@@ -1,26 +1,22 @@
-# 📂 الملف: notification_center/services.py
-# 🧠 Mham Cloud — Smart Notification Services V7.4
+# ============================================================
+# 📂 notification_center/services.py
+# 🧠 Primey Care - Notification Services
 # ------------------------------------------------------------
-# ✅ الحفاظ على التوافق مع create_notification الحالي
-# ✅ إنشاء NotificationEvent تلقائيًا
-# ✅ إنشاء NotificationDelivery لكل قناة
-# ✅ دعم In-App + Email + WhatsApp
-# ✅ دعم بريد HTML مخصص + subject مخصص + recipients متعددة
-# ✅ دعم مرفقات البريد (PDF / ملفات)
-# ✅ إنشاء HTML احترافي افتراضي تلقائيًا عند عدم تمرير قالب خاص
+# ✅ ملف الخدمات الرسمي الوحيد
+# ✅ يدعم:
+#    - In-App
+#    - Email
+#    - WhatsApp
+# ✅ مستقل عن company_manager
+# ✅ لا يفترض وجود whatsapp_center/channels بشكل إجباري
 # ✅ Fail-Safe كامل
-# ✅ متوافق مع WebSocket + Channels
-# ✅ جاهز للتوسعة لاحقًا نحو SMS / Push
-# ✅ توحيد استخراج رقم واتساب من recipient / target_object / context
-# ------------------------------------------------------------
+# ============================================================
 
 from __future__ import annotations
 
 import logging
 from typing import Any, Iterable, Optional
 
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import EmailMultiAlternatives, send_mail
@@ -28,7 +24,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.html import escape
 
-from .models import (
+from notification_center.models import (
     Notification,
     NotificationChannel,
     NotificationDelivery,
@@ -42,10 +38,11 @@ User = get_user_model()
 
 
 # ============================================================
-# 🧩 Helpers
+# Helpers
 # ============================================================
-def _clean_text(value: Optional[str]) -> str:
-    return (value or "").strip()
+
+def _clean_text(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
 
 
 def _safe_getattr(obj: Any, attr_name: str, default=None):
@@ -67,16 +64,15 @@ def _default_from_email() -> str:
     return getattr(
         settings,
         "DEFAULT_FROM_EMAIL",
-        "Mham Cloud <no-reply@localhost>",
+        "Primey Care <no-reply@primeycare.local>",
     )
 
 
 def _default_app_name() -> str:
-    return _clean_text(
-        getattr(settings, "NOTIFICATION_APP_NAME", "")
-        or getattr(settings, "EMAIL_APP_NAME", "")
-        or getattr(settings, "PROJECT_BRAND_NAME", "")
-        or "Mham Cloud"
+    return (
+        _clean_text(getattr(settings, "NOTIFICATION_APP_NAME", ""))
+        or _clean_text(getattr(settings, "PROJECT_BRAND_NAME", ""))
+        or "Primey Care"
     )
 
 
@@ -85,7 +81,7 @@ def _frontend_base_url() -> str:
         _clean_text(getattr(settings, "FRONTEND_BASE_URL", ""))
         or _clean_text(getattr(settings, "FRONTEND_URL", ""))
         or _clean_text(getattr(settings, "NEXT_PUBLIC_APP_URL", ""))
-        or "https://mhamcloud.com"
+        or "http://127.0.0.1:3000"
     ).rstrip("/")
 
 
@@ -93,15 +89,14 @@ def _default_support_email() -> str:
     return (
         _clean_text(getattr(settings, "SUPPORT_EMAIL", ""))
         or _clean_text(getattr(settings, "DEFAULT_SUPPORT_EMAIL", ""))
-        or "info@mhamcloud.sa"
+        or "support@primeycare.local"
     )
 
 
 def _default_logo_url() -> str:
     return (
-        _clean_text(getattr(settings, "PRIMEY_EMAIL_LOGO_URL", ""))
-        or _clean_text(getattr(settings, "EMAIL_LOGO_URL", ""))
-        or "https://drive.google.com/uc?export=view&id=1a0Y1SK3n-Hn9QDZa7Ge24r3--B8zXbTd"
+        _clean_text(getattr(settings, "EMAIL_LOGO_URL", ""))
+        or _clean_text(getattr(settings, "PRIMEY_EMAIL_LOGO_URL", ""))
     )
 
 
@@ -111,18 +106,15 @@ def _audit_bcc_list() -> list[str]:
         return []
 
     if isinstance(raw, str):
-        return [email.strip() for email in raw.split(",") if email.strip()]
+        return [item.strip() for item in raw.split(",") if item.strip()]
 
     if isinstance(raw, (list, tuple, set)):
-        return [str(email).strip() for email in raw if str(email).strip()]
+        return [str(item).strip() for item in raw if str(item).strip()]
 
     return []
 
 
 def _normalize_email_list(value: Any) -> list[str]:
-    """
-    تحويل أي مدخلات بريد إلى قائمة نظيفة بدون تكرار.
-    """
     emails: list[str] = []
 
     if not value:
@@ -140,22 +132,17 @@ def _normalize_email_list(value: Any) -> list[str]:
         if not email:
             continue
 
-        email_key = email.lower()
-        if email_key in seen:
+        key = email.lower()
+        if key in seen:
             continue
 
-        seen.add(email_key)
+        seen.add(key)
         emails.append(email)
 
     return emails
 
 
 def _normalize_email_attachments(value: Any) -> list[dict]:
-    """
-    يدعم:
-    - [{"filename": "...", "content": b"...", "mimetype": "application/pdf"}]
-    - [("file.pdf", b"..."), ("file.pdf", b"...", "application/pdf")]
-    """
     normalized: list[dict] = []
 
     if not value:
@@ -200,8 +187,8 @@ def _normalize_email_attachments(value: Any) -> list[dict]:
                             "mimetype": mimetype,
                         }
                     )
-        except Exception as attachment_error:
-            logger.warning(f"⚠️ تم تجاهل مرفق بريد غير صالح: {attachment_error}")
+        except Exception as exc:
+            logger.warning("Ignored invalid email attachment: %s", exc)
 
     return normalized
 
@@ -217,97 +204,22 @@ def _safe_username(user: User | None) -> str:
     )
 
 
-def _safe_company(company):
-    return company if company is not None else None
-
-
-def _safe_model_label(obj: Any) -> str:
-    if obj is None:
-        return ""
-
-    meta = getattr(obj, "_meta", None)
-    if meta:
-        app_label = getattr(meta, "app_label", "")
-        object_name = getattr(meta, "object_name", "")
-        if app_label and object_name:
-            return f"{app_label}.{object_name}"
-
-    return obj.__class__.__name__
-
-
-def _safe_object_id(obj: Any) -> str:
-    if obj is None:
-        return ""
-
-    obj_id = getattr(obj, "pk", None)
-    if obj_id is None:
-        obj_id = getattr(obj, "id", None)
-
-    return str(obj_id) if obj_id is not None else ""
-
-
 def _json_safe_dict(value: Any) -> dict:
-    if isinstance(value, dict):
-        return value
-    return {}
-
-
-def _serialize_notification_for_ws(note: Notification) -> dict:
-    return {
-        "id": note.id,
-        "title": note.title,
-        "message": note.message,
-        "notification_type": note.notification_type,
-        "severity": note.severity,
-        "link": note.link or "",
-        "created_at": timezone.localtime(note.created_at).strftime("%Y-%m-%d %H:%M"),
-    }
-
-
-def _resolve_event_group(
-    *,
-    event_group: str | None = None,
-    notification_type: str | None = None,
-) -> str:
-    if _clean_text(event_group):
-        return _clean_text(event_group)
-
-    if _clean_text(notification_type):
-        return _clean_text(notification_type)
-
-    return "system"
-
-
-def _resolve_event_code(
-    *,
-    event_code: str | None = None,
-    notification_type: str | None = None,
-) -> str:
-    if _clean_text(event_code):
-        return _clean_text(event_code)
-
-    if _clean_text(notification_type):
-        return _clean_text(notification_type)
-
-    return "system_notification"
+    return value if isinstance(value, dict) else {}
 
 
 def _resolve_user_phone(user: User | None) -> str:
-    """
-    استخراج رقم الجوال من user أو profile/userprofile بشكل مرن.
-    """
     if not user:
         return ""
 
-    direct_fields = [
+    fields = [
         "mobile",
         "phone",
         "phone_number",
         "whatsapp_number",
         "mobile_number",
     ]
-
-    for field_name in direct_fields:
+    for field_name in fields:
         value = _clean_text(getattr(user, field_name, ""))
         if value:
             return value
@@ -317,7 +229,7 @@ def _resolve_user_phone(user: User | None) -> str:
         if not profile:
             continue
 
-        for field_name in direct_fields:
+        for field_name in fields:
             value = _clean_text(getattr(profile, field_name, ""))
             if value:
                 return value
@@ -362,74 +274,7 @@ def _resolve_user_language_code(user: User | None, default: str = "ar") -> str:
     return default
 
 
-def _resolve_employee_phone(employee: Any) -> str:
-    """
-    استخراج رقم الموظف بشكل مرن.
-    """
-    if not employee:
-        return ""
-
-    direct_fields = [
-        "mobile_number",
-        "mobile",
-        "phone",
-        "phone_number",
-        "whatsapp_number",
-        "personal_phone",
-        "work_phone",
-    ]
-
-    for field_name in direct_fields:
-        value = _clean_text(_safe_getattr(employee, field_name, ""))
-        if value:
-            return value
-
-    related_user = _safe_getattr(employee, "user", None)
-    if related_user:
-        user_phone = _resolve_user_phone(related_user)
-        if user_phone:
-            return user_phone
-
-    return ""
-
-
-def _resolve_context_phone(context: dict | None = None) -> str:
-    """
-    محاولة استخراج الرقم من context.
-    """
-    ctx = _json_safe_dict(context)
-
-    phone_candidates = [
-        "recipient_phone",
-        "phone",
-        "phone_number",
-        "mobile",
-        "mobile_number",
-        "whatsapp_number",
-        "employee_phone",
-        "employee_mobile_number",
-        "user_phone",
-        "manager_phone",
-        "direct_manager_phone",
-    ]
-
-    for field_name in phone_candidates:
-        value = _clean_text(ctx.get(field_name))
-        if value:
-            return value
-
-    return ""
-
-
 def _resolve_target_object_phone(target_object: Any | None = None) -> str:
-    """
-    استخراج رقم الجوال من target_object أو الكائنات المرتبطة به.
-    يدعم:
-    - User مباشرة
-    - Employee مباشرة
-    - كائن يحوي employee
-    - كائن يحوي user
-    """
     if target_object is None:
         return ""
 
@@ -438,27 +283,42 @@ def _resolve_target_object_phone(target_object: Any | None = None) -> str:
         if phone:
             return phone
 
-    employee_like_markers = [
-        _safe_getattr(target_object, "employee_number", None),
-        _safe_getattr(target_object, "mobile_number", None),
-        _safe_getattr(target_object, "work_start_date", None),
-    ]
-    if any(marker is not None for marker in employee_like_markers):
-        phone = _resolve_employee_phone(target_object)
-        if phone:
-            return phone
-
-    related_employee = _safe_getattr(target_object, "employee", None)
-    if related_employee:
-        phone = _resolve_employee_phone(related_employee)
-        if phone:
-            return phone
-
     related_user = _safe_getattr(target_object, "user", None)
     if related_user:
         phone = _resolve_user_phone(related_user)
         if phone:
             return phone
+
+    for field_name in [
+        "phone",
+        "phone_number",
+        "mobile",
+        "mobile_number",
+        "whatsapp_number",
+    ]:
+        value = _clean_text(_safe_getattr(target_object, field_name, ""))
+        if value:
+            return value
+
+    return ""
+
+
+def _resolve_context_phone(context: dict | None = None) -> str:
+    ctx = _json_safe_dict(context)
+
+    for field_name in [
+        "recipient_phone",
+        "phone",
+        "phone_number",
+        "mobile",
+        "mobile_number",
+        "whatsapp_number",
+        "customer_phone",
+        "user_phone",
+    ]:
+        value = _clean_text(ctx.get(field_name))
+        if value:
+            return value
 
     return ""
 
@@ -470,9 +330,6 @@ def _resolve_whatsapp_phone(
     target_object: Any | None = None,
     context: dict | None = None,
 ) -> str:
-    """
-    توحيد استخراج رقم الواتساب داخل Notification Center.
-    """
     if _clean_text(explicit_phone):
         return _clean_text(explicit_phone)
 
@@ -480,9 +337,9 @@ def _resolve_whatsapp_phone(
     if recipient_phone:
         return recipient_phone
 
-    object_phone = _resolve_target_object_phone(target_object)
-    if object_phone:
-        return object_phone
+    target_phone = _resolve_target_object_phone(target_object)
+    if target_phone:
+        return target_phone
 
     context_phone = _resolve_context_phone(context)
     if context_phone:
@@ -491,9 +348,31 @@ def _resolve_whatsapp_phone(
     return ""
 
 
-# ============================================================
-# ✉️ Professional Email Helpers
-# ============================================================
+def _company_reference(company=None, context: dict | None = None) -> str:
+    if company is not None:
+        return (
+            _clean_text(_safe_getattr(company, "pk", ""))
+            or _clean_text(_safe_getattr(company, "id", ""))
+            or _clean_text(_safe_getattr(company, "code", ""))
+        )
+
+    ctx = _json_safe_dict(context)
+    return (
+        _clean_text(ctx.get("company_reference"))
+        or _clean_text(ctx.get("company_id"))
+        or _clean_text(ctx.get("company_code"))
+    )
+
+
+def _company_name(company=None, context: dict | None = None) -> str:
+    if company is not None:
+        value = _clean_text(_safe_getattr(company, "name", ""))
+        if value:
+            return value
+
+    return _clean_text(_json_safe_dict(context).get("company_name"))
+
+
 def _absolute_link(value: str | None) -> str:
     raw = _clean_text(value)
     if not raw:
@@ -508,68 +387,80 @@ def _absolute_link(value: str | None) -> str:
     return f"{_frontend_base_url()}/{raw}"
 
 
-def _recipient_display_name_from_context(
-    recipient: User | None = None,
-    context: dict | None = None,
+def _safe_model_label(obj: Any) -> str:
+    if obj is None:
+        return ""
+
+    meta = getattr(obj, "_meta", None)
+    if meta:
+        app_label = getattr(meta, "app_label", "")
+        object_name = getattr(meta, "object_name", "")
+        if app_label and object_name:
+            return f"{app_label}.{object_name}"
+
+    return obj.__class__.__name__
+
+
+def _safe_object_id(obj: Any) -> str:
+    if obj is None:
+        return ""
+
+    obj_id = getattr(obj, "pk", None)
+    if obj_id is None:
+        obj_id = getattr(obj, "id", None)
+
+    return str(obj_id) if obj_id is not None else ""
+
+
+def _serialize_notification_for_ws(note: Notification) -> dict:
+    return {
+        "id": note.id,
+        "title": note.title,
+        "message": note.message,
+        "notification_type": note.notification_type,
+        "severity": note.severity,
+        "link": note.link or "",
+        "created_at": timezone.localtime(note.created_at).strftime("%Y-%m-%d %H:%M"),
+    }
+
+
+def _resolve_event_group(
+    *,
+    event_group: str | None = None,
+    notification_type: str | None = None,
 ) -> str:
-    if recipient:
-        name = _resolve_user_display_name(recipient)
-        if name:
-            return name
+    if _clean_text(event_group):
+        return _clean_text(event_group)
 
-    ctx = _json_safe_dict(context)
-    for key in [
-        "recipient_name",
-        "full_name",
-        "employee_name",
-        "username",
-        "name",
-    ]:
-        value = _clean_text(ctx.get(key))
-        if value:
-            return value
+    if _clean_text(notification_type):
+        return _clean_text(notification_type)
 
-    return "المستخدم"
+    return "system"
 
 
-def _company_display_name(company=None, context: dict | None = None) -> str:
-    company_name = _clean_text(_safe_getattr(company, "name", ""))
-    if company_name:
-        return company_name
+def _resolve_event_code(
+    *,
+    event_code: str | None = None,
+    notification_type: str | None = None,
+) -> str:
+    if _clean_text(event_code):
+        return _clean_text(event_code)
 
-    ctx = _json_safe_dict(context)
-    return _clean_text(ctx.get("company_name")) or _default_app_name()
+    if _clean_text(notification_type):
+        return _clean_text(notification_type)
+
+    return "system_notification"
 
 
 def _severity_palette(severity: str) -> dict[str, str]:
     normalized = _clean_text(severity).lower()
 
     palettes = {
-        "success": {
-            "badge_bg": "#dcfce7",
-            "badge_text": "#166534",
-            "accent": "#16a34a",
-        },
-        "warning": {
-            "badge_bg": "#fef3c7",
-            "badge_text": "#92400e",
-            "accent": "#d97706",
-        },
-        "error": {
-            "badge_bg": "#fee2e2",
-            "badge_text": "#991b1b",
-            "accent": "#dc2626",
-        },
-        "danger": {
-            "badge_bg": "#fee2e2",
-            "badge_text": "#991b1b",
-            "accent": "#dc2626",
-        },
-        "info": {
-            "badge_bg": "#dbeafe",
-            "badge_text": "#1d4ed8",
-            "accent": "#2563eb",
-        },
+        "success": {"badge_bg": "#dcfce7", "badge_text": "#166534", "accent": "#16a34a"},
+        "warning": {"badge_bg": "#fef3c7", "badge_text": "#92400e", "accent": "#d97706"},
+        "error": {"badge_bg": "#fee2e2", "badge_text": "#991b1b", "accent": "#dc2626"},
+        "critical": {"badge_bg": "#fee2e2", "badge_text": "#991b1b", "accent": "#dc2626"},
+        "info": {"badge_bg": "#dbeafe", "badge_text": "#1d4ed8", "accent": "#2563eb"},
     }
 
     return palettes.get(normalized, palettes["info"])
@@ -580,13 +471,13 @@ def _render_message_html_blocks(message: str) -> str:
     if not clean_message:
         return ""
 
-    paragraphs = []
+    blocks = []
     for raw_line in clean_message.splitlines():
         line = _clean_text(raw_line)
         if not line:
             continue
 
-        paragraphs.append(
+        blocks.append(
             f"""
             <div style="margin:0 0 12px;color:#334155;font-size:15px;line-height:2;">
               {escape(line)}
@@ -594,7 +485,7 @@ def _render_message_html_blocks(message: str) -> str:
             """.strip()
         )
 
-    return "\n".join(paragraphs)
+    return "\n".join(blocks)
 
 
 def _build_default_notification_email_html(
@@ -613,8 +504,12 @@ def _build_default_notification_email_html(
     support_email = escape(_default_support_email())
     app_url = escape(_frontend_base_url())
     logo_url = escape(_default_logo_url())
-    recipient_name = escape(_recipient_display_name_from_context(recipient=recipient, context=context))
-    company_name = escape(_company_display_name(company=company, context=context))
+    recipient_name = escape(
+        _resolve_user_display_name(recipient)
+        or _clean_text(_json_safe_dict(context).get("recipient_name"))
+        or "المستخدم"
+    )
+    company_name = escape(_company_name(company=company, context=context) or app_name)
     safe_title = escape(_clean_text(title) or _clean_text(subject) or "تنبيه جديد")
     safe_subject = escape(_clean_text(subject) or _clean_text(title) or "تنبيه جديد")
     message_blocks = _render_message_html_blocks(message)
@@ -624,10 +519,22 @@ def _build_default_notification_email_html(
         "success": "نجاح",
         "warning": "تنبيه",
         "error": "هام",
-        "danger": "هام",
+        "critical": "حرج",
         "info": "إشعار",
     }
     badge_label = badge_label_map.get(_clean_text(severity).lower(), "إشعار")
+
+    logo_block = ""
+    if _clean_text(logo_url):
+        logo_block = f"""
+        <img
+          src="{logo_url}"
+          alt="{app_name}"
+          width="148"
+          height="48"
+          style="margin:0 auto 14px;object-fit:contain;display:block;"
+        />
+        """
 
     cta_block = ""
     if resolved_link:
@@ -678,15 +585,12 @@ def _build_default_notification_email_html(
         >
           <tr>
             <td align="center" style="background:linear-gradient(135deg,#0f172a 0%,#111827 100%);padding:30px 24px 24px;">
-              <img
-                src="{logo_url}"
-                alt="{app_name}"
-                width="148"
-                height="48"
-                style="margin:0 auto 14px;object-fit:contain;display:block;"
-              />
-              <div style="margin:0;color:#cbd5e1;font-size:14px;line-height:24px;">
-                نظام احترافي لإدارة الشركات والموظفين والفوترة والاشتراكات
+              {logo_block}
+              <div style="margin:0;color:#ffffff;font-size:22px;font-weight:700;line-height:24px;">
+                {app_name}
+              </div>
+              <div style="margin:10px 0 0;color:#cbd5e1;font-size:14px;line-height:24px;">
+                نظام تنبيهات احترافي متعدد القنوات
               </div>
             </td>
           </tr>
@@ -784,8 +688,9 @@ def _build_default_notification_email_html(
 
 
 # ============================================================
-# 🧩 Event / Delivery Builders
+# Event / Delivery Builders
 # ============================================================
+
 def create_notification_event(
     *,
     event_code: str,
@@ -802,43 +707,34 @@ def create_notification_event(
     context: dict | None = None,
     target_object: Any | None = None,
 ) -> NotificationEvent | None:
-    """
-    إنشاء الحدث الأصلي داخل النظام.
-    """
     event_code = _clean_text(event_code)
     event_group = _clean_text(event_group) or "system"
-    title = _clean_text(title)
-    message = _clean_text(message)
-    link = _clean_text(link)
-    language_code = _clean_text(language_code) or "ar"
-    source = _clean_text(source)
 
     if not event_code:
-        logger.warning("🚫 تم تجاهل إنشاء NotificationEvent بدون event_code.")
+        logger.warning("Ignored NotificationEvent creation without event_code.")
         return None
 
     try:
-        event = NotificationEvent.objects.create(
-            company=_safe_company(company),
+        return NotificationEvent.objects.create(
+            company_reference=_company_reference(company=company, context=context),
+            company_name=_company_name(company=company, context=context),
             actor=actor,
             target_user=target_user,
             event_code=event_code,
             event_group=event_group,
-            severity=severity or "info",
+            severity=_clean_text(severity) or "info",
             status=NotificationEventStatus.PENDING,
-            language_code=language_code,
+            language_code=_clean_text(language_code) or "ar",
             target_model=_safe_model_label(target_object),
             target_object_id=_safe_object_id(target_object),
-            title=title or None,
-            message=message or None,
-            link=link or None,
+            title=_clean_text(title),
+            message=_clean_text(message),
+            link=_clean_text(link),
             context=_json_safe_dict(context),
-            source=source or None,
+            source=_clean_text(source),
         )
-        return event
-
-    except Exception as e:
-        logger.error(f"❌ فشل إنشاء NotificationEvent: {e}")
+    except Exception as exc:
+        logger.error("Failed to create NotificationEvent: %s", exc)
         return None
 
 
@@ -856,36 +752,31 @@ def create_notification_delivery(
     provider_name: str | None = None,
     notification: Notification | None = None,
 ) -> NotificationDelivery | None:
-    """
-    إنشاء سجل تسليم لقناة محددة.
-    """
     if not event:
         return None
 
     try:
         return NotificationDelivery.objects.create(
             event=event,
-            company=_safe_company(company) or getattr(event, "company", None),
+            company_reference=_company_reference(company=company) or event.company_reference,
+            company_name=_company_name(company=company) or event.company_name,
             recipient=recipient,
             channel=channel,
             status=NotificationDeliveryStatus.PENDING,
-            destination=_clean_text(destination) or None,
-            subject=_clean_text(subject) or None,
-            rendered_message=_clean_text(rendered_message) or None,
-            template_key=_clean_text(template_key) or None,
+            destination=_clean_text(destination),
+            subject=_clean_text(subject),
+            rendered_message=_clean_text(rendered_message),
+            template_key=_clean_text(template_key),
             language_code=_clean_text(language_code) or "ar",
-            provider_name=_clean_text(provider_name) or None,
+            provider_name=_clean_text(provider_name),
             notification=notification,
         )
-    except Exception as e:
-        logger.warning(f"⚠️ فشل إنشاء NotificationDelivery (غير حرج): {e}")
+    except Exception as exc:
+        logger.warning("Failed to create NotificationDelivery: %s", exc)
         return None
 
 
 def _finalize_event_status(event: NotificationEvent | None) -> None:
-    """
-    تحديث حالة الحدث بناءً على حالات الـ deliveries.
-    """
     if not event:
         return
 
@@ -927,13 +818,14 @@ def _finalize_event_status(event: NotificationEvent | None) -> None:
         event.processed_at = None
         event.save(update_fields=["status", "processed_at"])
 
-    except Exception as e:
-        logger.warning(f"⚠️ تعذر تحديث حالة الحدث #{getattr(event, 'id', '?')}: {e}")
+    except Exception as exc:
+        logger.warning("Failed to finalize event status #%s: %s", getattr(event, "id", "?"), exc)
 
 
 # ============================================================
-# ✉️ Email Sender (Fail-Safe + Attachments)
+# Email
 # ============================================================
+
 def _send_notification_email(
     *,
     recipient: User | None,
@@ -949,18 +841,7 @@ def _send_notification_email(
     severity: str = "info",
     attachments: list[dict] | None = None,
 ) -> tuple[bool, dict]:
-    """
-    ✉️ إرسال بريد الإشعار بشكل Fail-Safe.
-    يدعم:
-    - recipient الافتراضي
-    - recipient_emails متعددة
-    - subject مخصص
-    - text/html body مخصصين
-    - HTML احترافي افتراضي عند عدم تمرير قالب خاص
-    - مرفقات بريد مثل PDF
-    """
     if not _email_notifications_enabled():
-        logger.info("📭 البريد معطّل من الإعدادات: EMAIL_NOTIFICATIONS_ENABLED=False")
         return False, {"reason": "EMAIL_NOTIFICATIONS_DISABLED"}
 
     resolved_recipients = _normalize_email_list(recipient_emails)
@@ -968,24 +849,21 @@ def _send_notification_email(
         resolved_recipients = _normalize_email_list(getattr(recipient, "email", ""))
 
     if not resolved_recipients:
-        logger.info(f"📭 لا يوجد بريد صالح للمستخدم {_safe_username(recipient)}")
         return False, {"reason": "RECIPIENT_EMAIL_MISSING"}
 
     resolved_subject = _clean_text(subject_override) or f"[{_default_app_name()}] {_clean_text(title)}"
     resolved_text_message = _clean_text(text_message) or _clean_text(message)
 
-    resolved_html_message = html_message
-    if not resolved_html_message:
-        resolved_html_message = _build_default_notification_email_html(
-            recipient=recipient,
-            title=title,
-            message=resolved_text_message or message,
-            subject=resolved_subject,
-            severity=severity,
-            link=link,
-            company=company,
-            context=context,
-        )
+    resolved_html_message = html_message or _build_default_notification_email_html(
+        recipient=recipient,
+        title=title,
+        message=resolved_text_message or message,
+        subject=resolved_subject,
+        severity=severity,
+        link=link,
+        company=company,
+        context=context,
+    )
 
     resolved_attachments = _normalize_email_attachments(attachments)
 
@@ -1005,30 +883,23 @@ def _send_notification_email(
             filename = item["filename"]
             content = item["content"]
             mimetype = item.get("mimetype") or None
-
             email.attach(filename, content, mimetype)
             attached_filenames.append(filename)
 
         email.send(fail_silently=False)
-        logger.info(f"✅ تم إرسال بريد إشعار إلى: {resolved_recipients}")
 
         audit_bcc = _audit_bcc_list()
         if audit_bcc:
             try:
                 send_mail(
                     subject=f"[AUDIT COPY] {resolved_subject}",
-                    message=(
-                        f"Recipients: {', '.join(resolved_recipients)}\n\n"
-                        f"Title: {_clean_text(title)}\n\n"
-                        f"Message:\n{resolved_text_message}"
-                    ),
+                    message=resolved_text_message,
                     from_email=_default_from_email(),
                     recipient_list=audit_bcc,
                     fail_silently=True,
-                    html_message=None,
                 )
-            except Exception as audit_error:
-                logger.warning(f"⚠️ فشل إرسال نسخة BCC audit (غير حرج): {audit_error}")
+            except Exception as exc:
+                logger.warning("Audit BCC failed: %s", exc)
 
         return True, {
             "provider": "django_email_multi_alternatives",
@@ -1040,21 +911,22 @@ def _send_notification_email(
             "attachments": attached_filenames,
         }
 
-    except Exception as e:
-        logger.warning(f"📭 فشل إرسال بريد إشعار (غير حرج): {e}")
+    except Exception as exc:
+        logger.warning("Email notification failed: %s", exc)
         return False, {
             "provider": "django_email_multi_alternatives",
             "recipient_emails": resolved_recipients,
             "status": "failed",
             "subject": resolved_subject,
-            "error": str(e),
+            "error": str(exc),
             "attachments_count": len(resolved_attachments),
         }
 
 
 # ============================================================
-# 💬 WhatsApp Sender (Fail-Safe)
+# WhatsApp
 # ============================================================
+
 def _send_notification_whatsapp(
     *,
     delivery: NotificationDelivery,
@@ -1069,16 +941,11 @@ def _send_notification_whatsapp(
     attachment_name: str = "",
     mime_type: str = "",
 ) -> tuple[bool, dict]:
-    """
-    إرسال واتساب عبر الجسر الرسمي مع Fail-Safe كامل.
-    """
     if not _whatsapp_notifications_enabled():
-        logger.info("📵 الواتساب معطّل من الإعدادات: WHATSAPP_NOTIFICATIONS_ENABLED=False")
         return False, {"reason": "WHATSAPP_NOTIFICATIONS_DISABLED"}
 
     resolved_phone = _clean_text(recipient_phone) or _resolve_user_phone(recipient)
     if not resolved_phone:
-        logger.info(f"📵 لا يوجد رقم واتساب للمستخدم {_safe_username(recipient)}")
         return False, {"reason": "RECIPIENT_PHONE_MISSING"}
 
     resolved_name = (
@@ -1126,27 +993,30 @@ def _send_notification_whatsapp(
             "failure_reason": _clean_text(getattr(log, "failure_reason", "")),
         }
 
-    except Exception as e:
-        logger.warning(f"📵 فشل إرسال واتساب (غير حرج): {e}")
+    except Exception as exc:
+        logger.warning("WhatsApp notification failed: %s", exc)
         return False, {
             "provider": "whatsapp_center",
             "recipient_phone": resolved_phone,
             "status": "failed",
-            "error": str(e),
+            "error": str(exc),
         }
 
 
 # ============================================================
-# 📡 WebSocket Broadcast
+# WebSocket / Realtime
 # ============================================================
+
 def _broadcast_live_notification(note: Notification) -> None:
-    """
-    📡 إرسال إشعار جديد للمجموعة المخصصة للمستخدم.
-    """
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+    except Exception:
+        return
+
     try:
         channel_layer = get_channel_layer()
         if not channel_layer:
-            logger.warning("⚠️ لم يتم العثور على Channel Layer.")
             return
 
         group_name = f"user_{note.recipient.id}"
@@ -1159,15 +1029,14 @@ def _broadcast_live_notification(note: Notification) -> None:
         }
 
         async_to_sync(channel_layer.group_send)(group_name, payload)
-        logger.debug(f"📡 بث إشعار مباشر للمجموعة: {group_name}")
-
-    except Exception as e:
-        logger.warning(f"⚠️ فشل بث الإشعار الفوري: {e}")
+    except Exception as exc:
+        logger.warning("Realtime notification broadcast failed: %s", exc)
 
 
 # ============================================================
-# 1️⃣ الدالة العامة لإنشاء إشعار فردي + Event + Delivery + بريد + واتساب
+# Public Core API
 # ============================================================
+
 @transaction.atomic
 def create_notification(
     *,
@@ -1203,21 +1072,8 @@ def create_notification(
     email_attachments: list[dict] | list[tuple] | tuple | None = None,
     create_in_app: bool = True,
 ) -> Notification | None:
-    """
-    🧠 إنشاء إشعار جديد وتفعيله.
-
-    الجديد في V7.4:
-    - دعم بريد HTML مخصص
-    - دعم subject مخصص
-    - دعم recipients متعددة
-    - دعم email-only notification عند الحاجة
-    - دعم مرفقات البريد (email_attachments)
-    - الحفاظ على التوافق الكامل مع الاستدعاءات القديمة
-    - توحيد استخراج رقم الواتساب من recipient / target_object / context
-    - توليد قالب بريد احترافي تلقائيًا عند عدم تمرير HTML مخصص
-    """
     if not recipient and not send_email and not send_whatsapp:
-        logger.warning("🚫 محاولة إنشاء إشعار بدون مستلم وبدون أي قناة إرسال.")
+        logger.warning("Skipped notification without recipient and without delivery channels.")
         return None
 
     title = _clean_text(title)
@@ -1225,11 +1081,9 @@ def create_notification(
     link = _clean_text(link)
 
     if not title and not message:
-        logger.warning("🚫 تم تجاهل إشعار فارغ (عنوان ورسالة فارغان).")
+        logger.warning("Skipped empty notification.")
         return None
 
-    resolved_company = _safe_company(company)
-    resolved_target_user = target_user or recipient
     resolved_event_group = _resolve_event_group(
         event_group=event_group,
         notification_type=notification_type,
@@ -1249,28 +1103,30 @@ def create_notification(
             event = create_notification_event(
                 event_code=resolved_event_code,
                 event_group=resolved_event_group,
-                company=resolved_company,
+                company=company,
                 actor=actor,
-                target_user=resolved_target_user,
+                target_user=target_user or recipient,
                 severity=severity,
                 title=title,
                 message=message,
                 link=link,
                 language_code=language_code,
-                source=source or "services.create_notification",
+                source=source or "notification_center.services.create_notification",
                 context=resolved_context,
                 target_object=target_object,
             )
 
         if recipient is not None and create_in_app:
             note = Notification.objects.create(
-                company=resolved_company or getattr(event, "company", None),
+                company_reference=_company_reference(company=company, context=resolved_context) or getattr(event, "company_reference", ""),
+                company_name=_company_name(company=company, context=resolved_context) or getattr(event, "company_name", ""),
                 recipient=recipient,
+                recipient_name=_resolve_user_display_name(recipient),
                 title=title,
                 message=message,
                 notification_type=notification_type,
                 severity=severity,
-                link=link or None,
+                link=link,
                 event=event,
             )
 
@@ -1278,7 +1134,7 @@ def create_notification(
                 event=event,
                 channel=NotificationChannel.IN_APP,
                 recipient=recipient,
-                company=resolved_company or getattr(event, "company", None),
+                company=company,
                 destination=f"user:{recipient.id}",
                 subject=title,
                 rendered_message=message,
@@ -1299,8 +1155,8 @@ def create_notification(
                             "status": "sent",
                         },
                     )
-                except Exception as delivery_error:
-                    logger.warning(f"⚠️ فشل تحديث Delivery الخاص بـ in_app: {delivery_error}")
+                except Exception as exc:
+                    logger.warning("Failed to finalize in-app delivery: %s", exc)
 
             _broadcast_live_notification(note)
 
@@ -1313,8 +1169,8 @@ def create_notification(
                 event=event,
                 channel=NotificationChannel.EMAIL,
                 recipient=recipient,
-                company=resolved_company or getattr(event, "company", None),
-                destination=email_destination or None,
+                company=company,
+                destination=email_destination,
                 subject=_clean_text(email_subject) or title,
                 rendered_message=_clean_text(email_text_message) or message,
                 template_key=template_key,
@@ -1335,7 +1191,7 @@ def create_notification(
                 text_message=email_text_message,
                 html_message=email_html_message,
                 link=link,
-                company=resolved_company or getattr(event, "company", None),
+                company=company,
                 context=resolved_context,
                 severity=severity,
                 attachments=resolved_email_attachments,
@@ -1343,13 +1199,10 @@ def create_notification(
 
             if email_delivery:
                 if email_sent:
-                    provider_message_id = None
                     recipient_list = email_response.get("recipient_emails", [])
-                    if recipient_list:
-                        provider_message_id = ",".join(recipient_list)
-
+                    provider_message_id = ",".join(recipient_list) if recipient_list else ""
                     email_delivery.mark_sent(
-                        provider_message_id=provider_message_id,
+                        provider_message_id=provider_message_id or None,
                         provider_response=email_response,
                     )
                 else:
@@ -1359,12 +1212,6 @@ def create_notification(
                         or "EMAIL_SEND_FAILED",
                         provider_response=email_response,
                     )
-
-            if email_sent and note and hasattr(note, "mark_as_sent_email"):
-                try:
-                    note.mark_as_sent_email()
-                except Exception as mark_error:
-                    logger.warning(f"⚠️ تعذر تحديث حالة البريد في الإشعار: {mark_error}")
 
         if send_whatsapp:
             whatsapp_destination = _resolve_whatsapp_phone(
@@ -1378,8 +1225,8 @@ def create_notification(
                 event=event,
                 channel=NotificationChannel.WHATSAPP,
                 recipient=recipient,
-                company=resolved_company or getattr(event, "company", None),
-                destination=whatsapp_destination or None,
+                company=company,
+                destination=whatsapp_destination,
                 subject=title,
                 rendered_message=message,
                 template_key=template_key,
@@ -1395,7 +1242,7 @@ def create_notification(
                     recipient_phone=whatsapp_destination,
                     recipient_name=whatsapp_recipient_name,
                     recipient_role=whatsapp_recipient_role,
-                    company=resolved_company or getattr(event, "company", None),
+                    company=company,
                     language_code=language_code,
                     context=resolved_context,
                     attachment_url=whatsapp_attachment_url,
@@ -1422,13 +1269,11 @@ def create_notification(
 
         _finalize_event_status(event)
 
-        logger.info(
-            f"✅ إشعار جديد أُنشئ/عولج للمستخدم {_safe_username(recipient)}: {title}"
-        )
+        logger.info("Notification processed successfully for %s: %s", _safe_username(recipient), title)
         return note
 
-    except Exception as e:
-        logger.error(f"❌ فشل إنشاء الإشعار (Non-Blocking): {e}")
+    except Exception as exc:
+        logger.error("Notification processing failed: %s", exc)
         try:
             _finalize_event_status(event)
         except Exception:
@@ -1436,9 +1281,6 @@ def create_notification(
         return None
 
 
-# ============================================================
-# 2️⃣ إرسال Event موحّد لعدة قنوات (النسخة الأولى)
-# ============================================================
 def dispatch_notification_event(
     *,
     recipients: Iterable[User],
@@ -1459,9 +1301,6 @@ def dispatch_notification_event(
     target_object: Any | None = None,
     template_key: str | None = None,
 ) -> list[Notification]:
-    """
-    بوابة موحدة مبدئية لإطلاق نفس الحدث على عدة مستلمين.
-    """
     notes: list[Notification] = []
     seen_user_ids: set[int] = set()
 
@@ -1490,7 +1329,7 @@ def dispatch_notification_event(
             actor=actor,
             target_user=recipient,
             language_code=language_code,
-            source=source or "services.dispatch_notification_event",
+            source=source or "notification_center.services.dispatch_notification_event",
             context=context,
             target_object=target_object,
             template_key=template_key,
@@ -1501,9 +1340,6 @@ def dispatch_notification_event(
     return notes
 
 
-# ============================================================
-# 3️⃣ إشعار جماعي
-# ============================================================
 def broadcast_notification(
     *,
     users: Iterable[User],
@@ -1514,9 +1350,6 @@ def broadcast_notification(
     send_email: bool = False,
     send_whatsapp: bool = False,
 ) -> list[Notification]:
-    """
-    🔔 إرسال نفس الإشعار لمجموعة مستخدمين.
-    """
     return dispatch_notification_event(
         recipients=users,
         title=title,
@@ -1527,13 +1360,10 @@ def broadcast_notification(
         send_whatsapp=send_whatsapp,
         event_code=ntype,
         event_group=ntype,
-        source="services.broadcast_notification",
+        source="notification_center.services.broadcast_notification",
     )
 
 
-# ============================================================
-# 4️⃣ إعلان عام
-# ============================================================
 def announce_global(
     title: str,
     message: str,
@@ -1541,9 +1371,6 @@ def announce_global(
     send_email: bool = False,
     send_whatsapp: bool = False,
 ) -> list[Notification]:
-    """
-    📢 إعلان عام لجميع المستخدمين.
-    """
     users = User.objects.all()
     return broadcast_notification(
         users=users,
@@ -1556,9 +1383,6 @@ def announce_global(
     )
 
 
-# ============================================================
-# 5️⃣ إشعار الفوترة
-# ============================================================
 def notify_billing_event(
     recipient: User,
     invoice_number: str,
@@ -1580,7 +1404,7 @@ def notify_billing_event(
         send_whatsapp=send_whatsapp,
         event_code="billing_invoice_status_updated",
         event_group="billing",
-        source="services.notify_billing_event",
+        source="notification_center.services.notify_billing_event",
         context={
             "invoice_number": _clean_text(invoice_number),
             "status": _clean_text(status),
@@ -1588,9 +1412,6 @@ def notify_billing_event(
     )
 
 
-# ============================================================
-# 6️⃣ إشعار التقارير
-# ============================================================
 def notify_report_generated(
     recipient: User,
     report_title: str,
@@ -1607,38 +1428,11 @@ def notify_report_generated(
         send_whatsapp=send_whatsapp,
         event_code="report_generated",
         event_group="report",
-        source="services.notify_report_generated",
+        source="notification_center.services.notify_report_generated",
         context={"report_title": _clean_text(report_title)},
     )
 
 
-# ============================================================
-# 7️⃣ إشعارات المساعد الذكي
-# ============================================================
-def notify_smart_assistant(
-    recipient: User,
-    suggestion: str,
-    send_email: bool = False,
-    send_whatsapp: bool = False,
-) -> Notification | None:
-    return create_notification(
-        recipient=recipient,
-        title="🤖 تنبيه من المساعد الذكي",
-        message=suggestion,
-        notification_type="assistant",
-        severity="info",
-        send_email=send_email,
-        send_whatsapp=send_whatsapp,
-        event_code="assistant_suggestion",
-        event_group="assistant",
-        source="services.notify_smart_assistant",
-        context={"suggestion": _clean_text(suggestion)},
-    )
-
-
-# ============================================================
-# 8️⃣ إشعار آمن لعدة مستلمين
-# ============================================================
 def notify_many(
     *,
     recipients: Iterable[User],
@@ -1659,9 +1453,6 @@ def notify_many(
     target_object: Any | None = None,
     template_key: str | None = None,
 ) -> list[Notification]:
-    """
-    🧩 Helper إضافي لاستخدامه لاحقًا.
-    """
     return dispatch_notification_event(
         recipients=recipients,
         title=title,
@@ -1676,56 +1467,7 @@ def notify_many(
         event_group=event_group or notification_type,
         actor=actor,
         language_code=language_code,
-        source=source or "services.notify_many",
-        context=context,
-        target_object=target_object,
-        template_key=template_key,
-    )
-
-
-# ============================================================
-# 9️⃣ Backward Compatibility Helpers
-# ============================================================
-def notify_company(
-    *,
-    recipient,
-    title: str,
-    message: str,
-    notification_type: str = "company",
-    severity: str = "info",
-    send_email: bool = False,
-    send_whatsapp: bool = False,
-    link: str | None = None,
-    company=None,
-    event_code: str | None = None,
-    event_group: str | None = "company",
-    actor=None,
-    language_code: str = "ar",
-    source: str | None = None,
-    context: dict | None = None,
-    target_object=None,
-    template_key: str | None = None,
-):
-    """
-    توافق خلفي للمسارات القديمة التي كانت تستورد notify_company
-    من notification_center.services.
-    """
-    return create_notification(
-        recipient=recipient,
-        title=title,
-        message=message,
-        notification_type=notification_type,
-        severity=severity,
-        send_email=send_email,
-        send_whatsapp=send_whatsapp,
-        link=link,
-        company=company,
-        event_code=event_code or notification_type,
-        event_group=event_group or "company",
-        actor=actor,
-        target_user=recipient,
-        language_code=language_code,
-        source=source or "services.notify_company",
+        source=source or "notification_center.services.notify_many",
         context=context,
         target_object=target_object,
         template_key=template_key,

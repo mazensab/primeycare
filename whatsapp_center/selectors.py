@@ -1,6 +1,19 @@
 # ============================================================
 # 📂 whatsapp_center/selectors.py
-# Mham Cloud - WhatsApp Selectors
+# 🧠 Primey Care - WhatsApp Selectors V1 Core
+# ------------------------------------------------------------
+# ✅ متوافق مع WhatsApp Center Models V1 Core
+# ✅ لا يعتمد على CompanyWhatsAppConfig
+# ✅ لا يعتمد على FK company مباشر
+# ✅ يعتمد على:
+#    - scope_type
+#    - company_reference
+# ✅ يدعم:
+#    - system config
+#    - template fallback
+#    - inbox selectors
+#    - messages selectors
+#    - summary selectors
 # ============================================================
 
 from __future__ import annotations
@@ -10,7 +23,6 @@ from typing import Optional
 from django.db.models import Q
 
 from .models import (
-    CompanyWhatsAppConfig,
     ScopeType,
     SystemWhatsAppConfig,
     WhatsAppContact,
@@ -31,13 +43,6 @@ def _normalize_language_code(language_code: str) -> str:
 
 
 def _build_language_candidates(language_code: str) -> list[str]:
-    """
-    ترتيب مرن للغات:
-    - اللغة المطلوبة أولًا
-    - ثم العربية
-    - ثم الإنجليزية
-    - بدون تكرار
-    """
     normalized = _normalize_language_code(language_code)
     candidates: list[str] = []
 
@@ -68,17 +73,39 @@ def _normalize_limit(limit: int | None, default: int = 50, maximum: int = 500) -
     return min(parsed, maximum)
 
 
+def _resolve_company_reference(*, company=None, company_reference: str | None = None) -> str:
+    if company_reference:
+        return str(company_reference).strip()
+
+    if company is None:
+        return ""
+
+    for attr_name in ["company_reference", "reference", "code", "pk", "id"]:
+        value = getattr(company, attr_name, None)
+        if value not in [None, ""]:
+            return str(value).strip()
+
+    return ""
+
+
+def _system_scope_company_reference() -> str:
+    return ""
+
+
 def _get_company_template_candidate(
     *,
-    company,
+    company_reference: str,
     event_code: str,
     language_code: str,
 ):
+    if not company_reference:
+        return None
+
     return (
         WhatsAppTemplate.objects
         .filter(
             scope_type=ScopeType.COMPANY,
-            company=company,
+            company_reference=company_reference,
             event_code=event_code,
             language_code=language_code,
             is_active=True,
@@ -97,7 +124,7 @@ def _get_system_template_candidate(
         WhatsAppTemplate.objects
         .filter(
             scope_type=ScopeType.SYSTEM,
-            company__isnull=True,
+            company_reference=_system_scope_company_reference(),
             event_code=event_code,
             language_code=language_code,
             is_active=True,
@@ -120,17 +147,13 @@ def get_active_system_whatsapp_config() -> Optional[SystemWhatsAppConfig]:
     )
 
 
-def get_active_company_whatsapp_config(company) -> Optional[CompanyWhatsAppConfig]:
-    if not company:
-        return None
-
-    return (
-        CompanyWhatsAppConfig.objects
-        .filter(company=company, is_enabled=True, is_active=True)
-        .select_related("company")
-        .order_by("-id")
-        .first()
-    )
+def get_active_company_whatsapp_config(company=None, company_reference: str | None = None):
+    """
+    Primey Care V1 Core:
+    لا يوجد CompanyWhatsAppConfig بعد.
+    نعيد None ليكمل services.py الـ fallback إلى system config.
+    """
+    return None
 
 
 # ============================================================
@@ -143,11 +166,12 @@ def get_whatsapp_template(
     event_code: str,
     language_code: str = "ar",
     company=None,
+    company_reference: str | None = None,
 ):
     """
     جلب أفضل قالب متاح بترتيب مرن وآمن:
 
-    1) إذا كان Company Scope ومعنا company:
+    1) إذا كان Company Scope ومعنا company/company_reference:
        - نحاول قالب الشركة باللغة المطلوبة
        - ثم العربية
        - ثم الإنجليزية
@@ -158,23 +182,21 @@ def get_whatsapp_template(
        - ثم الإنجليزية
     """
     language_candidates = _build_language_candidates(language_code)
+    resolved_company_reference = _resolve_company_reference(
+        company=company,
+        company_reference=company_reference,
+    )
 
-    # --------------------------------------------------------
-    # 1) Company Scope Templates
-    # --------------------------------------------------------
-    if scope_type == ScopeType.COMPANY and company:
+    if scope_type == ScopeType.COMPANY and resolved_company_reference:
         for lang in language_candidates:
             company_template = _get_company_template_candidate(
-                company=company,
+                company_reference=resolved_company_reference,
                 event_code=event_code,
                 language_code=lang,
             )
             if company_template:
                 return company_template
 
-    # --------------------------------------------------------
-    # 2) System Scope Fallback
-    # --------------------------------------------------------
     for lang in language_candidates:
         system_template = _get_system_template_candidate(
             event_code=event_code,
@@ -195,24 +217,28 @@ def _build_system_conversations_queryset():
         WhatsAppConversation.objects
         .filter(
             scope_type=ScopeType.SYSTEM,
-            company__isnull=True,
+            company_reference=_system_scope_company_reference(),
         )
         .select_related("contact", "assigned_to")
         .order_by("-is_pinned", "-last_message_at", "-id")
     )
 
 
-def _build_company_conversations_queryset(company):
-    if not company:
+def _build_company_conversations_queryset(*, company=None, company_reference: str | None = None):
+    resolved_company_reference = _resolve_company_reference(
+        company=company,
+        company_reference=company_reference,
+    )
+    if not resolved_company_reference:
         return WhatsAppConversation.objects.none()
 
     return (
         WhatsAppConversation.objects
         .filter(
             scope_type=ScopeType.COMPANY,
-            company=company,
+            company_reference=resolved_company_reference,
         )
-        .select_related("contact", "assigned_to", "company")
+        .select_related("contact", "assigned_to")
         .order_by("-is_pinned", "-last_message_at", "-id")
     )
 
@@ -223,7 +249,6 @@ def _apply_conversation_search(queryset, search: str):
         return queryset
 
     normalized_phone = normalize_phone_number(search)
-
     phone_candidates = [search]
     if normalized_phone:
         phone_candidates.append(normalized_phone)
@@ -284,7 +309,6 @@ def get_system_whatsapp_inbox(
         only_unread=only_unread,
         is_resolved=is_resolved,
     )
-
     return queryset[:_normalize_limit(limit)]
 
 
@@ -308,7 +332,7 @@ def get_system_whatsapp_contact_by_phone(phone_number: str):
         WhatsAppContact.objects
         .filter(
             scope_type=ScopeType.SYSTEM,
-            company__isnull=True,
+            company_reference=_system_scope_company_reference(),
             phone_number=normalized_phone,
         )
         .order_by("-last_message_at", "-id")
@@ -341,7 +365,7 @@ def get_system_whatsapp_messages(
         .filter(
             conversation_id=conversation_id,
             scope_type=ScopeType.SYSTEM,
-            company__isnull=True,
+            company_reference=_system_scope_company_reference(),
         )
         .select_related("conversation", "webhook_event", "message_log")
         .order_by("message_created_at", "created_at", "id")
@@ -359,7 +383,7 @@ def get_system_whatsapp_last_message(*, conversation_id: int):
         .filter(
             conversation_id=conversation_id,
             scope_type=ScopeType.SYSTEM,
-            company__isnull=True,
+            company_reference=_system_scope_company_reference(),
         )
         .order_by("-message_created_at", "-created_at", "-id")
         .first()
@@ -395,7 +419,8 @@ def get_system_whatsapp_inbox_summary(
 
 def get_company_whatsapp_inbox(
     *,
-    company,
+    company=None,
+    company_reference: str | None = None,
     search: str = "",
     status: str = "",
     assigned_to_id: int | None = None,
@@ -403,7 +428,10 @@ def get_company_whatsapp_inbox(
     is_resolved: bool | None = None,
     limit: int | None = 50,
 ):
-    queryset = _build_company_conversations_queryset(company)
+    queryset = _build_company_conversations_queryset(
+        company=company,
+        company_reference=company_reference,
+    )
     queryset = _apply_conversation_search(queryset, search=search)
     queryset = _apply_conversation_filters(
         queryset,
@@ -416,19 +444,36 @@ def get_company_whatsapp_inbox(
     return queryset[:_normalize_limit(limit)]
 
 
-def get_company_whatsapp_conversation_by_id(*, company, conversation_id: int):
-    if not company or not conversation_id:
+def get_company_whatsapp_conversation_by_id(
+    *,
+    company=None,
+    company_reference: str | None = None,
+    conversation_id: int,
+):
+    if not conversation_id:
         return None
 
     return (
-        _build_company_conversations_queryset(company)
+        _build_company_conversations_queryset(
+            company=company,
+            company_reference=company_reference,
+        )
         .filter(id=conversation_id)
         .first()
     )
 
 
-def get_company_whatsapp_contact_by_phone(*, company, phone_number: str):
-    if not company:
+def get_company_whatsapp_contact_by_phone(
+    *,
+    company=None,
+    company_reference: str | None = None,
+    phone_number: str,
+):
+    resolved_company_reference = _resolve_company_reference(
+        company=company,
+        company_reference=company_reference,
+    )
+    if not resolved_company_reference:
         return None
 
     normalized_phone = normalize_phone_number(phone_number)
@@ -439,7 +484,7 @@ def get_company_whatsapp_contact_by_phone(*, company, phone_number: str):
         WhatsAppContact.objects
         .filter(
             scope_type=ScopeType.COMPANY,
-            company=company,
+            company_reference=resolved_company_reference,
             phone_number=normalized_phone,
         )
         .order_by("-last_message_at", "-id")
@@ -447,16 +492,25 @@ def get_company_whatsapp_contact_by_phone(*, company, phone_number: str):
     )
 
 
-def get_company_whatsapp_conversation_by_contact_phone(*, company, phone_number: str):
+def get_company_whatsapp_conversation_by_contact_phone(
+    *,
+    company=None,
+    company_reference: str | None = None,
+    phone_number: str,
+):
     contact = get_company_whatsapp_contact_by_phone(
         company=company,
+        company_reference=company_reference,
         phone_number=phone_number,
     )
     if not contact:
         return None
 
     return (
-        _build_company_conversations_queryset(company)
+        _build_company_conversations_queryset(
+            company=company,
+            company_reference=company_reference,
+        )
         .filter(contact=contact)
         .first()
     )
@@ -464,11 +518,16 @@ def get_company_whatsapp_conversation_by_contact_phone(*, company, phone_number:
 
 def get_company_whatsapp_messages(
     *,
-    company,
+    company=None,
+    company_reference: str | None = None,
     conversation_id: int,
     limit: int | None = 100,
 ):
-    if not company or not conversation_id:
+    resolved_company_reference = _resolve_company_reference(
+        company=company,
+        company_reference=company_reference,
+    )
+    if not resolved_company_reference or not conversation_id:
         return WhatsAppConversationMessage.objects.none()
 
     queryset = (
@@ -476,17 +535,26 @@ def get_company_whatsapp_messages(
         .filter(
             conversation_id=conversation_id,
             scope_type=ScopeType.COMPANY,
-            company=company,
+            company_reference=resolved_company_reference,
         )
-        .select_related("conversation", "company", "webhook_event", "message_log")
+        .select_related("conversation", "webhook_event", "message_log")
         .order_by("message_created_at", "created_at", "id")
     )
 
     return queryset[:_normalize_limit(limit, default=100, maximum=2000)]
 
 
-def get_company_whatsapp_last_message(*, company, conversation_id: int):
-    if not company or not conversation_id:
+def get_company_whatsapp_last_message(
+    *,
+    company=None,
+    company_reference: str | None = None,
+    conversation_id: int,
+):
+    resolved_company_reference = _resolve_company_reference(
+        company=company,
+        company_reference=company_reference,
+    )
+    if not resolved_company_reference or not conversation_id:
         return None
 
     return (
@@ -494,7 +562,7 @@ def get_company_whatsapp_last_message(*, company, conversation_id: int):
         .filter(
             conversation_id=conversation_id,
             scope_type=ScopeType.COMPANY,
-            company=company,
+            company_reference=resolved_company_reference,
         )
         .order_by("-message_created_at", "-created_at", "-id")
         .first()
@@ -503,11 +571,15 @@ def get_company_whatsapp_last_message(*, company, conversation_id: int):
 
 def get_company_whatsapp_inbox_summary(
     *,
-    company,
+    company=None,
+    company_reference: str | None = None,
     search: str = "",
     assigned_to_id: int | None = None,
 ):
-    queryset = _build_company_conversations_queryset(company)
+    queryset = _build_company_conversations_queryset(
+        company=company,
+        company_reference=company_reference,
+    )
     queryset = _apply_conversation_search(queryset, search=search)
 
     if assigned_to_id:

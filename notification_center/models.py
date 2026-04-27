@@ -1,16 +1,29 @@
+# ============================================================
+# 📂 notification_center/models.py
+# 🧠 Primey Care - Notification Center Models
+# ------------------------------------------------------------
+# ✅ مستقل عن company_manager
+# ✅ مناسب لـ Primey Care
+# ✅ يدعم:
+#    - Notification
+#    - NotificationEvent
+#    - NotificationDelivery
+# ✅ يدعم In-App + Email + WhatsApp
+# ============================================================
+
 from __future__ import annotations
 
+from django.contrib.auth import get_user_model
 from django.db import models
 from django.utils import timezone
-from django.contrib.auth import get_user_model
-from company_manager.models import Company
 
 User = get_user_model()
 
 
-# ================================================================
-# 🧭 Notification Enums
-# ================================================================
+# ============================================================
+# Enums
+# ============================================================
+
 class NotificationSeverity(models.TextChoices):
     INFO = "info", "Info"
     SUCCESS = "success", "Success"
@@ -44,99 +57,110 @@ class NotificationDeliveryStatus(models.TextChoices):
     CANCELLED = "cancelled", "Cancelled"
 
 
-# ================================================================
-# 🔔 Notification Model — Ultra Pro V2 (Extended Safely)
-# ================================================================
+# ============================================================
+# Notification
+# ============================================================
+
 class Notification(models.Model):
     """
-    نظام الإشعارات الرسمي في Mham Cloud
-    يدعم:
-    - إشعارات النظام System Events
-    - الإشعارات الذكية Smart Alerts
-    - التنبيهات المالية Billing Alerts
-    - إشعارات الموارد البشرية HR Alerts
-    - الربط الكامل مع WebSocket + Notification Signals
+    الإشعار الداخلي داخل النظام.
     """
 
-    # 🏢 الشركة (اختياري)
-    company = models.ForeignKey(
-        Company,
-        on_delete=models.CASCADE,
-        related_name="notifications",
-        null=True,
+    company_reference = models.CharField(
+        max_length=100,
         blank=True,
-        verbose_name="الشركة"
+        default="",
+        db_index=True,
+        verbose_name="Company Reference",
+    )
+    company_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name="Company Name",
     )
 
-    # 👤 المستلم الأساسي
     recipient = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
         related_name="notifications",
-        verbose_name="المستخدم المستلم"
+        verbose_name="Recipient",
     )
 
-    # 📝 محتوى الإشعار
-    title = models.CharField(max_length=200, verbose_name="العنوان")
-    message = models.TextField(verbose_name="الرسالة")
+    recipient_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name="Recipient Name",
+    )
 
-    # 🔖 نوع الإشعار
+    title = models.CharField(
+        max_length=200,
+        verbose_name="Title",
+    )
+    message = models.TextField(
+        verbose_name="Message",
+    )
+
     notification_type = models.CharField(
         max_length=50,
         default="system",
         db_index=True,
-        verbose_name="نوع الإشعار"
+        verbose_name="Notification Type",
     )
 
-    # 🚦 مستوى الإشعار
     severity = models.CharField(
         max_length=20,
+        choices=NotificationSeverity.choices,
         default=NotificationSeverity.INFO,
         db_index=True,
-        verbose_name="مستوى الإشعار"
+        verbose_name="Severity",
     )
 
-    # 🔗 رابط داخلي (اختياري)
     link = models.CharField(
-        max_length=300,
-        null=True,
+        max_length=500,
         blank=True,
-        verbose_name="الرابط الداخلي"
+        default="",
+        verbose_name="Link",
     )
 
-    # 🔗 ربط اختياري مع الحدث الأصلي
     event = models.ForeignKey(
         "NotificationEvent",
         on_delete=models.SET_NULL,
         related_name="notifications",
         null=True,
         blank=True,
-        verbose_name="الحدث المرتبط"
+        verbose_name="Event",
     )
 
-    # 📘 حالة القراءة
-    is_read = models.BooleanField(default=False, verbose_name="مقروء؟")
-    read_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ القراءة")
+    is_read = models.BooleanField(
+        default=False,
+        verbose_name="Is Read",
+    )
+    read_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Read At",
+    )
 
-    # 🕒 وقت الإنشاء
     created_at = models.DateTimeField(
         default=timezone.now,
         db_index=True,
-        verbose_name="تاريخ الإنشاء"
+        verbose_name="Created At",
     )
 
     class Meta:
         ordering = ["-created_at"]
-        verbose_name = "إشعار"
-        verbose_name_plural = "الإشعارات"
+        verbose_name = "Notification"
+        verbose_name_plural = "Notifications"
         indexes = [
             models.Index(fields=["recipient", "is_read"]),
             models.Index(fields=["recipient", "-created_at"]),
-            models.Index(fields=["company", "-created_at"]),
+            models.Index(fields=["company_reference", "-created_at"]),
             models.Index(fields=["notification_type", "severity"]),
         ]
 
-    # ✔️ علامة مقروء
     def mark_as_read(self):
         if not self.is_read:
             self.is_read = True
@@ -144,34 +168,31 @@ class Notification(models.Model):
             self.save(update_fields=["is_read", "read_at"])
 
     def __str__(self):
-        return f"{self.title} — {self.recipient}"
+        return f"{self.title} -> {self.recipient}"
 
 
-# ================================================================
-# 🧩 Notification Event — الحدث الأصلي في النظام
-# ================================================================
+# ============================================================
+# Notification Event
+# ============================================================
+
 class NotificationEvent(models.Model):
     """
-    يمثل الحدث الأصلي في النظام قبل الإرسال عبر القنوات.
-
-    أمثلة:
-    - employee_created
-    - employee_deactivated
-    - leave_requested
-    - payroll_record_paid
-    - password_changed
-    - company_created
-    - subscription_renewed
-    - payment_confirmed
+    الحدث الأصلي قبل الإرسال عبر القنوات.
     """
 
-    company = models.ForeignKey(
-        Company,
-        on_delete=models.CASCADE,
-        related_name="notification_events",
-        null=True,
+    company_reference = models.CharField(
+        max_length=100,
         blank=True,
-        verbose_name="الشركة"
+        default="",
+        db_index=True,
+        verbose_name="Company Reference",
+    )
+    company_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name="Company Name",
     )
 
     actor = models.ForeignKey(
@@ -180,7 +201,7 @@ class NotificationEvent(models.Model):
         related_name="triggered_notification_events",
         null=True,
         blank=True,
-        verbose_name="منفذ الحدث"
+        verbose_name="Actor",
     )
 
     target_user = models.ForeignKey(
@@ -189,20 +210,19 @@ class NotificationEvent(models.Model):
         related_name="targeted_notification_events",
         null=True,
         blank=True,
-        verbose_name="المستخدم المستهدف"
+        verbose_name="Target User",
     )
 
     event_code = models.CharField(
         max_length=100,
         db_index=True,
-        verbose_name="كود الحدث"
+        verbose_name="Event Code",
     )
-
     event_group = models.CharField(
         max_length=50,
         default="system",
         db_index=True,
-        verbose_name="مجموعة الحدث"
+        verbose_name="Event Group",
     )
 
     severity = models.CharField(
@@ -210,7 +230,7 @@ class NotificationEvent(models.Model):
         choices=NotificationSeverity.choices,
         default=NotificationSeverity.INFO,
         db_index=True,
-        verbose_name="مستوى الحدث"
+        verbose_name="Severity",
     )
 
     status = models.CharField(
@@ -218,79 +238,79 @@ class NotificationEvent(models.Model):
         choices=NotificationEventStatus.choices,
         default=NotificationEventStatus.PENDING,
         db_index=True,
-        verbose_name="حالة الحدث"
+        verbose_name="Status",
     )
 
     language_code = models.CharField(
         max_length=10,
         default="ar",
         db_index=True,
-        verbose_name="رمز اللغة"
+        verbose_name="Language Code",
     )
 
     target_model = models.CharField(
         max_length=100,
-        null=True,
         blank=True,
-        verbose_name="اسم الموديل المستهدف"
+        default="",
+        verbose_name="Target Model",
     )
     target_object_id = models.CharField(
         max_length=100,
-        null=True,
         blank=True,
-        verbose_name="معرف الكيان المستهدف"
+        default="",
+        verbose_name="Target Object ID",
     )
 
     title = models.CharField(
         max_length=200,
-        null=True,
         blank=True,
-        verbose_name="العنوان الافتراضي"
+        default="",
+        verbose_name="Title",
     )
     message = models.TextField(
-        null=True,
         blank=True,
-        verbose_name="الرسالة الافتراضية"
+        default="",
+        verbose_name="Message",
     )
     link = models.CharField(
-        max_length=300,
-        null=True,
+        max_length=500,
         blank=True,
-        verbose_name="الرابط الداخلي"
+        default="",
+        verbose_name="Link",
     )
 
     context = models.JSONField(
         default=dict,
         blank=True,
-        verbose_name="بيانات الحدث"
+        verbose_name="Context",
     )
 
     source = models.CharField(
         max_length=100,
-        null=True,
         blank=True,
-        verbose_name="مصدر الحدث"
+        default="",
+        verbose_name="Source",
     )
 
     created_at = models.DateTimeField(
         default=timezone.now,
         db_index=True,
-        verbose_name="تاريخ الإنشاء"
+        verbose_name="Created At",
     )
     processed_at = models.DateTimeField(
         null=True,
         blank=True,
-        verbose_name="تاريخ المعالجة"
+        verbose_name="Processed At",
     )
 
     class Meta:
         ordering = ["-created_at"]
-        verbose_name = "حدث تنبيهي"
-        verbose_name_plural = "الأحداث التنبيهية"
+        verbose_name = "Notification Event"
+        verbose_name_plural = "Notification Events"
         indexes = [
             models.Index(fields=["event_code", "-created_at"]),
             models.Index(fields=["event_group", "-created_at"]),
-            models.Index(fields=["company", "-created_at"]),
+            models.Index(fields=["company_reference", "-created_at"]),
             models.Index(fields=["target_user", "-created_at"]),
             models.Index(fields=["status", "-created_at"]),
             models.Index(fields=["severity", "-created_at"]),
@@ -311,28 +331,35 @@ class NotificationEvent(models.Model):
         return f"{self.event_code} #{self.pk}"
 
 
-# ================================================================
-# 🚚 Notification Delivery — تتبع كل قناة بشكل مستقل
-# ================================================================
+# ============================================================
+# Notification Delivery
+# ============================================================
+
 class NotificationDelivery(models.Model):
     """
-    يمثل محاولة التسليم لقناة محددة لمستلم محدد.
+    تتبع كل قناة بشكل مستقل.
     """
 
     event = models.ForeignKey(
         NotificationEvent,
         on_delete=models.CASCADE,
         related_name="deliveries",
-        verbose_name="الحدث"
+        verbose_name="Event",
     )
 
-    company = models.ForeignKey(
-        Company,
-        on_delete=models.CASCADE,
-        related_name="notification_deliveries",
-        null=True,
+    company_reference = models.CharField(
+        max_length=100,
         blank=True,
-        verbose_name="الشركة"
+        default="",
+        db_index=True,
+        verbose_name="Company Reference",
+    )
+    company_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name="Company Name",
     )
 
     recipient = models.ForeignKey(
@@ -341,14 +368,14 @@ class NotificationDelivery(models.Model):
         related_name="notification_deliveries",
         null=True,
         blank=True,
-        verbose_name="المستخدم المستلم"
+        verbose_name="Recipient",
     )
 
     channel = models.CharField(
         max_length=20,
         choices=NotificationChannel.choices,
         db_index=True,
-        verbose_name="القناة"
+        verbose_name="Channel",
     )
 
     status = models.CharField(
@@ -356,73 +383,73 @@ class NotificationDelivery(models.Model):
         choices=NotificationDeliveryStatus.choices,
         default=NotificationDeliveryStatus.PENDING,
         db_index=True,
-        verbose_name="حالة التسليم"
+        verbose_name="Status",
     )
 
     destination = models.CharField(
         max_length=255,
-        null=True,
         blank=True,
-        verbose_name="الوجهة"
+        default="",
+        verbose_name="Destination",
     )
 
     subject = models.CharField(
         max_length=255,
-        null=True,
         blank=True,
-        verbose_name="العنوان/الموضوع"
+        default="",
+        verbose_name="Subject",
     )
     rendered_message = models.TextField(
-        null=True,
         blank=True,
-        verbose_name="المحتوى المرسل"
+        default="",
+        verbose_name="Rendered Message",
     )
 
     template_key = models.CharField(
         max_length=120,
-        null=True,
         blank=True,
+        default="",
         db_index=True,
-        verbose_name="مفتاح القالب"
+        verbose_name="Template Key",
     )
     language_code = models.CharField(
         max_length=10,
         default="ar",
         db_index=True,
-        verbose_name="رمز اللغة"
+        verbose_name="Language Code",
     )
 
     provider_name = models.CharField(
         max_length=100,
-        null=True,
         blank=True,
-        verbose_name="اسم المزود"
+        default="",
+        verbose_name="Provider Name",
     )
     provider_message_id = models.CharField(
         max_length=255,
-        null=True,
         blank=True,
+        default="",
         db_index=True,
-        verbose_name="معرف الرسالة عند المزود"
+        verbose_name="Provider Message ID",
     )
     provider_response = models.JSONField(
         default=dict,
         blank=True,
-        verbose_name="استجابة المزود"
+        verbose_name="Provider Response",
     )
 
     error_message = models.TextField(
-        null=True,
         blank=True,
-        verbose_name="رسالة الخطأ"
+        default="",
+        verbose_name="Error Message",
     )
     attempts = models.PositiveIntegerField(
         default=0,
-        verbose_name="عدد المحاولات"
+        verbose_name="Attempts",
     )
     max_attempts = models.PositiveIntegerField(
         default=3,
-        verbose_name="أقصى عدد للمحاولات"
+        verbose_name="Max Attempts",
     )
 
     notification = models.ForeignKey(
@@ -431,34 +458,34 @@ class NotificationDelivery(models.Model):
         related_name="deliveries",
         null=True,
         blank=True,
-        verbose_name="الإشعار الداخلي المرتبط"
+        verbose_name="Notification",
     )
 
     created_at = models.DateTimeField(
         default=timezone.now,
         db_index=True,
-        verbose_name="تاريخ الإنشاء"
+        verbose_name="Created At",
     )
     last_attempt_at = models.DateTimeField(
         null=True,
         blank=True,
-        verbose_name="آخر محاولة"
+        verbose_name="Last Attempt At",
     )
     sent_at = models.DateTimeField(
         null=True,
         blank=True,
-        verbose_name="تاريخ الإرسال"
+        verbose_name="Sent At",
     )
 
     class Meta:
         ordering = ["-created_at"]
-        verbose_name = "سجل تسليم"
-        verbose_name_plural = "سجلات التسليم"
+        verbose_name = "Notification Delivery"
+        verbose_name_plural = "Notification Deliveries"
         indexes = [
             models.Index(fields=["event", "channel"]),
             models.Index(fields=["recipient", "channel"]),
             models.Index(fields=["status", "channel"]),
-            models.Index(fields=["company", "-created_at"]),
+            models.Index(fields=["company_reference", "-created_at"]),
             models.Index(fields=["provider_message_id"]),
             models.Index(fields=["template_key", "language_code"]),
         ]

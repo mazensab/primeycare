@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/utils.py
-# Mham Cloud - WhatsApp Utilities
+# 🧠 Primey Care - WhatsApp Utilities V1 Core
 # ============================================================
 
 from __future__ import annotations
@@ -12,34 +12,104 @@ from typing import Optional
 # ============================================================
 # 🌍 Defaults
 # ============================================================
-
 DEFAULT_COUNTRY_CODE = "966"
+PHONE_REGEX = re.compile(r"^\+[1-9]\d{7,14}$")
 
 
 # ============================================================
-# 🔧 Text Helper
+# 🔧 Text Helpers
 # ============================================================
-
-def safe_text(value: Optional[str]) -> str:
+def safe_text(value: Optional[object]) -> str:
     """
     إرجاع نص آمن دائمًا.
     """
-    return (value or "").strip()
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def is_blank(value: Optional[object]) -> bool:
+    """
+    فحص هل القيمة فارغة بعد التنظيف.
+    """
+    return safe_text(value) == ""
 
 
 # ============================================================
 # 📱 Phone Helpers
 # ============================================================
-
 def _digits_only(value: str) -> str:
     return re.sub(r"\D", "", value or "")
 
 
-def normalize_phone_number(phone: str, default_country_code: str = DEFAULT_COUNTRY_CODE) -> str:
+def _normalize_country_code(default_country_code: str = DEFAULT_COUNTRY_CODE) -> str:
+    normalized = _digits_only(default_country_code)
+    return normalized or DEFAULT_COUNTRY_CODE
+
+
+def _looks_like_international_without_plus(digits: str) -> bool:
+    """
+    مثال:
+    14155552671
+    966555555555
+    """
+    return bool(digits) and len(digits) >= 8 and not digits.startswith("0")
+
+
+def _normalize_saudi_local_number(digits: str, country_code: str) -> str:
+    """
+    دعم الأنماط السعودية الشائعة:
+    - 05xxxxxxxx
+    - 5xxxxxxxx
+    - 9665xxxxxxxx
+    """
+    if country_code != "966":
+        return ""
+
+    if digits.startswith("05") and len(digits) == 10:
+        return f"+966{digits[1:]}"
+
+    if digits.startswith("5") and len(digits) == 9:
+        return f"+966{digits}"
+
+    if digits.startswith("966") and len(digits) == 12:
+        return f"+{digits}"
+
+    return ""
+
+
+def _looks_like_valid_local_number(digits: str, country_code: str) -> bool:
+    """
+    قبل fallback المحلي، نتحقق أن الرقم المحلي فعلاً بطول منطقي.
+    هذا يمنع قبول أرقام قصيرة مثل:
+    055555
+    """
+    if not digits:
+        return False
+
+    if country_code == "966":
+        # السعودية:
+        # 05xxxxxxxx => 10 digits
+        # 5xxxxxxxx  => 9 digits
+        if digits.startswith("05"):
+            return len(digits) == 10
+        if digits.startswith("5"):
+            return len(digits) == 9
+        return False
+
+    # لبقية الدول: fallback محافظ
+    local_digits = digits.lstrip("0")
+    return len(local_digits) >= 8
+
+
+def normalize_phone_number(
+    phone: str,
+    default_country_code: str = DEFAULT_COUNTRY_CODE,
+) -> str:
     """
     تنظيف وتوحيد رقم الجوال بصيغة دولية.
 
-    يدعم بشكل جيد:
+    يدعم:
     - +9665XXXXXXXX
     - 009665XXXXXXXX
     - 9665XXXXXXXX
@@ -48,22 +118,17 @@ def normalize_phone_number(phone: str, default_country_code: str = DEFAULT_COUNT
 
     المخرجات النهائية دائمًا بصيغة:
     +<country_code><number>
-
-    ملاحظات:
-    - الافتراضي هنا موجه للسعودية (966)
-    - لا يحاول تخمينات معقدة جدًا خارج الأنماط الشائعة
     """
     raw = safe_text(phone)
     if not raw:
         return ""
 
-    country_code = _digits_only(default_country_code) or DEFAULT_COUNTRY_CODE
+    country_code = _normalize_country_code(default_country_code=default_country_code)
 
     # --------------------------------------------------------
-    # 1) إزالة المسافات والرموز مع الإبقاء على +
+    # 1) تنظيف أولي مع الإبقاء على +
     # --------------------------------------------------------
     cleaned = re.sub(r"[^\d+]", "", raw)
-
     if not cleaned:
         return ""
 
@@ -74,75 +139,80 @@ def normalize_phone_number(phone: str, default_country_code: str = DEFAULT_COUNT
         cleaned = f"+{cleaned[2:]}"
 
     # --------------------------------------------------------
-    # 3) لو يبدأ بـ + نتحقق فقط من الرقم الداخلي
+    # 3) لو يبدأ بـ +
     # --------------------------------------------------------
     if cleaned.startswith("+"):
         digits = _digits_only(cleaned)
-
         if not digits:
             return ""
 
         normalized = f"+{digits}"
-        if re.match(r"^\+[1-9]\d{7,14}$", normalized):
-            return normalized
-        return ""
+        return normalized if PHONE_REGEX.match(normalized) else ""
 
-    # من هنا نتعامل مع أرقام بدون +
     digits = _digits_only(cleaned)
-
     if not digits:
         return ""
 
     # --------------------------------------------------------
-    # 4) دعم الأرقام السعودية المحلية الشائعة
+    # 4) الأنماط السعودية المحلية
     # --------------------------------------------------------
-    # مثال: 05xxxxxxxx -> +9665xxxxxxxx
-    if country_code == "966":
-        if digits.startswith("05") and len(digits) == 10:
-            normalized = f"+966{digits[1:]}"
-            if re.match(r"^\+[1-9]\d{7,14}$", normalized):
-                return normalized
-
-        # مثال: 5xxxxxxxx -> +9665xxxxxxxx
-        if digits.startswith("5") and len(digits) == 9:
-            normalized = f"+966{digits}"
-            if re.match(r"^\+[1-9]\d{7,14}$", normalized):
-                return normalized
-
-        # مثال: 9665xxxxxxxx -> +9665xxxxxxxx
-        if digits.startswith("966") and len(digits) >= 11:
-            normalized = f"+{digits}"
-            if re.match(r"^\+[1-9]\d{7,14}$", normalized):
-                return normalized
+    saudi_normalized = _normalize_saudi_local_number(digits, country_code)
+    if saudi_normalized and PHONE_REGEX.match(saudi_normalized):
+        return saudi_normalized
 
     # --------------------------------------------------------
-    # 5) لو الرقم يبدو دوليًا لكنه بدون +
+    # 5) رقم دولي بدون +
     # --------------------------------------------------------
-    # مثال: 14155552671 -> +14155552671
-    if len(digits) >= 8 and not digits.startswith("0"):
+    if _looks_like_international_without_plus(digits):
         normalized = f"+{digits}"
-        if re.match(r"^\+[1-9]\d{7,14}$", normalized):
+        if PHONE_REGEX.match(normalized):
             return normalized
 
     # --------------------------------------------------------
-    # 6) fallback للأرقام المحلية الأخرى:
-    # إزالة الصفر الأول ثم إضافة كود الدولة
+    # 6) fallback محلي محافظ
     # --------------------------------------------------------
-    local_digits = digits.lstrip("0")
-    if local_digits:
-        normalized = f"+{country_code}{local_digits}"
-        if re.match(r"^\+[1-9]\d{7,14}$", normalized):
-            return normalized
+    if _looks_like_valid_local_number(digits, country_code):
+        local_digits = digits.lstrip("0")
+        if local_digits:
+            normalized = f"+{country_code}{local_digits}"
+            if PHONE_REGEX.match(normalized):
+                return normalized
 
     return ""
 
 
-def is_valid_phone_number(phone: str, default_country_code: str = DEFAULT_COUNTRY_CODE) -> bool:
+def is_valid_phone_number(
+    phone: str,
+    default_country_code: str = DEFAULT_COUNTRY_CODE,
+) -> bool:
     """
     تحقق من صيغة الرقم بعد التطبيع.
     """
-    if not phone:
+    normalized = normalize_phone_number(
+        phone,
+        default_country_code=default_country_code,
+    )
+    return bool(PHONE_REGEX.match(normalized))
+
+
+def are_same_phone_number(
+    first_phone: str,
+    second_phone: str,
+    default_country_code: str = DEFAULT_COUNTRY_CODE,
+) -> bool:
+    """
+    مقارنة رقمين بعد التطبيع.
+    """
+    first_normalized = normalize_phone_number(
+        first_phone,
+        default_country_code=default_country_code,
+    )
+    second_normalized = normalize_phone_number(
+        second_phone,
+        default_country_code=default_country_code,
+    )
+
+    if not first_normalized or not second_normalized:
         return False
 
-    normalized = normalize_phone_number(phone, default_country_code=default_country_code)
-    return bool(re.match(r"^\+[1-9]\d{7,14}$", normalized))
+    return first_normalized == second_normalized

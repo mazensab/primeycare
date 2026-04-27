@@ -12,25 +12,61 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuTrigger
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar
+  useSidebar,
 } from "@/components/ui/sidebar";
 
 import {
   BellIcon,
   CreditCardIcon,
   LogOutIcon,
-  UserCircle2Icon
+  UserCircle2Icon,
 } from "lucide-react";
 
 import { DotsVerticalIcon } from "@radix-ui/react-icons";
 
 type AppLocale = "ar" | "en";
+
+/* =====================================================
+   ✅ قراءة لغة النظام بشكل آمن
+   الأولوية لـ localStorage لأنه المصدر الرسمي للتبديل
+   ثم document.documentElement.lang كاحتياط فقط
+===================================================== */
+function readStoredLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
+
+    const savedLocale = window.localStorage.getItem("primey-locale");
+    if (savedLocale === "en") return "en";
+    if (savedLocale === "ar") return "ar";
+
+    const htmlLang = document.documentElement.lang;
+    return htmlLang === "en" ? "en" : "ar";
+  } catch (error) {
+    console.error("Nav user locale read error:", error);
+    return "ar";
+  }
+}
+
+/* =====================================================
+   ✅ مزامنة اتجاه الصفحة مع اللغة الحالية
+===================================================== */
+function applyDocumentLocale(locale: AppLocale) {
+  try {
+    if (typeof document === "undefined") return;
+
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch (error) {
+    console.error("Nav user locale apply error:", error);
+  }
+}
 
 export function NavUser() {
   const { isMobile } = useSidebar();
@@ -40,17 +76,42 @@ export function NavUser() {
   const [loading, setLoading] = useState(false);
   const [locale, setLocale] = useState<AppLocale>("ar");
 
-  useEffect(() => {
-    try {
-      const savedLocale =
-        typeof window !== "undefined"
-          ? (window.localStorage.getItem("primey-locale") as AppLocale | null)
-          : null;
+  /* =====================================================
+     ✅ مزامنة لغة قائمة المستخدم مع الهيدر مباشرة
+     يعتمد على:
+     - localStorage: primey-locale
+     - event: primey-locale-changed
+     - storage event
 
-      setLocale(savedLocale === "en" ? "en" : "ar");
-    } catch (error) {
-      console.error("Nav user locale initialization error:", error);
-    }
+     ملاحظة:
+     أضفنا setTimeout خفيف لضمان قراءة القيمة الجديدة
+     بعد اكتمال تحديث localStorage و document.
+  ===================================================== */
+  useEffect(() => {
+    const syncLocale = () => {
+      const nextLocale = readStoredLocale();
+
+      applyDocumentLocale(nextLocale);
+      setLocale(nextLocale);
+    };
+
+    const syncLocaleAfterPaint = () => {
+      syncLocale();
+
+      window.setTimeout(() => {
+        syncLocale();
+      }, 0);
+    };
+
+    syncLocaleAfterPaint();
+
+    window.addEventListener("primey-locale-changed", syncLocaleAfterPaint);
+    window.addEventListener("storage", syncLocaleAfterPaint);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", syncLocaleAfterPaint);
+      window.removeEventListener("storage", syncLocaleAfterPaint);
+    };
   }, []);
 
   const isArabic = locale === "ar";
@@ -65,7 +126,8 @@ export function NavUser() {
   const avatarFallback =
     userName?.charAt(0)?.toUpperCase() || (isArabic ? "م" : "U");
 
-  const isCompanyArea = pathname?.startsWith("/company");
+  const isCompanyArea =
+    pathname?.startsWith("/company") || pathname?.startsWith("/center");
 
   const accountHref = useMemo(() => {
     return isCompanyArea ? "/company/profile" : "/system/profile";
@@ -95,35 +157,26 @@ export function NavUser() {
     setLoading(true);
 
     try {
-      await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/csrf/`,
-        {
-          method: "GET",
-          credentials: "include",
-        }
-      );
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/csrf/`, {
+        method: "GET",
+        credentials: "include",
+      });
 
       const csrfToken = getCSRFToken();
 
-      await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/logout/`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": csrfToken,
-          },
-        }
-      );
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/logout/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken,
+        },
+      });
     } catch {
       // حتى لو فشل الـ API، ننهي الجلسة من الواجهة
     }
 
-    localStorage.setItem(
-      "primey_logout",
-      Date.now().toString()
-    );
+    localStorage.setItem("primey_logout", Date.now().toString());
 
     router.replace("/login");
   };
@@ -145,15 +198,19 @@ export function NavUser() {
                     referrerPolicy="no-referrer"
                   />
                 ) : null}
+
                 <AvatarFallback className="rounded-lg">
                   {avatarFallback}
                 </AvatarFallback>
               </Avatar>
 
-              <div className={`grid flex-1 text-sm leading-tight ${isArabic ? "text-right" : "text-left"}`}>
-                <span className="truncate font-medium">
-                  {userName}
-                </span>
+              <div
+                className={`grid flex-1 text-sm leading-tight ${
+                  isArabic ? "text-right" : "text-left"
+                }`}
+              >
+                <span className="truncate font-medium">{userName}</span>
+
                 <span className="text-muted-foreground truncate text-xs">
                   {userEmail}
                 </span>
@@ -170,7 +227,11 @@ export function NavUser() {
             sideOffset={4}
           >
             <DropdownMenuLabel className="p-0 font-normal">
-              <div className={`flex items-center gap-2 px-1 py-1.5 text-sm ${isArabic ? "text-right" : "text-left"}`}>
+              <div
+                className={`flex items-center gap-2 px-1 py-1.5 text-sm ${
+                  isArabic ? "text-right" : "text-left"
+                }`}
+              >
                 <Avatar className="h-8 w-8 rounded-lg">
                   {session?.user?.avatar ? (
                     <AvatarImage
@@ -179,15 +240,19 @@ export function NavUser() {
                       referrerPolicy="no-referrer"
                     />
                   ) : null}
+
                   <AvatarFallback className="rounded-lg">
                     {avatarFallback}
                   </AvatarFallback>
                 </Avatar>
 
-                <div className={`grid flex-1 text-sm leading-tight ${isArabic ? "text-right" : "text-left"}`}>
-                  <span className="truncate font-medium">
-                    {userName}
-                  </span>
+                <div
+                  className={`grid flex-1 text-sm leading-tight ${
+                    isArabic ? "text-right" : "text-left"
+                  }`}
+                >
+                  <span className="truncate font-medium">{userName}</span>
+
                   <span className="text-muted-foreground truncate text-xs">
                     {userEmail}
                   </span>
@@ -230,13 +295,14 @@ export function NavUser() {
               className="cursor-pointer text-red-600 focus:text-red-600"
             >
               <LogOutIcon />
+
               {loading
                 ? isArabic
                   ? "جارٍ تسجيل الخروج..."
                   : "Signing out..."
                 : isArabic
-                ? "تسجيل الخروج"
-                : "Log out"}
+                  ? "تسجيل الخروج"
+                  : "Log out"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

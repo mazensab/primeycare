@@ -1,13 +1,16 @@
 # ============================================================
 # 📂 whatsapp_center/apps.py
-# Mham Cloud - WhatsApp Center App Config
-# ============================================================
-# ✅ تشغيل تلقائي لـ WhatsApp Session Gateway
-# ✅ آمن مع Django runserver + StatReloader
-# ✅ لا يعيد التشغيل إذا كان الجت واي شغال
-# ✅ يدعم Windows بشكل صحيح
+# 🧠 Primey Care - WhatsApp Center App Config
+# ------------------------------------------------------------
+# ✅ نسخة Core نظيفة مناسبة لـ Primey Care
+# ✅ Autostart اختياري وآمن للـ gateway
 # ✅ لا يعتمد على DB داخل ready()
-# ✅ يفضّل تشغيل node server.js مباشرة على ويندوز
+# ✅ يمنع التكرار مع runserver autoreloader
+# ✅ لا يعمل أثناء:
+#    - makemigrations
+#    - migrate
+#    - test
+#    - shell
 # ============================================================
 
 from __future__ import annotations
@@ -37,15 +40,14 @@ class WhatsappCenterConfig(AppConfig):
     # --------------------------------------------------------
     def ready(self):
         """
-        تشغيل الجت واي تلقائيًا عند إقلاع Django
-        بدون تكرار مع autoreloader.
+        تشغيل اختياري وآمن للـ gateway عند إقلاع Django.
         """
         if not self._should_autostart_gateway():
             return
 
         worker = threading.Thread(
             target=self._autostart_gateway_worker,
-            name="primey-whatsapp-gateway-autostart",
+            name="primeycare-whatsapp-gateway-autostart",
             daemon=True,
         )
         worker.start()
@@ -55,10 +57,9 @@ class WhatsappCenterConfig(AppConfig):
     # --------------------------------------------------------
     def _should_autostart_gateway(self) -> bool:
         """
-        منع التشغيل في أوامر لا تحتاج الجت واي،
-        ومنع التكرار مع Django reloader.
+        تحديد هل يسمح بتشغيل الـ gateway تلقائيًا أم لا.
         """
-        if not getattr(settings, "WHATSAPP_GATEWAY_AUTOSTART", True):
+        if not getattr(settings, "WHATSAPP_GATEWAY_AUTOSTART", False):
             return False
 
         if os.getenv("DISABLE_WHATSAPP_GATEWAY_AUTOSTART", "").strip().lower() in {
@@ -87,14 +88,11 @@ class WhatsappCenterConfig(AppConfig):
         if argv.intersection(blocked_commands):
             return False
 
-        # مهم جدًا:
-        # مع runserver يوجد process أولي + process فعلي
-        # نسمح فقط للـ process الفعلي بالتشغيل
+        # runserver يطلق process أولي + process فعلي
+        # نشغّل فقط في الـ process الفعلي
         if "runserver" in argv:
             return os.getenv("RUN_MAIN") == "true"
 
-        # في أي تشغيل آخر:
-        # اسمح بالمحاولة مع health check لمنع التكرار.
         return True
 
     # --------------------------------------------------------
@@ -114,7 +112,7 @@ class WhatsappCenterConfig(AppConfig):
 
     def _is_gateway_running(self) -> bool:
         """
-        فحص هل الجت واي شغال فعليًا عبر /health
+        فحص هل الـ gateway يعمل فعليًا عبر health endpoint.
         """
         timeout = int(
             getattr(settings, "WHATSAPP_GATEWAY_AUTOSTART_HEALTH_TIMEOUT", 2)
@@ -153,9 +151,9 @@ class WhatsappCenterConfig(AppConfig):
 
     def _resolve_gateway_command(self, gateway_dir: Path) -> list[str]:
         """
-        اختيار أمر تشغيل الجت واي بشكل أنظف:
-        - على ويندوز: نفضّل node server.js مباشرة
-        - fallback إلى npm run start إذا لزم
+        اختيار أمر التشغيل:
+        - نفضّل node server.js
+        - fallback إلى npm run start
         """
         server_js = gateway_dir / "server.js"
 
@@ -198,9 +196,7 @@ class WhatsappCenterConfig(AppConfig):
         server_js = gateway_dir / "server.js"
 
         if not gateway_dir.exists():
-            self._write_boot_log(
-                f"[ERROR] Gateway directory not found: {gateway_dir}"
-            )
+            self._write_boot_log(f"[ERROR] Gateway directory not found: {gateway_dir}")
             return False
 
         if not package_json.exists() or not server_js.exists():
@@ -240,18 +236,13 @@ class WhatsappCenterConfig(AppConfig):
                 popen_kwargs["preexec_fn"] = os.setsid
 
         try:
-            subprocess.Popen(
-                launch_command,
-                **popen_kwargs,
-            )
+            subprocess.Popen(launch_command, **popen_kwargs)
             self._write_boot_log(
                 f"[INFO] WhatsApp gateway launch requested using command: {' '.join(launch_command)}"
             )
             return True
         except Exception as exc:
-            self._write_boot_log(
-                f"[ERROR] Failed to launch WhatsApp gateway: {exc}"
-            )
+            self._write_boot_log(f"[ERROR] Failed to launch WhatsApp gateway: {exc}")
             return False
 
     # --------------------------------------------------------
@@ -259,9 +250,9 @@ class WhatsappCenterConfig(AppConfig):
     # --------------------------------------------------------
     def _autostart_gateway_worker(self) -> None:
         """
-        1) يفحص هل الجت واي شغال
-        2) لو لا، يشغله
-        3) ينتظر حتى يصير /health شغال
+        1) يفحص هل الـ gateway يعمل
+        2) لو لا، يطلب تشغيله
+        3) ينتظر حتى يصبح health endpoint جاهزًا
         """
         try:
             if self._is_gateway_running():

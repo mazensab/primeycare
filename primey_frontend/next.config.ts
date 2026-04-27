@@ -11,13 +11,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "images.unsplash.com",
       },
-
-      // Google Drive
       {
         protocol: "https",
         hostname: "drive.google.com",
       },
-
       {
         protocol: "https",
         hostname: "lh3.googleusercontent.com",
@@ -33,12 +30,38 @@ const nextConfig: NextConfig = {
     return {
       beforeFiles: [
         // ======================================================
+        // 🏥 PRIMEY CARE PROVIDERS / CENTERS
+        // ------------------------------------------------------
+        // ✅ حل صريح لمشكلة 301 في صفحات المراكز
+        // ✅ يحافظ على trailing slash المطلوب من Django
+        // ======================================================
+        {
+          source: "/api/providers",
+          destination: "http://127.0.0.1:8000/api/providers/",
+        },
+        {
+          source: "/api/providers/",
+          destination: "http://127.0.0.1:8000/api/providers/",
+        },
+        {
+          source: "/api/providers/active",
+          destination: "http://127.0.0.1:8000/api/providers/active/",
+        },
+        {
+          source: "/api/providers/active/",
+          destination: "http://127.0.0.1:8000/api/providers/active/",
+        },
+        {
+          source: "/api/providers/:provider_id",
+          destination: "http://127.0.0.1:8000/api/providers/:provider_id/",
+        },
+        {
+          source: "/api/providers/:provider_id/",
+          destination: "http://127.0.0.1:8000/api/providers/:provider_id/",
+        },
+
+        // ======================================================
         // 📦 SYSTEM PLANS
-        // حل صريح لمشكلة الـ trailing slash في بيئة التطوير فقط
-        // حتى لا يتحول:
-        // /api/system/plans/create/
-        // إلى:
-        // /api/system/plans/create
         // ======================================================
         {
           source: "/api/system/plans/admin",
@@ -79,6 +102,8 @@ const nextConfig: NextConfig = {
 
         // ======================================================
         // 🌐 GENERIC DEV PROXY
+        // ------------------------------------------------------
+        // يبقى آخر شيء حتى لا يسبق المسارات الصريحة أعلاه
         // ======================================================
         {
           source: "/api/:path*",

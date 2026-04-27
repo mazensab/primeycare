@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Globe, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 import { Separator } from "@/components/ui/separator";
@@ -72,49 +72,89 @@ export function SiteHeader() {
     }
   };
 
+  const isArabic = locale === "ar";
+
+  const wrapperDirection = useMemo(
+    () => (isArabic ? "flex-row-reverse" : "flex-row"),
+    [isArabic]
+  );
+
   return (
-    <header
-      className="
-        sticky top-0 z-50
-        flex h-14 shrink-0 items-center
-        border-b
-        bg-background
-        supports-[backdrop-filter]:bg-background/80
-        backdrop-blur-xl
-      "
-    >
-      <div className="flex w-full items-center gap-2 px-6">
-        <Button onClick={toggleSidebar} size="icon" variant="ghost">
-          {open ? <PanelLeftClose /> : <PanelLeftOpen />}
-        </Button>
-
-        <Separator orientation="vertical" className="mx-2 h-4" />
-
-        <Search />
-
-        <div className="ml-auto flex items-center gap-1.5">
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            onClick={toggleLanguage}
-            className="h-9 w-9 rounded-xl"
-            aria-label={locale === "ar" ? "Switch to English" : "التبديل إلى العربية"}
-            title={locale === "ar" ? "Switch to English" : "التبديل إلى العربية"}
+    <header className="sticky top-0 z-50 border-b border-border/70 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <div className="w-full px-3 md:px-4 xl:px-5">
+        <div className="flex h-16 items-center">
+          <div
+            className={`flex w-full items-center gap-3 ${wrapperDirection}`}
           >
-            <Globe className="h-5 w-5" />
-          </Button>
+            <div
+              className={`flex shrink-0 items-center gap-2 ${
+                isArabic ? "flex-row-reverse" : "flex-row"
+              }`}
+            >
+              <Button
+                type="button"
+                onClick={toggleSidebar}
+                size="icon"
+                variant="outline"
+                className="h-10 w-10 rounded-xl border-border/70 bg-background shadow-sm"
+              >
+                {open ? (
+                  <PanelLeftClose className="h-4.5 w-4.5" />
+                ) : (
+                  <PanelLeftOpen className="h-4.5 w-4.5" />
+                )}
+              </Button>
 
-          <Notifications />
-          <ThemeSwitch />
+              <Separator
+                orientation="vertical"
+                className="mx-1 hidden h-5 lg:flex"
+              />
+            </div>
 
-          <ActiveThemeProvider>
-            <ThemeCustomizerPanel />
-          </ActiveThemeProvider>
+            <div className="flex min-w-0 flex-1 justify-center">
+              <div className="w-full max-w-[760px]">
+                <Search />
+              </div>
+            </div>
 
-          <Separator orientation="vertical" className="mx-2 h-4" />
+            <div
+              className={`flex shrink-0 items-center gap-1 rounded-2xl border border-border/70 bg-background/80 p-1 shadow-sm ${
+                isArabic ? "flex-row-reverse" : "flex-row"
+              }`}
+            >
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                onClick={toggleLanguage}
+                className="h-9 w-9 rounded-xl"
+                aria-label={
+                  locale === "ar" ? "Switch to English" : "التبديل إلى العربية"
+                }
+                title={
+                  locale === "ar" ? "Switch to English" : "التبديل إلى العربية"
+                }
+              >
+                <Globe className="h-4.5 w-4.5" />
+              </Button>
 
-          <UserMenu />
+              <Notifications />
+              <ThemeSwitch />
+
+              <ActiveThemeProvider>
+                <ThemeCustomizerPanel />
+              </ActiveThemeProvider>
+
+              <Separator
+                orientation="vertical"
+                className="mx-1 hidden h-5 sm:flex"
+              />
+
+              <div className="hidden sm:block">
+                <UserMenu />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </header>

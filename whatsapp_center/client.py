@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 whatsapp_center/client.py
-# Mham Cloud - WhatsApp Provider Client
+# Primey Care - WhatsApp Provider Client
 # ============================================================
 # ✅ يدعم:
 # - مزودات Stub الحالية
@@ -10,33 +10,41 @@
 #   * Create Pairing Code
 #   * Get Session Status
 #   * Disconnect Session
+# - Core Messaging:
+#   * Send Text Message
+#   * Send Document Message
 # ============================================================
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import Any, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
+logger = logging.getLogger(__name__)
+
 
 # ============================================================
-# 📦 Results
+# 📦 Send Result
 # ============================================================
-
 @dataclass
 class WhatsAppSendResult:
     success: bool
     status_code: int
     provider_status: str = ""
     external_message_id: str = ""
-    response_data: Optional[dict] = None
+    response_data: Optional[dict[str, Any]] = None
     error_message: str = ""
 
 
+# ============================================================
+# 📦 Session Result
+# ============================================================
 @dataclass
 class WhatsAppSessionResult:
     success: bool
@@ -48,14 +56,13 @@ class WhatsAppSessionResult:
     qr_code: str = ""
     pairing_code: str = ""
     last_connected_at: str = ""
-    response_data: Optional[dict] = None
+    response_data: Optional[dict[str, Any]] = None
     error_message: str = ""
 
 
 # ============================================================
 # 💬 WhatsApp Client
 # ============================================================
-
 class WhatsAppClient:
     """
     عميل إرسال واتساب.
@@ -64,6 +71,12 @@ class WhatsAppClient:
     - Stub افتراضي للمزودات غير المربوطة بعد
     - WhatsApp Web Session Gateway
     """
+
+    SESSION_PROVIDERS = {
+        "whatsapp_web_session",
+        "web_session",
+        "WEB_SESSION",
+    }
 
     def __init__(
         self,
@@ -75,10 +88,10 @@ class WhatsAppClient:
         session_name: str = "",
     ):
         self.provider = (provider or "").strip()
-        self.access_token = access_token or ""
-        self.phone_number_id = phone_number_id or ""
-        self.api_version = api_version or "v22.0"
-        self.session_name = (session_name or "primey-system-session").strip()
+        self.access_token = (access_token or "").strip()
+        self.phone_number_id = (phone_number_id or "").strip()
+        self.api_version = (api_version or "v22.0").strip()
+        self.session_name = (session_name or "primey-care-system-session").strip()
 
     # --------------------------------------------------------
     # ⚙️ Gateway Config
@@ -93,67 +106,95 @@ class WhatsAppClient:
 
     @property
     def gateway_timeout(self) -> int:
+        raw = (os.getenv("WHATSAPP_SESSION_GATEWAY_TIMEOUT") or "20").strip()
         try:
-            timeout = int(os.getenv("WHATSAPP_SESSION_GATEWAY_TIMEOUT", "20"))
+            timeout = int(raw)
             return timeout if timeout > 0 else 20
-        except Exception:
+        except (TypeError, ValueError):
             return 20
+
+    # --------------------------------------------------------
+    # 🧠 Internal Helpers
+    # --------------------------------------------------------
+    def _normalized_provider(self) -> str:
+        return (self.provider or "").strip().lower()
+
+    def _is_web_session_provider(self) -> bool:
+        return self.provider in self.SESSION_PROVIDERS or self._normalized_provider() in {
+            "whatsapp_web_session",
+            "web_session",
+        }
 
     def _gateway_headers(self) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-
         if self.gateway_token:
             headers["Authorization"] = f"Bearer {self.gateway_token}"
-
         return headers
 
-    # --------------------------------------------------------
-    # 🔐 Provider Detection
-    # --------------------------------------------------------
-    def _is_web_session_provider(self) -> bool:
-        return self.provider in {
-            "whatsapp_web_session",
-            "WEB_SESSION",
-            "web_session",
-        }
+    def _build_request(
+        self,
+        *,
+        url: str,
+        method: str = "POST",
+        payload: Optional[dict[str, Any]] = None,
+    ) -> Request:
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+
+        return Request(
+            url,
+            data=data,
+            headers=self._gateway_headers(),
+            method=method.upper(),
+        )
+
+    def _safe_json_loads(self, raw: str) -> dict[str, Any]:
+        try:
+            parsed = json.loads(raw or "{}")
+            return parsed if isinstance(parsed, dict) else {"raw_response": parsed}
+        except json.JSONDecodeError:
+            return {
+                "success": False,
+                "message": "Invalid JSON response from gateway",
+                "raw_response": raw,
+            }
 
     # --------------------------------------------------------
     # 🌐 Gateway Core Request
     # --------------------------------------------------------
-    def _gateway_post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _gateway_request(
+        self,
+        *,
+        path: str,
+        method: str = "POST",
+        payload: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """
         استدعاء موحد للـ Session Gateway الخارجي.
         """
         if not self.gateway_base_url:
+            logger.warning("WhatsApp gateway base URL is not configured")
             return {
                 "success": False,
+                "status_code": 500,
                 "message": "WHATSAPP_SESSION_GATEWAY_URL is not configured",
             }
 
         target_url = urljoin(f"{self.gateway_base_url}/", path.lstrip("/"))
-
-        req = Request(
-            target_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=self._gateway_headers(),
-            method="POST",
+        request_obj = self._build_request(
+            url=target_url,
+            method=method,
+            payload=payload,
         )
 
         try:
-            with urlopen(req, timeout=self.gateway_timeout) as response:
+            with urlopen(request_obj, timeout=self.gateway_timeout) as response:
                 raw = response.read().decode("utf-8") or "{}"
-
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    return {
-                        "success": False,
-                        "message": "Invalid JSON response from gateway",
-                        "raw_response": raw,
-                    }
+                data = self._safe_json_loads(raw)
 
                 if "success" not in data:
                     data["success"] = True
@@ -166,33 +207,39 @@ class WhatsAppClient:
         except HTTPError as exc:
             try:
                 raw = exc.read().decode("utf-8") or "{}"
-                parsed = json.loads(raw)
+                parsed = self._safe_json_loads(raw)
             except Exception:
                 parsed = {}
 
+            logger.exception("WhatsApp gateway HTTPError: %s", exc.code)
             return {
                 "success": False,
+                "status_code": exc.code,
                 "message": parsed.get("message") or f"Gateway HTTPError {exc.code}",
                 "details": parsed,
-                "status_code": exc.code,
             }
 
         except URLError as exc:
+            logger.exception("WhatsApp gateway URLError")
             return {
                 "success": False,
-                "message": f"Gateway connection failed: {exc.reason}",
                 "status_code": 503,
+                "message": f"Gateway connection failed: {exc.reason}",
             }
 
         except Exception as exc:
+            logger.exception("Unexpected WhatsApp gateway error")
             return {
                 "success": False,
-                "message": f"Unexpected gateway error: {str(exc)}",
                 "status_code": 500,
+                "message": f"Unexpected gateway error: {str(exc)}",
             }
 
+    def _gateway_post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._gateway_request(path=path, method="POST", payload=payload)
+
     # --------------------------------------------------------
-    # 🧩 Session Result Mapper
+    # 🧩 Result Builders
     # --------------------------------------------------------
     def _build_session_result(self, data: dict[str, Any]) -> WhatsAppSessionResult:
         return WhatsAppSessionResult(
@@ -207,6 +254,34 @@ class WhatsAppClient:
             last_connected_at=str(data.get("last_connected_at") or ""),
             response_data=data,
             error_message=str(data.get("message") or ""),
+        )
+
+    def _build_send_error_result(
+        self,
+        *,
+        status_code: int,
+        provider_status: str,
+        message: str,
+        data: Optional[dict[str, Any]] = None,
+    ) -> WhatsAppSendResult:
+        return WhatsAppSendResult(
+            success=False,
+            status_code=status_code,
+            provider_status=provider_status,
+            error_message=message,
+            response_data=data or {},
+        )
+
+    def _build_send_success_result(self, data: dict[str, Any]) -> WhatsAppSendResult:
+        return WhatsAppSendResult(
+            success=True,
+            status_code=int(data.get("status_code", 200)),
+            provider_status=str(data.get("provider_status") or "accepted"),
+            external_message_id=str(
+                data.get("external_message_id", "") or data.get("message_id", "")
+            ),
+            response_data=data,
+            error_message="",
         )
 
     # --------------------------------------------------------
@@ -244,8 +319,8 @@ class WhatsAppClient:
                 response_data={},
             )
 
-        phone_number = (phone_number or "").strip()
-        if not phone_number:
+        clean_phone = (phone_number or "").strip()
+        if not clean_phone:
             return WhatsAppSessionResult(
                 success=False,
                 status_code=400,
@@ -258,7 +333,7 @@ class WhatsAppClient:
             "/session/create-pairing-code/",
             {
                 "session_name": self.session_name,
-                "phone_number": phone_number,
+                "phone_number": clean_phone,
                 "mode": "pairing_code",
             },
         )
@@ -315,13 +390,15 @@ class WhatsAppClient:
     # 💬 Send Text Message
     # --------------------------------------------------------
     def send_text_message(self, *, to_phone: str, body: str) -> WhatsAppSendResult:
-        if not to_phone or not body:
-            return WhatsAppSendResult(
-                success=False,
+        clean_phone = (to_phone or "").strip()
+        clean_body = (body or "").strip()
+
+        if not clean_phone or not clean_body:
+            return self._build_send_error_result(
                 status_code=400,
                 provider_status="validation_failed",
-                error_message="Missing to_phone or body",
-                response_data={},
+                message="Missing to_phone or body",
+                data={},
             )
 
         # ----------------------------------------------------
@@ -332,30 +409,20 @@ class WhatsAppClient:
                 "/messages/send-text/",
                 {
                     "session_name": self.session_name,
-                    "to_phone": to_phone,
-                    "body": body,
+                    "to_phone": clean_phone,
+                    "body": clean_body,
                 },
             )
 
             if not data.get("success"):
-                return WhatsAppSendResult(
-                    success=False,
+                return self._build_send_error_result(
                     status_code=int(data.get("status_code", 400)),
                     provider_status=str(data.get("provider_status") or "gateway_failed"),
-                    error_message=str(data.get("message") or "Session gateway failed"),
-                    response_data=data,
+                    message=str(data.get("message") or "Session gateway failed"),
+                    data=data,
                 )
 
-            return WhatsAppSendResult(
-                success=True,
-                status_code=int(data.get("status_code", 200)),
-                provider_status=str(data.get("provider_status") or "accepted"),
-                external_message_id=str(
-                    data.get("external_message_id", "") or data.get("message_id", "")
-                ),
-                response_data=data,
-                error_message="",
-            )
+            return self._build_send_success_result(data)
 
         # ----------------------------------------------------
         # Placeholder للمزودات الأخرى
@@ -368,8 +435,8 @@ class WhatsAppClient:
             response_data={
                 "stub": True,
                 "provider": self.provider,
-                "to": to_phone,
-                "body": body,
+                "to": clean_phone,
+                "body": clean_body,
             },
         )
 
@@ -384,13 +451,17 @@ class WhatsAppClient:
         caption: str = "",
         filename: str = "",
     ) -> WhatsAppSendResult:
-        if not to_phone or not document_url:
-            return WhatsAppSendResult(
-                success=False,
+        clean_phone = (to_phone or "").strip()
+        clean_document_url = (document_url or "").strip()
+        clean_caption = (caption or "").strip()
+        clean_filename = (filename or "").strip()
+
+        if not clean_phone or not clean_document_url:
+            return self._build_send_error_result(
                 status_code=400,
                 provider_status="validation_failed",
-                error_message="Missing to_phone or document_url",
-                response_data={},
+                message="Missing to_phone or document_url",
+                data={},
             )
 
         # ----------------------------------------------------
@@ -401,32 +472,22 @@ class WhatsAppClient:
                 "/messages/send-document/",
                 {
                     "session_name": self.session_name,
-                    "to_phone": to_phone,
-                    "document_url": document_url,
-                    "caption": caption,
-                    "filename": filename,
+                    "to_phone": clean_phone,
+                    "document_url": clean_document_url,
+                    "caption": clean_caption,
+                    "filename": clean_filename,
                 },
             )
 
             if not data.get("success"):
-                return WhatsAppSendResult(
-                    success=False,
+                return self._build_send_error_result(
                     status_code=int(data.get("status_code", 400)),
                     provider_status=str(data.get("provider_status") or "gateway_failed"),
-                    error_message=str(data.get("message") or "Session gateway failed"),
-                    response_data=data,
+                    message=str(data.get("message") or "Session gateway failed"),
+                    data=data,
                 )
 
-            return WhatsAppSendResult(
-                success=True,
-                status_code=int(data.get("status_code", 200)),
-                provider_status=str(data.get("provider_status") or "accepted"),
-                external_message_id=str(
-                    data.get("external_message_id", "") or data.get("message_id", "")
-                ),
-                response_data=data,
-                error_message="",
-            )
+            return self._build_send_success_result(data)
 
         # ----------------------------------------------------
         # Placeholder للمزودات الأخرى
@@ -439,9 +500,9 @@ class WhatsAppClient:
             response_data={
                 "stub": True,
                 "provider": self.provider,
-                "to": to_phone,
-                "document_url": document_url,
-                "caption": caption,
-                "filename": filename,
+                "to": clean_phone,
+                "document_url": clean_document_url,
+                "caption": clean_caption,
+                "filename": clean_filename,
             },
         )

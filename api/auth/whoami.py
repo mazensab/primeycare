@@ -1,361 +1,314 @@
+# ===============================================================
+# 📂 الملف: api/auth/whoami.py
+# 🧭 Primey Care — Auth WhoAmI API
+# ---------------------------------------------------------------
+# ✅ Returns current authenticated user context
+# ✅ Returns anonymous-safe payload when not authenticated
+# ✅ Returns normalized workspace / redirect payload
+# ✅ Compatible with frontend login + middleware guards
+# ===============================================================
+
+from __future__ import annotations
+
+from typing import Any
+
 from django.http import JsonResponse
-from django.contrib.auth import get_user_model
+from django.views.decorators.http import require_GET
 
-from company_manager.models import CompanyUser
-from employee_center.models import Employee
 from auth_center.models import ActiveUserSession, UserProfile
-from billing_center.models import CompanySubscription
 
-User = get_user_model()
+
+# ===============================================================
+# 🧩 Helpers
+# ===============================================================
+
+SYSTEM_ROLE_NAMES = {
+    "SYSTEM",
+    "SUPER_ADMIN",
+    "SYSTEM_ADMIN",
+    "SUPPORT",
+    "INTERNAL",
+    "ADMIN",
+}
+
+COMPANY_ROLE_NAMES = {
+    "COMPANY",
+    "COMPANY_ADMIN",
+    "COMPANY_OWNER",
+    "OWNER",
+    "HR",
+}
+
+CENTER_ROLE_NAMES = {
+    "CENTER",
+    "CENTER_ADMIN",
+}
+
+CUSTOMER_ROLE_NAMES = {
+    "CUSTOMER",
+}
+
+AGENT_ROLE_NAMES = {
+    "AGENT",
+}
+
+
+def _safe_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _safe_int(value: Any) -> int | None:
+    try:
+        if value in (None, "", 0, "0"):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_upper(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
+def _resolve_context_ids(profile: UserProfile | None) -> tuple[int | None, int | None, int | None, int | None]:
+    """
+    نحاول قراءة المعرّفات من extra_data أو من خصائص مباشرة إن وُجدت.
+    هذا يجعل whoami مرنًا حتى لو تغيّرت بنية UserProfile لاحقًا.
+    """
+    if not profile:
+        return None, None, None, None
+
+    extra_data = _safe_dict(getattr(profile, "extra_data", {}) or {})
+
+    company_id = _safe_int(
+        extra_data.get("company_id")
+        or extra_data.get("company")
+        or getattr(profile, "company_id", None)
+    )
+    center_id = _safe_int(
+        extra_data.get("center_id")
+        or extra_data.get("center")
+        or getattr(profile, "center_id", None)
+    )
+    customer_id = _safe_int(
+        extra_data.get("customer_id")
+        or extra_data.get("customer")
+        or getattr(profile, "customer_id", None)
+    )
+    agent_id = _safe_int(
+        extra_data.get("agent_id")
+        or extra_data.get("agent")
+        or getattr(profile, "agent_id", None)
+    )
+
+    return company_id, center_id, customer_id, agent_id
+
+
+def _resolve_system_user(user, profile: UserProfile | None, groups: list[str]) -> bool:
+    if user.is_superuser or user.is_staff:
+        return True
+
+    normalized_groups = {_normalize_upper(item) for item in groups}
+    if normalized_groups & SYSTEM_ROLE_NAMES:
+        return True
+
+    if profile:
+        user_type = _normalize_upper(getattr(profile, "user_type", ""))
+        if user_type in SYSTEM_ROLE_NAMES:
+            return True
+
+    return False
+
+
+def _resolve_role(user, profile: UserProfile | None, is_system_user: bool) -> str:
+    if user.is_superuser:
+        return "SUPER_ADMIN"
+
+    if profile:
+        profile_user_type = _normalize_upper(getattr(profile, "user_type", ""))
+        if profile_user_type:
+            return profile_user_type
+
+    if is_system_user:
+        return "SYSTEM"
+
+    return "OTHER"
+
+
+def _resolve_workspace(
+    is_system_user: bool,
+    company_id: int | None,
+    center_id: int | None,
+    customer_id: int | None,
+    agent_id: int | None,
+    role: str,
+) -> str:
+    if is_system_user:
+        return "system"
+
+    if company_id or role in COMPANY_ROLE_NAMES:
+        return "company"
+
+    if center_id or role in CENTER_ROLE_NAMES:
+        return "center"
+
+    if customer_id or role in CUSTOMER_ROLE_NAMES:
+        return "customer"
+
+    if agent_id or role in AGENT_ROLE_NAMES:
+        return "agent"
+
+    return "system"
+
+
+def _resolve_dashboard_path(workspace: str) -> str:
+    mapping = {
+        "system": "/system",
+        "company": "/company",
+        "center": "/center",
+        "customer": "/customer",
+        "agent": "/agent",
+    }
+    return mapping.get(workspace, "/system")
 
 
 def _anonymous_payload():
     return {
         "authenticated": False,
-        "user": None,
-        "is_superuser": False,
+        "workspace": None,
+        "dashboard_path": "/login",
+        "is_system_user": False,
         "role": None,
-        "company": None,
+        "user_type": None,
+        "scope_type": None,
         "company_id": None,
-        "companies": [],
-        "active_company_id": None,
-        "subscription": {
-            "apps": [],
-            "apps_snapshot": [],
-            "days_remaining": None,
+        "center_id": None,
+        "customer_id": None,
+        "agent_id": None,
+        "is_superuser": False,
+        "is_staff": False,
+        "user": None,
+        "profile": None,
+        "session": None,
+        "permissions": {
+            "is_superuser": False,
+            "is_staff": False,
+            "groups": [],
         },
-        "impersonation": {
-            "active": False,
-        },
     }
 
 
-def _normalize_apps(value):
-    """
-    توحيد apps إلى list[str] آمنة
-    """
-    if not value:
-        return []
+# ===============================================================
+# 🚀 API
+# ===============================================================
 
-    if isinstance(value, list):
-        return [
-            str(item).strip().lower()
-            for item in value
-            if str(item).strip()
-        ]
-
-    if isinstance(value, tuple):
-        return [
-            str(item).strip().lower()
-            for item in value
-            if str(item).strip()
-        ]
-
-    if isinstance(value, str):
-        return [
-            item.strip().lower()
-            for item in value.split(",")
-            if item.strip()
-        ]
-
-    return []
-
-
-def _resolve_company_subscription(company_id):
-    """
-    أحدث اشتراك للشركة
-    """
-    if not company_id:
-        return None
-
-    return (
-        CompanySubscription.objects
-        .select_related("plan")
-        .filter(company_id=company_id)
-        .order_by("-id")
-        .first()
-    )
-
-
-def _resolve_subscription_apps_payload(auth_user, resolved_company_id):
-    """
-    مصدر التطبيقات الفعلي للفرونت:
-    - apps_snapshot: القيمة الخام المخزنة على الاشتراك
-    - apps: القيمة الفعالة المستخدمة في الواجهة
-
-    القرار المعتمد هنا:
-    1) إذا كانت plan.apps موجودة وتختلف عن apps_snapshot → نعتمد plan.apps
-       لأن هذا يغطي حالة تغيير الباقة بدون مزامنة snapshot بعد
-    2) إذا لم توجد plan.apps نستخدم apps_snapshot
-    3) وإلا []
-    """
-    empty = {
-        "apps": [],
-        "apps_snapshot": [],
-    }
-
-    if auth_user.is_superuser:
-        return empty
-
-    subscription = _resolve_company_subscription(resolved_company_id)
-    if not subscription:
-        return empty
-
-    raw_snapshot = _normalize_apps(
-        getattr(subscription, "apps_snapshot", None)
-    )
-
-    plan_apps = _normalize_apps(
-        getattr(getattr(subscription, "plan", None), "apps", None)
-    )
-
-    # ------------------------------------------------
-    # ✅ Effective apps for frontend
-    # ------------------------------------------------
-    effective_apps = []
-
-    if plan_apps and plan_apps != raw_snapshot:
-        effective_apps = plan_apps
-    elif raw_snapshot:
-        effective_apps = raw_snapshot
-    elif plan_apps:
-        effective_apps = plan_apps
-
-    return {
-        "apps": effective_apps,
-        "apps_snapshot": raw_snapshot,
-    }
-
-
-def _resolve_days_remaining(auth_user, resolved_company_id):
-    """
-    حساب الأيام المتبقية من الاشتراك بشكل آمن
-    """
-    if auth_user.is_superuser:
-        return None
-
-    subscription = _resolve_company_subscription(resolved_company_id)
-    if not subscription or not getattr(subscription, "end_date", None):
-        return None
-
-    try:
-        from django.utils.timezone import now
-        remaining = (subscription.end_date - now().date()).days
-        return remaining
-    except Exception:
-        return None
-
-
-def apiWhoAmI(request):
+@require_GET
+def whoami_api(request):
     user = request.user
 
-    # ============================================================
-    # 🔒 Anonymous (NO 401 — avoid redirect loops)
-    # ============================================================
     if not user.is_authenticated:
         return JsonResponse(_anonymous_payload(), status=200)
 
-    # ============================================================
-    # 👤 Base User Payload
-    # ============================================================
+    profile = UserProfile.objects.filter(user=user).first()
 
-    profile = (
-        UserProfile.objects
-        .filter(user=user)
-        .only("avatar_url", "phone_number", "whatsapp_number")
-        .first()
-    )
-
-    avatar = None
-    phone = None
-
-    if profile:
-        if profile.avatar_url:
-            avatar = profile.avatar_url
-
-        phone = profile.phone_number or profile.whatsapp_number or None
-
-    user_payload = {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email or None,
-        "full_name": (user.get_full_name() or "").strip() or user.username,
-        "avatar": avatar,
-        "phone": phone,
-        "last_login": user.last_login.isoformat() if user.last_login else None,
-    }
-
-    # ============================================================
-    # 🏢 ALL USER COMPANIES (MULTI-TENANT SOURCE OF TRUTH)
-    # ============================================================
-    companies = []
-    active_company = None
-    company_id = None
-
-    group_names = set(user.groups.values_list("name", flat=True))
-
-    is_internal_system_user = (
-        user.is_superuser
-        or "SYSTEM_ADMIN" in group_names
-        or "SUPPORT" in group_names
-    )
-
-    role = "system" if is_internal_system_user else "company"
-
-    company_links_qs = (
-        CompanyUser.objects
-        .select_related("company")
-        .filter(user=user, is_active=True)
-        .order_by("-id")
-    )
-
-    company_links = list(company_links_qs)
-
-    for link in company_links:
-        if not link.company:
-            continue
-
-        companies.append(
-            {
-                "id": link.company.id,
-                "name": link.company.name,
-                "role": (
-                    link.role.lower()
-                    if link.role
-                    else "company"
-                ),
-            }
-        )
-
-    # ============================================================
-    # 🔐 Impersonation State
-    # ============================================================
-    impersonation_active = bool(request.session.get("impersonation_active"))
-    impersonation_company_id = request.session.get("impersonation_company_id")
-    impersonation_payload = {
-        "active": impersonation_active,
-        "source_user_id": request.session.get("impersonation_source_user_id"),
-        "source_username": request.session.get("impersonation_source_username"),
-        "source_email": request.session.get("impersonation_source_email"),
-        "company_id": impersonation_company_id,
-        "company_name": request.session.get("impersonation_company_name"),
-        "company_user_id": request.session.get("impersonation_company_user_id"),
-        "target_user_id": request.session.get("impersonation_target_user_id"),
-        "target_username": request.session.get("impersonation_target_username"),
-        "target_role": request.session.get("impersonation_target_role"),
-    }
-
-    # ============================================================
-    # Active Company (SESSION FIRST, SAFE DEFAULT SECOND)
-    # ============================================================
-    preferred_company_id = (
-        impersonation_company_id
-        or request.session.get("active_company_id")
-    )
-
-    primary_link = None
-
-    if preferred_company_id:
-        for link in company_links:
-            if link.company and link.company.id == preferred_company_id:
-                primary_link = link
-                break
-
-    if primary_link is None and company_links:
-        primary_link = company_links[0]
-
-    if primary_link and primary_link.company:
-        active_company = {
-            "id": primary_link.company.id,
-            "name": primary_link.company.name,
-        }
-
-        company_id = primary_link.company.id
-
-        if not is_internal_system_user:
-            role = (
-                primary_link.role.lower()
-                if primary_link.role
-                else "company"
-            )
-
-        employee = (
-            Employee.objects
-            .filter(
-                user=user,
-                company=primary_link.company,
-            )
-            .only("full_name")
-            .first()
-        )
-
-        if employee and employee.full_name:
-            user_payload["full_name"] = employee.full_name
-
-    # ============================================================
-    # 📦 Subscription Apps (COMPANY SCOPED)
-    # ============================================================
-    subscription_payload = _resolve_subscription_apps_payload(user, company_id)
-
-    # ============================================================
-    # ⏳ Subscription Status
-    # ============================================================
-    days_remaining = _resolve_days_remaining(user, company_id)
-
-    # ============================================================
-    # 🔐 Ω+ SESSION SYNC LAYER (PATCH ONLY)
-    # ============================================================
     session_key = request.session.session_key
-    session_version = request.session.get("session_version", 1)
+    active_session = None
 
-    try:
-        if session_key:
-            active_session = (
-                ActiveUserSession.objects
-                .filter(
-                    session_key=session_key,
-                    is_active=True,
-                )
-                .only("session_version")
-                .first()
-            )
+    if session_key:
+        active_session = ActiveUserSession.objects.filter(
+            session_key=session_key,
+            user=user,
+            is_active=True,
+        ).first()
 
-            if active_session:
-                session_version = active_session.session_version
+        if active_session:
+            if not active_session.is_current:
+                active_session.is_current = True
+                active_session.save(update_fields=["is_current", "last_seen"])
             else:
-                request.session.flush()
-                return JsonResponse(_anonymous_payload(), status=200)
+                active_session.save(update_fields=["last_seen"])
 
-    except Exception:
-        pass
+    full_name = (user.get_full_name() or "").strip()
+    groups = list(user.groups.values_list("name", flat=True))
 
-    # ============================================================
-    # ✅ FINAL RESPONSE (ENTERPRISE CONTRACT)
-    # ============================================================
+    company_id, center_id, customer_id, agent_id = _resolve_context_ids(profile)
+    is_system_user = _resolve_system_user(user, profile, groups)
+    role = _resolve_role(user, profile, is_system_user)
+    user_type = _normalize_upper(getattr(profile, "user_type", "OTHER")) if profile else "OTHER"
+    scope_type = "SYSTEM" if is_system_user else role
+    workspace = _resolve_workspace(
+        is_system_user=is_system_user,
+        company_id=company_id,
+        center_id=center_id,
+        customer_id=customer_id,
+        agent_id=agent_id,
+        role=role,
+    )
+    dashboard_path = _resolve_dashboard_path(workspace)
+
     return JsonResponse(
         {
             "authenticated": True,
-            "user": user_payload,
-            "is_superuser": user.is_superuser,
+
+            # ---------------------------------------------------
+            # ✅ Normalized top-level fields for frontend
+            # ---------------------------------------------------
+            "workspace": workspace,
+            "dashboard_path": dashboard_path,
+            "is_system_user": is_system_user,
             "role": role,
-
-            "company": active_company,
+            "user_type": user_type,
+            "scope_type": scope_type,
             "company_id": company_id,
-            "active_company_id": company_id,
+            "center_id": center_id,
+            "customer_id": customer_id,
+            "agent_id": agent_id,
+            "is_superuser": user.is_superuser,
+            "is_staff": user.is_staff,
 
-            "companies": companies,
-
-            "subscription": {
-                "apps": subscription_payload["apps"],
-                "apps_snapshot": subscription_payload["apps_snapshot"],
-                "days_remaining": days_remaining,
+            # ---------------------------------------------------
+            # ✅ Original structured payload
+            # ---------------------------------------------------
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email or "",
+                "first_name": user.first_name or "",
+                "last_name": user.last_name or "",
+                "full_name": full_name,
+                "last_login": user.last_login.isoformat() if user.last_login else None,
             },
-
-            "impersonation": impersonation_payload,
-
+            "profile": {
+                "display_name": profile.display_name if profile else "",
+                "avatar_url": profile.avatar_url if profile else None,
+                "bio": profile.bio if profile else "",
+                "phone_number": profile.phone_number if profile else None,
+                "whatsapp_number": profile.whatsapp_number if profile else None,
+                "alternate_email": profile.alternate_email if profile else None,
+                "preferred_language": profile.preferred_language if profile else "ar",
+                "timezone": profile.timezone if profile else "Asia/Riyadh",
+                "user_type": getattr(profile, "user_type", "OTHER") if profile else "OTHER",
+                "is_phone_verified": profile.is_phone_verified if profile else False,
+                "is_whatsapp_verified": profile.is_whatsapp_verified if profile else False,
+                "is_email_verified": profile.is_email_verified if profile else False,
+                "is_profile_completed": profile.is_profile_completed if profile else False,
+                "tags": profile.tags if profile else [],
+                "extra_data": profile.extra_data if profile else {},
+            },
             "session": {
-                "key": session_key,
-                "version": session_version,
+                "key": active_session.session_key if active_session else session_key,
+                "version": active_session.session_version if active_session else request.session.get("session_version", 1),
+                "auth_channel": active_session.auth_channel if active_session else None,
+                "is_current": active_session.is_current if active_session else False,
+                "is_active": active_session.is_active if active_session else False,
+                "ip_address": active_session.ip_address if active_session else None,
+                "last_seen": active_session.last_seen.isoformat() if active_session and active_session.last_seen else None,
+                "created_at": active_session.created_at.isoformat() if active_session and active_session.created_at else None,
+            },
+            "permissions": {
+                "is_superuser": user.is_superuser,
+                "is_staff": user.is_staff,
+                "groups": groups,
             },
         },
         status=200,

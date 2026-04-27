@@ -1,11 +1,9 @@
 # ===================================================================
-# 📄 الملف: performance_center/reports.py
-# 🧭 نظام التقارير الاحترافي — Performance Center Reports Engine V1.0
-# 🚀 يدعم: PDF + Excel | Arabic RTL | Tajawal Font | Glass Design
+# 📂 performance_center/reports.py
+# 🧭 Primey Care - Performance Center Reports Engine
 # ===================================================================
 
 from django.http import HttpResponse
-from django.utils import timezone
 
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -16,59 +14,46 @@ from reportlab.pdfbase.ttfonts import TTFont
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 
-from .models import PerformanceReview, ReviewAnswer
+from .models import PerformanceAnswer, PerformanceReview
 
 
 # ================================================================
-# 🅰️ 1) إعداد خطوط PDF (Tajawal)
+# 🅰️ إعداد خط PDF
 # ================================================================
-# ملاحظة: تأكد من وضع الخط داخل static/fonts
 try:
     pdfmetrics.registerFont(TTFont("Tajawal", "static/fonts/Tajawal-Regular.ttf"))
-except:
-    # fallback لو لم يتم تحميل الخط
+except Exception:
     pass
 
 
-# ================================================================
-# 📝 2) دالة المساعدة — رسم نص عربي RTL
-# ================================================================
-def draw_rtl_text(c, text, x, y, size=12, bold=False):
-    """
-    ✨ دالة ذكية لعرض النصوص العربية RTL داخل PDF
-    """
+def draw_rtl_text(c, text, x, y, size=12):
     c.setFont("Tajawal", size)
-    c.drawRightString(x, y, text)
+    c.drawRightString(x, y, str(text or ""))
 
 
 # ===================================================================
-# 📘 3) generate_review_pdf — تقرير تقييم واحد كامل PDF
+# 📘 generate_review_pdf
 # ===================================================================
-def generate_review_pdf(review_id):
-    """
-    📝 إنشاء تقرير PDF لتقييم أداء واحد (Self + Manager + HR)
-    """
+def generate_review_pdf(review_id: int):
     review = PerformanceReview.objects.get(id=review_id)
-    answers = ReviewAnswer.objects.filter(review=review).select_related("item")
+    answers = PerformanceAnswer.objects.filter(review=review).select_related("item")
 
-    # إنشاء ملف PDF
     response = HttpResponse(content_type="application/pdf")
-    filename = f"performance_review_{review.employee_id}.pdf"
+    filename = f"performance_review_{review.id}.pdf"
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
 
     c = canvas.Canvas(response, pagesize=A4)
-
-    # هوامش
     margin_x = 190 * mm
     current_y = 270 * mm
 
-    # ---------------------------------------------------------
-    # 🧩 عنوان التقرير
-    # ---------------------------------------------------------
+    subject_name = review.employee_name or (
+        f"Subject #{review.employee_id}" if review.employee_id else "Unknown Subject"
+    )
+
     draw_rtl_text(c, "تقرير تقييم الأداء", margin_x, current_y, size=20)
     current_y -= 20
 
-    draw_rtl_text(c, f"الموظف: {review.employee}", margin_x, current_y, size=13)
+    draw_rtl_text(c, f"الهدف: {subject_name}", margin_x, current_y, size=13)
     current_y -= 10
 
     draw_rtl_text(c, f"القالب: {review.template.name}", margin_x, current_y, size=12)
@@ -77,9 +62,6 @@ def generate_review_pdf(review_id):
     draw_rtl_text(c, f"الفترة: {review.period_label}", margin_x, current_y, size=12)
     current_y -= 25
 
-    # ---------------------------------------------------------
-    # 🧾 جدول العناصر
-    # ---------------------------------------------------------
     draw_rtl_text(c, "تفاصيل التقييم:", margin_x, current_y, size=15)
     current_y -= 15
 
@@ -87,40 +69,25 @@ def generate_review_pdf(review_id):
         if current_y < 40:
             c.showPage()
             current_y = 270 * mm
+            try:
+                c.setFont("Tajawal", 12)
+            except Exception:
+                pass
 
         draw_rtl_text(c, f"السؤال: {ans.item.question}", margin_x, current_y)
         current_y -= 8
 
-        draw_rtl_text(
-            c,
-            f"درجة الموظف: {ans.self_score if ans.self_score else '—'}",
-            margin_x,
-            current_y,
-        )
+        draw_rtl_text(c, f"درجة التقييم الذاتي: {ans.self_score if ans.self_score is not None else '—'}", margin_x, current_y)
         current_y -= 8
 
-        draw_rtl_text(
-            c,
-            f"درجة المدير: {ans.manager_score if ans.manager_score else '—'}",
-            margin_x,
-            current_y,
-        )
+        draw_rtl_text(c, f"درجة المدير: {ans.manager_score if ans.manager_score is not None else '—'}", margin_x, current_y)
         current_y -= 8
 
-        draw_rtl_text(
-            c,
-            f"درجة HR: {ans.hr_score if ans.hr_score else '—'}",
-            margin_x,
-            current_y,
-        )
+        draw_rtl_text(c, f"درجة HR: {ans.hr_score if ans.hr_score is not None else '—'}", margin_x, current_y)
         current_y -= 8
 
-        draw_rtl_text(
-            c,
-            f"ملاحظات: {ans.hr_comment or ans.manager_comment or ans.self_comment or '—'}",
-            margin_x,
-            current_y,
-        )
+        note_text = ans.hr_answer or ans.manager_answer or ans.self_answer or "—"
+        draw_rtl_text(c, f"ملاحظات: {note_text}", margin_x, current_y)
         current_y -= 15
 
     c.save()
@@ -128,24 +95,20 @@ def generate_review_pdf(review_id):
 
 
 # ===================================================================
-# 📘 4) generate_employee_summary_pdf — تقرير موظف شامل
+# 📘 generate_employee_summary_pdf
 # ===================================================================
-def generate_employee_summary_pdf(employee_id):
-    """
-    🧾 تقرير شامل لتقييمات موظف واحد (Multiple Reviews)
-    """
+def generate_employee_summary_pdf(employee_id: int):
     reviews = PerformanceReview.objects.filter(employee_id=employee_id)
 
     response = HttpResponse(content_type="application/pdf")
-    filename = f"employee_summary_{employee_id}.pdf"
+    filename = f"subject_summary_{employee_id}.pdf"
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
 
     c = canvas.Canvas(response, pagesize=A4)
-
     margin_x = 190 * mm
     current_y = 270 * mm
 
-    draw_rtl_text(c, f"تقرير شامل — الموظف رقم {employee_id}", margin_x, current_y, size=20)
+    draw_rtl_text(c, f"تقرير شامل — الهدف رقم {employee_id}", margin_x, current_y, size=20)
     current_y -= 20
 
     for review in reviews:
@@ -161,54 +124,54 @@ def generate_employee_summary_pdf(employee_id):
         if current_y < 40:
             c.showPage()
             current_y = 270 * mm
+            try:
+                c.setFont("Tajawal", 12)
+            except Exception:
+                pass
 
     c.save()
     return response
 
 
 # ===================================================================
-# 📘 5) export_reviews_excel — تصدير Excel لجميع التقييمات
+# 📘 export_reviews_excel
 # ===================================================================
 def export_reviews_excel():
-    """
-    📊 إنشاء ملف Excel يحتوي جميع التقييمات في النظام
-    """
     wb = Workbook()
     ws = wb.active
     ws.title = "Performance Reviews"
 
     headers = [
-        "الموظف",
+        "الهدف",
         "القالب",
         "الفترة",
         "الحالة",
         "النتيجة النهائية",
-        "أخر تحديث"
+        "آخر تحديث",
     ]
 
     ws.append(headers)
 
-    # تنسيق الرأس
     for col in range(1, len(headers) + 1):
         ws.cell(row=1, column=col).font = Font(bold=True)
         ws.cell(row=1, column=col).alignment = Alignment(horizontal="center")
 
-    # بيانات التقييم
-    for review in PerformanceReview.objects.all():
+    for review in PerformanceReview.objects.select_related("template").all():
+        subject_name = review.employee_name or (
+            f"Subject #{review.employee_id}" if review.employee_id else "Unknown Subject"
+        )
         ws.append([
-            str(review.employee),
+            subject_name,
             review.template.name,
             review.period_label,
             review.status,
             review.final_score,
-            review.updated_at.strftime("%Y-%m-%d"),
+            review.updated_at.strftime("%Y-%m-%d") if review.updated_at else "",
         ])
 
-    # تجهيز الاستجابة
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     response["Content-Disposition"] = 'attachment; filename="performance_reviews.xlsx"'
-
     wb.save(response)
     return response

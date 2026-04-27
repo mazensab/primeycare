@@ -91,23 +91,26 @@ class NotificationTests(TestCase):
         self.assertEqual(email_delivery.destination, self.user.email)
         self.assertEqual(email_delivery.notification, n)
 
-    @patch("whatsapp_center.services.send_notification_center_whatsapp_delivery")
+    @patch("notification_center.services._send_notification_whatsapp")
     @override_settings(WHATSAPP_NOTIFICATIONS_ENABLED=True)
     def test_create_notification_with_whatsapp_creates_whatsapp_delivery(
         self,
         mock_send_whatsapp,
     ):
-        mock_send_whatsapp.return_value = type(
-            "MockWhatsAppLog",
-            (),
+        mock_send_whatsapp.return_value = (
+            True,
             {
-                "id": 999,
-                "delivery_status": "SENT",
+                "provider": "whatsapp_center",
+                "recipient_phone": "+966500000001",
+                "recipient_name": "Mazen",
+                "status": "sent",
+                "log_id": 999,
                 "external_message_id": "wamid.test.123",
+                "delivery_status": "SENT",
                 "provider_status": "sent",
                 "failure_reason": "",
             },
-        )()
+        )
 
         n = create_notification(
             recipient=self.user,

@@ -1,1 +1,0 @@
-default_app_config = "employee_center.apps.EmployeeCenterConfig"
