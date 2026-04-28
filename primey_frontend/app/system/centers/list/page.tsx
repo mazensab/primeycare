@@ -1,5 +1,30 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/centers/list/page.tsx
+   🧠 Primey Care | Centers List
+   ------------------------------------------------------------
+   ✅ المسار: /system/centers/list
+   ✅ الإصدار: v1.0.0
+   ✅ العمل: قائمة المراكز / مقدمي الخدمة مع البحث والفلاتر والفرز
+   ✅ API: GET /api/providers/?page_size=100
+   ✅ متوافق مع:
+      - /system/centers
+      - /system/centers/list
+      - /system/centers/create
+      - /system/centers/[id]
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+   - توثيق مختصر أعلى الملف
+   - دعم Excel للقائمة الحالية فقط
+   - دعم طباعة Web PDF للقائمة الحالية فقط
+   - دعم عربي / إنجليزي عبر primey-locale
+   - الأرقام دائمًا بالإنجليزي
+   - استخدام sonner للتنبيهات
+   - استخدام UI الداخلي فقط
+   - بدون localhost hardcoded
+============================================================ */
+
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
@@ -17,6 +42,7 @@ import {
   MoreHorizontal,
   Phone,
   PlusCircle,
+  Printer,
   RefreshCcw,
   Search,
   ShieldCheck,
@@ -55,16 +81,7 @@ import {
 } from "@/components/ui/table";
 
 /* ============================================================
-   📂 app/system/centers/list/page.tsx
-   🧠 Primey Care | Centers List
-   ------------------------------------------------------------
-   ✅ نفس اتجاه الصفحة المدفوعة
-   ✅ بدون @tanstack/react-table
-   ✅ استخدام UI الداخلي فقط
-   ✅ بحث + فلاتر + أعمدة + تحديد + فرز + صفحات
-   ✅ تصدير Excel منظم .xlsx بدل CSV
-   ✅ ربط حقيقي مع /api/providers/
-   ✅ بدون localhost hardcoded
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -118,7 +135,7 @@ type ProvidersApiResponse = {
   ok?: boolean;
   message?: string;
   results?: unknown[];
-  data?: unknown[];
+  data?: unknown[] | { results?: unknown[]; items?: unknown[] };
   items?: unknown[];
   providers?: unknown[];
   centers?: unknown[];
@@ -136,7 +153,7 @@ type VisibleColumns = {
 };
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -144,6 +161,7 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
@@ -166,8 +184,18 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
+function formatNumber(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0";
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(numericValue);
+}
+
 /* ============================================================
-   🔁 API Normalizers
+   API Normalizers
 ============================================================ */
 
 function normalizeApiList(payload: unknown): unknown[] {
@@ -177,10 +205,26 @@ function normalizeApiList(payload: unknown): unknown[] {
     const data = payload as ProvidersApiResponse;
 
     if (Array.isArray(data.results)) return data.results;
-    if (Array.isArray(data.data)) return data.data;
     if (Array.isArray(data.items)) return data.items;
     if (Array.isArray(data.providers)) return data.providers;
     if (Array.isArray(data.centers)) return data.centers;
+    if (Array.isArray(data.data)) return data.data;
+
+    if (
+      data.data &&
+      typeof data.data === "object" &&
+      Array.isArray(data.data.results)
+    ) {
+      return data.data.results;
+    }
+
+    if (
+      data.data &&
+      typeof data.data === "object" &&
+      Array.isArray(data.data.items)
+    ) {
+      return data.data.items;
+    }
   }
 
   return [];
@@ -219,21 +263,23 @@ function normalizeCenter(item: unknown): Center {
 
   return {
     id: (obj.id ?? "-") as number | string,
-    name: String(obj.name ?? "-"),
-    code: String(obj.code ?? "-"),
-    providerType: normalizeProviderType(obj.provider_type),
-    status: normalizeStatus(obj.status),
-    contactPerson: String(obj.contact_person ?? ""),
+    name: String(obj.name ?? obj.title ?? "-"),
+    code: String(obj.code ?? obj.provider_code ?? "-"),
+    providerType: normalizeProviderType(
+      obj.provider_type ?? obj.type ?? obj.category,
+    ),
+    status: normalizeStatus(obj.status ?? obj.is_active),
+    contactPerson: String(obj.contact_person ?? obj.contact_name ?? ""),
     phone: String(obj.phone ?? ""),
-    mobile: String(obj.mobile ?? ""),
+    mobile: String(obj.mobile ?? obj.phone_number ?? ""),
     email: String(obj.email ?? ""),
     website: String(obj.website ?? ""),
     city: String(obj.city ?? ""),
-    area: String(obj.area ?? ""),
+    area: String(obj.area ?? obj.region ?? ""),
     address: String(obj.address ?? ""),
-    googleMapsLink: String(obj.google_maps_link ?? ""),
+    googleMapsLink: String(obj.google_maps_link ?? obj.map_url ?? ""),
     notes: String(obj.notes ?? ""),
-    isFeatured: Boolean(obj.is_featured),
+    isFeatured: Boolean(obj.is_featured ?? obj.featured),
     createdAt: String(obj.created_at ?? ""),
     updatedAt: String(obj.updated_at ?? ""),
     raw: obj,
@@ -241,7 +287,7 @@ function normalizeCenter(item: unknown): Center {
 }
 
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -257,6 +303,7 @@ function dictionary(locale: AppLocale) {
     createCenter: isArabic ? "إنشاء مركز" : "Create Center",
     refresh: isArabic ? "تحديث" : "Refresh",
     export: isArabic ? "تصدير Excel" : "Export Excel",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
 
     tableTitle: isArabic ? "بيانات المراكز" : "Centers Data",
     tableSubtitle: isArabic
@@ -297,6 +344,9 @@ function dictionary(locale: AppLocale) {
     exportSuccess: isArabic
       ? "تم تجهيز ملف Excel بنجاح"
       : "Excel file prepared successfully",
+    printSuccess: isArabic
+      ? "تم تجهيز نافذة الطباعة"
+      : "Print window prepared",
     copied: isArabic ? "تم النسخ بنجاح" : "Copied successfully",
 
     excelSummary: isArabic ? "ملخص القائمة" : "List Summary",
@@ -353,7 +403,7 @@ function dictionary(locale: AppLocale) {
 }
 
 /* ============================================================
-   🎨 UI Helpers
+   UI Helpers
 ============================================================ */
 
 function getStatusLabel(status: ProviderStatus, locale: AppLocale) {
@@ -417,11 +467,11 @@ function calculatePercent(value: number, total: number) {
   return Math.round((value / total) * 100);
 }
 
-function formatDateForExcel(value: string, locale: AppLocale) {
+function formatDateForExport(value: string) {
   if (!value) return "-";
 
   try {
-    return new Intl.DateTimeFormat(locale === "ar" ? "ar-SA" : "en-US", {
+    return new Intl.DateTimeFormat("en-US", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -437,8 +487,17 @@ function safeSheetName(name: string) {
   return name.replace(/[\\/?*[\]:]/g, "").slice(0, 31) || "Report";
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 /* ============================================================
-   ✅ Page
+   Page
 ============================================================ */
 
 export default function SystemCentersListPage() {
@@ -531,6 +590,7 @@ export default function SystemCentersListPage() {
 
       if (first < second) return sortDirection === "asc" ? -1 : 1;
       if (first > second) return sortDirection === "asc" ? 1 : -1;
+
       return 0;
     });
   }, [centers, query, statusFilter, typeFilter, sortKey, sortDirection]);
@@ -565,7 +625,8 @@ export default function SystemCentersListPage() {
     selectedIds.includes(row.id),
   ).length;
 
-  const allPageSelected = pageRows.length > 0 && selectedOnPage === pageRows.length;
+  const allPageSelected =
+    pageRows.length > 0 && selectedOnPage === pageRows.length;
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -644,9 +705,9 @@ export default function SystemCentersListPage() {
       [t.title],
       [],
       [t.excelSummary, ""],
-      [t.generatedAt, generatedAt.toLocaleString(locale === "ar" ? "ar-SA" : "en-US")],
+      [t.generatedAt, generatedAt.toLocaleString("en-US")],
       [t.reportScope, t.currentFilteredData],
-      [t.showing, `${filteredCenters.length} / ${centers.length}`],
+      [t.showing, `${formatNumber(filteredCenters.length)} / ${formatNumber(centers.length)}`],
       [t.stats.total, stats.total],
       [t.stats.active, stats.active],
       [t.stats.draft, stats.draft],
@@ -689,10 +750,10 @@ export default function SystemCentersListPage() {
         center.email || "-",
         center.website || "-",
         getStatusLabel(center.status, locale),
-        center.isFeatured ? (isArabic ? "نعم" : "Yes") : (isArabic ? "لا" : "No"),
+        center.isFeatured ? (isArabic ? "نعم" : "Yes") : isArabic ? "لا" : "No",
         center.address || "-",
-        formatDateForExcel(center.createdAt, locale),
-        formatDateForExcel(center.updatedAt, locale),
+        formatDateForExport(center.createdAt),
+        formatDateForExport(center.updatedAt),
       ]),
     ];
 
@@ -746,6 +807,197 @@ export default function SystemCentersListPage() {
     );
 
     toast.success(t.exportSuccess);
+  }
+
+  function printCurrentList() {
+    const generatedAt = new Date().toLocaleString("en-US");
+    const direction = isArabic ? "rtl" : "ltr";
+    const align = isArabic ? "right" : "left";
+
+    const rows = filteredCenters
+      .map((center) => {
+        return `
+          <tr>
+            <td>${escapeHtml(String(center.id))}</td>
+            <td>${escapeHtml(center.code || "-")}</td>
+            <td>${escapeHtml(center.name || "-")}</td>
+            <td>${escapeHtml(t.typeLabels[center.providerType])}</td>
+            <td>${escapeHtml(center.city || center.area || "-")}</td>
+            <td>${escapeHtml(center.mobile || center.phone || "-")}</td>
+            <td>${escapeHtml(getStatusLabel(center.status, locale))}</td>
+            <td>${escapeHtml(center.isFeatured ? (isArabic ? "نعم" : "Yes") : isArabic ? "لا" : "No")}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    const html = `
+      <!doctype html>
+      <html lang="${locale}" dir="${direction}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.title)}</title>
+          <style>
+            * {
+              box-sizing: border-box;
+            }
+
+            body {
+              margin: 0;
+              padding: 24px;
+              font-family: Arial, Tahoma, sans-serif;
+              color: #111827;
+              background: #ffffff;
+              direction: ${direction};
+              text-align: ${align};
+            }
+
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 1px solid #e5e7eb;
+              padding-bottom: 16px;
+              margin-bottom: 20px;
+            }
+
+            .title {
+              font-size: 22px;
+              font-weight: 700;
+              margin: 0 0 8px;
+            }
+
+            .meta {
+              color: #6b7280;
+              font-size: 12px;
+              line-height: 1.8;
+            }
+
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 12px;
+              margin-bottom: 18px;
+            }
+
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 12px;
+              padding: 12px;
+            }
+
+            .box strong {
+              display: block;
+              font-size: 18px;
+              margin-bottom: 4px;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 12px;
+            }
+
+            th,
+            td {
+              border: 1px solid #e5e7eb;
+              padding: 9px;
+              vertical-align: top;
+            }
+
+            th {
+              background: #f9fafb;
+              font-weight: 700;
+            }
+
+            @media print {
+              body {
+                padding: 12px;
+              }
+
+              .no-print {
+                display: none;
+              }
+
+              .summary {
+                grid-template-columns: repeat(4, 1fr);
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1 class="title">${escapeHtml(t.title)}</h1>
+              <div class="meta">${escapeHtml(t.subtitle)}</div>
+            </div>
+            <div class="meta">
+              <div>${escapeHtml(t.generatedAt)}: ${escapeHtml(generatedAt)}</div>
+              <div>${escapeHtml(t.showing)}: ${formatNumber(filteredCenters.length)} / ${formatNumber(centers.length)}</div>
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="box">
+              <strong>${formatNumber(stats.total)}</strong>
+              <span>${escapeHtml(t.stats.total)}</span>
+            </div>
+            <div class="box">
+              <strong>${formatNumber(stats.active)}</strong>
+              <span>${escapeHtml(t.stats.active)}</span>
+            </div>
+            <div class="box">
+              <strong>${formatNumber(stats.draft)}</strong>
+              <span>${escapeHtml(t.stats.draft)}</span>
+            </div>
+            <div class="box">
+              <strong>${formatNumber(stats.stopped)}</strong>
+              <span>${escapeHtml(t.stats.stopped)}</span>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.table.id)}</th>
+                <th>${escapeHtml(t.table.code)}</th>
+                <th>${escapeHtml(t.table.name)}</th>
+                <th>${escapeHtml(t.table.providerType)}</th>
+                <th>${escapeHtml(t.table.city)}</th>
+                <th>${escapeHtml(t.table.contact)}</th>
+                <th>${escapeHtml(t.table.status)}</th>
+                <th>${escapeHtml(t.table.featured)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                rows ||
+                `<tr><td colspan="8" style="text-align:center">${escapeHtml(t.noResults)}</td></tr>`
+              }
+            </tbody>
+          </table>
+
+          <script>
+            window.addEventListener("load", () => {
+              window.print();
+            });
+          </script>
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(isArabic ? "تعذر فتح نافذة الطباعة" : "Unable to open print window");
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+
+    toast.success(t.printSuccess);
   }
 
   useEffect(() => {
@@ -840,6 +1092,16 @@ export default function SystemCentersListPage() {
             <span>{t.export}</span>
           </Button>
 
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={printCurrentList}
+            disabled={isLoading || filteredCenters.length === 0}
+          >
+            <Printer className="h-4 w-4" />
+            <span>{t.print}</span>
+          </Button>
+
           <Link href="/system/centers/create">
             <Button className="h-10 w-full rounded-xl sm:w-auto">
               <PlusCircle className="h-4 w-4" />
@@ -885,7 +1147,7 @@ export default function SystemCentersListPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-2xl font-bold">
-                      {isLoading ? "..." : item.value}
+                      {isLoading ? "..." : formatNumber(item.value)}
                     </p>
                     <p className="text-muted-foreground mt-1 text-sm">
                       {item.label}
@@ -899,7 +1161,7 @@ export default function SystemCentersListPage() {
 
                 <div className="mt-3 flex items-center gap-2">
                   <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                    {item.percent}%
+                    {formatNumber(item.percent)}%
                   </span>
                   <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
                     <div
@@ -1249,11 +1511,12 @@ export default function SystemCentersListPage() {
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
               <div className="text-muted-foreground flex-1 text-sm">
-                {selectedIds.length} / {filteredCenters.length} {t.selectedRows}
+                {formatNumber(selectedIds.length)} /{" "}
+                {formatNumber(filteredCenters.length)} {t.selectedRows}
               </div>
 
               <div className="text-muted-foreground text-sm">
-                {pageIndex + 1} / {pageCount}
+                {formatNumber(pageIndex + 1)} / {formatNumber(pageCount)}
               </div>
 
               <div className="flex items-center gap-2">

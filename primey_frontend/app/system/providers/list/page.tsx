@@ -1,14 +1,40 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/providers/list/page.tsx
+   🧠 Primey Care | Providers List
+   ------------------------------------------------------------
+   ✅ المسار: /system/providers/list
+   ✅ الإصدار: v1.0.0
+   ✅ العمل: قائمة مقدمي الخدمة مع البحث والفلاتر والفرز
+   ✅ API: GET /api/providers/?page_size=500
+   ✅ متوافق مع:
+      - /system/providers
+      - /system/providers/list
+      - /system/providers/create
+      - /system/providers/reports
+      - /system/providers/[id]
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+   - توثيق مختصر أعلى الملف
+   - تصدير Excel منظم .xlsx للقائمة الحالية أو المحددة
+   - طباعة Web PDF للقائمة الحالية فقط
+   - دعم عربي / إنجليزي عبر primey-locale
+   - الأرقام دائمًا بالإنجليزي
+   - استخدام sonner للتنبيهات
+   - استخدام UI الداخلي فقط
+   - بدون localhost hardcoded
+============================================================ */
+
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import {
   ArrowDownUp,
   ArrowLeft,
   BadgeCheck,
   Building2,
   Columns3,
-  Download,
   Eye,
   FileSpreadsheet,
   Filter,
@@ -51,17 +77,7 @@ import {
 } from "@/components/ui/table";
 
 /* ============================================================
-   📂 app/system/providers/list/page.tsx
-   🧠 Primey Care | System Providers List
-   ------------------------------------------------------------
-   ✅ نفس نمط قائمة المراكز
-   ✅ بحث + فلاتر + فرز + أعمدة + تحديد + صفحات
-   ✅ تصدير Excel منظم للقائمة فقط
-   ✅ طباعة Web PDF للقائمة فقط
-   ✅ ربط حقيقي مع /api/providers/
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ الأرقام دائمًا بالإنجليزي
-   ✅ بدون hardcoded localhost
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -133,7 +149,7 @@ type ColumnKey =
 type ColumnState = Record<ColumnKey, boolean>;
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -141,11 +157,13 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
+  } catch (error) {
+    console.error("Read locale error:", error);
     return "ar";
   }
 }
@@ -173,7 +191,7 @@ function formatNumber(value: number | string): string {
 }
 
 /* ============================================================
-   🔁 API Normalizers
+   API Normalizers
 ============================================================ */
 
 function normalizeApiList(payload: unknown): unknown[] {
@@ -244,7 +262,7 @@ function normalizeProvider(item: unknown): Provider {
     name: String(obj.name ?? obj.title ?? "-"),
     code: String(obj.code ?? obj.provider_code ?? "-"),
     providerType: normalizeProviderType(
-      obj.provider_type ?? obj.type ?? obj.category
+      obj.provider_type ?? obj.type ?? obj.category,
     ),
     status: normalizeStatus(obj.status ?? obj.is_active),
     contactPerson: String(obj.contact_person ?? obj.contact_name ?? ""),
@@ -265,7 +283,7 @@ function normalizeProvider(item: unknown): Provider {
 }
 
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -283,7 +301,7 @@ function dictionary(locale: AppLocale) {
     reports: isArabic ? "التقارير" : "Reports",
     refresh: isArabic ? "تحديث" : "Refresh",
     exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة" : "Print",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
 
     searchPlaceholder: isArabic
       ? "ابحث بالاسم، الكود، المدينة، الجوال..."
@@ -302,7 +320,6 @@ function dictionary(locale: AppLocale) {
     draft: isArabic ? "مسودة" : "Draft",
     unknown: isArabic ? "غير محدد" : "Unknown",
 
-    newest: isArabic ? "الأحدث" : "Newest",
     sortByName: isArabic ? "الاسم" : "Name",
     sortByCode: isArabic ? "الكود" : "Code",
     sortByCity: isArabic ? "المدينة" : "City",
@@ -341,16 +358,34 @@ function dictionary(locale: AppLocale) {
     page: isArabic ? "صفحة" : "Page",
     of: isArabic ? "من" : "of",
 
+    excelSummary: isArabic ? "ملخص القائمة" : "List Summary",
+    excelTable: isArabic ? "بيانات مقدمي الخدمة" : "Providers Data",
+    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
+    reportScope: isArabic ? "نطاق التقرير" : "Report Scope",
+    currentFilteredData: isArabic
+      ? "حسب الفلاتر الحالية أو الصفوف المحددة"
+      : "Current filters or selected rows",
+    showing: isArabic ? "المعروض" : "Showing",
+
     table: {
       select: isArabic ? "تحديد" : "Select",
+      id: isArabic ? "المعرف" : "ID",
       code: isArabic ? "الرقم" : "Code",
       name: isArabic ? "اسم مقدم الخدمة" : "Provider Name",
       type: isArabic ? "النوع" : "Type",
       city: isArabic ? "المدينة" : "City",
+      area: isArabic ? "المنطقة" : "Area",
       contact: isArabic ? "التواصل" : "Contact",
+      contactPerson: isArabic ? "الشخص المسؤول" : "Contact Person",
       email: isArabic ? "البريد" : "Email",
       status: isArabic ? "الحالة" : "Status",
       featured: isArabic ? "مميز" : "Featured",
+      phone: isArabic ? "الهاتف" : "Phone",
+      mobile: isArabic ? "الجوال" : "Mobile",
+      website: isArabic ? "الموقع الإلكتروني" : "Website",
+      address: isArabic ? "العنوان" : "Address",
+      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
+      updatedAt: isArabic ? "آخر تحديث" : "Updated At",
       action: isArabic ? "الإجراء" : "Action",
     },
 
@@ -368,24 +403,34 @@ function dictionary(locale: AppLocale) {
 }
 
 /* ============================================================
-   🎨 UI Helpers
+   UI Helpers
 ============================================================ */
 
-function statusBadge(status: ProviderStatus, locale: AppLocale) {
+function getStatusLabel(status: ProviderStatus, locale: AppLocale) {
   const isArabic = locale === "ar";
 
+  const labels: Record<ProviderStatus, string> = {
+    ACTIVE: isArabic ? "نشط" : "Active",
+    INACTIVE: isArabic ? "غير نشط" : "Inactive",
+    SUSPENDED: isArabic ? "موقوف" : "Suspended",
+    DRAFT: isArabic ? "مسودة" : "Draft",
+    UNKNOWN: isArabic ? "غير محدد" : "Unknown",
+  };
+
+  return labels[status];
+}
+
+function statusBadge(status: ProviderStatus, locale: AppLocale) {
+  const label = getStatusLabel(status, locale);
+
   if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full px-3 py-1">
-        {isArabic ? "نشط" : "Active"}
-      </Badge>
-    );
+    return <Badge className="rounded-full px-3 py-1">{label}</Badge>;
   }
 
   if (status === "DRAFT") {
     return (
       <Badge variant="secondary" className="rounded-full px-3 py-1">
-        {isArabic ? "مسودة" : "Draft"}
+        {label}
       </Badge>
     );
   }
@@ -393,7 +438,7 @@ function statusBadge(status: ProviderStatus, locale: AppLocale) {
   if (status === "SUSPENDED") {
     return (
       <Badge variant="destructive" className="rounded-full px-3 py-1">
-        {isArabic ? "موقوف" : "Suspended"}
+        {label}
       </Badge>
     );
   }
@@ -401,14 +446,14 @@ function statusBadge(status: ProviderStatus, locale: AppLocale) {
   if (status === "INACTIVE") {
     return (
       <Badge variant="outline" className="rounded-full px-3 py-1">
-        {isArabic ? "غير نشط" : "Inactive"}
+        {label}
       </Badge>
     );
   }
 
   return (
     <Badge variant="outline" className="rounded-full px-3 py-1">
-      {isArabic ? "غير محدد" : "Unknown"}
+      {label}
     </Badge>
   );
 }
@@ -423,100 +468,37 @@ function getSortValue(provider: Provider, key: SortKey): string {
   return provider.name;
 }
 
-function buildExcelHtml({
-  title,
-  locale,
-  rows,
-  t,
-}: {
-  title: string;
-  locale: AppLocale;
-  rows: Provider[];
-  t: ReturnType<typeof dictionary>;
-}) {
-  const direction = locale === "ar" ? "rtl" : "ltr";
+function formatDateForExport(value: string) {
+  if (!value) return "-";
 
-  const escapeCell = (value: string | number | boolean) =>
-    String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;");
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
 
-  const tableRows = rows
-    .map((provider, index) => {
-      return `
-        <tr>
-          <td>${escapeCell(index + 1)}</td>
-          <td>${escapeCell(provider.code && provider.code !== "-" ? provider.code : `#${provider.id}`)}</td>
-          <td>${escapeCell(provider.name)}</td>
-          <td>${escapeCell(t.typeLabels[provider.providerType])}</td>
-          <td>${escapeCell(provider.city || provider.area || "-")}</td>
-          <td>${escapeCell(provider.mobile || provider.phone || "-")}</td>
-          <td>${escapeCell(provider.email || "-")}</td>
-          <td>${escapeCell(provider.status)}</td>
-          <td>${escapeCell(provider.isFeatured ? "YES" : "NO")}</td>
-        </tr>
-      `;
-    })
-    .join("");
+function safeSheetName(name: string) {
+  return name.replace(/[\\/?*[\]:]/g, "").slice(0, 31) || "Report";
+}
 
-  return `
-    <html dir="${direction}">
-      <head>
-        <meta charset="UTF-8" />
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            direction: ${direction};
-          }
-          table {
-            border-collapse: collapse;
-            width: 100%;
-          }
-          th {
-            background: #f3f4f6;
-            font-weight: 700;
-          }
-          th, td {
-            border: 1px solid #d1d5db;
-            padding: 10px;
-            text-align: ${locale === "ar" ? "right" : "left"};
-          }
-          .title {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 12px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="title">${escapeCell(title)}</div>
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>${escapeCell(t.table.code)}</th>
-              <th>${escapeCell(t.table.name)}</th>
-              <th>${escapeCell(t.table.type)}</th>
-              <th>${escapeCell(t.table.city)}</th>
-              <th>${escapeCell(t.table.contact)}</th>
-              <th>${escapeCell(t.table.email)}</th>
-              <th>${escapeCell(t.table.status)}</th>
-              <th>${escapeCell(t.table.featured)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRows}
-          </tbody>
-        </table>
-      </body>
-    </html>
-  `;
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 /* ============================================================
-   🧩 Page
+   Page
 ============================================================ */
 
 export default function SystemProvidersListPage() {
@@ -526,7 +508,7 @@ export default function SystemProvidersListPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProviderStatus | "ALL">(
-    "ALL"
+    "ALL",
   );
   const [typeFilter, setTypeFilter] = useState<ProviderType | "ALL">("ALL");
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -555,6 +537,7 @@ export default function SystemProvidersListPage() {
 
   const syncLocale = useCallback(() => {
     const nextLocale = readLocale();
+
     setLocale(nextLocale);
     applyDocumentLocale(nextLocale);
   }, []);
@@ -597,13 +580,14 @@ export default function SystemProvidersListPage() {
         setIsRefreshing(false);
       }
     },
-    [t.apiError, t.refreshSuccess]
+    [t.apiError, t.refreshSuccess],
   );
 
   useEffect(() => {
     syncLocale();
 
     const handleLocaleChange = () => syncLocale();
+
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === "primey-locale") syncLocale();
     };
@@ -691,7 +675,7 @@ export default function SystemProvidersListPage() {
 
   const visibleCurrentPageIds = useMemo(
     () => currentPageRows.map((provider) => String(provider.id)),
-    [currentPageRows]
+    [currentPageRows],
   );
 
   const isAllCurrentPageSelected =
@@ -709,6 +693,16 @@ export default function SystemProvidersListPage() {
 
     return Array.from(values);
   }, [providers]);
+
+  const exportRows = useMemo(() => {
+    if (selectedIds.size > 0) {
+      return filteredProviders.filter((provider) =>
+        selectedIds.has(String(provider.id)),
+      );
+    }
+
+    return filteredProviders;
+  }, [filteredProviders, selectedIds]);
 
   function toggleCurrentPageSelection() {
     setSelectedIds((prev) => {
@@ -741,41 +735,120 @@ export default function SystemProvidersListPage() {
   }
 
   function handleExportExcel() {
-    const rows =
-      selectedIds.size > 0
-        ? filteredProviders.filter((provider) =>
-            selectedIds.has(String(provider.id))
-          )
-        : filteredProviders;
-
-    if (rows.length === 0) {
+    if (exportRows.length === 0) {
       toast.error(t.emptyTitle);
       return;
     }
 
-    const html = buildExcelHtml({
-      title: t.pageTitle,
-      locale,
-      rows,
-      t,
-    });
+    const generatedAt = new Date();
 
-    const blob = new Blob(["\ufeff", html], {
-      type: "application/vnd.ms-excel;charset=utf-8;",
-    });
+    const worksheetData: Array<Array<string | number>> = [
+      [t.pageTitle],
+      [],
+      [t.excelSummary, ""],
+      [t.generatedAt, generatedAt.toLocaleString("en-US")],
+      [t.reportScope, t.currentFilteredData],
+      [
+        t.showing,
+        `${formatNumber(exportRows.length)} / ${formatNumber(providers.length)}`,
+      ],
+      [t.total, stats.total],
+      [t.active, stats.active],
+      [t.suspended, stats.suspended],
+      [t.selected, stats.selected],
+      [],
+      [t.excelTable],
+      [
+        t.table.id,
+        t.table.code,
+        t.table.name,
+        t.table.type,
+        t.table.city,
+        t.table.area,
+        t.table.contactPerson,
+        t.table.phone,
+        t.table.mobile,
+        t.table.email,
+        t.table.website,
+        t.table.status,
+        t.table.featured,
+        t.table.address,
+        t.table.createdAt,
+        t.table.updatedAt,
+      ],
+      ...exportRows.map((provider) => [
+        String(provider.id),
+        provider.code || "-",
+        provider.name || "-",
+        t.typeLabels[provider.providerType],
+        provider.city || "-",
+        provider.area || "-",
+        provider.contactPerson || "-",
+        provider.phone || "-",
+        provider.mobile || "-",
+        provider.email || "-",
+        provider.website || "-",
+        getStatusLabel(provider.status, locale),
+        provider.isFeatured
+          ? isArabic
+            ? "نعم"
+            : "Yes"
+          : isArabic
+            ? "لا"
+            : "No",
+        provider.address || "-",
+        formatDateForExport(provider.createdAt),
+        formatDateForExport(provider.updatedAt),
+      ]),
+    ];
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
 
-    link.href = url;
-    link.download = `primey-care-providers-${new Date()
-      .toISOString()
-      .slice(0, 10)}.xls`;
+    worksheet["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 15 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 15 } },
+      { s: { r: 11, c: 0 }, e: { r: 11, c: 15 } },
+    ];
 
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    worksheet["!cols"] = [
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 34 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 22 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 28 },
+      { wch: 28 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 36 },
+      { wch: 22 },
+      { wch: 22 },
+    ];
+
+    worksheet["!autofilter"] = {
+      ref: `A13:P${Math.max(13 + exportRows.length, 13)}`,
+    };
+
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      safeSheetName(isArabic ? "قائمة مقدمي الخدمة" : "Providers List"),
+    );
+
+    XLSX.writeFile(
+      workbook,
+      `primey-care-providers-list-${generatedAt.toISOString().slice(0, 10)}.xlsx`,
+      {
+        bookType: "xlsx",
+        compression: true,
+      },
+    );
 
     toast.success(t.exportSuccess);
   }
@@ -789,7 +862,7 @@ export default function SystemProvidersListPage() {
       toast.error(
         isArabic
           ? "تعذر فتح نافذة الطباعة من المتصفح."
-          : "Unable to open print window."
+          : "Unable to open print window.",
       );
       return;
     }
@@ -797,42 +870,56 @@ export default function SystemProvidersListPage() {
     const direction = isArabic ? "rtl" : "ltr";
     const content = printRef.current.innerHTML;
 
+    printWindow.document.open();
     printWindow.document.write(`
       <html lang="${locale}" dir="${direction}">
         <head>
-          <title>${t.pageTitle}</title>
+          <title>${escapeHtml(t.pageTitle)}</title>
           <meta charset="UTF-8" />
           <style>
             body {
-              font-family: Arial, sans-serif;
+              font-family: Arial, Tahoma, sans-serif;
               padding: 24px;
               direction: ${direction};
               color: #111827;
             }
+
             table {
               width: 100%;
               border-collapse: collapse;
               margin-top: 16px;
             }
-            th, td {
+
+            th,
+            td {
               border: 1px solid #d1d5db;
               padding: 10px;
               font-size: 12px;
               text-align: ${isArabic ? "right" : "left"};
             }
+
             th {
               background: #f3f4f6;
               font-weight: 700;
             }
+
             .print-title {
               font-size: 22px;
               font-weight: 700;
               margin-bottom: 4px;
             }
+
             .print-subtitle {
               color: #6b7280;
               margin-bottom: 16px;
             }
+
+            button,
+            svg,
+            input[type="checkbox"] {
+              display: none !important;
+            }
+
             @media print {
               body {
                 padding: 12px;
@@ -843,7 +930,6 @@ export default function SystemProvidersListPage() {
         <body>${content}</body>
       </html>
     `);
-
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();
@@ -864,9 +950,7 @@ export default function SystemProvidersListPage() {
 
   return (
     <div className="space-y-6">
-      {/* =====================================================
-          Page Header
-      ====================================================== */}
+      {/* Page Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="order-2 flex flex-wrap items-center gap-2 lg:order-1">
           <Link href="/system/providers">
@@ -916,15 +1000,14 @@ export default function SystemProvidersListPage() {
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
             {t.pageTitle}
           </h1>
+
           <p className="text-sm leading-7 text-muted-foreground md:text-base">
             {t.pageSubtitle}
           </p>
         </div>
       </div>
 
-      {/* =====================================================
-          Stats
-      ====================================================== */}
+      {/* Stats */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card className="rounded-2xl border bg-card shadow-sm">
           <CardContent className="flex items-center justify-between p-5">
@@ -934,6 +1017,7 @@ export default function SystemProvidersListPage() {
                 {isLoading ? "..." : formatNumber(stats.total)}
               </p>
             </div>
+
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Building2 className="h-5 w-5" />
             </div>
@@ -948,6 +1032,7 @@ export default function SystemProvidersListPage() {
                 {isLoading ? "..." : formatNumber(stats.active)}
               </p>
             </div>
+
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <BadgeCheck className="h-5 w-5" />
             </div>
@@ -962,6 +1047,7 @@ export default function SystemProvidersListPage() {
                 {isLoading ? "..." : formatNumber(stats.suspended)}
               </p>
             </div>
+
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <ShieldCheck className="h-5 w-5" />
             </div>
@@ -976,6 +1062,7 @@ export default function SystemProvidersListPage() {
                 {formatNumber(stats.selected)}
               </p>
             </div>
+
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Star className="h-5 w-5" />
             </div>
@@ -983,9 +1070,7 @@ export default function SystemProvidersListPage() {
         </Card>
       </div>
 
-      {/* =====================================================
-          List Table
-      ====================================================== */}
+      {/* List Table */}
       <Card className="rounded-2xl border bg-card shadow-sm">
         <CardHeader className="pb-3">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -997,6 +1082,7 @@ export default function SystemProvidersListPage() {
                     <span>{t.columns}</span>
                   </Button>
                 </DropdownMenuTrigger>
+
                 <DropdownMenuContent align="start" className="w-56">
                   {(Object.keys(columnLabels) as ColumnKey[]).map((key) => (
                     <DropdownMenuCheckboxItem
@@ -1022,6 +1108,7 @@ export default function SystemProvidersListPage() {
                     <span>{t.statusFilter}</span>
                   </Button>
                 </DropdownMenuTrigger>
+
                 <DropdownMenuContent align="start" className="w-48">
                   {(
                     [
@@ -1061,6 +1148,7 @@ export default function SystemProvidersListPage() {
                     <span>{t.typeFilter}</span>
                   </Button>
                 </DropdownMenuTrigger>
+
                 <DropdownMenuContent align="start" className="w-56">
                   <DropdownMenuCheckboxItem
                     checked={typeFilter === "ALL"}
@@ -1088,6 +1176,7 @@ export default function SystemProvidersListPage() {
                     <span>{t.sort}</span>
                   </Button>
                 </DropdownMenuTrigger>
+
                 <DropdownMenuContent align="start" className="w-56">
                   {(
                     [

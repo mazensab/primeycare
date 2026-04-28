@@ -1,5 +1,29 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/providers/create/page.tsx
+   🧠 Primey Care | Create Provider
+   ------------------------------------------------------------
+   ✅ المسار: /system/providers/create
+   ✅ الإصدار: v1.0.0
+   ✅ العمل: إنشاء مقدم خدمة جديد
+   ✅ API: POST /api/providers/
+   ✅ متوافق مع:
+      - /system/providers
+      - /system/providers/list
+      - /system/providers/reports
+      - /system/providers/[id]
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+   - توثيق مختصر أعلى الملف
+   - استخدام lib/api.ts مع CSRF
+   - دعم عربي / إنجليزي عبر primey-locale
+   - استخدام sonner للتنبيهات
+   - تحقق آمن من الحقول والرابط والبريد والهاتف
+   - بدون localhost hardcoded
+   - الحفاظ على التصميم السابق بدون كسر الواجهة
+============================================================ */
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ElementType, useEffect, useMemo, useState } from "react";
@@ -23,6 +47,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { apiPost, API_PATHS } from "@/lib/api";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,15 +64,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 /* ============================================================
-   📂 app/system/providers/create/page.tsx
-   🧠 Primey Care | Create Provider
-   ------------------------------------------------------------
-   ✅ نفس نمط صفحة إنشاء المراكز المرفقة
-   ✅ استخدام UI الداخلي فقط
-   ✅ ربط حقيقي مع POST /api/providers/
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ استخدام sonner
-   ✅ بدون hardcoded localhost
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -89,12 +107,15 @@ type ProviderCreateResponse = {
     id?: number | string;
     name?: string;
     code?: string;
+    data?: {
+      id?: number | string;
+    };
   };
   errors?: unknown;
 };
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -102,6 +123,7 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
@@ -124,21 +146,8 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
-function getCookie(name: string) {
-  if (typeof document === "undefined") return "";
-
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-
-  if (parts.length === 2) {
-    return parts.pop()?.split(";").shift() || "";
-  }
-
-  return "";
-}
-
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -244,6 +253,9 @@ function dictionary(locale: AppLocale) {
       invalidEmail: isArabic ? "صيغة البريد غير صحيحة" : "Invalid email format",
       invalidUrl: isArabic ? "الرابط غير صحيح" : "Invalid URL",
       invalidPhone: isArabic ? "رقم الهاتف غير صحيح" : "Invalid phone number",
+      fixRequired: isArabic
+        ? "يرجى تصحيح الحقول المطلوبة أولًا."
+        : "Please fix the required fields first.",
     },
 
     successTitle: isArabic
@@ -289,8 +301,26 @@ function dictionary(locale: AppLocale) {
 }
 
 /* ============================================================
-   ✅ Validators
+   Defaults / Validators
 ============================================================ */
+
+const initialFormData: ProviderFormData = {
+  name: "",
+  code: "",
+  provider_type: "MEDICAL_CENTER",
+  status: "ACTIVE",
+  contact_person: "",
+  phone: "",
+  mobile: "",
+  email: "",
+  website: "",
+  city: "",
+  area: "",
+  address: "",
+  google_maps_link: "",
+  notes: "",
+  is_featured: false,
+};
 
 function isValidEmail(value: string) {
   if (!value.trim()) return true;
@@ -310,12 +340,17 @@ function isValidUrl(value: string) {
 
 function isValidPhone(value: string) {
   if (!value.trim()) return true;
+
   const cleaned = value.replace(/[^\d+]/g, "");
   return cleaned.length >= 7;
 }
 
+function resolveCreatedId(result: ProviderCreateResponse) {
+  return result.data?.id ?? result.data?.data?.id;
+}
+
 /* ============================================================
-   🧩 Page
+   Page
 ============================================================ */
 
 export default function SystemProvidersCreatePage() {
@@ -323,54 +358,12 @@ export default function SystemProvidersCreatePage() {
 
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState<ProviderFormData>({
-    name: "",
-    code: "",
-    provider_type: "MEDICAL_CENTER",
-    status: "ACTIVE",
-    contact_person: "",
-    phone: "",
-    mobile: "",
-    email: "",
-    website: "",
-    city: "",
-    area: "",
-    address: "",
-    google_maps_link: "",
-    notes: "",
-    is_featured: false,
-  });
-
+  const [submitMode, setSubmitMode] = useState<"CREATE" | "DRAFT" | null>(null);
+  const [formData, setFormData] = useState<ProviderFormData>(initialFormData);
   const [errors, setErrors] = useState<ProviderFormErrors>({});
 
   const isArabic = locale === "ar";
   const t = useMemo(() => dictionary(locale), [locale]);
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-      setLocale(nextLocale);
-      applyDocumentLocale(nextLocale);
-    };
-
-    syncLocale();
-
-    const handleLocaleChange = () => syncLocale();
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === "primey-locale") syncLocale();
-    };
-
-    window.addEventListener("primey-locale-changed", handleLocaleChange);
-    window.addEventListener("storage", handleStorageChange);
-
-    const timer = window.setTimeout(syncLocale, 50);
-
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("primey-locale-changed", handleLocaleChange);
-      window.removeEventListener("storage", handleStorageChange);
-    };
-  }, []);
 
   const completion = useMemo(() => {
     const keys: Array<keyof ProviderFormData> = [
@@ -401,7 +394,7 @@ export default function SystemProvidersCreatePage() {
 
   function setField<K extends keyof ProviderFormData>(
     key: K,
-    value: ProviderFormData[K]
+    value: ProviderFormData[K],
   ) {
     setFormData((prev) => ({ ...prev, [key]: value }));
 
@@ -410,12 +403,14 @@ export default function SystemProvidersCreatePage() {
 
       const next = { ...prev };
       delete next[key];
+
       return next;
     });
   }
 
   function validate(statusOverride?: ProviderStatus) {
     const nextErrors: ProviderFormErrors = {};
+    const isDraft = statusOverride === "DRAFT";
 
     if (!formData.name.trim()) {
       nextErrors.name = t.validation.required;
@@ -425,19 +420,19 @@ export default function SystemProvidersCreatePage() {
       nextErrors.code = t.validation.required;
     }
 
-    if (!formData.contact_person.trim()) {
+    if (!isDraft && !formData.contact_person.trim()) {
       nextErrors.contact_person = t.validation.required;
     }
 
-    if (!formData.city.trim()) {
+    if (!isDraft && !formData.city.trim()) {
       nextErrors.city = t.validation.required;
     }
 
-    if (!formData.address.trim()) {
+    if (!isDraft && !formData.address.trim()) {
       nextErrors.address = t.validation.required;
     }
 
-    if (!formData.phone.trim() && !formData.mobile.trim()) {
+    if (!isDraft && !formData.phone.trim() && !formData.mobile.trim()) {
       nextErrors.phone = t.validation.required;
       nextErrors.mobile = t.validation.required;
     }
@@ -465,16 +460,6 @@ export default function SystemProvidersCreatePage() {
       nextErrors.google_maps_link = t.validation.invalidUrl;
     }
 
-    if (statusOverride !== "DRAFT") {
-      if (!formData.provider_type) {
-        nextErrors.provider_type = t.validation.required;
-      }
-
-      if (!formData.status) {
-        nextErrors.status = t.validation.required;
-      }
-    }
-
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
@@ -500,46 +485,42 @@ export default function SystemProvidersCreatePage() {
   }
 
   async function submitProvider(statusOverride?: ProviderStatus) {
+    const mode = statusOverride === "DRAFT" ? "DRAFT" : "CREATE";
+
     if (!validate(statusOverride)) {
-      toast.error(
-        isArabic
-          ? "يرجى تصحيح الحقول المطلوبة أولًا."
-          : "Please fix the required fields first."
-      );
+      toast.error(t.validation.fixRequired);
       return;
     }
 
     setIsSubmitting(true);
+    setSubmitMode(mode);
 
     try {
-      const response = await fetch("/api/providers/", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          "X-CSRFToken": getCookie("csrftoken"),
-        },
-        body: JSON.stringify(buildPayload(statusOverride)),
-      });
+      const result = await apiPost<ProviderCreateResponse>(
+        API_PATHS.providers.list,
+        buildPayload(statusOverride),
+      );
 
-      const payload = (await response.json().catch(() => null)) as
-        | ProviderCreateResponse
-        | null;
-
-      if (!response.ok || payload?.ok === false) {
-        console.error("Create provider API error:", payload);
+      if (!result.ok) {
         throw new Error(
-          payload?.message ||
+          result.message ||
             (isArabic
               ? "حدث خطأ أثناء حفظ مقدم الخدمة."
-              : "An error occurred while saving provider.")
+              : "An error occurred while saving provider."),
         );
       }
+
+      const createdId = resolveCreatedId(result);
 
       toast.success(statusOverride === "DRAFT" ? t.draftTitle : t.successTitle, {
         description: statusOverride === "DRAFT" ? t.draftDesc : t.successDesc,
       });
+
+      if (createdId) {
+        router.push(`/system/providers/${createdId}`);
+        router.refresh();
+        return;
+      }
 
       router.push("/system/providers/list");
       router.refresh();
@@ -555,6 +536,7 @@ export default function SystemProvidersCreatePage() {
       });
     } finally {
       setIsSubmitting(false);
+      setSubmitMode(null);
     }
   }
 
@@ -576,11 +558,37 @@ export default function SystemProvidersCreatePage() {
     },
   ];
 
+  useEffect(() => {
+    const syncLocale = () => {
+      const nextLocale = readLocale();
+
+      setLocale(nextLocale);
+      applyDocumentLocale(nextLocale);
+    };
+
+    syncLocale();
+
+    const handleLocaleChange = () => syncLocale();
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === "primey-locale") syncLocale();
+    };
+
+    window.addEventListener("primey-locale-changed", handleLocaleChange);
+    window.addEventListener("storage", handleStorageChange);
+
+    const timer = window.setTimeout(syncLocale, 50);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("primey-locale-changed", handleLocaleChange);
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, []);
+
   return (
     <div className="space-y-6">
-      {/* =====================================================
-          Header
-      ====================================================== */}
+      {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="order-2 flex flex-wrap items-center gap-2 lg:order-1">
           <Link href="/system/providers">
@@ -596,7 +604,7 @@ export default function SystemProvidersCreatePage() {
             disabled={isSubmitting}
             onClick={() => submitProvider("DRAFT")}
           >
-            {isSubmitting ? (
+            {isSubmitting && submitMode === "DRAFT" ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Save className="h-4 w-4" />
@@ -609,7 +617,7 @@ export default function SystemProvidersCreatePage() {
             disabled={isSubmitting}
             onClick={() => submitProvider()}
           >
-            {isSubmitting ? (
+            {isSubmitting && submitMode === "CREATE" ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <CheckCircle2 className="h-4 w-4" />
@@ -638,9 +646,7 @@ export default function SystemProvidersCreatePage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_0.42fr]">
-        {/* =====================================================
-            Form
-        ====================================================== */}
+        {/* Form */}
         <div className="space-y-6">
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="text-right">
@@ -868,9 +874,7 @@ export default function SystemProvidersCreatePage() {
           </Card>
         </div>
 
-        {/* =====================================================
-            Side Panel
-        ====================================================== */}
+        {/* Side Panel */}
         <div className="space-y-6">
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="text-right">
@@ -952,8 +956,8 @@ export default function SystemProvidersCreatePage() {
               <CardTitle>{t.requiredFields}</CardTitle>
               <CardDescription>
                 {isArabic
-                  ? "هذه الحقول مطلوبة للحفظ."
-                  : "These fields are required to save."}
+                  ? "هذه الحقول مطلوبة للحفظ الكامل."
+                  : "These fields are required for full save."}
               </CardDescription>
             </CardHeader>
 
@@ -1013,7 +1017,7 @@ export default function SystemProvidersCreatePage() {
 }
 
 /* ============================================================
-   🧱 Components
+   Components
 ============================================================ */
 
 type FieldProps = {
@@ -1049,6 +1053,7 @@ function Field({
             isArabic ? "right-3" : "left-3"
           }`}
         />
+
         <Input
           id={id}
           type={type}
@@ -1084,6 +1089,7 @@ function TextAreaField({
   return (
     <div className="space-y-2 text-right">
       <Label htmlFor={id}>{label}</Label>
+
       <Textarea
         id={id}
         value={value}
@@ -1091,6 +1097,7 @@ function TextAreaField({
         placeholder={placeholder}
         className="min-h-28 rounded-xl"
       />
+
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   );

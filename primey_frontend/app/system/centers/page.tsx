@@ -1,5 +1,51 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/centers/page.tsx
+   🧠 Primey Care | Centers Dashboard Page
+   ------------------------------------------------------------
+   ✅ المسار:
+      /system/centers
+
+   ✅ العمل:
+      صفحة لوحة إدارة المراكز / مقدمي الخدمة داخل مساحة النظام.
+
+   ✅ الإصدار:
+      v1.0.0 - Centers Dashboard Integration
+
+   ✅ يعتمد على:
+      GET /api/providers/?page_size=100
+
+   ✅ متوافق مع صفحات:
+      - /system/centers
+      - /system/centers/list
+      - /system/centers/create
+      - /system/centers/reports
+      - /system/centers/[id]
+
+   ✅ الوظائف:
+      - عرض إحصائيات المراكز من API فعلي
+      - عرض المراكز المميزة
+      - عرض آخر المراكز في جدول مختصر
+      - البحث السريع داخل بيانات المراكز المحملة
+      - دعم عربي / إنجليزي عبر primey-locale
+      - استخدام toast من sonner للتنبيهات
+      - عدم استخدام localhost hardcoded
+      - استخدام UI الداخلي فقط
+      - الأرقام تبقى بالإنجليزية
+      - روابط داخلية آمنة بدون Dynamic href غير مدعوم
+
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+      - إضافة وصف رسمي أعلى الملف لتوثيق الصفحة
+      - توحيد تسمية Centers كواجهة تشغيل رسمية للمراكز
+      - بقاء الربط مع /api/providers/ لأن الباك إند الحالي يستخدم providers
+      - تحسين التعليقات الداخلية وتنظيم الأقسام
+      - الحفاظ على نفس شكل التصميم السابق بدون كسر الواجهة
+      - الحفاظ على Response normalizers لدعم أكثر من شكل API
+      - حماية الصفحة من أخطاء البيانات الناقصة أو غير المتوقعة
+============================================================ */
+
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -44,15 +90,7 @@ import {
 } from "@/components/ui/table";
 
 /* ============================================================
-   📂 app/system/centers/page.tsx
-   🧠 Primey Care | System Centers Dashboard
-   ------------------------------------------------------------
-   ✅ صفحة المراكز الرئيسية بتصميم قريب من المرجع المدفوع
-   ✅ بدون عرض روابط خام داخل البطاقات
-   ✅ استخدام UI الداخلي فقط
-   ✅ ربط حقيقي مع /api/providers/
-   ✅ دعم عربي / إنجليزي من primey-locale
-   ✅ لا يوجد localhost hardcoded
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -107,7 +145,7 @@ type ProvidersApiResponse = {
 };
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -115,6 +153,7 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
@@ -138,7 +177,7 @@ function applyDocumentLocale(locale: AppLocale) {
 }
 
 /* ============================================================
-   🔁 API Normalizers
+   API Normalizers
 ============================================================ */
 
 function normalizeApiList(payload: unknown): unknown[] {
@@ -212,7 +251,7 @@ function normalizeCenter(item: unknown): Center {
 }
 
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -319,7 +358,7 @@ function dictionary(locale: AppLocale) {
 }
 
 /* ============================================================
-   🎨 UI Helpers
+   UI Helpers
 ============================================================ */
 
 function statusLabel(status: ProviderStatus, locale: AppLocale) {
@@ -384,7 +423,7 @@ function percent(value: number, total: number) {
 }
 
 /* ============================================================
-   ✅ Page
+   Page
 ============================================================ */
 
 export default function SystemCentersPage() {

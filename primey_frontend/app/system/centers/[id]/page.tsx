@@ -1,5 +1,31 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/centers/[id]/page.tsx
+   🧠 Primey Care | Center Details
+   ------------------------------------------------------------
+   ✅ المسار: /system/centers/[id]
+   ✅ الإصدار: v1.0.0
+   ✅ العمل: عرض تفاصيل مركز / مقدم خدمة
+   ✅ API: GET /api/providers/{id}/
+   ✅ متوافق مع:
+      - /system/centers
+      - /system/centers/list
+      - /system/centers/create
+      - /system/centers/[id]
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+   - توثيق مختصر أعلى الملف
+   - عرض تفاصيل المركز من API فعلي
+   - تجهيز أقسام الخدمات والعقود والمدفوعات والطلبات
+   - دعم عربي / إنجليزي عبر primey-locale
+   - الأرقام والتواريخ دائمًا بالإنجليزية
+   - استخدام sonner للتنبيهات
+   - بدون localhost hardcoded
+   - الحفاظ على التصميم السابق بدون كسر الواجهة
+============================================================ */
+
+import type { ComponentType } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -22,7 +48,6 @@ import {
   ShieldCheck,
   Star,
   Trash2Icon,
-  UserRound,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -44,14 +69,7 @@ import {
 } from "@/components/ui/table";
 
 /* ============================================================
-   📂 app/system/centers/[id]/page.tsx
-   🧠 Primey Care | Center Detail Page
-   ------------------------------------------------------------
-   ✅ تصميم قريب من صفحة التفاصيل المدفوعة المرفقة
-   ✅ استخدام UI الداخلي فقط
-   ✅ ربط حقيقي مع GET /api/providers/<id>/
-   ✅ دعم عربي / إنجليزي
-   ✅ بدون localhost hardcoded
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -104,7 +122,7 @@ type ProviderDetailResponse = {
 };
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -112,6 +130,7 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
@@ -134,8 +153,18 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
+function formatNumber(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0";
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(numericValue);
+}
+
 /* ============================================================
-   🔁 API Normalizers
+   API Normalizers
 ============================================================ */
 
 function normalizeStatus(value: unknown): ProviderStatus {
@@ -176,21 +205,23 @@ function normalizeCenterDetail(payload: unknown): CenterDetail {
 
   return {
     id: (obj.id ?? "-") as number | string,
-    name: String(obj.name ?? "-"),
-    code: String(obj.code ?? "-"),
-    providerType: normalizeProviderType(obj.provider_type),
-    status: normalizeStatus(obj.status),
-    contactPerson: String(obj.contact_person ?? ""),
+    name: String(obj.name ?? obj.title ?? "-"),
+    code: String(obj.code ?? obj.provider_code ?? "-"),
+    providerType: normalizeProviderType(
+      obj.provider_type ?? obj.type ?? obj.category,
+    ),
+    status: normalizeStatus(obj.status ?? obj.is_active),
+    contactPerson: String(obj.contact_person ?? obj.contact_name ?? ""),
     phone: String(obj.phone ?? ""),
-    mobile: String(obj.mobile ?? ""),
+    mobile: String(obj.mobile ?? obj.phone_number ?? ""),
     email: String(obj.email ?? ""),
     website: String(obj.website ?? ""),
     city: String(obj.city ?? ""),
-    area: String(obj.area ?? ""),
+    area: String(obj.area ?? obj.region ?? ""),
     address: String(obj.address ?? ""),
-    googleMapsLink: String(obj.google_maps_link ?? ""),
+    googleMapsLink: String(obj.google_maps_link ?? obj.map_url ?? ""),
     notes: String(obj.notes ?? ""),
-    isFeatured: Boolean(obj.is_featured),
+    isFeatured: Boolean(obj.is_featured ?? obj.featured),
     createdAt: String(obj.created_at ?? ""),
     updatedAt: String(obj.updated_at ?? ""),
     raw: obj,
@@ -198,7 +229,7 @@ function normalizeCenterDetail(payload: unknown): CenterDetail {
 }
 
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -232,32 +263,31 @@ function dictionary(locale: AppLocale) {
       ? "تم تحديث بيانات المركز بنجاح."
       : "Center details refreshed successfully.",
 
-    loading: isArabic ? "جاري تحميل بيانات المركز..." : "Loading center details...",
-    notFound: isArabic ? "لم يتم العثور على بيانات المركز" : "Center data was not found",
+    loading: isArabic
+      ? "جاري تحميل بيانات المركز..."
+      : "Loading center details...",
+    notFound: isArabic
+      ? "لم يتم العثور على بيانات المركز"
+      : "Center data was not found",
 
     seller: isArabic ? "المسؤول" : "Contact",
     published: isArabic ? "تاريخ الإنشاء" : "Published",
     sku: isArabic ? "الكود" : "Code",
 
-    profile: isArabic ? "ملف المركز" : "Center Profile",
     profileDesc: isArabic
       ? "البيانات الأساسية للمركز كما هي محفوظة في providers API."
       : "Core center data stored in providers API.",
 
-    indicators: isArabic ? "المؤشرات" : "Indicators",
     details: isArabic ? "البيانات التفصيلية" : "Detailed Information",
     operationalLinks: isArabic ? "الروابط التشغيلية" : "Operational Links",
     operationalDesc: isArabic
-      ? "روابط مستقبلية لربط المركز بالعقود والخدمات والمدفوعات."
-      : "Future links to connect the center with contracts, services, and payments.",
-
-    activityTitle: isArabic ? "النشاط التشغيلي" : "Operational Activity",
-    activityDesc: isArabic
-      ? "مؤشرات مبدئية سيتم ربطها لاحقًا بالطلبات والفواتير."
-      : "Initial indicators that will later connect to orders and invoices.",
+      ? "أقسام تشغيلية جاهزة للربط مع العقود والخدمات والمدفوعات والطلبات."
+      : "Operational sections ready to connect with contracts, services, payments, and orders.",
 
     notes: isArabic ? "ملاحظات" : "Notes",
     noNotes: isArabic ? "لا توجد ملاحظات." : "No notes available.",
+
+    profileCompletion: isArabic ? "اكتمال الملف" : "Profile Completion",
 
     fields: {
       id: isArabic ? "رقم المركز" : "Center ID",
@@ -304,16 +334,24 @@ function dictionary(locale: AppLocale) {
       services: isArabic ? "الخدمات" : "Services",
       payments: isArabic ? "المدفوعات" : "Payments",
       orders: isArabic ? "الطلبات" : "Orders",
-      contractsDesc: isArabic ? "ربط عقود المركز لاحقًا" : "Link center contracts later",
-      servicesDesc: isArabic ? "ربط الخدمات لاحقًا" : "Link services later",
-      paymentsDesc: isArabic ? "ربط المدفوعات لاحقًا" : "Link payments later",
-      ordersDesc: isArabic ? "ربط الطلبات لاحقًا" : "Link orders later",
+      contractsDesc: isArabic
+        ? "عرض وربط عقود المركز مع النظام."
+        : "View and link center contracts with the system.",
+      servicesDesc: isArabic
+        ? "عرض الخدمات المرتبطة بالمركز."
+        : "View services connected to this center.",
+      paymentsDesc: isArabic
+        ? "متابعة مدفوعات ومعاملات المركز."
+        : "Track center payments and transactions.",
+      ordersDesc: isArabic
+        ? "متابعة الطلبات المرتبطة بالمركز."
+        : "Track orders connected to this center.",
     },
   };
 }
 
 /* ============================================================
-   🎨 UI Helpers
+   UI Helpers
 ============================================================ */
 
 function getStatusLabel(status: ProviderStatus, locale: AppLocale) {
@@ -372,11 +410,11 @@ function statusBadge(status: ProviderStatus, locale: AppLocale) {
   );
 }
 
-function formatDate(value: string, locale: AppLocale) {
+function formatDate(value: string) {
   if (!value) return "-";
 
   try {
-    return new Intl.DateTimeFormat(locale === "ar" ? "ar-SA" : "en-US", {
+    return new Intl.DateTimeFormat("en-US", {
       year: "numeric",
       month: "short",
       day: "2-digit",
@@ -386,8 +424,12 @@ function formatDate(value: string, locale: AppLocale) {
   }
 }
 
+function isValidExternalLink(value: string) {
+  return value.startsWith("https://") || value.startsWith("http://");
+}
+
 /* ============================================================
-   ✅ Page
+   Page
 ============================================================ */
 
 export default function SystemCenterDetailPage() {
@@ -400,7 +442,6 @@ export default function SystemCenterDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
 
   const profileCompleteness = useMemo(() => {
     if (!center) return 0;
@@ -420,6 +461,7 @@ export default function SystemCenterDetailPage() {
     ];
 
     const completed = fields.filter((item) => String(item || "").trim()).length;
+
     return Math.round((completed / fields.length) * 100);
   }, [center]);
 
@@ -442,6 +484,7 @@ export default function SystemCenterDetailPage() {
       }
 
       const payload = (await response.json()) as ProviderDetailResponse;
+
       setCenter(normalizeCenterDetail(payload));
 
       if (showToast) {
@@ -551,16 +594,16 @@ export default function SystemCenterDetailPage() {
 
   return (
     <div className="space-y-4">
-      {/* =====================================================
-          Header — Product Detail Reference Style
-      ====================================================== */}
+      {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary" className="rounded-full">
               /system/centers/{center.id}
             </Badge>
+
             {statusBadge(center.status, locale)}
+
             {center.isFeatured ? (
               <Badge className="rounded-full">
                 <Star className="h-3.5 w-3.5 fill-current" />
@@ -578,12 +621,14 @@ export default function SystemCenterDetailPage() {
               <span className="text-foreground font-semibold">{t.seller} :</span>{" "}
               {center.contactPerson || "-"}
             </div>
+
             <div>
               <span className="text-foreground font-semibold">
                 {t.published} :
               </span>{" "}
-              {formatDate(center.createdAt, locale)}
+              {formatDate(center.createdAt)}
             </div>
+
             <div>
               <span className="text-foreground font-semibold">{t.sku} :</span>{" "}
               {center.code}
@@ -619,6 +664,7 @@ export default function SystemCenterDetailPage() {
             className="rounded-xl"
             onClick={deleteCenter}
             disabled={isDeleting}
+            aria-label={t.delete}
           >
             {isDeleting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -629,11 +675,8 @@ export default function SystemCenterDetailPage() {
         </div>
       </div>
 
-      {/* =====================================================
-          Main Grid
-      ====================================================== */}
+      {/* Main Grid */}
       <div className="grid gap-4 xl:grid-cols-3">
-        {/* Left Profile Card */}
         <div className="min-w-0 xl:col-span-1">
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardContent className="space-y-4 p-4">
@@ -645,9 +688,11 @@ export default function SystemCenterDetailPage() {
 
               <div className="space-y-2 text-center">
                 <h2 className="text-lg font-bold">{center.name}</h2>
+
                 <p className="text-muted-foreground text-sm">
                   {t.typeLabels[center.providerType]}
                 </p>
+
                 <div className="flex justify-center">
                   {statusBadge(center.status, locale)}
                 </div>
@@ -655,11 +700,10 @@ export default function SystemCenterDetailPage() {
 
               <div className="rounded-xl border bg-background p-4">
                 <div className="mb-3 flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold">
-                    {isArabic ? "اكتمال الملف" : "Profile Completion"}
-                  </p>
+                  <p className="text-sm font-semibold">{t.profileCompletion}</p>
+
                   <Badge variant="outline" className="rounded-full">
-                    {profileCompleteness}%
+                    {formatNumber(profileCompleteness)}%
                   </Badge>
                 </div>
 
@@ -672,42 +716,61 @@ export default function SystemCenterDetailPage() {
               </div>
 
               <div className="space-y-2">
-                <MiniInfo icon={Phone} label={t.fields.mobile} value={center.mobile || center.phone || "-"} />
-                <MiniInfo icon={Mail} label={t.fields.email} value={center.email || "-"} />
-                <MiniInfo icon={MapPin} label={t.fields.city} value={center.city || center.area || "-"} />
-                <MiniInfo icon={Globe} label={t.fields.website} value={center.website || "-"} />
+                <MiniInfo
+                  icon={Phone}
+                  label={t.fields.mobile}
+                  value={center.mobile || center.phone || "-"}
+                />
+
+                <MiniInfo
+                  icon={Mail}
+                  label={t.fields.email}
+                  value={center.email || "-"}
+                />
+
+                <MiniInfo
+                  icon={MapPin}
+                  label={t.fields.city}
+                  value={center.city || center.area || "-"}
+                />
+
+                <MiniInfo
+                  icon={Globe}
+                  label={t.fields.website}
+                  value={center.website || "-"}
+                />
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Right Details */}
         <div className="space-y-4 xl:col-span-2">
-          {/* Indicators */}
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon={ShieldCheck}
               label={t.fields.status}
               value={getStatusLabel(center.status, locale)}
             />
+
             <MetricCard
               icon={Building2}
               label={t.fields.providerType}
               value={t.typeLabels[center.providerType]}
             />
+
             <MetricCard
               icon={Star}
               label={t.fields.featured}
               value={center.isFeatured ? t.yes : t.no}
             />
+
             <MetricCard
               icon={CalendarDays}
               label={t.fields.updatedAt}
-              value={formatDate(center.updatedAt, locale)}
+              value={formatDate(center.updatedAt)}
             />
           </div>
 
-          {/* Details Table */}
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-bold">{t.details}</CardTitle>
@@ -721,47 +784,59 @@ export default function SystemCenterDetailPage() {
                     <DetailRow label={t.fields.id} value={String(center.id)} />
                     <DetailRow label={t.fields.name} value={center.name} />
                     <DetailRow label={t.fields.code} value={center.code} />
+
                     <DetailRow
                       label={t.fields.providerType}
                       value={t.typeLabels[center.providerType]}
                     />
+
                     <DetailRow
                       label={t.fields.status}
                       value={getStatusLabel(center.status, locale)}
                     />
+
                     <DetailRow
                       label={t.fields.contactPerson}
                       value={center.contactPerson || "-"}
                     />
+
                     <DetailRow label={t.fields.phone} value={center.phone || "-"} />
+
                     <DetailRow
                       label={t.fields.mobile}
                       value={center.mobile || "-"}
                     />
+
                     <DetailRow label={t.fields.email} value={center.email || "-"} />
+
                     <DetailRow
                       label={t.fields.website}
                       value={center.website || "-"}
                       link={center.website}
                     />
+
                     <DetailRow label={t.fields.city} value={center.city || "-"} />
                     <DetailRow label={t.fields.area} value={center.area || "-"} />
+
                     <DetailRow
                       label={t.fields.address}
                       value={center.address || "-"}
                     />
+
                     <DetailRow
                       label={t.fields.maps}
                       value={center.googleMapsLink || "-"}
                       link={center.googleMapsLink}
                     />
+
                     <DetailRow
                       label={t.fields.createdAt}
-                      value={formatDate(center.createdAt, locale)}
+                      value={formatDate(center.createdAt)}
                     />
+
                     <DetailRow
                       label={t.fields.updatedAt}
-                      value={formatDate(center.updatedAt, locale)}
+                      value={formatDate(center.updatedAt)}
                     />
                   </TableBody>
                 </Table>
@@ -769,7 +844,6 @@ export default function SystemCenterDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Operational Cards */}
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-bold">
@@ -784,16 +858,19 @@ export default function SystemCenterDetailPage() {
                 title={t.cards.contracts}
                 description={t.cards.contractsDesc}
               />
+
               <OperationCard
                 icon={Activity}
                 title={t.cards.services}
                 description={t.cards.servicesDesc}
               />
+
               <OperationCard
                 icon={Wallet}
                 title={t.cards.payments}
                 description={t.cards.paymentsDesc}
               />
+
               <OperationCard
                 icon={CheckCircle2}
                 title={t.cards.orders}
@@ -802,7 +879,6 @@ export default function SystemCenterDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Notes */}
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-bold">{t.notes}</CardTitle>
@@ -821,7 +897,7 @@ export default function SystemCenterDetailPage() {
 }
 
 /* ============================================================
-   🔹 Small Components
+   Small Components
 ============================================================ */
 
 function MetricCard({
@@ -829,13 +905,14 @@ function MetricCard({
   label,
   value,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
 }) {
   return (
     <div className="hover:border-primary/30 grid auto-cols-max grid-flow-col gap-4 rounded-lg border bg-muted p-4">
       <Icon className="size-6 opacity-40" />
+
       <div className="flex min-w-0 flex-col gap-1">
         <span className="text-muted-foreground text-sm">{label}</span>
         <span className="truncate text-lg font-semibold">{value}</span>
@@ -849,7 +926,7 @@ function MiniInfo({
   label,
   value,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
 }) {
@@ -876,13 +953,14 @@ function DetailRow({
   value: string;
   link?: string;
 }) {
-  const hasLink = link && (link.startsWith("https://") || link.startsWith("http://"));
+  const hasLink = Boolean(link && isValidExternalLink(link));
 
   return (
     <TableRow>
       <TableCell className="w-[220px] bg-muted/50 font-medium">
         {label}
       </TableCell>
+
       <TableCell>
         {hasLink ? (
           <a
@@ -907,7 +985,7 @@ function OperationCard({
   title,
   description,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className?: string }>;
   title: string;
   description: string;
 }) {
@@ -916,7 +994,9 @@ function OperationCard({
       <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
         <Icon className="h-5 w-5" />
       </div>
+
       <p className="font-semibold">{title}</p>
+
       <p className="text-muted-foreground mt-1 text-xs leading-5">
         {description}
       </p>

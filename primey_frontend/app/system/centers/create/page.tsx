@@ -1,5 +1,29 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/centers/create/page.tsx
+   🧠 Primey Care | Create Center
+   ------------------------------------------------------------
+   ✅ المسار: /system/centers/create
+   ✅ الإصدار: v1.0.0
+   ✅ العمل: إنشاء مركز / مقدم خدمة جديد
+   ✅ API: POST /api/providers/
+   ✅ متوافق مع:
+      - /system/centers
+      - /system/centers/list
+      - /system/centers/[id]
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+   - توثيق مختصر أعلى الملف
+   - استخدام lib/api.ts مع CSRF
+   - دعم عربي / إنجليزي عبر primey-locale
+   - استخدام sonner للتنبيهات
+   - تحقق آمن من الحقول والرابط والبريد
+   - بدون localhost hardcoded
+   - الحفاظ على التصميم السابق بدون كسر الواجهة
+============================================================ */
+
+import type { ComponentType, ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -9,7 +33,6 @@ import {
   Building2,
   CheckCircle2,
   FileText,
-  Globe,
   Loader2,
   Mail,
   MapPin,
@@ -18,7 +41,6 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
-  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -39,15 +61,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 /* ============================================================
-   📂 app/system/centers/create/page.tsx
-   🧠 Primey Care | Create Center
-   ------------------------------------------------------------
-   ✅ تصميم قريب من الصفحة المدفوعة المرفقة
-   ✅ استخدام UI الداخلي فقط
-   ✅ ربط حقيقي مع POST /api/providers/
-   ✅ دعم عربي / إنجليزي
-   ✅ CSRF عبر lib/api.ts
-   ✅ بدون localhost hardcoded
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -83,18 +97,20 @@ type CenterFormData = {
 
 type CenterFormErrors = Partial<Record<keyof CenterFormData, string>>;
 
+type ProviderCreateData = {
+  id?: number | string;
+  name?: string;
+  code?: string;
+};
+
 type ProviderCreateResponse = {
   ok?: boolean;
   message?: string;
-  data?: {
-    id?: number | string;
-    name?: string;
-    code?: string;
-  };
+  data?: ProviderCreateData;
 };
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -102,6 +118,7 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
@@ -125,7 +142,7 @@ function applyDocumentLocale(locale: AppLocale) {
 }
 
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -189,7 +206,9 @@ function dictionary(locale: AppLocale) {
     },
 
     placeholders: {
-      name: isArabic ? "مثال: مركز برايمي كير جدة" : "Example: Primey Care Jeddah",
+      name: isArabic
+        ? "مثال: مركز برايمي كير جدة"
+        : "Example: Primey Care Jeddah",
       code: isArabic ? "مثال: CTR-001" : "Example: CTR-001",
       contactPerson: isArabic ? "مثال: محمد أحمد" : "Example: Mohammed Ahmed",
       phone: isArabic ? "011xxxxxxx" : "011xxxxxxx",
@@ -199,7 +218,9 @@ function dictionary(locale: AppLocale) {
       city: isArabic ? "مثال: جدة" : "Example: Jeddah",
       area: isArabic ? "مثال: الروضة" : "Example: Al Rawdah",
       address: isArabic ? "اكتب العنوان التفصيلي" : "Enter full address",
-      googleMaps: isArabic ? "https://maps.google.com/..." : "https://maps.google.com/...",
+      googleMaps: isArabic
+        ? "https://maps.google.com/..."
+        : "https://maps.google.com/...",
       notes: isArabic
         ? "أي ملاحظات تشغيلية عن المركز..."
         : "Any operational notes about the center...",
@@ -244,6 +265,10 @@ function dictionary(locale: AppLocale) {
       ? "تعذر إنشاء المركز. تحقق من البيانات وحاول مرة أخرى."
       : "Unable to create center. Please check the data and try again.",
 
+    validationToast: isArabic
+      ? "يرجى تصحيح الحقول المطلوبة قبل المتابعة."
+      : "Please fix the required fields before continuing.",
+
     quickNotes: [
       isArabic
         ? "الكود يجب أن يكون فريدًا داخل النظام."
@@ -262,7 +287,7 @@ function dictionary(locale: AppLocale) {
 }
 
 /* ============================================================
-   🧩 Defaults / Validation
+   Defaults / Validation
 ============================================================ */
 
 const initialFormData: CenterFormData = {
@@ -313,8 +338,21 @@ function normalizePayload(formData: CenterFormData, status?: ProviderStatus) {
   };
 }
 
+function resolveCreatedId(result: unknown) {
+  const response = result as {
+    data?: {
+      id?: number | string;
+      data?: {
+        id?: number | string;
+      };
+    };
+  };
+
+  return response.data?.id ?? response.data?.data?.id;
+}
+
 /* ============================================================
-   ✅ Page
+   Page
 ============================================================ */
 
 export default function SystemCreateCenterPage() {
@@ -371,6 +409,7 @@ export default function SystemCreateCenterPage() {
 
   function validateForm(nextStatus?: ProviderStatus) {
     const nextErrors: CenterFormErrors = {};
+    const isDraft = nextStatus === "DRAFT";
 
     if (!formData.name.trim()) {
       nextErrors.name = t.validation.name;
@@ -380,7 +419,7 @@ export default function SystemCreateCenterPage() {
       nextErrors.code = t.validation.code;
     }
 
-    if (!isValidEmail(formData.email)) {
+    if (!isDraft && !isValidEmail(formData.email)) {
       nextErrors.email = t.validation.email;
     }
 
@@ -392,13 +431,6 @@ export default function SystemCreateCenterPage() {
       nextErrors.google_maps_link = t.validation.maps;
     }
 
-    if (nextStatus === "DRAFT") {
-      if (!formData.name.trim() && !formData.code.trim()) {
-        nextErrors.name = t.validation.name;
-        nextErrors.code = t.validation.code;
-      }
-    }
-
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
@@ -407,11 +439,7 @@ export default function SystemCreateCenterPage() {
     const nextStatus: ProviderStatus = mode === "DRAFT" ? "DRAFT" : formData.status;
 
     if (!validateForm(nextStatus)) {
-      toast.error(
-        isArabic
-          ? "يرجى تصحيح الحقول المطلوبة قبل المتابعة."
-          : "Please fix the required fields before continuing.",
-      );
+      toast.error(t.validationToast);
       return;
     }
 
@@ -429,7 +457,7 @@ export default function SystemCreateCenterPage() {
         return;
       }
 
-      const createdId = result.data?.data?.id;
+      const createdId = resolveCreatedId(result);
 
       toast.success(mode === "DRAFT" ? t.draftSuccess : t.success);
 
@@ -477,9 +505,7 @@ export default function SystemCreateCenterPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      {/* =====================================================
-          Header
-      ====================================================== */}
+      {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -536,9 +562,7 @@ export default function SystemCreateCenterPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        {/* =====================================================
-            Form
-        ====================================================== */}
+        {/* Form */}
         <div className="space-y-4">
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
@@ -550,11 +574,7 @@ export default function SystemCreateCenterPage() {
             </CardHeader>
 
             <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock
-                label={t.labels.name}
-                error={errors.name}
-                required
-              >
+              <FieldBlock label={t.labels.name} error={errors.name} required>
                 <Input
                   value={formData.name}
                   onChange={(event) => updateField("name", event.target.value)}
@@ -563,11 +583,7 @@ export default function SystemCreateCenterPage() {
                 />
               </FieldBlock>
 
-              <FieldBlock
-                label={t.labels.code}
-                error={errors.code}
-                required
-              >
+              <FieldBlock label={t.labels.code} error={errors.code} required>
                 <Input
                   value={formData.code}
                   onChange={(event) =>
@@ -760,6 +776,7 @@ export default function SystemCreateCenterPage() {
                     updateField("is_featured", Boolean(checked))
                   }
                 />
+
                 <div>
                   <p className="text-sm font-semibold">{t.labels.featured}</p>
                   <p className="text-muted-foreground mt-1 text-xs">
@@ -782,9 +799,7 @@ export default function SystemCreateCenterPage() {
           </Card>
         </div>
 
-        {/* =====================================================
-            Sidebar Summary
-        ====================================================== */}
+        {/* Sidebar Summary */}
         <aside className="space-y-4">
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
@@ -801,9 +816,7 @@ export default function SystemCreateCenterPage() {
                     <p className="text-muted-foreground text-xs">
                       {isArabic ? "نسبة الاكتمال" : "Completion"}
                     </p>
-                    <p className="mt-1 text-2xl font-bold">
-                      {progressPercent}%
-                    </p>
+                    <p className="mt-1 text-2xl font-bold">{progressPercent}%</p>
                   </div>
 
                   <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
@@ -860,6 +873,7 @@ export default function SystemCreateCenterPage() {
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
                     <Star className="h-4 w-4 fill-orange-400 text-orange-400" />
                   </div>
+
                   <div>
                     <p className="text-sm font-semibold">{t.labels.featured}</p>
                     <p className="text-muted-foreground mt-1 text-xs">
@@ -888,6 +902,7 @@ export default function SystemCreateCenterPage() {
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
                     {index + 1}
                   </div>
+
                   <p className="text-muted-foreground text-sm leading-6">
                     {item}
                   </p>
@@ -933,7 +948,7 @@ export default function SystemCreateCenterPage() {
 }
 
 /* ============================================================
-   🔹 Small Components
+   Small Components
 ============================================================ */
 
 function FieldBlock({
@@ -945,7 +960,7 @@ function FieldBlock({
   label: string;
   error?: string;
   required?: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="space-y-2">
@@ -953,7 +968,9 @@ function FieldBlock({
         {label}
         {required ? <span className="text-destructive ms-1">*</span> : null}
       </Label>
+
       {children}
+
       {error ? <p className="text-destructive text-xs">{error}</p> : null}
     </div>
   );
@@ -964,7 +981,7 @@ function SummaryItem({
   label,
   value,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
 }) {

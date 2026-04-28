@@ -1,5 +1,35 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/providers/[id]/page.tsx
+   🧠 Primey Care | Provider Details
+   ------------------------------------------------------------
+   ✅ المسار: /system/providers/[id]
+   ✅ الإصدار: v1.0.0
+   ✅ العمل: عرض تفاصيل مقدم خدمة
+   ✅ API:
+      - GET    /api/providers/{id}/
+      - DELETE /api/providers/{id}/
+   ✅ متوافق مع:
+      - /system/providers
+      - /system/providers/list
+      - /system/providers/create
+      - /system/providers/reports
+      - /system/providers/[id]
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+   - توثيق مختصر أعلى الملف
+   - عرض تفاصيل مقدم الخدمة من API فعلي
+   - حذف مقدم الخدمة مع CSRF
+   - تجهيز أقسام العقود والخدمات والمدفوعات والطلبات
+   - دعم عربي / إنجليزي عبر primey-locale
+   - الأرقام والتواريخ دائمًا بالإنجليزي
+   - استخدام sonner للتنبيهات
+   - بدون localhost hardcoded
+   - الحفاظ على التصميم السابق بدون كسر الواجهة
+============================================================ */
+
+import type { ComponentType } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -21,7 +51,6 @@ import {
   ShieldCheck,
   Star,
   Trash2Icon,
-  UserRound,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -43,15 +72,7 @@ import {
 } from "@/components/ui/table";
 
 /* ============================================================
-   📂 app/system/providers/[id]/page.tsx
-   🧠 Primey Care | Provider Detail Page
-   ------------------------------------------------------------
-   ✅ نفس نمط صفحة تفاصيل المراكز المرفقة
-   ✅ استخدام UI الداخلي فقط
-   ✅ ربط حقيقي مع GET /api/providers/<id>/
-   ✅ حذف عبر DELETE /api/providers/<id>/
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ بدون hardcoded localhost
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -104,7 +125,7 @@ type ProviderDetailResponse = {
 };
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -112,11 +133,13 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
+  } catch (error) {
+    console.error("Read locale error:", error);
     return "ar";
   }
 }
@@ -146,14 +169,24 @@ function getCookie(name: string) {
   return "";
 }
 
-function formatDate(value: string, locale: AppLocale) {
+function formatNumber(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0";
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(numericValue);
+}
+
+function formatDate(value: string) {
   if (!value) return "-";
 
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) return "-";
 
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar-SA" : "en-US", {
+  return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "short",
     day: "2-digit",
@@ -161,7 +194,7 @@ function formatDate(value: string, locale: AppLocale) {
 }
 
 /* ============================================================
-   🔁 Normalizers
+   Normalizers
 ============================================================ */
 
 function normalizeStatus(value: unknown): ProviderStatus {
@@ -200,7 +233,7 @@ function normalizeProvider(item: unknown): ProviderDetail {
     name: String(obj.name ?? obj.title ?? "-"),
     code: String(obj.code ?? obj.provider_code ?? "-"),
     providerType: normalizeProviderType(
-      obj.provider_type ?? obj.type ?? obj.category
+      obj.provider_type ?? obj.type ?? obj.category,
     ),
     status: normalizeStatus(obj.status ?? obj.is_active),
     contactPerson: String(obj.contact_person ?? obj.contact_name ?? ""),
@@ -220,8 +253,14 @@ function normalizeProvider(item: unknown): ProviderDetail {
   };
 }
 
+function extractProvider(payload: ProviderDetailResponse | unknown) {
+  const response = (payload || {}) as ProviderDetailResponse;
+
+  return response.data ?? response.provider ?? response.center ?? payload;
+}
+
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -251,6 +290,8 @@ function dictionary(locale: AppLocale) {
 
     notes: isArabic ? "الملاحظات" : "Notes",
     noNotes: isArabic ? "لا توجد ملاحظات مسجلة." : "No notes recorded.",
+
+    profileCompletion: isArabic ? "اكتمال الملف" : "Profile Completion",
 
     loading: isArabic
       ? "جاري تحميل تفاصيل مقدم الخدمة..."
@@ -341,7 +382,7 @@ function dictionary(locale: AppLocale) {
 }
 
 /* ============================================================
-   🎨 UI Helpers
+   UI Helpers
 ============================================================ */
 
 function statusBadge(status: ProviderStatus, locale: AppLocale) {
@@ -408,8 +449,13 @@ function calculateProfileCompleteness(provider: ProviderDetail) {
   return Math.round((completed / fields.length) * 100);
 }
 
+function isValidExternalLink(value?: string) {
+  if (!value) return false;
+  return value.startsWith("https://") || value.startsWith("http://");
+}
+
 /* ============================================================
-   🧩 Page
+   Page
 ============================================================ */
 
 export default function SystemProviderDetailPage() {
@@ -424,7 +470,6 @@ export default function SystemProviderDetailPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const isArabic = locale === "ar";
   const t = useMemo(() => dictionary(locale), [locale]);
 
   const profileCompleteness = useMemo(() => {
@@ -434,6 +479,7 @@ export default function SystemProviderDetailPage() {
 
   const syncLocale = useCallback(() => {
     const nextLocale = readLocale();
+
     setLocale(nextLocale);
     applyDocumentLocale(nextLocale);
   }, []);
@@ -462,7 +508,7 @@ export default function SystemProviderDetailPage() {
         }
 
         const payload = (await response.json()) as ProviderDetailResponse;
-        const rawProvider = payload.data ?? payload.provider ?? payload.center;
+        const rawProvider = extractProvider(payload);
 
         if (!rawProvider) {
           setProvider(null);
@@ -476,38 +522,15 @@ export default function SystemProviderDetailPage() {
         }
       } catch (error) {
         console.error("Load provider detail error:", error);
+        setProvider(null);
         toast.error(t.apiError);
       } finally {
         setIsLoading(false);
         setIsRefreshing(false);
       }
     },
-    [providerId, t.apiError, t.refreshSuccess]
+    [providerId, t.apiError, t.refreshSuccess],
   );
-
-  useEffect(() => {
-    syncLocale();
-
-    const handleLocaleChange = () => syncLocale();
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === "primey-locale") syncLocale();
-    };
-
-    window.addEventListener("primey-locale-changed", handleLocaleChange);
-    window.addEventListener("storage", handleStorageChange);
-
-    const timer = window.setTimeout(syncLocale, 50);
-
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("primey-locale-changed", handleLocaleChange);
-      window.removeEventListener("storage", handleStorageChange);
-    };
-  }, [syncLocale]);
-
-  useEffect(() => {
-    loadProvider();
-  }, [loadProvider]);
 
   async function handleDelete() {
     if (!providerId) return;
@@ -548,6 +571,31 @@ export default function SystemProviderDetailPage() {
     }
   }
 
+  useEffect(() => {
+    syncLocale();
+
+    const handleLocaleChange = () => syncLocale();
+
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === "primey-locale") syncLocale();
+    };
+
+    window.addEventListener("primey-locale-changed", handleLocaleChange);
+    window.addEventListener("storage", handleStorageChange);
+
+    const timer = window.setTimeout(syncLocale, 50);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("primey-locale-changed", handleLocaleChange);
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, [syncLocale]);
+
+  useEffect(() => {
+    loadProvider();
+  }, [loadProvider]);
+
   if (isLoading) {
     return (
       <div className="flex min-h-[420px] items-center justify-center">
@@ -576,6 +624,7 @@ export default function SystemProviderDetailPage() {
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
               <Building2 className="h-8 w-8 text-muted-foreground" />
             </div>
+
             <h1 className="text-xl font-bold">{t.notFound}</h1>
             <p className="mt-2 text-sm text-muted-foreground">
               {t.notFoundDesc}
@@ -588,9 +637,7 @@ export default function SystemProviderDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* =====================================================
-          Header
-      ====================================================== */}
+      {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="order-2 flex flex-wrap items-center gap-2 lg:order-1">
           <Link href="/system/providers/list">
@@ -634,6 +681,7 @@ export default function SystemProviderDetailPage() {
             <Badge variant="secondary" className="rounded-full px-3 py-1">
               {t.list}
             </Badge>
+
             <Badge variant="outline" className="rounded-full px-3 py-1">
               {provider.code && provider.code !== "-"
                 ? provider.code
@@ -644,6 +692,7 @@ export default function SystemProviderDetailPage() {
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
             {t.title}
           </h1>
+
           <p className="text-sm leading-7 text-muted-foreground md:text-base">
             {t.subtitle}
           </p>
@@ -663,9 +712,11 @@ export default function SystemProviderDetailPage() {
 
               <div className="space-y-2 text-center">
                 <h2 className="text-lg font-bold">{provider.name}</h2>
+
                 <p className="text-sm text-muted-foreground">
                   {t.typeLabels[provider.providerType]}
                 </p>
+
                 <div className="flex justify-center">
                   {statusBadge(provider.status, locale)}
                 </div>
@@ -674,10 +725,11 @@ export default function SystemProviderDetailPage() {
               <div className="rounded-xl border bg-background p-4">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold">
-                    {isArabic ? "اكتمال الملف" : "Profile Completion"}
+                    {t.profileCompletion}
                   </p>
+
                   <Badge variant="outline" className="rounded-full">
-                    {profileCompleteness}%
+                    {formatNumber(profileCompleteness)}%
                   </Badge>
                 </div>
 
@@ -695,16 +747,19 @@ export default function SystemProviderDetailPage() {
                   label={t.fields.mobile}
                   value={provider.mobile || provider.phone || "-"}
                 />
+
                 <MiniInfo
                   icon={Mail}
                   label={t.fields.email}
                   value={provider.email || "-"}
                 />
+
                 <MiniInfo
                   icon={MapPin}
                   label={t.fields.city}
                   value={provider.city || provider.area || "-"}
                 />
+
                 <MiniInfo
                   icon={Globe}
                   label={t.fields.website}
@@ -717,34 +772,37 @@ export default function SystemProviderDetailPage() {
 
         {/* Right Details */}
         <div className="space-y-4">
-          {/* Indicators */}
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon={ShieldCheck}
               label={t.fields.status}
               value={t.statusLabels[provider.status]}
             />
+
             <MetricCard
               icon={Building2}
               label={t.fields.providerType}
               value={t.typeLabels[provider.providerType]}
             />
+
             <MetricCard
               icon={Star}
               label={t.fields.featured}
               value={provider.isFeatured ? t.yes : t.no}
             />
+
             <MetricCard
               icon={CalendarDays}
               label={t.fields.updatedAt}
-              value={formatDate(provider.updatedAt, locale)}
+              value={formatDate(provider.updatedAt)}
             />
           </div>
 
-          {/* Details Table */}
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3 text-right">
-              <CardTitle className="text-base font-bold">{t.details}</CardTitle>
+              <CardTitle className="text-base font-bold">
+                {t.details}
+              </CardTitle>
               <CardDescription>{t.profileDesc}</CardDescription>
             </CardHeader>
 
@@ -755,59 +813,72 @@ export default function SystemProviderDetailPage() {
                     <DetailRow label={t.fields.id} value={String(provider.id)} />
                     <DetailRow label={t.fields.name} value={provider.name} />
                     <DetailRow label={t.fields.code} value={provider.code} />
+
                     <DetailRow
                       label={t.fields.providerType}
                       value={t.typeLabels[provider.providerType]}
                     />
+
                     <DetailRow
                       label={t.fields.status}
                       value={t.statusLabels[provider.status]}
                     />
+
                     <DetailRow
                       label={t.fields.contactPerson}
                       value={provider.contactPerson || "-"}
                     />
+
                     <DetailRow
                       label={t.fields.phone}
                       value={provider.phone || "-"}
                     />
+
                     <DetailRow
                       label={t.fields.mobile}
                       value={provider.mobile || "-"}
                     />
+
                     <DetailRow
                       label={t.fields.email}
                       value={provider.email || "-"}
                     />
+
                     <DetailRow
                       label={t.fields.website}
                       value={provider.website || "-"}
                       link={provider.website}
                     />
+
                     <DetailRow
                       label={t.fields.city}
                       value={provider.city || "-"}
                     />
+
                     <DetailRow
                       label={t.fields.area}
                       value={provider.area || "-"}
                     />
+
                     <DetailRow
                       label={t.fields.address}
                       value={provider.address || "-"}
                     />
+
                     <DetailRow
                       label={t.fields.maps}
                       value={provider.googleMapsLink || "-"}
                       link={provider.googleMapsLink}
                     />
+
                     <DetailRow
                       label={t.fields.createdAt}
-                      value={formatDate(provider.createdAt, locale)}
+                      value={formatDate(provider.createdAt)}
                     />
+
                     <DetailRow
                       label={t.fields.updatedAt}
-                      value={formatDate(provider.updatedAt, locale)}
+                      value={formatDate(provider.updatedAt)}
                     />
                   </TableBody>
                 </Table>
@@ -815,7 +886,6 @@ export default function SystemProviderDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Operational Cards */}
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3 text-right">
               <CardTitle className="text-base font-bold">
@@ -830,16 +900,19 @@ export default function SystemProviderDetailPage() {
                 title={t.cards.contracts}
                 description={t.cards.contractsDesc}
               />
+
               <OperationCard
                 icon={Activity}
                 title={t.cards.services}
                 description={t.cards.servicesDesc}
               />
+
               <OperationCard
                 icon={Wallet}
                 title={t.cards.payments}
                 description={t.cards.paymentsDesc}
               />
+
               <OperationCard
                 icon={CheckCircle2}
                 title={t.cards.orders}
@@ -848,7 +921,6 @@ export default function SystemProviderDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Notes */}
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3 text-right">
               <CardTitle className="text-base font-bold">{t.notes}</CardTitle>
@@ -867,7 +939,7 @@ export default function SystemProviderDetailPage() {
 }
 
 /* ============================================================
-   🔹 Small Components
+   Small Components
 ============================================================ */
 
 function MetricCard({
@@ -875,13 +947,14 @@ function MetricCard({
   label,
   value,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
 }) {
   return (
     <div className="hover:border-primary/30 grid auto-cols-max grid-flow-col gap-4 rounded-lg border bg-muted p-4">
       <Icon className="size-6 opacity-40" />
+
       <div className="flex min-w-0 flex-col gap-1">
         <span className="text-sm text-muted-foreground">{label}</span>
         <span className="truncate text-lg font-semibold">{value}</span>
@@ -895,7 +968,7 @@ function MiniInfo({
   label,
   value,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
 }) {
@@ -922,14 +995,14 @@ function DetailRow({
   value: string;
   link?: string;
 }) {
-  const hasLink =
-    link && (link.startsWith("https://") || link.startsWith("http://"));
+  const hasLink = isValidExternalLink(link);
 
   return (
     <TableRow>
       <TableCell className="w-[220px] bg-muted/50 font-medium">
         {label}
       </TableCell>
+
       <TableCell>
         {hasLink ? (
           <a
@@ -954,7 +1027,7 @@ function OperationCard({
   title,
   description,
 }: {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className?: string }>;
   title: string;
   description: string;
 }) {
@@ -963,7 +1036,9 @@ function OperationCard({
       <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
         <Icon className="h-5 w-5" />
       </div>
+
       <p className="font-semibold">{title}</p>
+
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         {description}
       </p>

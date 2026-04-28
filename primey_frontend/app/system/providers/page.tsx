@@ -1,5 +1,30 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/providers/page.tsx
+   🧠 Primey Care | Providers Dashboard
+   ------------------------------------------------------------
+   ✅ المسار: /system/providers
+   ✅ الإصدار: v1.0.0
+   ✅ العمل: لوحة إدارة مقدمي الخدمة داخل النظام
+   ✅ API: GET /api/providers/?page_size=100
+   ✅ متوافق مع:
+      - /system/providers
+      - /system/providers/list
+      - /system/providers/create
+      - /system/providers/reports
+      - /system/providers/[id]
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+   - توثيق مختصر أعلى الملف
+   - دعم عربي / إنجليزي عبر primey-locale
+   - الأرقام دائمًا بالإنجليزي
+   - استخدام sonner للتنبيهات
+   - استخدام UI الداخلي فقط
+   - بدون localhost hardcoded
+   - الحفاظ على نفس منجز الصفحة السابق بدون كسر التصميم
+============================================================ */
+
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -44,16 +69,7 @@ import {
 } from "@/components/ui/table";
 
 /* ============================================================
-   📂 app/system/providers/page.tsx
-   🧠 Primey Care | System Providers Dashboard
-   ------------------------------------------------------------
-   ✅ نفس تصميم صفحة المراكز المعتمدة
-   ✅ مقدمو الخدمة كوحدة مستقلة
-   ✅ استخدام UI الداخلي فقط
-   ✅ ربط حقيقي مع /api/providers/
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ الأرقام دائمًا بالإنجليزي
-   ✅ بدون hardcoded localhost
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -108,7 +124,7 @@ type ProvidersApiResponse = {
 };
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -116,6 +132,7 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
@@ -140,6 +157,7 @@ function applyDocumentLocale(locale: AppLocale) {
 
 function formatNumber(value: number | string): string {
   const numericValue = Number(value);
+
   if (!Number.isFinite(numericValue)) return "0";
 
   return new Intl.NumberFormat("en-US", {
@@ -148,7 +166,7 @@ function formatNumber(value: number | string): string {
 }
 
 /* ============================================================
-   🔁 API Normalizers
+   API Normalizers
 ============================================================ */
 
 function normalizeApiList(payload: unknown): unknown[] {
@@ -219,7 +237,7 @@ function normalizeProvider(item: unknown): Provider {
     name: String(obj.name ?? obj.title ?? "-"),
     code: String(obj.code ?? obj.provider_code ?? "-"),
     providerType: normalizeProviderType(
-      obj.provider_type ?? obj.type ?? obj.category
+      obj.provider_type ?? obj.type ?? obj.category,
     ),
     status: normalizeStatus(obj.status ?? obj.is_active),
     contactPerson: String(obj.contact_person ?? obj.contact_name ?? ""),
@@ -240,7 +258,7 @@ function normalizeProvider(item: unknown): Provider {
 }
 
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -352,7 +370,7 @@ function dictionary(locale: AppLocale) {
 }
 
 /* ============================================================
-   🎨 UI Helpers
+   UI Helpers
 ============================================================ */
 
 function statusBadge(status: ProviderStatus, locale: AppLocale) {
@@ -398,7 +416,7 @@ function statusBadge(status: ProviderStatus, locale: AppLocale) {
 }
 
 /* ============================================================
-   🧩 Page
+   Page
 ============================================================ */
 
 export default function SystemProvidersPage() {
@@ -413,6 +431,7 @@ export default function SystemProvidersPage() {
 
   const syncLocale = useCallback(() => {
     const nextLocale = readLocale();
+
     setLocale(nextLocale);
     applyDocumentLocale(nextLocale);
   }, []);
@@ -454,13 +473,14 @@ export default function SystemProvidersPage() {
         setIsRefreshing(false);
       }
     },
-    [t.apiError, t.refreshSuccess]
+    [t.apiError, t.refreshSuccess],
   );
 
   useEffect(() => {
     syncLocale();
 
     const handleLocaleChange = () => syncLocale();
+
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === "primey-locale") syncLocale();
     };
@@ -511,10 +531,10 @@ export default function SystemProvidersPage() {
     const active = providers.filter((item) => item.status === "ACTIVE").length;
     const draft = providers.filter((item) => item.status === "DRAFT").length;
     const suspended = providers.filter(
-      (item) => item.status === "SUSPENDED"
+      (item) => item.status === "SUSPENDED",
     ).length;
     const inactive = providers.filter(
-      (item) => item.status === "INACTIVE"
+      (item) => item.status === "INACTIVE",
     ).length;
 
     return {
@@ -533,83 +553,93 @@ export default function SystemProvidersPage() {
       return featured.slice(0, 4);
     }
 
-    return [...providers].slice(0, 4);
+    return providers.slice(0, 4);
   }, [providers]);
 
   const tableRows = useMemo(() => {
     return filteredProviders.slice(0, 8);
   }, [filteredProviders]);
 
-  const statusCards = [
-    {
-      title: t.total,
-      value: formatNumber(stats.total),
-      percent: 100,
-      helperValue: stats.total > 0 ? "100%" : "0%",
-      icon: Building2,
-    },
-    {
-      title: t.active,
-      value: formatNumber(stats.active),
-      percent: stats.total ? Math.round((stats.active / stats.total) * 100) : 0,
-      helperValue: `${
-        stats.total ? Math.round((stats.active / stats.total) * 100) : 0
-      }%`,
-      icon: BadgeCheck,
-    },
-    {
-      title: t.draft,
-      value: formatNumber(stats.draft),
-      percent: stats.total ? Math.round((stats.draft / stats.total) * 100) : 0,
-      helperValue: `${
-        stats.total ? Math.round((stats.draft / stats.total) * 100) : 0
-      }%`,
-      icon: FileText,
-    },
-    {
-      title: t.suspended,
-      value: formatNumber(stats.suspended),
-      percent: stats.total
-        ? Math.round((stats.suspended / stats.total) * 100)
-        : 0,
-      helperValue: `${
-        stats.total ? Math.round((stats.suspended / stats.total) * 100) : 0
-      }%`,
-      icon: ShieldCheck,
-    },
-  ];
+  const statusCards = useMemo(
+    () => [
+      {
+        title: t.total,
+        value: formatNumber(stats.total),
+        percent: 100,
+        helperValue: stats.total > 0 ? "100%" : "0%",
+        icon: Building2,
+      },
+      {
+        title: t.active,
+        value: formatNumber(stats.active),
+        percent: stats.total
+          ? Math.round((stats.active / stats.total) * 100)
+          : 0,
+        helperValue: `${
+          stats.total ? Math.round((stats.active / stats.total) * 100) : 0
+        }%`,
+        icon: BadgeCheck,
+      },
+      {
+        title: t.draft,
+        value: formatNumber(stats.draft),
+        percent: stats.total
+          ? Math.round((stats.draft / stats.total) * 100)
+          : 0,
+        helperValue: `${
+          stats.total ? Math.round((stats.draft / stats.total) * 100) : 0
+        }%`,
+        icon: FileText,
+      },
+      {
+        title: t.suspended,
+        value: formatNumber(stats.suspended),
+        percent: stats.total
+          ? Math.round((stats.suspended / stats.total) * 100)
+          : 0,
+        helperValue: `${
+          stats.total ? Math.round((stats.suspended / stats.total) * 100) : 0
+        }%`,
+        icon: ShieldCheck,
+      },
+    ],
+    [stats, t],
+  );
 
-  const moduleActions = [
-    {
-      title: t.actionListTitle,
-      description: t.actionListDesc,
-      href: "/system/providers/list",
-      badge: t.manage,
-      cta: t.open,
-      icon: ListChecks,
-    },
-    {
-      title: t.actionCreateTitle,
-      description: t.actionCreateDesc,
-      href: "/system/providers/create",
-      badge: t.newItem,
-      cta: t.open,
-      icon: Plus,
-    },
-    {
-      title: t.actionReportsTitle,
-      description: t.actionReportsDesc,
-      href: "/system/providers/reports",
-      badge: t.analysis,
-      cta: t.open,
-      icon: Activity,
-    },
-  ];
+  const moduleActions = useMemo(
+    () => [
+      {
+        title: t.actionListTitle,
+        description: t.actionListDesc,
+        href: "/system/providers/list",
+        badge: t.manage,
+        cta: t.open,
+        icon: ListChecks,
+      },
+      {
+        title: t.actionCreateTitle,
+        description: t.actionCreateDesc,
+        href: "/system/providers/create",
+        badge: t.newItem,
+        cta: t.open,
+        icon: Plus,
+      },
+      {
+        title: t.actionReportsTitle,
+        description: t.actionReportsDesc,
+        href: "/system/providers/reports",
+        badge: t.analysis,
+        cta: t.open,
+        icon: Activity,
+      },
+    ],
+    [t],
+  );
 
   return (
     <div className="space-y-6">
       {/* =====================================================
-          Page Header - نفس صفحة المراكز
+          Page Header
       ====================================================== */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="order-2 flex flex-wrap items-center gap-2 lg:order-1">
@@ -653,7 +683,7 @@ export default function SystemProvidersPage() {
       </div>
 
       {/* =====================================================
-          Status + Featured - نفس تقسيم صفحة المراكز
+          Status + Featured
       ====================================================== */}
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.55fr]">
         <Card className="rounded-2xl border bg-card shadow-sm">
@@ -819,6 +849,7 @@ export default function SystemProvidersPage() {
                                   "-"}
                               </p>
                             </div>
+
                             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
                               <Building2 className="h-4 w-4" />
                             </div>
@@ -928,7 +959,7 @@ export default function SystemProvidersPage() {
       </div>
 
       {/* =====================================================
-          Module Actions - نفس صفحة المراكز
+          Module Actions
       ====================================================== */}
       <Card className="rounded-2xl border bg-card shadow-sm">
         <CardHeader className="pb-3 text-right">
@@ -991,6 +1022,7 @@ export default function SystemProvidersPage() {
             <div className="ms-auto flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Building2 className="h-5 w-5" />
             </div>
+
             <div>
               <CardTitle className="text-base">
                 {isArabic ? "الملف الأساسي" : "Core Profile"}
@@ -1009,6 +1041,7 @@ export default function SystemProvidersPage() {
             <div className="ms-auto flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Stethoscope className="h-5 w-5" />
             </div>
+
             <div>
               <CardTitle className="text-base">
                 {isArabic ? "العقود والخدمات" : "Contracts & Services"}
@@ -1027,6 +1060,7 @@ export default function SystemProvidersPage() {
             <div className="ms-auto flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Users className="h-5 w-5" />
             </div>
+
             <div>
               <CardTitle className="text-base">
                 {isArabic ? "التشغيل والتقارير" : "Operations & Reports"}

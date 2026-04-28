@@ -1,5 +1,31 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/providers/reports/page.tsx
+   🧠 Primey Care | Providers Reports
+   ------------------------------------------------------------
+   ✅ المسار: /system/providers/reports
+   ✅ الإصدار: v1.0.0
+   ✅ العمل: تقارير مقدمي الخدمة
+   ✅ API: GET /api/providers/?page_size=500
+   ✅ متوافق مع:
+      - /system/providers
+      - /system/providers/list
+      - /system/providers/create
+      - /system/providers/[id]
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+   - توثيق مختصر أعلى الملف
+   - دعم Excel منظم .xlsx للتقرير الحالي أو الصفوف المحددة
+   - دعم طباعة Web PDF للقسم المطلوب فقط
+   - دعم عربي / إنجليزي عبر primey-locale
+   - الأرقام دائمًا بالإنجليزي
+   - استخدام sonner للتنبيهات
+   - استخدام UI الداخلي فقط
+   - بدون localhost hardcoded
+   - الحفاظ على التصميم السابق بدون كسر الواجهة
+============================================================ */
+
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
@@ -12,7 +38,6 @@ import {
   Building2,
   ColumnsIcon,
   Download,
-  FileText,
   FilterIcon,
   Loader2,
   MapPin,
@@ -54,19 +79,7 @@ import {
 } from "@/components/ui/table";
 
 /* ============================================================
-   📂 app/system/providers/reports/page.tsx
-   🧠 Primey Care | Providers Reports
-   ------------------------------------------------------------
-   ✅ نفس نمط تقارير المراكز المرفقة
-   ✅ استخدام UI الداخلي فقط
-   ✅ بطاقات + فلاتر + جدول تفصيلي
-   ✅ تحديد صفوف + إظهار/إخفاء أعمدة
-   ✅ تصدير Excel منظم .xlsx وليس CSV
-   ✅ طباعة Web PDF للقسم المطلوب فقط
-   ✅ ربط حقيقي مع /api/providers/
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ الأرقام دائمًا بالإنجليزي
-   ✅ بدون hardcoded localhost
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -138,7 +151,7 @@ type VisibleColumns = {
 };
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -146,6 +159,7 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
@@ -179,7 +193,7 @@ function formatNumber(value: number | string): string {
 }
 
 /* ============================================================
-   🔁 API Normalizers
+   API Normalizers
 ============================================================ */
 
 function normalizeApiList(payload: unknown): unknown[] {
@@ -250,7 +264,7 @@ function normalizeProvider(item: unknown): Provider {
     name: String(obj.name ?? obj.title ?? "-"),
     code: String(obj.code ?? obj.provider_code ?? "-"),
     providerType: normalizeProviderType(
-      obj.provider_type ?? obj.type ?? obj.category
+      obj.provider_type ?? obj.type ?? obj.category,
     ),
     status: normalizeStatus(obj.status ?? obj.is_active),
     contactPerson: String(obj.contact_person ?? obj.contact_name ?? ""),
@@ -271,7 +285,7 @@ function normalizeProvider(item: unknown): Provider {
 }
 
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -288,7 +302,7 @@ function dictionary(locale: AppLocale) {
     list: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
     refresh: isArabic ? "تحديث" : "Refresh",
     exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة" : "Print",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
 
     overviewTitle: isArabic ? "ملخص مقدمي الخدمة" : "Providers Overview",
     overviewDesc: isArabic
@@ -398,7 +412,7 @@ function dictionary(locale: AppLocale) {
 }
 
 /* ============================================================
-   🎨 UI Helpers
+   UI Helpers
 ============================================================ */
 
 function statusBadge(status: ProviderStatus, locale: AppLocale) {
@@ -453,8 +467,37 @@ function getSortValue(provider: Provider, key: SortKey): string {
   return provider.name;
 }
 
+function formatDateForExport(value: string) {
+  if (!value) return "-";
+
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+function safeSheetName(name: string) {
+  return name.replace(/[\\/?*[\]:]/g, "").slice(0, 31) || "Report";
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 /* ============================================================
-   🧩 Page
+   Page
 ============================================================ */
 
 export default function SystemProvidersReportsPage() {
@@ -489,6 +532,7 @@ export default function SystemProvidersReportsPage() {
 
   const syncLocale = useCallback(() => {
     const nextLocale = readLocale();
+
     setLocale(nextLocale);
     applyDocumentLocale(nextLocale);
   }, []);
@@ -531,13 +575,14 @@ export default function SystemProvidersReportsPage() {
         setIsRefreshing(false);
       }
     },
-    [t.apiError, t.refreshSuccess]
+    [t.apiError, t.refreshSuccess],
   );
 
   useEffect(() => {
     syncLocale();
 
     const handleLocaleChange = () => syncLocale();
+
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === "primey-locale") syncLocale();
     };
@@ -632,7 +677,7 @@ export default function SystemProvidersReportsPage() {
     if (selectedIds.size === 0) return filteredProviders;
 
     return filteredProviders.filter((provider) =>
-      selectedIds.has(String(provider.id))
+      selectedIds.has(String(provider.id)),
     );
   }, [filteredProviders, selectedIds]);
 
@@ -640,18 +685,18 @@ export default function SystemProvidersReportsPage() {
     const total = providers.length;
     const filtered = filteredProviders.length;
     const active = filteredProviders.filter(
-      (provider) => provider.status === "ACTIVE"
+      (provider) => provider.status === "ACTIVE",
     ).length;
     const suspended = filteredProviders.filter(
-      (provider) => provider.status === "SUSPENDED"
+      (provider) => provider.status === "SUSPENDED",
     ).length;
     const featured = filteredProviders.filter(
-      (provider) => provider.isFeatured
+      (provider) => provider.isFeatured,
     ).length;
     const cities = new Set(
       filteredProviders
         .map((provider) => provider.city || provider.area)
-        .filter(Boolean)
+        .filter(Boolean),
     ).size;
 
     return {
@@ -667,7 +712,7 @@ export default function SystemProvidersReportsPage() {
 
   const visibleIds = useMemo(
     () => filteredProviders.map((provider) => String(provider.id)),
-    [filteredProviders]
+    [filteredProviders],
   );
 
   const isAllSelected =
@@ -704,44 +749,61 @@ export default function SystemProvidersReportsPage() {
   }
 
   function exportExcel() {
-    const rows = selectedRows.map((provider, index) => ({
-      "#": index + 1,
-      [t.table.code]:
-        provider.code && provider.code !== "-" ? provider.code : `#${provider.id}`,
-      [t.table.name]: provider.name,
-      [t.table.providerType]: t.typeLabels[provider.providerType],
-      [t.table.city]: provider.city || provider.area || "-",
-      [t.table.contact]: provider.mobile || provider.phone || "-",
-      [t.table.email]: provider.email || "-",
-      [t.table.status]: t.statusLabels[provider.status],
-      [t.table.featured]: provider.isFeatured ? t.featured : "-",
-    }));
-
-    if (rows.length === 0) {
+    if (selectedRows.length === 0) {
       toast.error(t.emptyTitle);
       return;
     }
 
-    const workbook = XLSX.utils.book_new();
+    const generatedAt = new Date();
 
-    const summaryRows = [
+    const summaryRows: Array<Array<string | number>> = [
       [t.pageTitle],
       [],
-      [t.total, stats.total],
+      [t.overviewTitle, ""],
       [t.showing, stats.filtered],
+      [t.total, stats.total],
       [t.active, stats.active],
       [t.suspended, stats.suspended],
       [t.featured, stats.featured],
       [t.cities, stats.cities],
       [t.selected, stats.selected],
       [],
+      [t.reportTableTitle],
+      [
+        "#",
+        t.table.code,
+        t.table.name,
+        t.table.providerType,
+        t.table.city,
+        t.table.contact,
+        t.table.email,
+        t.table.status,
+        t.table.featured,
+        "Created At",
+        "Updated At",
+      ],
+      ...selectedRows.map((provider, index) => [
+        index + 1,
+        provider.code && provider.code !== "-" ? provider.code : `#${provider.id}`,
+        provider.name,
+        t.typeLabels[provider.providerType],
+        provider.city || provider.area || "-",
+        provider.mobile || provider.phone || "-",
+        provider.email || "-",
+        t.statusLabels[provider.status],
+        provider.isFeatured ? t.featured : "-",
+        formatDateForExport(provider.createdAt),
+        formatDateForExport(provider.updatedAt),
+      ]),
     ];
 
     const worksheet = XLSX.utils.aoa_to_sheet(summaryRows);
-    XLSX.utils.sheet_add_json(worksheet, rows, {
-      origin: "A11",
-      skipHeader: false,
-    });
+
+    worksheet["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 10 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 10 } },
+      { s: { r: 11, c: 0 }, e: { r: 11, c: 10 } },
+    ];
 
     worksheet["!cols"] = [
       { wch: 8 },
@@ -753,19 +815,31 @@ export default function SystemProvidersReportsPage() {
       { wch: 28 },
       { wch: 16 },
       { wch: 14 },
+      { wch: 22 },
+      { wch: 22 },
     ];
+
+    worksheet["!autofilter"] = {
+      ref: `A13:K${Math.max(13 + selectedRows.length, 13)}`,
+    };
+
+    const workbook = XLSX.utils.book_new();
 
     XLSX.utils.book_append_sheet(
       workbook,
       worksheet,
-      locale === "ar" ? "تقرير مقدمي الخدمة" : "Providers Report"
+      safeSheetName(locale === "ar" ? "تقرير مقدمي الخدمة" : "Providers Report"),
     );
 
     XLSX.writeFile(
       workbook,
-      `primey-care-providers-report-${new Date()
+      `primey-care-providers-report-${generatedAt
         .toISOString()
-        .slice(0, 10)}.xlsx`
+        .slice(0, 10)}.xlsx`,
+      {
+        bookType: "xlsx",
+        compression: true,
+      },
     );
 
     toast.success(t.exportSuccess);
@@ -784,53 +858,69 @@ export default function SystemProvidersReportsPage() {
     const direction = isArabic ? "rtl" : "ltr";
     const content = printRef.current.innerHTML;
 
+    printWindow.document.open();
     printWindow.document.write(`
       <html lang="${locale}" dir="${direction}">
         <head>
-          <title>${t.pageTitle}</title>
+          <title>${escapeHtml(t.pageTitle)}</title>
           <meta charset="UTF-8" />
           <style>
             body {
-              font-family: Arial, sans-serif;
+              font-family: Arial, Tahoma, sans-serif;
               padding: 24px;
               direction: ${direction};
               color: #111827;
             }
+
             table {
               width: 100%;
               border-collapse: collapse;
               margin-top: 16px;
             }
-            th, td {
+
+            th,
+            td {
               border: 1px solid #d1d5db;
               padding: 10px;
               font-size: 12px;
               text-align: ${isArabic ? "right" : "left"};
             }
+
             th {
               background: #f3f4f6;
               font-weight: 700;
             }
+
             .print-title {
               font-size: 22px;
               font-weight: 700;
               margin-bottom: 4px;
             }
+
             .print-subtitle {
               color: #6b7280;
               margin-bottom: 16px;
             }
+
             .print-summary {
               display: grid;
               grid-template-columns: repeat(4, 1fr);
               gap: 8px;
               margin-bottom: 16px;
             }
+
             .print-card {
               border: 1px solid #d1d5db;
               border-radius: 12px;
               padding: 12px;
             }
+
+            button,
+            svg,
+            input[type="checkbox"] {
+              display: none !important;
+            }
+
             @media print {
               body {
                 padding: 12px;
@@ -907,9 +997,7 @@ export default function SystemProvidersReportsPage() {
 
   return (
     <div className="space-y-6">
-      {/* =====================================================
-          Header
-      ====================================================== */}
+      {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="order-2 flex flex-wrap items-center gap-2 lg:order-1">
           <Link href="/system/providers">
@@ -937,6 +1025,7 @@ export default function SystemProvidersReportsPage() {
             variant="outline"
             className="rounded-xl"
             onClick={exportExcel}
+            disabled={isLoading || selectedRows.length === 0}
           >
             <Download className="h-4 w-4" />
             <span>{t.exportExcel}</span>
@@ -946,6 +1035,7 @@ export default function SystemProvidersReportsPage() {
             variant="outline"
             className="rounded-xl"
             onClick={printReport}
+            disabled={isLoading}
           >
             <Printer className="h-4 w-4" />
             <span>{t.print}</span>
@@ -965,15 +1055,14 @@ export default function SystemProvidersReportsPage() {
           <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
             {t.pageTitle}
           </h1>
+
           <p className="text-sm leading-7 text-muted-foreground md:text-base">
             {t.pageSubtitle}
           </p>
         </div>
       </div>
 
-      {/* =====================================================
-          Summary
-      ====================================================== */}
+      {/* Summary */}
       <div className="grid gap-4 md:grid-cols-4">
         {summaryCards.map((card) => {
           const Icon = card.icon;
@@ -1000,9 +1089,7 @@ export default function SystemProvidersReportsPage() {
         })}
       </div>
 
-      {/* =====================================================
-          Filters + Mini Reports
-      ====================================================== */}
+      {/* Filters + Mini Reports */}
       <div className="grid gap-6 xl:grid-cols-[0.72fr_1fr]">
         <Card className="rounded-2xl border bg-card shadow-sm">
           <CardHeader className="text-right">
@@ -1036,6 +1123,7 @@ export default function SystemProvidersReportsPage() {
                     <span>{t.statusFilter}</span>
                   </Button>
                 </DropdownMenuTrigger>
+
                 <DropdownMenuContent align="start" className="w-52">
                   {(
                     [
@@ -1065,6 +1153,7 @@ export default function SystemProvidersReportsPage() {
                     <span>{t.typeFilter}</span>
                   </Button>
                 </DropdownMenuTrigger>
+
                 <DropdownMenuContent align="start" className="w-52">
                   <DropdownMenuCheckboxItem
                     checked={typeFilter === "ALL"}
@@ -1092,6 +1181,7 @@ export default function SystemProvidersReportsPage() {
                     <span>{t.featuredFilter}</span>
                   </Button>
                 </DropdownMenuTrigger>
+
                 <DropdownMenuContent align="start" className="w-52">
                   {(
                     [
@@ -1118,6 +1208,7 @@ export default function SystemProvidersReportsPage() {
                     <span>{t.sort}</span>
                   </Button>
                 </DropdownMenuTrigger>
+
                 <DropdownMenuContent align="start" className="w-56">
                   {(
                     [
@@ -1184,9 +1275,7 @@ export default function SystemProvidersReportsPage() {
         </div>
       </div>
 
-      {/* =====================================================
-          Report Table
-      ====================================================== */}
+      {/* Report Table */}
       <Card className="rounded-2xl border bg-card shadow-sm">
         <CardHeader className="pb-3">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1198,6 +1287,7 @@ export default function SystemProvidersReportsPage() {
                     <span>{t.columns}</span>
                   </Button>
                 </DropdownMenuTrigger>
+
                 <DropdownMenuContent align="start" className="w-56">
                   {(
                     [
@@ -1276,27 +1366,35 @@ export default function SystemProvidersReportsPage() {
                         aria-label={t.table.select}
                       />
                     </TableHead>
+
                     {visibleColumns.code ? (
                       <TableHead>{t.table.code}</TableHead>
                     ) : null}
+
                     {visibleColumns.name ? (
                       <TableHead>{t.table.name}</TableHead>
                     ) : null}
+
                     {visibleColumns.providerType ? (
                       <TableHead>{t.table.providerType}</TableHead>
                     ) : null}
+
                     {visibleColumns.city ? (
                       <TableHead>{t.table.city}</TableHead>
                     ) : null}
+
                     {visibleColumns.contact ? (
                       <TableHead>{t.table.contact}</TableHead>
                     ) : null}
+
                     {visibleColumns.email ? (
                       <TableHead>{t.table.email}</TableHead>
                     ) : null}
+
                     {visibleColumns.status ? (
                       <TableHead>{t.table.status}</TableHead>
                     ) : null}
+
                     {visibleColumns.featured ? (
                       <TableHead>{t.table.featured}</TableHead>
                     ) : null}
@@ -1397,9 +1495,7 @@ export default function SystemProvidersReportsPage() {
                         ) : null}
 
                         {visibleColumns.status ? (
-                          <TableCell>
-                            {statusBadge(provider.status, locale)}
-                          </TableCell>
+                          <TableCell>{statusBadge(provider.status, locale)}</TableCell>
                         ) : null}
 
                         {visibleColumns.featured ? (
@@ -1426,9 +1522,7 @@ export default function SystemProvidersReportsPage() {
         </CardContent>
       </Card>
 
-      {/* =====================================================
-          Bottom Insights
-      ====================================================== */}
+      {/* Bottom Insights */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="rounded-2xl border bg-card shadow-sm">
           <CardHeader className="space-y-3 text-right">

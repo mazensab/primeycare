@@ -1,5 +1,30 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/centers/reports/page.tsx
+   🧠 Primey Care | Centers Reports
+   ------------------------------------------------------------
+   ✅ المسار: /system/centers/reports
+   ✅ الإصدار: v1.0.0
+   ✅ العمل: تقارير المراكز / مقدمي الخدمة
+   ✅ API: GET /api/providers/?page_size=100
+   ✅ متوافق مع:
+      - /system/centers
+      - /system/centers/list
+      - /system/centers/[id]
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+   - توثيق مختصر أعلى الملف
+   - دعم Excel للتقرير الحالي فقط
+   - دعم الطباعة Web PDF للتقرير الحالي
+   - دعم عربي / إنجليزي عبر primey-locale
+   - الأرقام دائمًا بالإنجليزي
+   - استخدام رمز العملة /currency/sar.svg
+   - استخدام sonner للتنبيهات
+   - بدون localhost hardcoded
+   - الحفاظ على التصميم السابق بدون كسر الواجهة
+============================================================ */
+
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -54,17 +79,7 @@ import {
 } from "@/components/ui/table";
 
 /* ============================================================
-   📂 app/system/centers/reports/page.tsx
-   🧠 Primey Care | Centers Reports
-   ------------------------------------------------------------
-   ✅ تصميم قريب من الصفحة المدفوعة المرفقة
-   ✅ استخدام UI الداخلي فقط
-   ✅ بطاقات + جداول + فلاتر
-   ✅ تحديد صفوف + إظهار/إخفاء أعمدة
-   ✅ تصدير Excel منظم .xlsx بدل CSV
-   ✅ طباعة
-   ✅ ربط حقيقي مع /api/providers/
-   ✅ بدون localhost hardcoded
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -119,7 +134,7 @@ type ProvidersApiResponse = {
   ok?: boolean;
   message?: string;
   results?: unknown[];
-  data?: unknown[];
+  data?: unknown[] | { results?: unknown[]; items?: unknown[] };
   items?: unknown[];
   providers?: unknown[];
   centers?: unknown[];
@@ -138,7 +153,7 @@ type VisibleColumns = {
 const SAR_ICON = "/currency/sar.svg";
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -146,6 +161,7 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
@@ -168,8 +184,29 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
+function formatNumber(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0";
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(numericValue);
+}
+
+function formatMoney(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0.00";
+
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numericValue);
+}
+
 /* ============================================================
-   🔁 API Normalizers
+   API Normalizers
 ============================================================ */
 
 function normalizeApiList(payload: unknown): unknown[] {
@@ -179,10 +216,26 @@ function normalizeApiList(payload: unknown): unknown[] {
     const data = payload as ProvidersApiResponse;
 
     if (Array.isArray(data.results)) return data.results;
-    if (Array.isArray(data.data)) return data.data;
     if (Array.isArray(data.items)) return data.items;
     if (Array.isArray(data.providers)) return data.providers;
     if (Array.isArray(data.centers)) return data.centers;
+    if (Array.isArray(data.data)) return data.data;
+
+    if (
+      data.data &&
+      typeof data.data === "object" &&
+      Array.isArray(data.data.results)
+    ) {
+      return data.data.results;
+    }
+
+    if (
+      data.data &&
+      typeof data.data === "object" &&
+      Array.isArray(data.data.items)
+    ) {
+      return data.data.items;
+    }
   }
 
   return [];
@@ -221,21 +274,23 @@ function normalizeCenter(item: unknown): Center {
 
   return {
     id: (obj.id ?? "-") as number | string,
-    name: String(obj.name ?? "-"),
-    code: String(obj.code ?? "-"),
-    providerType: normalizeProviderType(obj.provider_type),
-    status: normalizeStatus(obj.status),
-    contactPerson: String(obj.contact_person ?? ""),
+    name: String(obj.name ?? obj.title ?? "-"),
+    code: String(obj.code ?? obj.provider_code ?? "-"),
+    providerType: normalizeProviderType(
+      obj.provider_type ?? obj.type ?? obj.category,
+    ),
+    status: normalizeStatus(obj.status ?? obj.is_active),
+    contactPerson: String(obj.contact_person ?? obj.contact_name ?? ""),
     phone: String(obj.phone ?? ""),
-    mobile: String(obj.mobile ?? ""),
+    mobile: String(obj.mobile ?? obj.phone_number ?? ""),
     email: String(obj.email ?? ""),
     website: String(obj.website ?? ""),
     city: String(obj.city ?? ""),
-    area: String(obj.area ?? ""),
+    area: String(obj.area ?? obj.region ?? ""),
     address: String(obj.address ?? ""),
-    googleMapsLink: String(obj.google_maps_link ?? ""),
+    googleMapsLink: String(obj.google_maps_link ?? obj.map_url ?? ""),
     notes: String(obj.notes ?? ""),
-    isFeatured: Boolean(obj.is_featured),
+    isFeatured: Boolean(obj.is_featured ?? obj.featured),
     createdAt: String(obj.created_at ?? ""),
     updatedAt: String(obj.updated_at ?? ""),
     raw: obj,
@@ -243,7 +298,7 @@ function normalizeCenter(item: unknown): Center {
 }
 
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -259,9 +314,8 @@ function dictionary(locale: AppLocale) {
     list: isArabic ? "قائمة المراكز" : "Centers List",
     refresh: isArabic ? "تحديث" : "Refresh",
     export: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة" : "Print",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
     columns: isArabic ? "الأعمدة" : "Columns",
-    filters: isArabic ? "الفلاتر" : "Filters",
     reset: isArabic ? "إعادة ضبط" : "Reset",
 
     searchPlaceholder: isArabic
@@ -362,7 +416,7 @@ function dictionary(locale: AppLocale) {
 }
 
 /* ============================================================
-   🎨 UI Helpers
+   UI Helpers
 ============================================================ */
 
 function getStatusLabel(status: ProviderStatus, locale: AppLocale) {
@@ -426,11 +480,11 @@ function calculatePercent(value: number, total: number) {
   return Math.round((value / total) * 100);
 }
 
-function formatDateForExcel(value: string, locale: AppLocale) {
+function formatDateForExcel(value: string) {
   if (!value) return "-";
 
   try {
-    return new Intl.DateTimeFormat(locale === "ar" ? "ar-SA" : "en-US", {
+    return new Intl.DateTimeFormat("en-US", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -447,7 +501,7 @@ function safeSheetName(name: string) {
 }
 
 /* ============================================================
-   ✅ Page
+   Page
 ============================================================ */
 
 export default function SystemCentersReportsPage() {
@@ -546,6 +600,7 @@ export default function SystemCentersReportsPage() {
 
       if (first < second) return sortDirection === "asc" ? -1 : 1;
       if (first > second) return sortDirection === "asc" ? 1 : -1;
+
       return 0;
     });
   }, [
@@ -624,7 +679,8 @@ export default function SystemCentersReportsPage() {
     selectedIds.includes(row.id),
   ).length;
 
-  const allPageSelected = pageRows.length > 0 && selectedOnPage === pageRows.length;
+  const allPageSelected =
+    pageRows.length > 0 && selectedOnPage === pageRows.length;
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -717,9 +773,12 @@ export default function SystemCentersReportsPage() {
       [t.title],
       [],
       [t.excelSummary, ""],
-      [t.generatedAt, generatedAt.toLocaleString(locale === "ar" ? "ar-SA" : "en-US")],
+      [t.generatedAt, generatedAt.toLocaleString("en-US")],
       [t.reportScope, t.currentFilteredData],
-      [t.showing, `${filteredCenters.length} / ${centers.length}`],
+      [
+        t.showing,
+        `${formatNumber(filteredCenters.length)} / ${formatNumber(centers.length)}`,
+      ],
       [t.totalCenters, report.total],
       [t.activeCenters, report.active],
       [t.stoppedCenters, report.stopped],
@@ -763,10 +822,10 @@ export default function SystemCentersReportsPage() {
         center.email || "-",
         center.website || "-",
         getStatusLabel(center.status, locale),
-        center.isFeatured ? (isArabic ? "نعم" : "Yes") : (isArabic ? "لا" : "No"),
+        center.isFeatured ? (isArabic ? "نعم" : "Yes") : isArabic ? "لا" : "No",
         center.address || "-",
-        formatDateForExcel(center.createdAt, locale),
-        formatDateForExcel(center.updatedAt, locale),
+        formatDateForExcel(center.createdAt),
+        formatDateForExcel(center.updatedAt),
       ]),
     ];
 
@@ -924,7 +983,11 @@ export default function SystemCentersReportsPage() {
             <span>{t.export}</span>
           </Button>
 
-          <Button className="h-10 rounded-xl" onClick={printReport} disabled={isLoading}>
+          <Button
+            className="h-10 rounded-xl"
+            onClick={printReport}
+            disabled={isLoading}
+          >
             <Printer className="h-4 w-4" />
             <span>{t.print}</span>
           </Button>
@@ -933,9 +996,7 @@ export default function SystemCentersReportsPage() {
 
       <div className="hidden print:block">
         <h1 className="text-xl font-bold">{t.title}</h1>
-        <p className="mt-1 text-sm">
-          {new Date().toLocaleString(locale === "ar" ? "ar-SA" : "en-US")}
-        </p>
+        <p className="mt-1 text-sm">{new Date().toLocaleString("en-US")}</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -968,12 +1029,15 @@ export default function SystemCentersReportsPage() {
           const Icon = item.icon;
 
           return (
-            <Card key={item.label} className="rounded-2xl border bg-card shadow-sm print:shadow-none">
+            <Card
+              key={item.label}
+              className="rounded-2xl border bg-card shadow-sm print:shadow-none"
+            >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-2xl font-bold">
-                      {isLoading ? "..." : item.value}
+                      {isLoading ? "..." : formatNumber(item.value)}
                     </p>
                     <p className="text-muted-foreground mt-1 text-sm">
                       {item.label}
@@ -987,7 +1051,7 @@ export default function SystemCentersReportsPage() {
 
                 <div className="mt-3 flex items-center gap-2">
                   <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                    {item.percent}%
+                    {formatNumber(item.percent)}%
                   </span>
                   <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
                     <div
@@ -1031,6 +1095,7 @@ export default function SystemCentersReportsPage() {
           loading={isLoading}
           loadingText={t.loading}
           noResults={t.noResults}
+          recordLabel={isArabic ? "سجل" : "record"}
         />
 
         <ReportMiniTable
@@ -1044,6 +1109,7 @@ export default function SystemCentersReportsPage() {
           loading={isLoading}
           loadingText={t.loading}
           noResults={t.noResults}
+          recordLabel={isArabic ? "سجل" : "record"}
         />
 
         <ReportMiniTable
@@ -1057,6 +1123,7 @@ export default function SystemCentersReportsPage() {
           loading={isLoading}
           loadingText={t.loading}
           noResults={t.noResults}
+          recordLabel={isArabic ? "سجل" : "record"}
         />
       </div>
 
@@ -1071,19 +1138,19 @@ export default function SystemCentersReportsPage() {
             {[
               {
                 label: t.revenue,
-                value: "0.00",
+                value: formatMoney(0),
                 icon: Wallet,
                 isMoney: true,
               },
               {
                 label: t.linkedInvoices,
-                value: "0",
+                value: formatNumber(0),
                 icon: FileText,
                 isMoney: false,
               },
               {
                 label: t.operationalActivity,
-                value: String(report.total),
+                value: formatNumber(report.total),
                 icon: Activity,
                 isMoney: false,
               },
@@ -1124,9 +1191,12 @@ export default function SystemCentersReportsPage() {
         <CardHeader className="pb-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <CardTitle className="text-base font-bold">{t.detailedReport}</CardTitle>
+              <CardTitle className="text-base font-bold">
+                {t.detailedReport}
+              </CardTitle>
               <CardDescription>
-                {t.showing}: {filteredCenters.length} / {centers.length}
+                {t.showing}: {formatNumber(filteredCenters.length)} /{" "}
+                {formatNumber(centers.length)}
               </CardDescription>
             </div>
 
@@ -1450,11 +1520,12 @@ export default function SystemCentersReportsPage() {
 
             <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:items-center sm:justify-end">
               <div className="text-muted-foreground flex-1 text-sm">
-                {selectedIds.length} / {filteredCenters.length} {t.selectedRows}
+                {formatNumber(selectedIds.length)} /{" "}
+                {formatNumber(filteredCenters.length)} {t.selectedRows}
               </div>
 
               <div className="text-muted-foreground text-sm">
-                {pageIndex + 1} / {pageCount}
+                {formatNumber(pageIndex + 1)} / {formatNumber(pageCount)}
               </div>
 
               <div className="flex items-center gap-2">
@@ -1491,7 +1562,7 @@ export default function SystemCentersReportsPage() {
 }
 
 /* ============================================================
-   🔹 Small Components
+   Small Components
 ============================================================ */
 
 function ReportMiniTable({
@@ -1501,6 +1572,7 @@ function ReportMiniTable({
   loading,
   loadingText,
   noResults,
+  recordLabel,
 }: {
   title: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -1508,6 +1580,7 @@ function ReportMiniTable({
   loading: boolean;
   loadingText: string;
   noResults: string;
+  recordLabel: string;
 }) {
   return (
     <Card className="rounded-2xl border bg-card shadow-sm print:shadow-none">
@@ -1535,12 +1608,12 @@ function ReportMiniTable({
                 <div className="min-w-0">
                   <p className="truncate font-semibold">{row.label}</p>
                   <p className="text-muted-foreground text-xs">
-                    {row.value} سجل
+                    {formatNumber(row.value)} {recordLabel}
                   </p>
                 </div>
 
                 <Badge variant="secondary" className="rounded-full">
-                  {row.percent}%
+                  {formatNumber(row.percent)}%
                 </Badge>
               </div>
 
