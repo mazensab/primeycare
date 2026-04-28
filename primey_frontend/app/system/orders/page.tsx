@@ -2,29 +2,30 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import type { ElementType } from "react";
+import type { ElementType, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BadgeCheck,
   BarChart3,
+  Building2,
   CreditCard,
-  Download,
   Eye,
   FileText,
-  Filter,
-  ListChecks,
   Loader2,
+  Package,
   PackageCheck,
-  Phone,
   Plus,
+  ReceiptText,
   RefreshCcw,
   Search,
   ShieldCheck,
   ShoppingBag,
+  TrendingUp,
   Truck,
   UserRound,
   Wallet,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -53,13 +54,21 @@ import { API_PATHS, apiGet } from "@/lib/api";
    📂 app/system/orders/page.tsx
    🧠 Primey Care | System Orders Dashboard
    ------------------------------------------------------------
-   ✅ صفحة الطلبات الرئيسية بنفس نمط صفحة المراكز
-   ✅ استخدام UI الداخلي فقط
+   ✅ لوحة الطلبات الرئيسية
    ✅ ربط حقيقي مع /api/orders/
-   ✅ دعم عربي / إنجليزي من primey-locale
+   ✅ يدعم المرحلة 8:
+      - Customer
+      - Product
+      - Provider / Center
+      - Contract
+      - Agent
+      - Invoice
+   ✅ روابط: القائمة / الإنشاء / التقارير / التفاصيل
+   ✅ عربي / إنجليزي عبر primey-locale
    ✅ الأرقام دائمًا بالإنجليزية
-   ✅ استخدام رمز SAR من /currency/sar.svg
-   ✅ بدون hardcoded localhost
+   ✅ رمز SAR من /currency/sar.svg
+   ✅ بدون localhost
+   ✅ sonner
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -102,29 +111,37 @@ type OrderSource =
 type Order = {
   id: number | string;
   orderNumber: string;
+
   customerName: string;
   customerPhone: string;
   customerEmail: string;
+
   productName: string;
   productCode: string;
   productType: string;
+
+  providerName: string;
+  providerCode: string;
+
+  contractTitle: string;
+  contractNumber: string;
+
+  agentName: string;
+  agentCode: string;
+
+  invoiceId: number | string | null;
+  invoiceNumber: string;
+  hasInvoice: boolean;
+
   status: OrderStatus;
   paymentStatus: PaymentStatus;
   fulfillmentStatus: FulfillmentStatus;
   source: OrderSource;
-  currencyCode: string;
-  unitPrice: number;
-  quantity: number;
-  subtotalAmount: number;
-  discountAmount: number;
-  taxAmount: number;
+
   totalAmount: number;
   amountPaid: number;
   remainingAmount: number;
-  issueReference: string;
   createdAt: string;
-  updatedAt: string;
-  raw: Record<string, unknown>;
 };
 
 type OrdersApiResponse = {
@@ -134,18 +151,10 @@ type OrdersApiResponse = {
   data?: unknown[] | Record<string, unknown>;
   items?: unknown[];
   orders?: unknown[];
-  pagination?: {
-    page?: number;
-    page_size?: number;
-    total_pages?: number;
-    total_items?: number;
-    has_next?: boolean;
-    has_previous?: boolean;
-  };
 };
 
 /* ============================================================
-   🌐 Locale Helpers
+   🌐 Locale
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -157,48 +166,54 @@ function readLocale(): AppLocale {
     if (savedLocale === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
 
 function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+  if (typeof document === "undefined") return;
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+  document.documentElement.lang = locale;
+  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+  document.body.dir = locale === "ar" ? "rtl" : "ltr";
 }
 
 /* ============================================================
-   🔁 API Normalizers
+   🔁 Normalizers
 ============================================================ */
 
 function normalizeApiList(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
 
-  if (payload && typeof payload === "object") {
-    const data = payload as OrdersApiResponse;
+  if (!payload || typeof payload !== "object") return [];
 
-    if (Array.isArray(data.results)) return data.results;
-    if (Array.isArray(data.data)) return data.data;
-    if (Array.isArray(data.items)) return data.items;
-    if (Array.isArray(data.orders)) return data.orders;
+  const data = payload as OrdersApiResponse;
 
-    if (data.data && typeof data.data === "object") {
-      const nested = data.data as OrdersApiResponse;
-      if (Array.isArray(nested.results)) return nested.results;
-      if (Array.isArray(nested.items)) return nested.items;
-      if (Array.isArray(nested.orders)) return nested.orders;
-    }
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.data)) return data.data;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.orders)) return data.orders;
+
+  if (data.data && typeof data.data === "object") {
+    const nested = data.data as OrdersApiResponse;
+
+    if (Array.isArray(nested.results)) return nested.results;
+    if (Array.isArray(nested.items)) return nested.items;
+    if (Array.isArray(nested.orders)) return nested.orders;
   }
 
   return [];
+}
+
+function safeRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+  return value as Record<string, unknown>;
+}
+
+function safeText(value: unknown, fallback = ""): string {
+  if (value === null || value === undefined || value === "") return fallback;
+  return String(value);
 }
 
 function toNumber(value: unknown): number {
@@ -260,37 +275,74 @@ function normalizeSource(value: unknown): OrderSource {
 }
 
 function normalizeOrder(item: unknown): Order {
-  const obj = (item || {}) as Record<string, unknown>;
+  const obj = safeRecord(item);
 
-  const customer = (obj.customer || {}) as Record<string, unknown>;
-  const product = (obj.product || {}) as Record<string, unknown>;
+  const customer = safeRecord(obj.customer);
+  const product = safeRecord(obj.product);
+  const provider = safeRecord(obj.provider);
+  const contract = safeRecord(obj.contract);
+  const agent = safeRecord(obj.agent);
+  const invoice = safeRecord(obj.invoice);
+
+  const invoiceId = obj.invoice_id ?? invoice.id ?? null;
 
   return {
     id: (obj.id ?? "-") as number | string,
-    orderNumber: String(obj.order_number ?? ""),
-    customerName: String(customer.full_name ?? obj.customer_name ?? "-"),
-    customerPhone: String(customer.phone ?? obj.customer_phone ?? ""),
-    customerEmail: String(customer.email ?? obj.customer_email ?? ""),
-    productName: String(obj.product_name ?? product.name ?? "-"),
-    productCode: String(product.code ?? obj.product_code ?? ""),
-    productType: String(obj.product_type ?? product.product_type ?? ""),
+    orderNumber: safeText(obj.order_number),
+
+    customerName: safeText(
+      customer.display_name ??
+        customer.full_name ??
+        customer.name ??
+        obj.customer_name,
+      "-",
+    ),
+    customerPhone: safeText(
+      customer.phone_number ??
+        customer.whatsapp_number ??
+        customer.phone ??
+        obj.customer_phone,
+    ),
+    customerEmail: safeText(customer.email ?? obj.customer_email),
+
+    productName: safeText(obj.product_name ?? product.name, "-"),
+    productCode: safeText(product.code ?? obj.product_code),
+    productType: safeText(obj.product_type ?? product.product_type),
+
+    providerName: safeText(
+      provider.name ??
+        provider.display_name ??
+        provider.provider_name ??
+        provider.center_name,
+      "-",
+    ),
+    providerCode: safeText(provider.code ?? provider.provider_code),
+
+    contractTitle: safeText(contract.title ?? contract.name, "-"),
+    contractNumber: safeText(contract.contract_number ?? contract.number),
+
+    agentName: safeText(
+      agent.name ??
+        agent.display_name ??
+        agent.full_name ??
+        agent.agent_name,
+      "-",
+    ),
+    agentCode: safeText(agent.agent_code ?? agent.code),
+
+    invoiceId: invoiceId as number | string | null,
+    invoiceNumber: safeText(invoice.invoice_number ?? invoice.number),
+    hasInvoice: Boolean(obj.has_invoice || invoiceId),
+
     status: normalizeOrderStatus(obj.status),
     paymentStatus: normalizePaymentStatus(obj.payment_status),
     fulfillmentStatus: normalizeFulfillmentStatus(obj.fulfillment_status),
     source: normalizeSource(obj.source),
-    currencyCode: String(obj.currency_code ?? product.currency_code ?? "SAR"),
-    unitPrice: toNumber(obj.unit_price),
-    quantity: toNumber(obj.quantity || 1),
-    subtotalAmount: toNumber(obj.subtotal_amount),
-    discountAmount: toNumber(obj.discount_amount),
-    taxAmount: toNumber(obj.tax_amount),
+
     totalAmount: toNumber(obj.total_amount),
     amountPaid: toNumber(obj.amount_paid),
     remainingAmount: toNumber(obj.remaining_amount),
-    issueReference: String(obj.issue_reference ?? ""),
-    createdAt: String(obj.created_at ?? ""),
-    updatedAt: String(obj.updated_at ?? ""),
-    raw: obj,
+    createdAt: safeText(obj.created_at),
   };
 }
 
@@ -304,93 +356,65 @@ function dictionary(locale: AppLocale) {
   return {
     pageTitle: isArabic ? "إدارة الطلبات" : "Orders Management",
     pageSubtitle: isArabic
-      ? "متابعة طلبات العملاء، حالات الدفع، التنفيذ، والقيم المالية من بيانات حقيقية."
-      : "Monitor customer orders, payment statuses, fulfillment, and financial values from live data.",
+      ? "لوحة تشغيلية لمتابعة دورة الطلبات وربط العملاء والمنتجات والمراكز والعقود والمندوبين والفواتير."
+      : "Operational dashboard to track the order lifecycle across customers, products, providers, contracts, agents and invoices.",
 
-    addOrder: isArabic ? "إنشاء طلب" : "Create Order",
-    ordersList: isArabic ? "قائمة الطلبات" : "Orders List",
-    reports: isArabic ? "التقارير" : "Reports",
-    export: isArabic ? "تصدير" : "Export",
     refresh: isArabic ? "تحديث" : "Refresh",
+    list: isArabic ? "قائمة الطلبات" : "Orders List",
+    create: isArabic ? "إنشاء طلب" : "Create Order",
+    reports: isArabic ? "التقارير" : "Reports",
+    details: isArabic ? "التفاصيل" : "Details",
 
-    featuredOrders: isArabic ? "أحدث الطلبات" : "Latest Orders",
-    featuredSubtitle: isArabic
-      ? "عرض مختصر لأحدث الطلبات حسب تاريخ الإنشاء."
-      : "A compact view of the most recent orders by creation date.",
+    searchPlaceholder: isArabic
+      ? "ابحث برقم الطلب، العميل، المنتج، المركز، العقد، المندوب، الفاتورة..."
+      : "Search by order, customer, product, provider, contract, agent or invoice...",
 
-    trackStatus: isArabic ? "حالة الطلبات" : "Track Order Status",
-    trackSubtitle: isArabic
-      ? "تحليل سريع لحالة الطلبات والدفع والتنفيذ."
-      : "Quick analysis of order, payment, and fulfillment statuses.",
-
-    filterPlaceholder: isArabic ? "ابحث في الطلبات..." : "Filter orders...",
-    columns: isArabic ? "الأعمدة" : "Columns",
-    previous: isArabic ? "السابق" : "Previous",
-    next: isArabic ? "التالي" : "Next",
-
-    total: isArabic ? "الإجمالي" : "Total",
-    open: isArabic ? "مفتوحة" : "Open",
-    completed: isArabic ? "مكتملة" : "Completed",
-    cancelled: isArabic ? "ملغاة" : "Cancelled",
-    paid: isArabic ? "مدفوعة" : "Paid",
-    unpaid: isArabic ? "غير مدفوعة" : "Unpaid",
-    partiallyPaid: isArabic ? "مدفوعة جزئيًا" : "Partially Paid",
-    failed: isArabic ? "فاشلة" : "Failed",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    newOrders: isArabic ? "طلبات جديدة" : "New Orders",
-    operational: isArabic ? "تشغيلي" : "Operational",
-    needsReview: isArabic ? "يحتاج متابعة" : "Needs Review",
-    stopped: isArabic ? "متوقف" : "Stopped",
-
-    totalValue: isArabic ? "إجمالي قيمة الطلبات" : "Total Order Value",
+    totalOrders: isArabic ? "إجمالي الطلبات" : "Total Orders",
+    openOrders: isArabic ? "طلبات مفتوحة" : "Open Orders",
+    completedOrders: isArabic ? "طلبات مكتملة" : "Completed Orders",
+    cancelledOrders: isArabic ? "ملغاة / مستردة" : "Cancelled / Refunded",
+    totalValue: isArabic ? "إجمالي القيمة" : "Total Value",
     paidValue: isArabic ? "إجمالي المدفوع" : "Total Paid",
     remainingValue: isArabic ? "إجمالي المتبقي" : "Total Remaining",
+    invoicedOrders: isArabic ? "طلبات مفوترة" : "Invoiced Orders",
 
-    table: {
-      id: isArabic ? "رقم الطلب" : "Order No.",
-      customer: isArabic ? "العميل" : "Customer",
-      product: isArabic ? "المنتج" : "Product",
-      amount: isArabic ? "المبلغ" : "Amount",
-      payment: isArabic ? "الدفع" : "Payment",
-      fulfillment: isArabic ? "التنفيذ" : "Fulfillment",
-      status: isArabic ? "الحالة" : "Status",
-      action: isArabic ? "الإجراء" : "Action",
-    },
+    quickActions: isArabic ? "إجراءات سريعة" : "Quick Actions",
+    quickActionsDesc: isArabic
+      ? "اختصارات تشغيلية لإدارة دورة الطلب."
+      : "Operational shortcuts to manage the order lifecycle.",
 
-    emptyTitle: isArabic ? "لا توجد طلبات بعد" : "No orders yet",
-    emptyText: isArabic
-      ? "عند إنشاء طلب جديد من صفحة الإنشاء أو عبر النظام سيظهر هنا مباشرة."
-      : "Orders created from the create page or system will appear here.",
-    loading: isArabic ? "جاري تحميل بيانات الطلبات..." : "Loading orders data...",
+    latestOrders: isArabic ? "آخر الطلبات" : "Latest Orders",
+    latestOrdersDesc: isArabic
+      ? "آخر الطلبات المسجلة في النظام مع روابط دورة الطلب."
+      : "Latest orders recorded in the system with lifecycle links.",
+
+    lifecycleOverview: isArabic ? "ملخص دورة الطلب" : "Lifecycle Overview",
+    lifecycleOverviewDesc: isArabic
+      ? "توزيع الطلبات حسب الحالة والدفع والتنفيذ."
+      : "Orders distribution by status, payment and fulfillment.",
+
+    orderNumber: isArabic ? "رقم الطلب" : "Order No.",
+    customer: isArabic ? "العميل" : "Customer",
+    product: isArabic ? "المنتج" : "Product",
+    provider: isArabic ? "المركز" : "Provider",
+    contract: isArabic ? "العقد" : "Contract",
+    agent: isArabic ? "المندوب" : "Agent",
+    invoice: isArabic ? "الفاتورة" : "Invoice",
+    amount: isArabic ? "المبلغ" : "Amount",
+    payment: isArabic ? "الدفع" : "Payment",
+    fulfillment: isArabic ? "التنفيذ" : "Fulfillment",
+    status: isArabic ? "الحالة" : "Status",
+    source: isArabic ? "المصدر" : "Source",
+    actions: isArabic ? "الإجراءات" : "Actions",
+
+    notLinked: isArabic ? "غير مرتبط" : "Not linked",
+    noOrdersTitle: isArabic ? "لا توجد طلبات" : "No orders found",
+    noOrdersText: isArabic
+      ? "لم يتم العثور على طلبات مطابقة للبحث الحالي."
+      : "No orders match the current search.",
+    loading: isArabic ? "جاري تحميل الطلبات..." : "Loading orders...",
     apiError: isArabic ? "تعذر تحميل بيانات الطلبات." : "Unable to load orders data.",
-    refreshSuccess: isArabic
-      ? "تم تحديث بيانات الطلبات بنجاح"
-      : "Orders data refreshed successfully",
-
-    quickAccessTitle: isArabic ? "إجراءات وحدة الطلبات" : "Orders Module Actions",
-    quickAccessSubtitle: isArabic
-      ? "اختصارات منظمة للوصول إلى أهم صفحات وحدة الطلبات بدون عرض روابط خام."
-      : "Organized shortcuts to the key orders module pages without raw route text.",
-
-    openAction: isArabic ? "فتح" : "Open",
-    manage: isArabic ? "إدارة" : "Manage",
-    view: isArabic ? "عرض" : "View",
-
-    actionListTitle: isArabic ? "قائمة الطلبات" : "Orders List",
-    actionListDesc: isArabic
-      ? "استعراض جميع الطلبات، البحث، التصفية، وإدارة السجلات."
-      : "Browse all orders, search, filter, and manage records.",
-
-    actionCreateTitle: isArabic ? "إنشاء طلب" : "Create Order",
-    actionCreateDesc: isArabic
-      ? "إضافة طلب جديد وربط العميل بالمنتج مع السعر والحالة."
-      : "Add a new order and link the customer with product, price, and status.",
-
-    actionReportsTitle: isArabic ? "تقارير الطلبات" : "Orders Reports",
-    actionReportsDesc: isArabic
-      ? "عرض تقارير تشغيلية، فلاتر، جداول، تصدير وطباعة."
-      : "View operational reports, filters, tables, export and print.",
+    refreshSuccess: isArabic ? "تم تحديث الطلبات بنجاح." : "Orders refreshed successfully.",
 
     statusLabels: {
       draft: isArabic ? "مسودة" : "Draft",
@@ -452,7 +476,7 @@ function formatMoney(value: number) {
 
 function CurrencyAmount({ value }: { value: number }) {
   return (
-    <span className="inline-flex items-center gap-1 font-semibold">
+    <span className="inline-flex items-center gap-1 font-semibold" dir="ltr">
       <span>{formatMoney(value)}</span>
       <Image
         src="/currency/sar.svg"
@@ -465,120 +489,50 @@ function CurrencyAmount({ value }: { value: number }) {
   );
 }
 
-function percent(value: number, total: number) {
-  if (!total) return 0;
-  return Math.round((value / total) * 100);
-}
-
-function statusBadge(status: OrderStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-  const label = t.statusLabels[status];
-
-  if (status === "completed" || status === "confirmed") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "pending" || status === "processing") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "cancelled" || status === "refunded") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "draft") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
+function StatCard({
+  title,
+  value,
+  subtitle,
+  icon: Icon,
+  money = false,
+}: {
+  title: string;
+  value: number;
+  subtitle: string;
+  icon: ElementType;
+  money?: boolean;
+}) {
   return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <p className="text-muted-foreground text-sm">{title}</p>
+            <div className="text-2xl font-bold">
+              {money ? <CurrencyAmount value={value} /> : formatNumber(value)}
+            </div>
+            <p className="text-muted-foreground text-xs">{subtitle}</p>
+          </div>
+
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
+            <Icon className="h-5 w-5" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
-function paymentBadge(status: PaymentStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-  const label = t.paymentLabels[status];
-
-  if (status === "paid") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "partially_paid") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "failed" || status === "refunded") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
+function StatusBadge({
+  children,
+  variant = "secondary",
+}: {
+  children: ReactNode;
+  variant?: "secondary" | "outline";
+}) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
-  );
-}
-
-function fulfillmentBadge(status: FulfillmentStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-  const label = t.fulfillmentLabels[status];
-
-  if (status === "issued" || status === "delivered") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "in_progress") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "failed") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge variant={variant} className="rounded-full">
+      {children}
     </Badge>
   );
 }
@@ -590,8 +544,8 @@ function fulfillmentBadge(status: FulfillmentStatus, locale: AppLocale) {
 export default function SystemOrdersPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [orders, setOrders] = useState<Order[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
@@ -610,43 +564,48 @@ export default function SystemOrdersPage() {
         order.productName.toLowerCase().includes(cleanQuery) ||
         order.productCode.toLowerCase().includes(cleanQuery) ||
         order.productType.toLowerCase().includes(cleanQuery) ||
-        order.status.toLowerCase().includes(cleanQuery) ||
-        order.paymentStatus.toLowerCase().includes(cleanQuery) ||
-        order.fulfillmentStatus.toLowerCase().includes(cleanQuery) ||
-        order.source.toLowerCase().includes(cleanQuery)
+        order.providerName.toLowerCase().includes(cleanQuery) ||
+        order.providerCode.toLowerCase().includes(cleanQuery) ||
+        order.contractTitle.toLowerCase().includes(cleanQuery) ||
+        order.contractNumber.toLowerCase().includes(cleanQuery) ||
+        order.agentName.toLowerCase().includes(cleanQuery) ||
+        order.agentCode.toLowerCase().includes(cleanQuery) ||
+        order.invoiceNumber.toLowerCase().includes(cleanQuery)
       );
     });
   }, [orders, query]);
 
+  const latestOrders = useMemo(() => {
+    return [...filteredOrders].slice(0, 8);
+  }, [filteredOrders]);
+
   const stats = useMemo(() => {
     const total = orders.length;
 
-    const completed = orders.filter((item) => item.status === "completed").length;
-
-    const cancelled = orders.filter((item) =>
-      ["cancelled", "refunded"].includes(item.status),
-    ).length;
-
     const open = orders.filter(
-      (item) => !["completed", "cancelled", "refunded"].includes(item.status),
+      (order) =>
+        !["completed", "cancelled", "refunded"].includes(order.status),
     ).length;
 
-    const paid = orders.filter((item) => item.paymentStatus === "paid").length;
-
-    const unpaid = orders.filter((item) => item.paymentStatus === "unpaid").length;
-
-    const partiallyPaid = orders.filter(
-      (item) => item.paymentStatus === "partially_paid",
+    const completed = orders.filter(
+      (order) => order.status === "completed",
     ).length;
 
-    const failedPayments = orders.filter(
-      (item) => item.paymentStatus === "failed",
+    const cancelled = orders.filter((order) =>
+      ["cancelled", "refunded"].includes(order.status),
     ).length;
 
-    const totalValue = orders.reduce((sum, item) => sum + item.totalAmount, 0);
-    const paidValue = orders.reduce((sum, item) => sum + item.amountPaid, 0);
+    const invoiced = orders.filter((order) => order.hasInvoice).length;
+
+    const totalValue = orders.reduce(
+      (sum, order) => sum + order.totalAmount,
+      0,
+    );
+
+    const paidValue = orders.reduce((sum, order) => sum + order.amountPaid, 0);
+
     const remainingValue = orders.reduce(
-      (sum, item) => sum + item.remainingAmount,
+      (sum, order) => sum + order.remainingAmount,
       0,
     );
 
@@ -655,95 +614,29 @@ export default function SystemOrdersPage() {
       open,
       completed,
       cancelled,
-      paid,
-      unpaid,
-      partiallyPaid,
-      failedPayments,
+      invoiced,
       totalValue,
       paidValue,
       remainingValue,
     };
   }, [orders]);
 
-  const latestOrders = useMemo(() => {
-    return [...orders]
-      .sort((a, b) => {
-        const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const bDate = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return bDate - aDate;
-      })
-      .slice(0, 6);
+  const lifecycleCounts = useMemo(() => {
+    return {
+      pending: orders.filter((order) => order.status === "pending").length,
+      confirmed: orders.filter((order) => order.status === "confirmed").length,
+      processing: orders.filter((order) => order.status === "processing").length,
+      completed: orders.filter((order) => order.status === "completed").length,
+      unpaid: orders.filter((order) => order.paymentStatus === "unpaid").length,
+      paid: orders.filter((order) => order.paymentStatus === "paid").length,
+      inProgress: orders.filter(
+        (order) => order.fulfillmentStatus === "in_progress",
+      ).length,
+      delivered: orders.filter(
+        (order) => order.fulfillmentStatus === "delivered",
+      ).length,
+    };
   }, [orders]);
-
-  const tableRows = useMemo(() => filteredOrders.slice(0, 8), [filteredOrders]);
-
-  const statusCards = useMemo(
-    () => [
-      {
-        title: t.total,
-        value: stats.total,
-        helper: t.newOrders,
-        helperValue: "+0.0%",
-        icon: ShoppingBag,
-        percent: 100,
-      },
-      {
-        title: t.open,
-        value: stats.open,
-        helper: t.needsReview,
-        helperValue: `${percent(stats.open, stats.total)}%`,
-        icon: Activity,
-        percent: percent(stats.open, stats.total),
-      },
-      {
-        title: t.completed,
-        value: stats.completed,
-        helper: t.operational,
-        helperValue: `${percent(stats.completed, stats.total)}%`,
-        icon: BadgeCheck,
-        percent: percent(stats.completed, stats.total),
-      },
-      {
-        title: t.cancelled,
-        value: stats.cancelled,
-        helper: t.stopped,
-        helperValue: `${percent(stats.cancelled, stats.total)}%`,
-        icon: ShieldCheck,
-        percent: percent(stats.cancelled, stats.total),
-      },
-    ],
-    [stats, t],
-  );
-
-  const moduleActions = useMemo(
-    () => [
-      {
-        title: t.actionListTitle,
-        description: t.actionListDesc,
-        href: "/system/orders/list",
-        icon: ListChecks,
-        badge: `${orders.length}`,
-        cta: t.manage,
-      },
-      {
-        title: t.actionCreateTitle,
-        description: t.actionCreateDesc,
-        href: "/system/orders/create",
-        icon: Plus,
-        badge: isArabic ? "جديد" : "New",
-        cta: t.openAction,
-      },
-      {
-        title: t.actionReportsTitle,
-        description: t.actionReportsDesc,
-        href: "/system/orders/reports",
-        icon: BarChart3,
-        badge: isArabic ? "تحليل" : "Reports",
-        cta: t.view,
-      },
-    ],
-    [orders.length, isArabic, t],
-  );
 
   async function loadOrders(showToast = false) {
     try {
@@ -754,10 +647,12 @@ export default function SystemOrdersPage() {
       });
 
       if (!result.ok) {
-        throw new Error(result.message);
+        throw new Error(result.message || t.apiError);
       }
 
-      const normalized = normalizeApiList(result.data).map(normalizeOrder);
+      const normalized = normalizeApiList(result.data ?? result).map(
+        normalizeOrder,
+      );
 
       setOrders(normalized);
 
@@ -765,7 +660,7 @@ export default function SystemOrdersPage() {
         toast.success(t.refreshSuccess);
       }
     } catch (error) {
-      console.error("Failed to load orders:", error);
+      console.error("Failed to load orders dashboard:", error);
       setOrders([]);
       toast.error(t.apiError);
     } finally {
@@ -806,16 +701,26 @@ export default function SystemOrdersPage() {
   }, [locale]);
 
   return (
-    <div className="space-y-4">
-      {/* =====================================================
-          Header
-      ====================================================== */}
+    <div className="space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="rounded-full">
+              <ShoppingBag className="h-3.5 w-3.5" />
+              {t.pageTitle}
+            </Badge>
+
+            <Badge variant="outline" className="rounded-full">
+              <BadgeCheck className="h-3.5 w-3.5" />
+              Order Lifecycle
+            </Badge>
+          </div>
+
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
             {t.pageTitle}
           </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className="text-muted-foreground mt-1 max-w-3xl text-sm leading-6">
             {t.pageSubtitle}
           </p>
         </div>
@@ -832,265 +737,244 @@ export default function SystemOrdersPage() {
             ) : (
               <RefreshCcw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          <Link href="/system/orders/reports">
-            <Button variant="outline" className="h-10 w-full rounded-xl sm:w-auto">
-              <BarChart3 className="h-4 w-4" />
-              <span>{t.reports}</span>
-            </Button>
-          </Link>
+          <Button asChild variant="outline" className="h-10 rounded-xl">
+            <Link href="/system/orders/list">
+              <FileText className="h-4 w-4" />
+              {t.list}
+            </Link>
+          </Button>
 
-          <Link href="/system/orders/create">
-            <Button className="h-10 w-full rounded-xl sm:w-auto">
+          <Button asChild variant="outline" className="h-10 rounded-xl">
+            <Link href="/system/orders/reports">
+              <BarChart3 className="h-4 w-4" />
+              {t.reports}
+            </Link>
+          </Button>
+
+          <Button asChild className="h-10 w-full rounded-xl sm:w-auto">
+            <Link href="/system/orders/create">
               <Plus className="h-4 w-4" />
-              <span>{t.addOrder}</span>
-            </Button>
-          </Link>
+              {t.create}
+            </Link>
+          </Button>
         </div>
       </div>
 
-      {/* =====================================================
-          Main Layout
-      ====================================================== */}
-      <div className="grid gap-4 xl:grid-cols-3">
-        {/* Latest Orders */}
-        <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
-          <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-            <div>
-              <CardTitle className="text-base font-bold">
-                {t.featuredOrders}
-              </CardTitle>
-              <CardDescription className="mt-1 text-sm">
-                {t.featuredSubtitle}
-              </CardDescription>
-            </div>
+      {/* Search */}
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="p-4">
+          <div className="relative">
+            <Search
+              className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
+                isArabic ? "right-3" : "left-3"
+              }`}
+            />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t.searchPlaceholder}
+              className={`h-10 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+            />
+          </div>
+        </CardContent>
+      </Card>
 
-            <Link href="/system/orders/list">
-              <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl">
-                <ListChecks className="h-4 w-4" />
-              </Button>
-            </Link>
+      {/* Stats */}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title={t.totalOrders}
+          value={stats.total}
+          subtitle={t.latestOrders}
+          icon={ShoppingBag}
+        />
+        <StatCard
+          title={t.openOrders}
+          value={stats.open}
+          subtitle={t.lifecycleOverview}
+          icon={Activity}
+        />
+        <StatCard
+          title={t.completedOrders}
+          value={stats.completed}
+          subtitle={t.fulfillment}
+          icon={PackageCheck}
+        />
+        <StatCard
+          title={t.cancelledOrders}
+          value={stats.cancelled}
+          subtitle={t.status}
+          icon={XCircle}
+        />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title={t.totalValue}
+          value={stats.totalValue}
+          subtitle={t.amount}
+          icon={Wallet}
+          money
+        />
+        <StatCard
+          title={t.paidValue}
+          value={stats.paidValue}
+          subtitle={t.payment}
+          icon={CreditCard}
+          money
+        />
+        <StatCard
+          title={t.remainingValue}
+          value={stats.remainingValue}
+          subtitle={t.payment}
+          icon={TrendingUp}
+          money
+        />
+        <StatCard
+          title={t.invoicedOrders}
+          value={stats.invoiced}
+          subtitle={t.invoice}
+          icon={ReceiptText}
+        />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[0.7fr_1.3fr]">
+        {/* Lifecycle Overview */}
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardHeader className="pb-3">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+                <Truck className="h-5 w-5" />
+              </div>
+              <div>
+                <CardTitle className="text-base font-bold">
+                  {t.lifecycleOverview}
+                </CardTitle>
+                <CardDescription>{t.lifecycleOverviewDesc}</CardDescription>
+              </div>
+            </div>
           </CardHeader>
 
           <CardContent className="space-y-3">
-            {isLoading ? (
-              <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>{t.loading}</span>
+            <div className="rounded-xl border bg-background p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                <p className="font-semibold">{t.status}</p>
               </div>
-            ) : latestOrders.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-5 text-center">
-                <p className="font-semibold">{t.emptyTitle}</p>
-                <p className="text-muted-foreground mt-2 text-sm leading-6">
-                  {t.emptyText}
-                </p>
+
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <StatusBadge>
+                  {t.statusLabels.pending}: {formatNumber(lifecycleCounts.pending)}
+                </StatusBadge>
+                <StatusBadge>
+                  {t.statusLabels.confirmed}: {formatNumber(lifecycleCounts.confirmed)}
+                </StatusBadge>
+                <StatusBadge>
+                  {t.statusLabels.processing}: {formatNumber(lifecycleCounts.processing)}
+                </StatusBadge>
+                <StatusBadge>
+                  {t.statusLabels.completed}: {formatNumber(lifecycleCounts.completed)}
+                </StatusBadge>
               </div>
-            ) : (
-              latestOrders.map((order) => (
-                <Link
-                  key={order.id}
-                  href={`/system/orders/${order.id}`}
-                  className="block"
-                >
-                  <div className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3 transition hover:bg-muted/50">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-                        <ShoppingBag className="h-5 w-5" />
-                      </div>
+            </div>
 
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="truncate text-sm font-semibold">
-                            {order.orderNumber || `#${order.id}`}
-                          </p>
-                        </div>
+            <div className="rounded-xl border bg-background p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <CreditCard className="h-4 w-4 text-muted-foreground" />
+                <p className="font-semibold">{t.payment}</p>
+              </div>
 
-                        <p className="text-muted-foreground mt-1 truncate text-xs">
-                          {order.customerName}
-                        </p>
-                      </div>
-                    </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <StatusBadge variant="outline">
+                  {t.paymentLabels.unpaid}: {formatNumber(lifecycleCounts.unpaid)}
+                </StatusBadge>
+                <StatusBadge variant="outline">
+                  {t.paymentLabels.paid}: {formatNumber(lifecycleCounts.paid)}
+                </StatusBadge>
+              </div>
+            </div>
 
-                    <div className="shrink-0 text-end">
-                      <CurrencyAmount value={order.totalAmount} />
-                      <p className="text-muted-foreground mt-1 text-xs">
-                        {t.sourceLabels[order.source]}
-                      </p>
-                    </div>
-                  </div>
-                </Link>
-              ))
-            )}
+            <div className="rounded-xl border bg-background p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <Package className="h-4 w-4 text-muted-foreground" />
+                <p className="font-semibold">{t.fulfillment}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <StatusBadge variant="outline">
+                  {t.fulfillmentLabels.in_progress}: {formatNumber(lifecycleCounts.inProgress)}
+                </StatusBadge>
+                <StatusBadge variant="outline">
+                  {t.fulfillmentLabels.delivered}: {formatNumber(lifecycleCounts.delivered)}
+                </StatusBadge>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
-        {/* Status + Table */}
-        <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-2">
-          <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <CardTitle className="text-base font-bold">
-                {t.trackStatus}
-              </CardTitle>
-              <CardDescription className="mt-1 text-sm">
-                {t.trackSubtitle}
-              </CardDescription>
-            </div>
+        {/* Latest Orders */}
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardHeader className="pb-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <CardTitle className="text-base font-bold">
+                  {t.latestOrders}
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  {t.latestOrdersDesc}
+                </CardDescription>
+              </div>
 
-            <Button variant="outline" className="h-9 rounded-xl">
-              <Download className="h-4 w-4" />
-              <span>{t.export}</span>
-            </Button>
+              <Badge variant="secondary" className="w-fit rounded-full">
+                {formatNumber(filteredOrders.length)} / {formatNumber(orders.length)}
+              </Badge>
+            </div>
           </CardHeader>
 
-          <CardContent className="space-y-4">
-            {/* Status Cards */}
-            <div className="grid gap-3 md:grid-cols-4">
-              {statusCards.map((card) => {
-                const Icon = card.icon;
-
-                return (
-                  <div key={card.title} className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Icon className="text-muted-foreground h-4 w-4" />
-                      <p className="text-2xl font-bold">
-                        {isLoading ? "..." : formatNumber(card.value)}
-                      </p>
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-muted-foreground text-sm">
-                          {card.title}
-                        </p>
-                        <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                          {card.helperValue}
-                        </span>
-                      </div>
-
-                      <div className="h-2 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary transition-all"
-                          style={{ width: `${card.percent}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Finance Summary */}
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-xl border bg-background p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-muted-foreground text-sm">
-                      {t.totalValue}
-                    </p>
-                    <div className="mt-2 text-xl font-bold">
-                      <CurrencyAmount value={stats.totalValue} />
-                    </div>
-                  </div>
-                  <Wallet className="text-muted-foreground h-5 w-5" />
-                </div>
-              </div>
-
-              <div className="rounded-xl border bg-background p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-muted-foreground text-sm">
-                      {t.paidValue}
-                    </p>
-                    <div className="mt-2 text-xl font-bold">
-                      <CurrencyAmount value={stats.paidValue} />
-                    </div>
-                  </div>
-                  <CreditCard className="text-muted-foreground h-5 w-5" />
-                </div>
-              </div>
-
-              <div className="rounded-xl border bg-background p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-muted-foreground text-sm">
-                      {t.remainingValue}
-                    </p>
-                    <div className="mt-2 text-xl font-bold">
-                      <CurrencyAmount value={stats.remainingValue} />
-                    </div>
-                  </div>
-                  <Activity className="text-muted-foreground h-5 w-5" />
-                </div>
-              </div>
-            </div>
-
-            {/* Filter */}
-            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-              <div className="relative">
-                <Search
-                  className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.filterPlaceholder}
-                  className={`h-10 rounded-xl ${
-                    isArabic ? "pr-10" : "pl-10"
-                  }`}
-                />
-              </div>
-
-              <Button variant="outline" className="h-10 rounded-xl">
-                <Filter className="h-4 w-4" />
-                <span>{t.columns}</span>
-              </Button>
-            </div>
-
-            {/* Table */}
+          <CardContent>
             <div className="overflow-hidden rounded-xl border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>{t.table.id}</TableHead>
-                    <TableHead>{t.table.customer}</TableHead>
-                    <TableHead>{t.table.product}</TableHead>
-                    <TableHead>{t.table.amount}</TableHead>
-                    <TableHead>{t.table.payment}</TableHead>
-                    <TableHead>{t.table.fulfillment}</TableHead>
-                    <TableHead>{t.table.status}</TableHead>
-                    <TableHead>{t.table.action}</TableHead>
+                    <TableHead>{t.orderNumber}</TableHead>
+                    <TableHead>{t.customer}</TableHead>
+                    <TableHead>{t.product}</TableHead>
+                    <TableHead>{t.provider}</TableHead>
+                    <TableHead>{t.invoice}</TableHead>
+                    <TableHead>{t.amount}</TableHead>
+                    <TableHead>{t.status}</TableHead>
+                    <TableHead className="text-end">{t.actions}</TableHead>
                   </TableRow>
                 </TableHeader>
 
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={8}>
-                        <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+                      <TableCell colSpan={8} className="h-44 text-center">
+                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          <span>{t.loading}</span>
+                          {t.loading}
                         </div>
                       </TableCell>
                     </TableRow>
-                  ) : tableRows.length === 0 ? (
+                  ) : latestOrders.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8}>
-                        <div className="py-12 text-center">
-                          <p className="font-semibold">{t.emptyTitle}</p>
-                          <p className="text-muted-foreground mt-2 text-sm">
-                            {t.emptyText}
+                      <TableCell colSpan={8} className="h-44 text-center">
+                        <div className="mx-auto max-w-md space-y-2">
+                          <XCircle className="mx-auto h-8 w-8 text-muted-foreground" />
+                          <p className="font-semibold">{t.noOrdersTitle}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {t.noOrdersText}
                           </p>
                         </div>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    tableRows.map((order) => (
+                    latestOrders.map((order) => (
                       <TableRow key={order.id}>
-                        <TableCell className="font-medium">
+                        <TableCell className="font-semibold">
                           {order.orderNumber || `#${order.id}`}
                         </TableCell>
 
@@ -1122,30 +1006,67 @@ export default function SystemOrdersPage() {
                         </TableCell>
 
                         <TableCell>
-                          <CurrencyAmount value={order.totalAmount} />
-                        </TableCell>
-
-                        <TableCell>{paymentBadge(order.paymentStatus, locale)}</TableCell>
-
-                        <TableCell>
                           <div className="flex items-center gap-2">
-                            <Truck className="text-muted-foreground h-3.5 w-3.5" />
-                            {fulfillmentBadge(order.fulfillmentStatus, locale)}
+                            <Building2 className="h-4 w-4 text-muted-foreground" />
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">
+                                {order.providerName === "-"
+                                  ? t.notLinked
+                                  : order.providerName}
+                              </p>
+                              <p className="text-muted-foreground truncate text-xs">
+                                {order.contractTitle === "-"
+                                  ? order.providerCode || "-"
+                                  : `${order.contractTitle} ${
+                                      order.agentName !== "-"
+                                        ? `• ${order.agentName}`
+                                        : ""
+                                    }`}
+                              </p>
+                            </div>
                           </div>
                         </TableCell>
 
-                        <TableCell>{statusBadge(order.status, locale)}</TableCell>
+                        <TableCell>
+                          {order.hasInvoice ? (
+                            <Badge variant="secondary" className="rounded-full">
+                              <ReceiptText className="h-3.5 w-3.5" />
+                              {order.invoiceNumber || `#${order.invoiceId}`}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="rounded-full">
+                              {t.notLinked}
+                            </Badge>
+                          )}
+                        </TableCell>
 
                         <TableCell>
-                          <Link href={`/system/orders/${order.id}`}>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 rounded-lg"
-                            >
+                          <CurrencyAmount value={order.totalAmount} />
+                        </TableCell>
+
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            <Badge variant="secondary" className="w-fit rounded-full">
+                              {t.statusLabels[order.status]}
+                            </Badge>
+                            <Badge variant="outline" className="w-fit rounded-full">
+                              {t.paymentLabels[order.paymentStatus]}
+                            </Badge>
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="text-end">
+                          <Button
+                            asChild
+                            variant="ghost"
+                            size="sm"
+                            className="rounded-xl"
+                          >
+                            <Link href={`/system/orders/${order.id}`}>
                               <Eye className="h-4 w-4" />
-                            </Button>
-                          </Link>
+                              {t.details}
+                            </Link>
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))
@@ -1153,78 +1074,67 @@ export default function SystemOrdersPage() {
                 </TableBody>
               </Table>
             </div>
-
-            {/* Footer */}
-            <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-              <p>
-                {formatNumber(filteredOrders.length)} / {formatNumber(orders.length)}
-              </p>
-
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="rounded-xl" disabled>
-                  {t.previous}
-                </Button>
-
-                <Link href="/system/orders/list">
-                  <Button variant="outline" size="sm" className="rounded-xl">
-                    <ListChecks className="h-4 w-4" />
-                    {t.next}
-                  </Button>
-                </Link>
-              </div>
-            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* =====================================================
-          Professional Action Cards
-      ====================================================== */}
+      {/* Quick Actions */}
       <Card className="rounded-2xl border bg-card shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-bold">
-            {t.quickAccessTitle}
+            {t.quickActions}
           </CardTitle>
-          <CardDescription>{t.quickAccessSubtitle}</CardDescription>
+          <CardDescription>{t.quickActionsDesc}</CardDescription>
         </CardHeader>
 
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
-            {moduleActions.map((item) => {
-              const Icon = item.icon as ElementType;
+        <CardContent className="grid gap-3 md:grid-cols-3">
+          <Button
+            asChild
+            variant="outline"
+            className="h-20 justify-start rounded-2xl"
+          >
+            <Link href="/system/orders/list">
+              <FileText className="h-5 w-5" />
+              <div className="text-start">
+                <p className="font-semibold">{t.list}</p>
+                <p className="text-muted-foreground text-xs">
+                  {t.latestOrders}
+                </p>
+              </div>
+            </Link>
+          </Button>
 
-              return (
-                <Link key={item.href} href={item.href} className="block">
-                  <Card className="h-full rounded-2xl border bg-background shadow-none transition hover:bg-muted/40 hover:shadow-sm">
-                    <CardContent className="flex h-full items-start justify-between gap-4 p-4">
-                      <div className="min-w-0 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-                            <Icon className="h-5 w-5" />
-                          </div>
+          <Button
+            asChild
+            variant="outline"
+            className="h-20 justify-start rounded-2xl"
+          >
+            <Link href="/system/orders/create">
+              <Plus className="h-5 w-5" />
+              <div className="text-start">
+                <p className="font-semibold">{t.create}</p>
+                <p className="text-muted-foreground text-xs">
+                  Customer / Product / Provider
+                </p>
+              </div>
+            </Link>
+          </Button>
 
-                          <Badge variant="secondary" className="rounded-full">
-                            {item.badge}
-                          </Badge>
-                        </div>
-
-                        <div>
-                          <p className="font-semibold">{item.title}</p>
-                          <p className="text-muted-foreground mt-1 line-clamp-2 text-sm leading-6">
-                            {item.description}
-                          </p>
-                        </div>
-
-                        <Button variant="outline" size="sm" className="rounded-xl">
-                          {item.cta}
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              );
-            })}
-          </div>
+          <Button
+            asChild
+            variant="outline"
+            className="h-20 justify-start rounded-2xl"
+          >
+            <Link href="/system/orders/reports">
+              <BarChart3 className="h-5 w-5" />
+              <div className="text-start">
+                <p className="font-semibold">{t.reports}</p>
+                <p className="text-muted-foreground text-xs">
+                  {t.lifecycleOverview}
+                </p>
+              </div>
+            </Link>
+          </Button>
         </CardContent>
       </Card>
     </div>

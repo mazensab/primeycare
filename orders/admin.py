@@ -22,6 +22,10 @@ class OrderAdmin(admin.ModelAdmin):
         "order_number",
         "customer",
         "product",
+        "provider",
+        "contract",
+        "agent",
+        "linked_invoice",
         "status",
         "payment_status",
         "fulfillment_status",
@@ -52,10 +56,13 @@ class OrderAdmin(admin.ModelAdmin):
         "product__code",
         "product__name",
         "issue_reference",
+        "customer_notes",
+        "internal_notes",
     )
 
     readonly_fields = (
         "order_number",
+        "linked_invoice",
         "product_name",
         "product_type",
         "currency_code",
@@ -80,6 +87,17 @@ class OrderAdmin(admin.ModelAdmin):
                     "payment_status",
                     "fulfillment_status",
                     "source",
+                )
+            },
+        ),
+        (
+            "Lifecycle Relations",
+            {
+                "fields": (
+                    "provider",
+                    "contract",
+                    "agent",
+                    "linked_invoice",
                 )
             },
         ),
@@ -138,6 +156,22 @@ class OrderAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+    @admin.display(description="Invoice")
+    def linked_invoice(self, obj):
+        invoice = self._get_order_invoice(obj)
+        return invoice or "-"
+
+    def _get_order_invoice(self, obj):
+        try:
+            invoice = obj.invoice
+        except Exception:
+            return None
+
+        if hasattr(invoice, "all"):
+            return invoice.all().first()
+
+        return invoice
 
 
 @admin.register(OrderStatusHistory)

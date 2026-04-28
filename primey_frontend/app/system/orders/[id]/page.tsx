@@ -2,28 +2,32 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import type { ChangeEvent, ElementType, FormEvent } from "react";
+import type { ChangeEvent, ElementType, FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   Activity,
   ArrowLeft,
   BadgeCheck,
+  Building2,
   CalendarClock,
   CheckCircle2,
   CreditCard,
+  FileSignature,
   FileText,
+  Handshake,
   Loader2,
   Package,
   Pencil,
+  ReceiptText,
   RefreshCcw,
   RotateCcw,
   Save,
   ShieldCheck,
   ShoppingBag,
-  Trash2,
   Truck,
   UserRound,
+  UsersRound,
   Wallet,
   XCircle,
 } from "lucide-react";
@@ -42,7 +46,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-import { API_PATHS, apiDelete, apiGet, apiPatch } from "@/lib/api";
+import { API_PATHS, apiGet, apiPatch, apiPost } from "@/lib/api";
 
 /* ============================================================
    📂 app/system/orders/[id]/page.tsx
@@ -50,13 +54,26 @@ import { API_PATHS, apiDelete, apiGet, apiPatch } from "@/lib/api";
    ------------------------------------------------------------
    ✅ صفحة تفاصيل الطلب بنفس نمط صفحات التفاصيل
    ✅ ربط حقيقي مع /api/orders/<id>/
-   ✅ عرض العميل والمنتج والمبالغ والحالات
-   ✅ تحديث حالات الطلب والتنفيذ والملاحظات والمدفوع
-   ✅ حذف الطلب عند السماح
+   ✅ يدعم المرحلة 8:
+      - Customer
+      - Product / Program / Service
+      - Provider / Center
+      - Contract
+      - Agent
+      - Invoice عبر Invoice.order
+   ✅ Lifecycle Actions:
+      - confirm
+      - processing
+      - complete
+      - cancel
+      - refund
+   ✅ تحديث الملاحظات والمدفوع وحالة التنفيذ
+   ✅ إلغاء آمن للطلب بدل الحذف النهائي
    ✅ دعم عربي / إنجليزي عبر primey-locale
    ✅ الأرقام دائمًا بالإنجليزية
    ✅ استخدام /currency/sar.svg
    ✅ بدون hardcoded localhost
+   ✅ استخدام sonner
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -96,6 +113,13 @@ type OrderSource =
   | "other"
   | "UNKNOWN";
 
+type LifecycleAction =
+  | "confirm"
+  | "processing"
+  | "complete"
+  | "cancel"
+  | "refund";
+
 type StatusHistory = {
   id: number | string;
   fromStatus: string;
@@ -120,6 +144,28 @@ type OrderDetail = {
   productCode: string;
   productType: string;
   productStatus: string;
+
+  providerId: number | string | null;
+  providerName: string;
+  providerCode: string;
+  providerStatus: string;
+
+  contractId: number | string | null;
+  contractTitle: string;
+  contractNumber: string;
+  contractStatus: string;
+
+  agentId: number | string | null;
+  agentName: string;
+  agentCode: string;
+  agentPhone: string;
+  agentStatus: string;
+
+  invoiceId: number | string | null;
+  invoiceNumber: string;
+  invoiceStatus: string;
+  invoiceTotalAmount: number;
+  hasInvoice: boolean;
 
   status: OrderStatus;
   paymentStatus: PaymentStatus;
@@ -205,6 +251,16 @@ function toNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function safeRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+  return value as Record<string, unknown>;
+}
+
+function safeText(value: unknown, fallback = ""): string {
+  if (value === null || value === undefined || value === "") return fallback;
+  return String(value);
+}
+
 function normalizeOrderStatus(value: unknown): OrderStatus {
   const status = String(value || "").toLowerCase();
 
@@ -257,50 +313,101 @@ function normalizeSource(value: unknown): OrderSource {
 }
 
 function normalizeHistory(item: unknown): StatusHistory {
-  const obj = (item || {}) as Record<string, unknown>;
+  const obj = safeRecord(item);
 
   return {
-    id: (obj.id ?? crypto.randomUUID()) as number | string,
-    fromStatus: String(obj.from_status ?? ""),
-    toStatus: String(obj.to_status ?? ""),
-    note: String(obj.note ?? ""),
-    changedByName: String(obj.changed_by_name ?? ""),
-    createdAt: String(obj.created_at ?? ""),
+    id: (obj.id ?? `${Date.now()}-${Math.random()}`) as number | string,
+    fromStatus: safeText(obj.from_status),
+    toStatus: safeText(obj.to_status),
+    note: safeText(obj.note),
+    changedByName: safeText(obj.changed_by_name),
+    createdAt: safeText(obj.created_at),
   };
 }
 
 function normalizeOrderDetail(payload: unknown): OrderDetail {
-  const obj = (payload || {}) as Record<string, unknown>;
+  const obj = safeRecord(payload);
 
-  const customer = (obj.customer || {}) as Record<string, unknown>;
-  const product = (obj.product || {}) as Record<string, unknown>;
+  const customer = safeRecord(obj.customer);
+  const product = safeRecord(obj.product);
+  const provider = safeRecord(obj.provider);
+  const contract = safeRecord(obj.contract);
+  const agent = safeRecord(obj.agent);
+  const invoice = safeRecord(obj.invoice);
 
   const statusHistory = Array.isArray(obj.status_history)
     ? obj.status_history.map(normalizeHistory)
     : [];
 
+  const invoiceId = obj.invoice_id ?? invoice.id ?? null;
+
   return {
     id: (obj.id ?? "-") as number | string,
-    orderNumber: String(obj.order_number ?? ""),
+    orderNumber: safeText(obj.order_number),
 
     customerId: (obj.customer_id ?? customer.id ?? "") as number | string,
-    customerName: String(customer.full_name ?? obj.customer_name ?? "-"),
-    customerPhone: String(customer.phone ?? obj.customer_phone ?? ""),
-    customerEmail: String(customer.email ?? obj.customer_email ?? ""),
-    customerStatus: String(customer.status ?? ""),
+    customerName: safeText(
+      customer.display_name ??
+        customer.full_name ??
+        customer.name ??
+        obj.customer_name,
+      "-",
+    ),
+    customerPhone: safeText(
+      customer.phone_number ??
+        customer.whatsapp_number ??
+        customer.phone ??
+        obj.customer_phone,
+    ),
+    customerEmail: safeText(customer.email ?? obj.customer_email),
+    customerStatus: safeText(customer.status),
 
     productId: (obj.product_id ?? product.id ?? "") as number | string,
-    productName: String(obj.product_name ?? product.name ?? "-"),
-    productCode: String(product.code ?? obj.product_code ?? ""),
-    productType: String(obj.product_type ?? product.product_type ?? ""),
-    productStatus: String(product.status ?? ""),
+    productName: safeText(obj.product_name ?? product.name, "-"),
+    productCode: safeText(product.code ?? obj.product_code),
+    productType: safeText(obj.product_type ?? product.product_type),
+    productStatus: safeText(product.status),
+
+    providerId: (obj.provider_id ?? provider.id ?? null) as number | string | null,
+    providerName: safeText(
+      provider.name ??
+        provider.display_name ??
+        provider.provider_name ??
+        provider.center_name,
+      "-",
+    ),
+    providerCode: safeText(provider.code ?? provider.provider_code),
+    providerStatus: safeText(provider.status),
+
+    contractId: (obj.contract_id ?? contract.id ?? null) as number | string | null,
+    contractTitle: safeText(contract.title ?? contract.name, "-"),
+    contractNumber: safeText(contract.contract_number ?? contract.number),
+    contractStatus: safeText(contract.status),
+
+    agentId: (obj.agent_id ?? agent.id ?? null) as number | string | null,
+    agentName: safeText(
+      agent.name ??
+        agent.display_name ??
+        agent.full_name ??
+        agent.agent_name,
+      "-",
+    ),
+    agentCode: safeText(agent.agent_code ?? agent.code),
+    agentPhone: safeText(agent.phone_number ?? agent.phone),
+    agentStatus: safeText(agent.status),
+
+    invoiceId: invoiceId as number | string | null,
+    invoiceNumber: safeText(invoice.invoice_number ?? invoice.number),
+    invoiceStatus: safeText(invoice.status),
+    invoiceTotalAmount: toNumber(invoice.total_amount),
+    hasInvoice: Boolean(obj.has_invoice || invoiceId),
 
     status: normalizeOrderStatus(obj.status),
     paymentStatus: normalizePaymentStatus(obj.payment_status),
     fulfillmentStatus: normalizeFulfillmentStatus(obj.fulfillment_status),
     source: normalizeSource(obj.source),
 
-    currencyCode: String(obj.currency_code ?? product.currency_code ?? "SAR"),
+    currencyCode: safeText(obj.currency_code ?? product.currency_code, "SAR"),
     unitPrice: toNumber(obj.unit_price),
     quantity: toNumber(obj.quantity || 1),
     subtotalAmount: toNumber(obj.subtotal_amount),
@@ -311,15 +418,15 @@ function normalizeOrderDetail(payload: unknown): OrderDetail {
     remainingAmount: toNumber(obj.remaining_amount),
     isPaid: Boolean(obj.is_paid),
 
-    issueReference: String(obj.issue_reference ?? ""),
-    issuedAt: String(obj.issued_at ?? ""),
+    issueReference: safeText(obj.issue_reference),
+    issuedAt: safeText(obj.issued_at),
 
-    customerNotes: String(obj.customer_notes ?? ""),
-    internalNotes: String(obj.internal_notes ?? ""),
-    cancellationReason: String(obj.cancellation_reason ?? ""),
+    customerNotes: safeText(obj.customer_notes),
+    internalNotes: safeText(obj.internal_notes),
+    cancellationReason: safeText(obj.cancellation_reason),
 
-    createdAt: String(obj.created_at ?? ""),
-    updatedAt: String(obj.updated_at ?? ""),
+    createdAt: safeText(obj.created_at),
+    updatedAt: safeText(obj.updated_at),
 
     statusHistory,
     raw: obj,
@@ -336,8 +443,8 @@ function dictionary(locale: AppLocale) {
   return {
     pageTitle: isArabic ? "تفاصيل الطلب" : "Order Details",
     pageSubtitle: isArabic
-      ? "عرض تفاصيل الطلب، العميل، المنتج، المبالغ، الحالات وسجل التغييرات."
-      : "View order details, customer, product, amounts, statuses and history.",
+      ? "عرض تفاصيل الطلب، العميل، المنتج، المركز، العقد، المندوب، الفاتورة، المبالغ وسجل التغييرات."
+      : "View order details, customer, product, provider, contract, agent, invoice, amounts and history.",
 
     back: isArabic ? "رجوع" : "Back",
     list: isArabic ? "قائمة الطلبات" : "Orders List",
@@ -347,16 +454,22 @@ function dictionary(locale: AppLocale) {
     cancelEdit: isArabic ? "إلغاء التعديل" : "Cancel Edit",
     save: isArabic ? "حفظ التعديلات" : "Save Changes",
     saving: isArabic ? "جاري الحفظ..." : "Saving...",
-    delete: isArabic ? "حذف الطلب" : "Delete Order",
-    deleting: isArabic ? "جاري الحذف..." : "Deleting...",
+    cancelOrder: isArabic ? "إلغاء الطلب" : "Cancel Order",
+    cancelling: isArabic ? "جاري الإلغاء..." : "Cancelling...",
+
+    confirm: isArabic ? "تأكيد" : "Confirm",
+    processing: isArabic ? "بدء المعالجة" : "Start Processing",
+    complete: isArabic ? "إكمال" : "Complete",
+    refund: isArabic ? "استرداد" : "Refund",
+    applying: isArabic ? "جاري التنفيذ..." : "Applying...",
 
     heroBadge1: isArabic ? "وحدة الطلبات" : "Orders Module",
     heroBadge2: isArabic ? "تفاصيل" : "Detail",
-    ready: isArabic ? "متصل بالواجهة" : "API Connected",
 
     overview: isArabic ? "نظرة عامة" : "Overview",
     customerInfo: isArabic ? "بيانات العميل" : "Customer Info",
     productInfo: isArabic ? "بيانات المنتج" : "Product Info",
+    lifecycleInfo: isArabic ? "الربط التشغيلي" : "Operational Links",
     financialInfo: isArabic ? "الملخص المالي" : "Financial Summary",
     operationalInfo: isArabic ? "الحالة التشغيلية" : "Operational Status",
     notesInfo: isArabic ? "الملاحظات" : "Notes",
@@ -370,6 +483,12 @@ function dictionary(locale: AppLocale) {
     product: isArabic ? "المنتج" : "Product",
     code: isArabic ? "الكود" : "Code",
     type: isArabic ? "النوع" : "Type",
+
+    provider: isArabic ? "المركز / مقدم الخدمة" : "Provider / Center",
+    contract: isArabic ? "العقد" : "Contract",
+    agent: isArabic ? "المندوب" : "Agent",
+    invoice: isArabic ? "الفاتورة" : "Invoice",
+    invoiceNumber: isArabic ? "رقم الفاتورة" : "Invoice Number",
 
     source: isArabic ? "مصدر الطلب" : "Order Source",
     status: isArabic ? "حالة الطلب" : "Order Status",
@@ -394,23 +513,21 @@ function dictionary(locale: AppLocale) {
     cancellationReason: isArabic ? "سبب الإلغاء" : "Cancellation Reason",
     statusNote: isArabic ? "ملاحظة تغيير الحالة" : "Status Change Note",
 
-    fromStatus: isArabic ? "من" : "From",
-    toStatus: isArabic ? "إلى" : "To",
-    changedBy: isArabic ? "بواسطة" : "By",
-    note: isArabic ? "الملاحظة" : "Note",
-
     empty: isArabic ? "لا يوجد" : "None",
+    notLinked: isArabic ? "غير مرتبط" : "Not linked",
     noHistory: isArabic ? "لا يوجد سجل تغييرات بعد." : "No status history yet.",
 
     loading: isArabic ? "جاري تحميل تفاصيل الطلب..." : "Loading order details...",
     loadError: isArabic ? "تعذر تحميل تفاصيل الطلب." : "Unable to load order details.",
     updateSuccess: isArabic ? "تم تحديث الطلب بنجاح." : "Order updated successfully.",
     updateError: isArabic ? "تعذر تحديث الطلب." : "Unable to update order.",
-    deleteConfirm: isArabic
-      ? "هل أنت متأكد من حذف هذا الطلب؟"
-      : "Are you sure you want to delete this order?",
-    deleteSuccess: isArabic ? "تم حذف الطلب بنجاح." : "Order deleted successfully.",
-    deleteError: isArabic ? "تعذر حذف الطلب." : "Unable to delete order.",
+    lifecycleSuccess: isArabic ? "تم تنفيذ الإجراء بنجاح." : "Lifecycle action completed.",
+    lifecycleError: isArabic ? "تعذر تنفيذ الإجراء." : "Unable to apply lifecycle action.",
+    cancelConfirm: isArabic
+      ? "هل أنت متأكد من إلغاء هذا الطلب؟ سيتم إلغاؤه بشكل آمن وليس حذفه من قاعدة البيانات."
+      : "Are you sure you want to cancel this order? It will be safely cancelled, not deleted from the database.",
+    cancelSuccess: isArabic ? "تم إلغاء الطلب بنجاح." : "Order cancelled successfully.",
+    cancelError: isArabic ? "تعذر إلغاء الطلب." : "Unable to cancel order.",
 
     statusLabels: {
       draft: isArabic ? "مسودة" : "Draft",
@@ -487,7 +604,7 @@ function formatDate(value: string, locale: AppLocale) {
 
 function CurrencyAmount({ value }: { value: number }) {
   return (
-    <span className="inline-flex items-center gap-1 font-semibold">
+    <span className="inline-flex items-center gap-1 font-semibold" dir="ltr">
       <span>{formatMoney(value)}</span>
       <Image
         src="/currency/sar.svg"
@@ -513,7 +630,7 @@ function InfoRow({
   value,
 }: {
   label: string;
-  value: React.ReactNode;
+  value: ReactNode;
 }) {
   return (
     <div className="flex items-start justify-between gap-3 border-b py-3 last:border-b-0">
@@ -633,7 +750,6 @@ function fulfillmentBadge(status: FulfillmentStatus, locale: AppLocale) {
 ============================================================ */
 
 export default function SystemOrderDetailPage() {
-  const router = useRouter();
   const params = useParams();
 
   const rawId = params?.id;
@@ -645,9 +761,13 @@ export default function SystemOrderDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [runningAction, setRunningAction] = useState<LifecycleAction | null>(
+    null,
+  );
 
   const t = useMemo(() => dictionary(locale), [locale]);
+  const isArabic = locale === "ar";
 
   function fillForm(nextOrder: OrderDetail) {
     setFormData({
@@ -677,7 +797,9 @@ export default function SystemOrderDetailPage() {
   }
 
   function handleInputChange(
-    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+    event: ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >,
   ) {
     const { name, value } = event.target;
     updateField(name as keyof EditFormData, value as never);
@@ -694,7 +816,7 @@ export default function SystemOrderDetailPage() {
       );
 
       if (!result.ok) {
-        throw new Error(result.message);
+        throw new Error(result.message || t.loadError);
       }
 
       const payload = result.data?.data || result.data;
@@ -745,7 +867,7 @@ export default function SystemOrderDetailPage() {
       );
 
       if (!result.ok) {
-        throw new Error(result.message);
+        throw new Error(result.message || t.updateError);
       }
 
       const payloadData = result.data?.data || result.data;
@@ -764,28 +886,92 @@ export default function SystemOrderDetailPage() {
     }
   }
 
-  async function handleDelete() {
+  async function runLifecycleAction(action: LifecycleAction) {
     if (!orderId) return;
 
-    const confirmed = window.confirm(t.deleteConfirm);
-    if (!confirmed) return;
+    const reason =
+      action === "cancel"
+        ? window.prompt(t.cancellationReason, order?.cancellationReason || "")
+        : "";
+
+    if (action === "cancel" && !reason?.trim()) {
+      toast.error(t.cancellationReason);
+      return;
+    }
 
     try {
-      setIsDeleting(true);
+      setRunningAction(action);
 
-      const result = await apiDelete(API_PATHS.orders.detail(orderId));
+      const result = await apiPost<OrderDetailApiResponse>(
+        `/api/orders/${orderId}/status/`,
+        {
+          action,
+          reason: reason?.trim() || "",
+          status_note: reason?.trim() || "",
+        },
+      );
 
       if (!result.ok) {
-        throw new Error(result.message);
+        throw new Error(result.message || t.lifecycleError);
       }
 
-      toast.success(t.deleteSuccess);
-      router.push("/system/orders/list");
+      const payloadData = result.data?.data || result.data;
+      const normalized = normalizeOrderDetail(payloadData);
+
+      setOrder(normalized);
+      fillForm(normalized);
+      toast.success(t.lifecycleSuccess);
     } catch (error) {
-      console.error("Delete order error:", error);
-      toast.error(error instanceof Error ? error.message : t.deleteError);
+      console.error("Order lifecycle action error:", error);
+      toast.error(error instanceof Error ? error.message : t.lifecycleError);
     } finally {
-      setIsDeleting(false);
+      setRunningAction(null);
+    }
+  }
+
+  async function handleCancelOrder() {
+    if (!orderId) return;
+
+    const confirmed = window.confirm(t.cancelConfirm);
+    if (!confirmed) return;
+
+    const reason = window.prompt(t.cancellationReason, "");
+    if (!reason?.trim()) {
+      toast.error(t.cancellationReason);
+      return;
+    }
+
+    try {
+      setIsCancelling(true);
+
+      const result = await apiPost<OrderDetailApiResponse>(
+        `/api/orders/${orderId}/status/`,
+        {
+          action: "cancel",
+          reason: reason.trim(),
+          cancellation_reason: reason.trim(),
+          status_note: reason.trim(),
+        },
+      );
+
+      if (!result.ok) {
+        throw new Error(result.message || t.cancelError);
+      }
+
+      const payloadData = result.data?.data || result.data;
+
+      if (payloadData) {
+        const normalized = normalizeOrderDetail(payloadData);
+        setOrder(normalized);
+        fillForm(normalized);
+      }
+
+      toast.success(t.cancelSuccess);
+    } catch (error) {
+      console.error("Cancel order error:", error);
+      toast.error(error instanceof Error ? error.message : t.cancelError);
+    } finally {
+      setIsCancelling(false);
     }
   }
 
@@ -867,17 +1053,21 @@ export default function SystemOrderDetailPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button variant="outline" className="rounded-xl" onClick={() => loadOrder(false)}>
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => loadOrder(false)}
+              >
                 <RefreshCcw className="h-4 w-4" />
                 {t.refresh}
               </Button>
 
-              <Link href="/system/orders/list">
-                <Button className="rounded-xl">
+              <Button asChild className="rounded-xl">
+                <Link href="/system/orders/list">
                   <ShoppingBag className="h-4 w-4" />
                   {t.list}
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -885,18 +1075,34 @@ export default function SystemOrderDetailPage() {
     );
   }
 
+  const disableActions =
+    isSaving ||
+    isCancelling ||
+    runningAction !== null ||
+    order.status === "cancelled";
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-4"
+      dir={isArabic ? "rtl" : "ltr"}
+    >
       {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Link href="/system/orders/list">
-              <Button type="button" variant="ghost" size="sm" className="h-8 rounded-xl">
+            <Button
+              asChild
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-xl"
+            >
+              <Link href="/system/orders/list">
                 <ArrowLeft className="h-4 w-4" />
                 {t.back}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
 
             <Badge variant="secondary" className="rounded-full">
               <ShoppingBag className="h-3.5 w-3.5" />
@@ -923,18 +1129,23 @@ export default function SystemOrderDetailPage() {
             variant="outline"
             className="h-10 rounded-xl"
             onClick={() => loadOrder(true)}
-            disabled={isSaving || isDeleting}
+            disabled={isSaving || isCancelling || runningAction !== null}
           >
             <RefreshCcw className="h-4 w-4" />
             {t.refresh}
           </Button>
 
-          <Link href="/system/orders/create">
-            <Button type="button" variant="outline" className="h-10 w-full rounded-xl sm:w-auto">
+          <Button
+            asChild
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-xl sm:w-auto"
+          >
+            <Link href="/system/orders/create">
               <ShoppingBag className="h-4 w-4" />
               {t.create}
-            </Button>
-          </Link>
+            </Link>
+          </Button>
 
           {isEditing ? (
             <Button
@@ -953,7 +1164,7 @@ export default function SystemOrderDetailPage() {
               variant="outline"
               className="h-10 rounded-xl"
               onClick={() => setIsEditing(true)}
-              disabled={isDeleting}
+              disabled={isCancelling || runningAction !== null}
             >
               <Pencil className="h-4 w-4" />
               {t.edit}
@@ -961,7 +1172,11 @@ export default function SystemOrderDetailPage() {
           )}
 
           {isEditing ? (
-            <Button type="submit" className="h-10 rounded-xl" disabled={isSaving || isDeleting}>
+            <Button
+              type="submit"
+              className="h-10 rounded-xl"
+              disabled={isSaving || isCancelling || runningAction !== null}
+            >
               {isSaving ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -975,15 +1190,15 @@ export default function SystemOrderDetailPage() {
             type="button"
             variant="destructive"
             className="h-10 rounded-xl"
-            onClick={handleDelete}
-            disabled={isSaving || isDeleting}
+            onClick={handleCancelOrder}
+            disabled={disableActions}
           >
-            {isDeleting ? (
+            {isCancelling ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Trash2 className="h-4 w-4" />
+              <XCircle className="h-4 w-4" />
             )}
-            {isDeleting ? t.deleting : t.delete}
+            {isCancelling ? t.cancelling : t.cancelOrder}
           </Button>
         </div>
       </div>
@@ -1017,7 +1232,9 @@ export default function SystemOrderDetailPage() {
         <Card className="rounded-2xl border bg-card shadow-sm">
           <CardContent className="flex items-center justify-between gap-4 p-4">
             <div>
-              <p className="text-muted-foreground text-sm">{t.remainingAmount}</p>
+              <p className="text-muted-foreground text-sm">
+                {t.remainingAmount}
+              </p>
               <div className="mt-2 text-2xl font-bold">
                 <CurrencyAmount value={order.remainingAmount} />
               </div>
@@ -1047,25 +1264,35 @@ export default function SystemOrderDetailPage() {
               <div className="flex items-start gap-3">
                 <SectionIcon icon={ShieldCheck} />
                 <div>
-                  <CardTitle className="text-base font-bold">{t.overview}</CardTitle>
-                  <CardDescription>{order.orderNumber || `#${order.id}`}</CardDescription>
+                  <CardTitle className="text-base font-bold">
+                    {t.overview}
+                  </CardTitle>
+                  <CardDescription>
+                    {order.orderNumber || `#${order.id}`}
+                  </CardDescription>
                 </div>
               </div>
             </CardHeader>
 
             <CardContent className="grid gap-4 md:grid-cols-3">
               <div className="rounded-xl border bg-background p-4">
-                <p className="text-muted-foreground mb-2 text-sm">{t.status}</p>
+                <p className="text-muted-foreground mb-2 text-sm">
+                  {t.status}
+                </p>
                 {statusBadge(order.status, locale)}
               </div>
 
               <div className="rounded-xl border bg-background p-4">
-                <p className="text-muted-foreground mb-2 text-sm">{t.paymentStatus}</p>
+                <p className="text-muted-foreground mb-2 text-sm">
+                  {t.paymentStatus}
+                </p>
                 {paymentBadge(order.paymentStatus, locale)}
               </div>
 
               <div className="rounded-xl border bg-background p-4">
-                <p className="text-muted-foreground mb-2 text-sm">{t.fulfillmentStatus}</p>
+                <p className="text-muted-foreground mb-2 text-sm">
+                  {t.fulfillmentStatus}
+                </p>
                 {fulfillmentBadge(order.fulfillmentStatus, locale)}
               </div>
             </CardContent>
@@ -1078,7 +1305,9 @@ export default function SystemOrderDetailPage() {
                 <div className="flex items-start gap-3">
                   <SectionIcon icon={UserRound} />
                   <div>
-                    <CardTitle className="text-base font-bold">{t.customerInfo}</CardTitle>
+                    <CardTitle className="text-base font-bold">
+                      {t.customerInfo}
+                    </CardTitle>
                     <CardDescription>{t.customer}</CardDescription>
                   </div>
                 </div>
@@ -1097,7 +1326,9 @@ export default function SystemOrderDetailPage() {
                 <div className="flex items-start gap-3">
                   <SectionIcon icon={Package} />
                   <div>
-                    <CardTitle className="text-base font-bold">{t.productInfo}</CardTitle>
+                    <CardTitle className="text-base font-bold">
+                      {t.productInfo}
+                    </CardTitle>
                     <CardDescription>{t.product}</CardDescription>
                   </div>
                 </div>
@@ -1112,27 +1343,138 @@ export default function SystemOrderDetailPage() {
             </Card>
           </div>
 
+          {/* Lifecycle Links */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <div className="flex items-start gap-3">
+                <SectionIcon icon={Handshake} />
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.lifecycleInfo}
+                  </CardTitle>
+                  <CardDescription>
+                    {t.provider} / {t.contract} / {t.agent} / {t.invoice}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-xl border bg-background p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-semibold">{t.provider}</p>
+                </div>
+                <InfoRow
+                  label={t.provider}
+                  value={
+                    order.providerName === "-" ? t.notLinked : order.providerName
+                  }
+                />
+                <InfoRow label={t.code} value={order.providerCode || t.empty} />
+                <InfoRow label={t.status} value={order.providerStatus || t.empty} />
+              </div>
+
+              <div className="rounded-xl border bg-background p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <FileSignature className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-semibold">{t.contract}</p>
+                </div>
+                <InfoRow
+                  label={t.contract}
+                  value={
+                    order.contractTitle === "-" ? t.notLinked : order.contractTitle
+                  }
+                />
+                <InfoRow label={t.code} value={order.contractNumber || t.empty} />
+                <InfoRow label={t.status} value={order.contractStatus || t.empty} />
+              </div>
+
+              <div className="rounded-xl border bg-background p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <UsersRound className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-semibold">{t.agent}</p>
+                </div>
+                <InfoRow
+                  label={t.agent}
+                  value={order.agentName === "-" ? t.notLinked : order.agentName}
+                />
+                <InfoRow label={t.code} value={order.agentCode || t.empty} />
+                <InfoRow label={t.phone} value={order.agentPhone || t.empty} />
+              </div>
+
+              <div className="rounded-xl border bg-background p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <ReceiptText className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-semibold">{t.invoice}</p>
+                </div>
+                <InfoRow
+                  label={t.invoiceNumber}
+                  value={
+                    order.hasInvoice
+                      ? order.invoiceNumber || `#${order.invoiceId}`
+                      : t.notLinked
+                  }
+                />
+                <InfoRow label={t.status} value={order.invoiceStatus || t.empty} />
+                <InfoRow
+                  label={t.totalAmount}
+                  value={
+                    order.hasInvoice ? (
+                      <CurrencyAmount value={order.invoiceTotalAmount} />
+                    ) : (
+                      t.empty
+                    )
+                  }
+                />
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Financial */}
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
               <div className="flex items-start gap-3">
                 <SectionIcon icon={Wallet} />
                 <div>
-                  <CardTitle className="text-base font-bold">{t.financialInfo}</CardTitle>
+                  <CardTitle className="text-base font-bold">
+                    {t.financialInfo}
+                  </CardTitle>
                   <CardDescription>{t.totalAmount}</CardDescription>
                 </div>
               </div>
             </CardHeader>
 
             <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <InfoRow label={t.unitPrice} value={<CurrencyAmount value={order.unitPrice} />} />
+              <InfoRow
+                label={t.unitPrice}
+                value={<CurrencyAmount value={order.unitPrice} />}
+              />
               <InfoRow label={t.quantity} value={formatNumber(order.quantity)} />
-              <InfoRow label={t.subtotalAmount} value={<CurrencyAmount value={order.subtotalAmount} />} />
-              <InfoRow label={t.discountAmount} value={<CurrencyAmount value={order.discountAmount} />} />
-              <InfoRow label={t.taxAmount} value={<CurrencyAmount value={order.taxAmount} />} />
-              <InfoRow label={t.totalAmount} value={<CurrencyAmount value={order.totalAmount} />} />
-              <InfoRow label={t.amountPaid} value={<CurrencyAmount value={order.amountPaid} />} />
-              <InfoRow label={t.remainingAmount} value={<CurrencyAmount value={order.remainingAmount} />} />
+              <InfoRow
+                label={t.subtotalAmount}
+                value={<CurrencyAmount value={order.subtotalAmount} />}
+              />
+              <InfoRow
+                label={t.discountAmount}
+                value={<CurrencyAmount value={order.discountAmount} />}
+              />
+              <InfoRow
+                label={t.taxAmount}
+                value={<CurrencyAmount value={order.taxAmount} />}
+              />
+              <InfoRow
+                label={t.totalAmount}
+                value={<CurrencyAmount value={order.totalAmount} />}
+              />
+              <InfoRow
+                label={t.amountPaid}
+                value={<CurrencyAmount value={order.amountPaid} />}
+              />
+              <InfoRow
+                label={t.remainingAmount}
+                value={<CurrencyAmount value={order.remainingAmount} />}
+              />
             </CardContent>
           </Card>
 
@@ -1143,7 +1485,9 @@ export default function SystemOrderDetailPage() {
                 <div className="flex items-start gap-3">
                   <SectionIcon icon={Pencil} />
                   <div>
-                    <CardTitle className="text-base font-bold">{t.editInfo}</CardTitle>
+                    <CardTitle className="text-base font-bold">
+                      {t.editInfo}
+                    </CardTitle>
                     <CardDescription>{t.save}</CardDescription>
                   </div>
                 </div>
@@ -1159,16 +1503,20 @@ export default function SystemOrderDetailPage() {
                     onChange={handleInputChange}
                     className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
-                    {(Object.keys(t.statusLabels) as OrderStatus[]).filter((item) => item !== "UNKNOWN").map((status) => (
-                      <option key={status} value={status}>
-                        {t.statusLabels[status]}
-                      </option>
-                    ))}
+                    {(Object.keys(t.statusLabels) as OrderStatus[])
+                      .filter((item) => item !== "UNKNOWN")
+                      .map((status) => (
+                        <option key={status} value={status}>
+                          {t.statusLabels[status]}
+                        </option>
+                      ))}
                   </select>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="fulfillmentStatus">{t.fulfillmentStatus}</Label>
+                  <Label htmlFor="fulfillmentStatus">
+                    {t.fulfillmentStatus}
+                  </Label>
                   <select
                     id="fulfillmentStatus"
                     name="fulfillmentStatus"
@@ -1176,11 +1524,13 @@ export default function SystemOrderDetailPage() {
                     onChange={handleInputChange}
                     className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
-                    {(Object.keys(t.fulfillmentLabels) as FulfillmentStatus[]).filter((item) => item !== "UNKNOWN").map((status) => (
-                      <option key={status} value={status}>
-                        {t.fulfillmentLabels[status]}
-                      </option>
-                    ))}
+                    {(Object.keys(t.fulfillmentLabels) as FulfillmentStatus[])
+                      .filter((item) => item !== "UNKNOWN")
+                      .map((status) => (
+                        <option key={status} value={status}>
+                          {t.fulfillmentLabels[status]}
+                        </option>
+                      ))}
                   </select>
                 </div>
 
@@ -1232,7 +1582,9 @@ export default function SystemOrderDetailPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="cancellationReason">{t.cancellationReason}</Label>
+                  <Label htmlFor="cancellationReason">
+                    {t.cancellationReason}
+                  </Label>
                   <Textarea
                     id="cancellationReason"
                     name="cancellationReason"
@@ -1262,8 +1614,10 @@ export default function SystemOrderDetailPage() {
               <div className="flex items-start gap-3">
                 <SectionIcon icon={FileText} />
                 <div>
-                  <CardTitle className="text-base font-bold">{t.notesInfo}</CardTitle>
-                  <CardDescription>{t.note}</CardDescription>
+                  <CardTitle className="text-base font-bold">
+                    {t.notesInfo}
+                  </CardTitle>
+                  <CardDescription>{t.customerNotes}</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -1300,8 +1654,12 @@ export default function SystemOrderDetailPage() {
               <div className="flex items-start gap-3">
                 <SectionIcon icon={Truck} />
                 <div>
-                  <CardTitle className="text-base font-bold">{t.operationalInfo}</CardTitle>
-                  <CardDescription>{t.sourceLabels[order.source]}</CardDescription>
+                  <CardTitle className="text-base font-bold">
+                    {t.operationalInfo}
+                  </CardTitle>
+                  <CardDescription>
+                    {t.sourceLabels[order.source]}
+                  </CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -1316,19 +1674,105 @@ export default function SystemOrderDetailPage() {
                 </Badge>
               </div>
 
+              <div className="grid gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 justify-start rounded-xl"
+                  disabled={disableActions || order.status !== "pending"}
+                  onClick={() => runLifecycleAction("confirm")}
+                >
+                  {runningAction === "confirm" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <BadgeCheck className="h-4 w-4" />
+                  )}
+                  {t.confirm}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 justify-start rounded-xl"
+                  disabled={disableActions || order.status !== "confirmed"}
+                  onClick={() => runLifecycleAction("processing")}
+                >
+                  {runningAction === "processing" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Truck className="h-4 w-4" />
+                  )}
+                  {t.processing}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 justify-start rounded-xl"
+                  disabled={
+                    disableActions ||
+                    !["confirmed", "processing"].includes(order.status)
+                  }
+                  onClick={() => runLifecycleAction("complete")}
+                >
+                  {runningAction === "complete" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4" />
+                  )}
+                  {t.complete}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 justify-start rounded-xl"
+                  disabled={disableActions || order.status !== "completed"}
+                  onClick={() => runLifecycleAction("refund")}
+                >
+                  {runningAction === "refund" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" />
+                  )}
+                  {t.refund}
+                </Button>
+              </div>
+
               <div className="rounded-xl border bg-background p-4">
-                <InfoRow label={t.issueReference} value={order.issueReference || t.empty} />
-                <InfoRow label={t.issuedAt} value={formatDate(order.issuedAt, locale)} />
-                <InfoRow label={t.createdAt} value={formatDate(order.createdAt, locale)} />
-                <InfoRow label={t.updatedAt} value={formatDate(order.updatedAt, locale)} />
+                <InfoRow
+                  label={t.issueReference}
+                  value={order.issueReference || t.empty}
+                />
+                <InfoRow
+                  label={t.issuedAt}
+                  value={formatDate(order.issuedAt, locale)}
+                />
+                <InfoRow
+                  label={t.createdAt}
+                  value={formatDate(order.createdAt, locale)}
+                />
+                <InfoRow
+                  label={t.updatedAt}
+                  value={formatDate(order.updatedAt, locale)}
+                />
               </div>
 
               <div className="rounded-xl border bg-background p-4">
                 <p className="mb-3 font-semibold">{t.financialInfo}</p>
 
-                <InfoRow label={t.totalAmount} value={<CurrencyAmount value={order.totalAmount} />} />
-                <InfoRow label={t.amountPaid} value={<CurrencyAmount value={order.amountPaid} />} />
-                <InfoRow label={t.remainingAmount} value={<CurrencyAmount value={order.remainingAmount} />} />
+                <InfoRow
+                  label={t.totalAmount}
+                  value={<CurrencyAmount value={order.totalAmount} />}
+                />
+                <InfoRow
+                  label={t.amountPaid}
+                  value={<CurrencyAmount value={order.amountPaid} />}
+                />
+                <InfoRow
+                  label={t.remainingAmount}
+                  value={<CurrencyAmount value={order.remainingAmount} />}
+                />
               </div>
             </CardContent>
           </Card>
@@ -1339,7 +1783,9 @@ export default function SystemOrderDetailPage() {
               <div className="flex items-start gap-3">
                 <SectionIcon icon={CalendarClock} />
                 <div>
-                  <CardTitle className="text-base font-bold">{t.historyInfo}</CardTitle>
+                  <CardTitle className="text-base font-bold">
+                    {t.historyInfo}
+                  </CardTitle>
                   <CardDescription>{t.status}</CardDescription>
                 </div>
               </div>
@@ -1353,7 +1799,10 @@ export default function SystemOrderDetailPage() {
               ) : (
                 <div className="space-y-3">
                   {order.statusHistory.map((history) => (
-                    <div key={history.id} className="rounded-xl border bg-background p-4">
+                    <div
+                      key={history.id}
+                      className="rounded-xl border bg-background p-4"
+                    >
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline" className="rounded-full">
                           {history.fromStatus || t.empty}

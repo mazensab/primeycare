@@ -2,16 +2,19 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import type { ElementType } from "react";
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   ArrowDownUp,
   ArrowLeft,
   BadgeCheck,
+  Building2,
   ColumnsIcon,
   CreditCard,
   Download,
   Eye,
+  FileSignature,
   FileText,
   FilterIcon,
   Loader2,
@@ -25,6 +28,7 @@ import {
   ShoppingBag,
   Truck,
   UserRound,
+  UsersRound,
   Wallet,
   XCircle,
 } from "lucide-react";
@@ -72,8 +76,16 @@ import { API_PATHS, apiGet } from "@/lib/api";
    ✅ تصدير Excel منظم .xlsx بدل CSV
    ✅ طباعة Web PDF للقائمة فقط
    ✅ ربط حقيقي مع /api/orders/
+   ✅ يدعم المرحلة 8:
+      - Customer
+      - Product
+      - Provider / Center
+      - Contract
+      - Agent
+      - Invoice
    ✅ استخدام /currency/sar.svg
    ✅ بدون localhost hardcoded
+   ✅ استخدام sonner
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -122,6 +134,10 @@ type SortKey =
   | "orderNumber"
   | "customerName"
   | "productName"
+  | "providerName"
+  | "contractTitle"
+  | "agentName"
+  | "invoiceNumber"
   | "totalAmount"
   | "paymentStatus"
   | "fulfillmentStatus"
@@ -133,16 +149,37 @@ type SortDirection = "asc" | "desc";
 type Order = {
   id: number | string;
   orderNumber: string;
+
   customerName: string;
   customerPhone: string;
   customerEmail: string;
+
   productName: string;
   productCode: string;
   productType: string;
+
+  providerName: string;
+  providerCode: string;
+  providerStatus: string;
+
+  contractTitle: string;
+  contractNumber: string;
+  contractStatus: string;
+
+  agentName: string;
+  agentCode: string;
+  agentPhone: string;
+
+  invoiceId: number | string | null;
+  invoiceNumber: string;
+  invoiceStatus: string;
+  hasInvoice: boolean;
+
   status: OrderStatus;
   paymentStatus: PaymentStatus;
   fulfillmentStatus: FulfillmentStatus;
   source: OrderSource;
+
   currencyCode: string;
   unitPrice: number;
   quantity: number;
@@ -152,6 +189,7 @@ type Order = {
   totalAmount: number;
   amountPaid: number;
   remainingAmount: number;
+
   issueReference: string;
   createdAt: string;
   updatedAt: string;
@@ -179,6 +217,10 @@ type VisibleColumns = {
   orderNumber: boolean;
   customer: boolean;
   product: boolean;
+  provider: boolean;
+  contract: boolean;
+  agent: boolean;
+  invoice: boolean;
   amount: boolean;
   paymentStatus: boolean;
   fulfillmentStatus: boolean;
@@ -252,6 +294,16 @@ function toNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function safeRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+  return value as Record<string, unknown>;
+}
+
+function safeText(value: unknown, fallback = ""): string {
+  if (value === null || value === undefined || value === "") return fallback;
+  return String(value);
+}
+
 function normalizeOrderStatus(value: unknown): OrderStatus {
   const status = String(value || "").toLowerCase();
 
@@ -304,25 +356,75 @@ function normalizeSource(value: unknown): OrderSource {
 }
 
 function normalizeOrder(item: unknown): Order {
-  const obj = (item || {}) as Record<string, unknown>;
+  const obj = safeRecord(item);
 
-  const customer = (obj.customer || {}) as Record<string, unknown>;
-  const product = (obj.product || {}) as Record<string, unknown>;
+  const customer = safeRecord(obj.customer);
+  const product = safeRecord(obj.product);
+  const provider = safeRecord(obj.provider);
+  const contract = safeRecord(obj.contract);
+  const agent = safeRecord(obj.agent);
+  const invoice = safeRecord(obj.invoice);
+
+  const invoiceId = obj.invoice_id ?? invoice.id ?? null;
 
   return {
     id: (obj.id ?? "-") as number | string,
-    orderNumber: String(obj.order_number ?? ""),
-    customerName: String(customer.full_name ?? obj.customer_name ?? "-"),
-    customerPhone: String(customer.phone ?? obj.customer_phone ?? ""),
-    customerEmail: String(customer.email ?? obj.customer_email ?? ""),
-    productName: String(obj.product_name ?? product.name ?? "-"),
-    productCode: String(product.code ?? obj.product_code ?? ""),
-    productType: String(obj.product_type ?? product.product_type ?? ""),
+    orderNumber: safeText(obj.order_number),
+
+    customerName: safeText(
+      customer.display_name ??
+        customer.full_name ??
+        customer.name ??
+        obj.customer_name,
+      "-",
+    ),
+    customerPhone: safeText(
+      customer.phone_number ??
+        customer.whatsapp_number ??
+        customer.phone ??
+        obj.customer_phone,
+    ),
+    customerEmail: safeText(customer.email ?? obj.customer_email),
+
+    productName: safeText(obj.product_name ?? product.name, "-"),
+    productCode: safeText(product.code ?? obj.product_code),
+    productType: safeText(obj.product_type ?? product.product_type),
+
+    providerName: safeText(
+      provider.name ??
+        provider.display_name ??
+        provider.provider_name ??
+        provider.center_name,
+      "-",
+    ),
+    providerCode: safeText(provider.code ?? provider.provider_code),
+    providerStatus: safeText(provider.status),
+
+    contractTitle: safeText(contract.title ?? contract.name, "-"),
+    contractNumber: safeText(contract.contract_number ?? contract.number),
+    contractStatus: safeText(contract.status),
+
+    agentName: safeText(
+      agent.name ??
+        agent.display_name ??
+        agent.full_name ??
+        agent.agent_name,
+      "-",
+    ),
+    agentCode: safeText(agent.agent_code ?? agent.code),
+    agentPhone: safeText(agent.phone_number ?? agent.phone),
+
+    invoiceId: invoiceId as number | string | null,
+    invoiceNumber: safeText(invoice.invoice_number ?? invoice.number),
+    invoiceStatus: safeText(invoice.status),
+    hasInvoice: Boolean(obj.has_invoice || invoiceId),
+
     status: normalizeOrderStatus(obj.status),
     paymentStatus: normalizePaymentStatus(obj.payment_status),
     fulfillmentStatus: normalizeFulfillmentStatus(obj.fulfillment_status),
     source: normalizeSource(obj.source),
-    currencyCode: String(obj.currency_code ?? product.currency_code ?? "SAR"),
+
+    currencyCode: safeText(obj.currency_code ?? product.currency_code, "SAR"),
     unitPrice: toNumber(obj.unit_price),
     quantity: toNumber(obj.quantity || 1),
     subtotalAmount: toNumber(obj.subtotal_amount),
@@ -331,9 +433,10 @@ function normalizeOrder(item: unknown): Order {
     totalAmount: toNumber(obj.total_amount),
     amountPaid: toNumber(obj.amount_paid),
     remainingAmount: toNumber(obj.remaining_amount),
-    issueReference: String(obj.issue_reference ?? ""),
-    createdAt: String(obj.created_at ?? ""),
-    updatedAt: String(obj.updated_at ?? ""),
+
+    issueReference: safeText(obj.issue_reference),
+    createdAt: safeText(obj.created_at),
+    updatedAt: safeText(obj.updated_at),
     raw: obj,
   };
 }
@@ -348,8 +451,8 @@ function dictionary(locale: AppLocale) {
   return {
     pageTitle: isArabic ? "قائمة الطلبات" : "Orders List",
     pageSubtitle: isArabic
-      ? "إدارة جميع طلبات العملاء مع البحث، التصفية، الفرز، التصدير والطباعة."
-      : "Manage all customer orders with search, filters, sorting, export and print.",
+      ? "إدارة جميع طلبات العملاء مع الربط بالمراكز والعقود والمندوبين والفواتير."
+      : "Manage all customer orders with providers, contracts, agents and invoices.",
 
     back: isArabic ? "رجوع" : "Back",
     refresh: isArabic ? "تحديث" : "Refresh",
@@ -357,10 +460,11 @@ function dictionary(locale: AppLocale) {
     reports: isArabic ? "التقارير" : "Reports",
     exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
     print: isArabic ? "طباعة PDF" : "Print PDF",
+    details: isArabic ? "عرض التفاصيل" : "View Details",
 
     searchPlaceholder: isArabic
-      ? "ابحث برقم الطلب، العميل، المنتج، الجوال..."
-      : "Search by order number, customer, product, phone...",
+      ? "ابحث برقم الطلب، العميل، المنتج، المركز، العقد، المندوب، الفاتورة..."
+      : "Search by order, customer, product, provider, contract, agent, invoice...",
 
     filters: isArabic ? "الفلاتر" : "Filters",
     columns: isArabic ? "الأعمدة" : "Columns",
@@ -389,10 +493,16 @@ function dictionary(locale: AppLocale) {
     exportSuccess: isArabic ? "تم تصدير ملف Excel بنجاح" : "Excel file exported successfully",
     printTitle: isArabic ? "تقرير قائمة الطلبات" : "Orders List Report",
 
+    notLinked: isArabic ? "غير مرتبط" : "Not linked",
+
     table: {
       orderNumber: isArabic ? "رقم الطلب" : "Order No.",
       customer: isArabic ? "العميل" : "Customer",
       product: isArabic ? "المنتج" : "Product",
+      provider: isArabic ? "المركز" : "Provider",
+      contract: isArabic ? "العقد" : "Contract",
+      agent: isArabic ? "المندوب" : "Agent",
+      invoice: isArabic ? "الفاتورة" : "Invoice",
       amount: isArabic ? "المبلغ" : "Amount",
       paymentStatus: isArabic ? "الدفع" : "Payment",
       fulfillmentStatus: isArabic ? "التنفيذ" : "Fulfillment",
@@ -449,6 +559,10 @@ function dictionary(locale: AppLocale) {
       orderNumber: isArabic ? "رقم الطلب" : "Order Number",
       customerName: isArabic ? "العميل" : "Customer",
       productName: isArabic ? "المنتج" : "Product",
+      providerName: isArabic ? "المركز" : "Provider",
+      contractTitle: isArabic ? "العقد" : "Contract",
+      agentName: isArabic ? "المندوب" : "Agent",
+      invoiceNumber: isArabic ? "الفاتورة" : "Invoice",
       totalAmount: isArabic ? "المبلغ" : "Amount",
       paymentStatus: isArabic ? "الدفع" : "Payment",
       fulfillmentStatus: isArabic ? "التنفيذ" : "Fulfillment",
@@ -460,6 +574,10 @@ function dictionary(locale: AppLocale) {
       orderNumber: isArabic ? "رقم الطلب" : "Order No.",
       customer: isArabic ? "العميل" : "Customer",
       product: isArabic ? "المنتج" : "Product",
+      provider: isArabic ? "المركز" : "Provider",
+      contract: isArabic ? "العقد" : "Contract",
+      agent: isArabic ? "المندوب" : "Agent",
+      invoice: isArabic ? "الفاتورة" : "Invoice",
       amount: isArabic ? "المبلغ" : "Amount",
       paymentStatus: isArabic ? "الدفع" : "Payment",
       fulfillmentStatus: isArabic ? "التنفيذ" : "Fulfillment",
@@ -489,7 +607,7 @@ function formatMoney(value: number) {
 
 function CurrencyAmount({ value }: { value: number }) {
   return (
-    <span className="inline-flex items-center gap-1 font-semibold">
+    <span className="inline-flex items-center gap-1 font-semibold" dir="ltr">
       <span>{formatMoney(value)}</span>
       <Image
         src="/currency/sar.svg"
@@ -560,7 +678,7 @@ function StatCard({
   title: string;
   value: number;
   subtitle: string;
-  icon: React.ElementType;
+  icon: ElementType;
   money?: boolean;
 }) {
   return (
@@ -610,11 +728,15 @@ export default function SystemOrdersListPage() {
     orderNumber: true,
     customer: true,
     product: true,
+    provider: true,
+    contract: true,
+    agent: true,
+    invoice: true,
     amount: true,
     paymentStatus: true,
     fulfillmentStatus: true,
     status: true,
-    source: true,
+    source: false,
     actions: true,
   });
 
@@ -635,6 +757,13 @@ export default function SystemOrdersListPage() {
         order.productName.toLowerCase().includes(cleanQuery) ||
         order.productCode.toLowerCase().includes(cleanQuery) ||
         order.productType.toLowerCase().includes(cleanQuery) ||
+        order.providerName.toLowerCase().includes(cleanQuery) ||
+        order.providerCode.toLowerCase().includes(cleanQuery) ||
+        order.contractTitle.toLowerCase().includes(cleanQuery) ||
+        order.contractNumber.toLowerCase().includes(cleanQuery) ||
+        order.agentName.toLowerCase().includes(cleanQuery) ||
+        order.agentCode.toLowerCase().includes(cleanQuery) ||
+        order.invoiceNumber.toLowerCase().includes(cleanQuery) ||
         order.issueReference.toLowerCase().includes(cleanQuery);
 
       const matchesStatus =
@@ -730,10 +859,12 @@ export default function SystemOrdersListPage() {
       });
 
       if (!result.ok) {
-        throw new Error(result.message);
+        throw new Error(result.message || t.apiError);
       }
 
-      const normalized = normalizeApiList(result.data).map(normalizeOrder);
+      const normalized = normalizeApiList(result.data ?? result).map(
+        normalizeOrder,
+      );
       setOrders(normalized);
 
       if (showToast) {
@@ -786,6 +917,10 @@ export default function SystemOrdersListPage() {
       [t.table.orderNumber]: order.orderNumber || `#${order.id}`,
       [t.table.customer]: order.customerName,
       [t.table.product]: order.productName,
+      [t.table.provider]: order.providerName === "-" ? "" : order.providerName,
+      [t.table.contract]: order.contractTitle === "-" ? "" : order.contractTitle,
+      [t.table.agent]: order.agentName === "-" ? "" : order.agentName,
+      [t.table.invoice]: order.invoiceNumber,
       [t.table.amount]: order.totalAmount,
       [t.table.paymentStatus]: t.paymentLabels[order.paymentStatus],
       [t.table.fulfillmentStatus]: t.fulfillmentLabels[order.fulfillmentStatus],
@@ -801,6 +936,10 @@ export default function SystemOrdersListPage() {
       { wch: 18 },
       { wch: 28 },
       { wch: 28 },
+      { wch: 28 },
+      { wch: 24 },
+      { wch: 22 },
+      { wch: 18 },
       { wch: 14 },
       { wch: 18 },
       { wch: 18 },
@@ -827,17 +966,20 @@ export default function SystemOrdersListPage() {
             <td>${order.orderNumber || `#${order.id}`}</td>
             <td>${order.customerName}</td>
             <td>${order.productName}</td>
+            <td>${order.providerName === "-" ? "" : order.providerName}</td>
+            <td>${order.contractTitle === "-" ? "" : order.contractTitle}</td>
+            <td>${order.agentName === "-" ? "" : order.agentName}</td>
+            <td>${order.invoiceNumber || ""}</td>
             <td>${formatMoney(order.totalAmount)}</td>
             <td>${t.paymentLabels[order.paymentStatus]}</td>
             <td>${t.fulfillmentLabels[order.fulfillmentStatus]}</td>
             <td>${t.statusLabels[order.status]}</td>
-            <td>${t.sourceLabels[order.source]}</td>
           </tr>
         `,
       )
       .join("");
 
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
+    const printWindow = window.open("", "_blank", "width=1400,height=900");
 
     if (!printWindow) return;
 
@@ -868,12 +1010,12 @@ export default function SystemOrdersListPage() {
             table {
               width: 100%;
               border-collapse: collapse;
-              font-size: 12px;
+              font-size: 11px;
             }
 
             th, td {
               border: 1px solid #e2e8f0;
-              padding: 10px;
+              padding: 9px;
               text-align: ${isArabic ? "right" : "left"};
             }
 
@@ -892,11 +1034,14 @@ export default function SystemOrdersListPage() {
                 <th>${t.table.orderNumber}</th>
                 <th>${t.table.customer}</th>
                 <th>${t.table.product}</th>
+                <th>${t.table.provider}</th>
+                <th>${t.table.contract}</th>
+                <th>${t.table.agent}</th>
+                <th>${t.table.invoice}</th>
                 <th>${t.table.amount}</th>
                 <th>${t.table.paymentStatus}</th>
                 <th>${t.table.fulfillmentStatus}</th>
                 <th>${t.table.status}</th>
-                <th>${t.table.source}</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -947,17 +1092,22 @@ export default function SystemOrdersListPage() {
   }, [query, statusFilter, paymentFilter, fulfillmentFilter, sourceFilter]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" dir={isArabic ? "rtl" : "ltr"}>
       {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="mb-2 flex items-center gap-2">
-            <Link href="/system/orders">
-              <Button variant="ghost" size="sm" className="h-8 rounded-xl">
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-xl"
+            >
+              <Link href="/system/orders">
                 <ArrowLeft className="h-4 w-4" />
                 {t.back}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
 
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
@@ -1003,12 +1153,12 @@ export default function SystemOrdersListPage() {
             <span>{t.print}</span>
           </Button>
 
-          <Link href="/system/orders/create">
-            <Button className="h-10 w-full rounded-xl sm:w-auto">
+          <Button asChild className="h-10 w-full rounded-xl sm:w-auto">
+            <Link href="/system/orders/create">
               <PlusCircle className="h-4 w-4" />
               <span>{t.addOrder}</span>
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       </div>
 
@@ -1091,64 +1241,95 @@ export default function SystemOrdersListPage() {
 
               <DropdownMenuContent align="end" className="w-64">
                 <DropdownMenuLabel>{t.statusFilter}</DropdownMenuLabel>
-                {(["ALL", "draft", "pending", "confirmed", "processing", "completed", "cancelled", "refunded"] as StatusFilter[]).map(
-                  (status) => (
-                    <DropdownMenuCheckboxItem
-                      key={status}
-                      checked={statusFilter === status}
-                      onCheckedChange={() => setStatusFilter(status)}
-                    >
-                      {status === "ALL" ? t.all : t.statusLabels[status]}
-                    </DropdownMenuCheckboxItem>
-                  ),
-                )}
+                {(
+                  [
+                    "ALL",
+                    "draft",
+                    "pending",
+                    "confirmed",
+                    "processing",
+                    "completed",
+                    "cancelled",
+                    "refunded",
+                  ] as StatusFilter[]
+                ).map((status) => (
+                  <DropdownMenuCheckboxItem
+                    key={status}
+                    checked={statusFilter === status}
+                    onCheckedChange={() => setStatusFilter(status)}
+                  >
+                    {status === "ALL" ? t.all : t.statusLabels[status]}
+                  </DropdownMenuCheckboxItem>
+                ))}
 
                 <DropdownMenuSeparator />
 
                 <DropdownMenuLabel>{t.paymentFilter}</DropdownMenuLabel>
-                {(["ALL", "unpaid", "partially_paid", "paid", "failed", "refunded"] as PaymentFilter[]).map(
-                  (status) => (
-                    <DropdownMenuCheckboxItem
-                      key={status}
-                      checked={paymentFilter === status}
-                      onCheckedChange={() => setPaymentFilter(status)}
-                    >
-                      {status === "ALL" ? t.all : t.paymentLabels[status]}
-                    </DropdownMenuCheckboxItem>
-                  ),
-                )}
+                {(
+                  [
+                    "ALL",
+                    "unpaid",
+                    "partially_paid",
+                    "paid",
+                    "failed",
+                    "refunded",
+                  ] as PaymentFilter[]
+                ).map((status) => (
+                  <DropdownMenuCheckboxItem
+                    key={status}
+                    checked={paymentFilter === status}
+                    onCheckedChange={() => setPaymentFilter(status)}
+                  >
+                    {status === "ALL" ? t.all : t.paymentLabels[status]}
+                  </DropdownMenuCheckboxItem>
+                ))}
 
                 <DropdownMenuSeparator />
 
                 <DropdownMenuLabel>{t.fulfillmentFilter}</DropdownMenuLabel>
-                {(["ALL", "not_started", "in_progress", "issued", "delivered", "failed"] as FulfillmentFilter[]).map(
-                  (status) => (
-                    <DropdownMenuCheckboxItem
-                      key={status}
-                      checked={fulfillmentFilter === status}
-                      onCheckedChange={() => setFulfillmentFilter(status)}
-                    >
-                      {status === "ALL"
-                        ? t.all
-                        : t.fulfillmentLabels[status]}
-                    </DropdownMenuCheckboxItem>
-                  ),
-                )}
+                {(
+                  [
+                    "ALL",
+                    "not_started",
+                    "in_progress",
+                    "issued",
+                    "delivered",
+                    "failed",
+                  ] as FulfillmentFilter[]
+                ).map((status) => (
+                  <DropdownMenuCheckboxItem
+                    key={status}
+                    checked={fulfillmentFilter === status}
+                    onCheckedChange={() => setFulfillmentFilter(status)}
+                  >
+                    {status === "ALL"
+                      ? t.all
+                      : t.fulfillmentLabels[status]}
+                  </DropdownMenuCheckboxItem>
+                ))}
 
                 <DropdownMenuSeparator />
 
                 <DropdownMenuLabel>{t.sourceFilter}</DropdownMenuLabel>
-                {(["ALL", "website", "whatsapp", "agent", "admin", "mobile_app", "other"] as SourceFilter[]).map(
-                  (source) => (
-                    <DropdownMenuCheckboxItem
-                      key={source}
-                      checked={sourceFilter === source}
-                      onCheckedChange={() => setSourceFilter(source)}
-                    >
-                      {source === "ALL" ? t.all : t.sourceLabels[source]}
-                    </DropdownMenuCheckboxItem>
-                  ),
-                )}
+                {(
+                  [
+                    "ALL",
+                    "website",
+                    "whatsapp",
+                    "agent",
+                    "admin",
+                    "mobile_app",
+                    "other",
+                  ] as SourceFilter[]
+                ).map((source) => (
+                  <DropdownMenuCheckboxItem
+                    key={source}
+                    checked={sourceFilter === source}
+                    onCheckedChange={() => setSourceFilter(source)}
+                  >
+                    {source === "ALL" ? t.all : t.sourceLabels[source]}
+                  </DropdownMenuCheckboxItem>
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -1202,6 +1383,10 @@ export default function SystemOrdersListPage() {
                     "orderNumber",
                     "customerName",
                     "productName",
+                    "providerName",
+                    "contractTitle",
+                    "agentName",
+                    "invoiceNumber",
                     "totalAmount",
                     "paymentStatus",
                     "fulfillmentStatus",
@@ -1243,6 +1428,22 @@ export default function SystemOrdersListPage() {
                     <TableHead>{t.table.product}</TableHead>
                   )}
 
+                  {visibleColumns.provider && (
+                    <TableHead>{t.table.provider}</TableHead>
+                  )}
+
+                  {visibleColumns.contract && (
+                    <TableHead>{t.table.contract}</TableHead>
+                  )}
+
+                  {visibleColumns.agent && (
+                    <TableHead>{t.table.agent}</TableHead>
+                  )}
+
+                  {visibleColumns.invoice && (
+                    <TableHead>{t.table.invoice}</TableHead>
+                  )}
+
                   {visibleColumns.amount && (
                     <TableHead>{t.table.amount}</TableHead>
                   )}
@@ -1273,7 +1474,7 @@ export default function SystemOrdersListPage() {
                 {isLoading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={10}
+                      colSpan={14}
                       className="h-44 text-center text-muted-foreground"
                     >
                       <div className="flex items-center justify-center gap-2">
@@ -1284,7 +1485,7 @@ export default function SystemOrdersListPage() {
                   </TableRow>
                 ) : paginatedOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="h-44 text-center">
+                    <TableCell colSpan={14} className="h-44 text-center">
                       <div className="mx-auto max-w-md space-y-2">
                         <XCircle className="mx-auto h-8 w-8 text-muted-foreground" />
                         <p className="font-semibold">{t.noOrdersTitle}</p>
@@ -1349,6 +1550,77 @@ export default function SystemOrdersListPage() {
                         </TableCell>
                       )}
 
+                      {visibleColumns.provider && (
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Building2 className="h-4 w-4 text-muted-foreground" />
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">
+                                {order.providerName === "-"
+                                  ? t.notLinked
+                                  : order.providerName}
+                              </p>
+                              <p className="text-muted-foreground mt-1 truncate text-xs">
+                                {order.providerCode || order.providerStatus || "-"}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                      )}
+
+                      {visibleColumns.contract && (
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <FileSignature className="h-4 w-4 text-muted-foreground" />
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">
+                                {order.contractTitle === "-"
+                                  ? t.notLinked
+                                  : order.contractTitle}
+                              </p>
+                              <p className="text-muted-foreground mt-1 truncate text-xs">
+                                {order.contractNumber ||
+                                  order.contractStatus ||
+                                  "-"}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                      )}
+
+                      {visibleColumns.agent && (
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <UsersRound className="h-4 w-4 text-muted-foreground" />
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">
+                                {order.agentName === "-"
+                                  ? t.notLinked
+                                  : order.agentName}
+                              </p>
+                              <p className="text-muted-foreground mt-1 truncate text-xs">
+                                {order.agentCode || order.agentPhone || "-"}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                      )}
+
+                      {visibleColumns.invoice && (
+                        <TableCell>
+                          {order.hasInvoice ? (
+                            <Badge variant="secondary" className="rounded-full">
+                              <FileText className="h-3.5 w-3.5" />
+                              {order.invoiceNumber || `#${order.invoiceId}`}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="rounded-full">
+                              {t.notLinked}
+                            </Badge>
+                          )}
+                        </TableCell>
+                      )}
+
                       {visibleColumns.amount && (
                         <TableCell>
                           <CurrencyAmount value={order.totalAmount} />
@@ -1366,6 +1638,7 @@ export default function SystemOrdersListPage() {
                               order.paymentStatus,
                             )}`}
                           >
+                            <CreditCard className="h-3.5 w-3.5" />
                             {t.paymentLabels[order.paymentStatus]}
                           </Badge>
                         </TableCell>
@@ -1421,7 +1694,7 @@ export default function SystemOrdersListPage() {
                               <DropdownMenuItem asChild>
                                 <Link href={`/system/orders/${order.id}`}>
                                   <Eye className="h-4 w-4" />
-                                  {t.table.actions}
+                                  {t.details}
                                 </Link>
                               </DropdownMenuItem>
 

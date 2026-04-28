@@ -3,14 +3,15 @@
 # 🧭 Primey Care — Orders Module
 # ------------------------------------------------------------
 # ✅ يربط العميل بالمنتج
+# ✅ يدعم دورة الطلب الكاملة Order Lifecycle
+# ✅ يدعم الربط مع:
+#    - Provider / Center
+#    - Contract
+#    - Agent
+#    - Invoice عبر العلاقة العكسية من invoices.Invoice.order
 # ✅ يحفظ السعر وقت الطلب
-# ✅ يدعم حالات الطلب والدفع
-# ✅ جاهز للتوسع لاحقًا مع:
-#    - المدفوعات
-#    - الإصدار
-#    - البطاقات
-#    - البرامج
-#    - الوكلاء والعمولات
+# ✅ يدعم حالات الطلب والدفع والتنفيذ
+# ✅ جاهز للربط مع الفواتير والمدفوعات والعمولات
 # ============================================================
 
 from __future__ import annotations
@@ -88,6 +89,39 @@ class Order(models.Model):
         on_delete=models.PROTECT,
         related_name="orders",
         verbose_name="Product",
+    )
+
+    # --------------------------------------------------------
+    # 🔹 Lifecycle Relations
+    # --------------------------------------------------------
+    provider = models.ForeignKey(
+        "providers.Provider",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="orders",
+        verbose_name="Provider / Center",
+        help_text="Optional provider/center selected for this order.",
+    )
+
+    contract = models.ForeignKey(
+        "contracts.Contract",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="orders",
+        verbose_name="Contract",
+        help_text="Optional contract used to price/fulfill this order.",
+    )
+
+    agent = models.ForeignKey(
+        "agents.Agent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="orders",
+        verbose_name="Agent",
+        help_text="Optional agent linked to this order.",
     )
 
     status = models.CharField(
@@ -199,7 +233,7 @@ class Order(models.Model):
         max_length=100,
         blank=True,
         verbose_name="Issue Reference",
-        help_text="Will be used later for card/program issuance reference.",
+        help_text="Used for card/program/service issue reference.",
     )
 
     issued_at = models.DateTimeField(
@@ -271,6 +305,9 @@ class Order(models.Model):
             models.Index(fields=["source"]),
             models.Index(fields=["customer", "created_at"]),
             models.Index(fields=["product", "created_at"]),
+            models.Index(fields=["provider", "created_at"]),
+            models.Index(fields=["contract", "created_at"]),
+            models.Index(fields=["agent", "created_at"]),
             models.Index(fields=["fulfillment_status"]),
             models.Index(fields=["currency_code"]),
         ]
@@ -294,12 +331,27 @@ class Order(models.Model):
         return self.payment_status == self.PaymentStatus.PAID
 
     @property
+    def can_be_confirmed(self) -> bool:
+        return self.status in {self.Status.DRAFT, self.Status.PENDING}
+
+    @property
+    def can_be_completed(self) -> bool:
+        return self.status in {self.Status.CONFIRMED, self.Status.PROCESSING}
+
+    @property
     def can_be_cancelled(self) -> bool:
         return self.status not in {
             self.Status.CANCELLED,
             self.Status.REFUNDED,
             self.Status.COMPLETED,
         }
+
+    @property
+    def has_invoice(self) -> bool:
+        try:
+            return bool(self.invoice)
+        except Exception:
+            return False
 
     # --------------------------------------------------------
     # 🔹 Internal Helpers
@@ -312,12 +364,20 @@ class Order(models.Model):
     def _resolve_unit_price(self) -> Decimal:
         if self.unit_price and self.unit_price > Decimal("0.00"):
             return self.unit_price
-        return self.product.effective_price or Decimal("0.00")
+
+        effective_price = getattr(self.product, "effective_price", None)
+        if effective_price is not None:
+            return effective_price or Decimal("0.00")
+
+        return getattr(self.product, "price", Decimal("0.00")) or Decimal("0.00")
 
     def _sync_product_snapshot(self) -> None:
-        self.product_name = self.product.name
-        self.product_type = self.product.product_type
-        self.currency_code = self.product.currency_code or "SAR"
+        if not self.product_id:
+            return
+
+        self.product_name = getattr(self.product, "name", "") or ""
+        self.product_type = getattr(self.product, "product_type", "") or ""
+        self.currency_code = (getattr(self.product, "currency_code", "") or "SAR").strip().upper()
 
     def _recalculate_amounts(self) -> None:
         self.unit_price = self._resolve_unit_price()
@@ -391,13 +451,22 @@ class Order(models.Model):
         if self.status == self.Status.CANCELLED and not self.cancellation_reason:
             raise ValidationError("Cancellation reason is required when order is cancelled.")
 
-        if self.product.status != Product.Status.ACTIVE and self.status not in {
+        if self.status == self.Status.COMPLETED and self.fulfillment_status == self.FulfillmentStatus.NOT_STARTED:
+            raise ValidationError("Completed orders must have fulfillment progress.")
+
+        product_status = getattr(self.product, "status", None)
+        product_active_status = getattr(Product.Status, "ACTIVE", "active")
+
+        if product_status != product_active_status and self.status not in {
             self.Status.DRAFT,
             self.Status.CANCELLED,
         }:
             raise ValidationError("Cannot place/keep an active order on an inactive product.")
 
-        if self.customer.status == Customer.Status.BLOCKED:
+        customer_status = getattr(self.customer, "status", None)
+        customer_blocked_status = getattr(Customer.Status, "BLOCKED", "blocked")
+
+        if customer_status == customer_blocked_status:
             raise ValidationError("Cannot create order for a blocked customer.")
 
     # --------------------------------------------------------
@@ -466,6 +535,10 @@ class OrderStatusHistory(models.Model):
         verbose_name = "Order Status History"
         verbose_name_plural = "Order Status History"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["order", "created_at"]),
+            models.Index(fields=["to_status", "created_at"]),
+        ]
 
     def __str__(self) -> str:
         return f"{self.order.order_number} | {self.from_status} -> {self.to_status}"

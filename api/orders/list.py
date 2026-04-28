@@ -44,6 +44,22 @@ def _ensure_authenticated(request):
     return request.user, None
 
 
+def _orders_queryset():
+    return (
+        Order.objects.select_related(
+            "customer",
+            "product",
+            "provider",
+            "contract",
+            "agent",
+            "created_by",
+            "updated_by",
+        )
+        .prefetch_related("status_history")
+        .all()
+    )
+
+
 # ============================================================
 # 🔹 Orders API
 # ============================================================
@@ -55,12 +71,7 @@ def orders_api(request):
         return auth_error
 
     if request.method == "GET":
-        queryset = (
-            Order.objects.select_related("customer", "product", "created_by", "updated_by")
-            .prefetch_related("status_history")
-            .all()
-        )
-        queryset = apply_order_filters(queryset, request.GET)
+        queryset = apply_order_filters(_orders_queryset(), request.GET)
 
         page = parse_int(request.GET.get("page"), 1) or 1
         page_size = parse_int(request.GET.get("page_size"), 20) or 20
@@ -71,7 +82,7 @@ def orders_api(request):
             {
                 "ok": True,
                 "message": "Orders loaded successfully.",
-                "results": [serialize_order(item) for item in paginated["items"]],
+                "results": [serialize_order(item, include_history=False) for item in paginated["items"]],
                 "pagination": paginated["pagination"],
             },
             status=200,
@@ -81,11 +92,13 @@ def orders_api(request):
         payload = parse_json_body(request)
         order = create_order(payload=payload, user=user)
 
+        fresh_order = _orders_queryset().get(pk=order.pk)
+
         return JsonResponse(
             {
                 "ok": True,
                 "message": "Order created successfully.",
-                "data": serialize_order(order),
+                "data": serialize_order(fresh_order),
             },
             status=201,
         )
@@ -102,17 +115,18 @@ def orders_api(request):
 
 @require_http_methods(["GET"])
 def open_orders_api(request):
-    queryset = (
-        Order.objects.select_related("customer", "product", "created_by", "updated_by")
-        .prefetch_related("status_history")
-        .exclude(
-            status__in=[
-                Order.Status.CANCELLED,
-                Order.Status.REFUNDED,
-                Order.Status.COMPLETED,
-            ]
-        )
+    user, auth_error = _ensure_authenticated(request)
+    if auth_error:
+        return auth_error
+
+    queryset = _orders_queryset().exclude(
+        status__in=[
+            Order.Status.CANCELLED,
+            Order.Status.REFUNDED,
+            Order.Status.COMPLETED,
+        ]
     )
+
     queryset = apply_order_filters(queryset, request.GET)
 
     page = parse_int(request.GET.get("page"), 1) or 1
@@ -124,7 +138,7 @@ def open_orders_api(request):
         {
             "ok": True,
             "message": "Open orders loaded successfully.",
-            "results": [serialize_order(item) for item in paginated["items"]],
+            "results": [serialize_order(item, include_history=False) for item in paginated["items"]],
             "pagination": paginated["pagination"],
         },
         status=200,

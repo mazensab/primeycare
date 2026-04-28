@@ -8,10 +8,14 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   BadgeCheck,
+  BriefcaseBusiness,
+  Building2,
   Calculator,
   CheckCircle2,
   CreditCard,
+  FileSignature,
   FileText,
+  Handshake,
   Loader2,
   Package,
   Plus,
@@ -22,6 +26,7 @@ import {
   Sparkles,
   Truck,
   UserRound,
+  UsersRound,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -45,17 +50,18 @@ import { API_PATHS, apiGet, apiPost } from "@/lib/api";
    📂 app/system/orders/create/page.tsx
    🧠 Primey Care | Create Order Page
    ------------------------------------------------------------
-   ✅ نفس نمط صفحات create السابقة
    ✅ ربط حقيقي مع /api/orders/
-   ✅ تحميل العملاء من /api/customers/
-   ✅ تحميل المنتجات من /api/products/
+   ✅ اختيار العميل
+   ✅ اختيار المنتج / البرنامج / الخدمة
+   ✅ اختيار المركز / مقدم الخدمة
+   ✅ اختيار العقد
+   ✅ اختيار المندوب
    ✅ استخدام UI الداخلي فقط
    ✅ دعم عربي / إنجليزي عبر primey-locale
    ✅ الأرقام دائمًا بالإنجليزية
    ✅ استخدام /currency/sar.svg
    ✅ بدون hardcoded localhost
-   ✅ إصلاح t.loading
-   ✅ إصلاح React.ElementType
+   ✅ استخدام sonner
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -111,9 +117,37 @@ type ProductOption = {
   effectivePrice: number;
 };
 
+type ProviderOption = {
+  id: number | string;
+  name: string;
+  code: string;
+  city: string;
+  status: string;
+};
+
+type ContractOption = {
+  id: number | string;
+  title: string;
+  contractNumber: string;
+  providerId: string;
+  providerName: string;
+  status: string;
+};
+
+type AgentOption = {
+  id: number | string;
+  name: string;
+  code: string;
+  phone: string;
+  status: string;
+};
+
 type OrderFormData = {
   customerId: string;
   productId: string;
+  providerId: string;
+  contractId: string;
+  agentId: string;
   status: OrderStatus;
   paymentStatus: PaymentStatus;
   fulfillmentStatus: FulfillmentStatus;
@@ -139,6 +173,9 @@ type ApiListResponse = {
   items?: unknown[];
   customers?: unknown[];
   products?: unknown[];
+  providers?: unknown[];
+  contracts?: unknown[];
+  agents?: unknown[];
 };
 
 type OrderCreateResponse = {
@@ -192,6 +229,9 @@ function normalizeApiList(payload: unknown): unknown[] {
   if (Array.isArray(record.items)) return record.items;
   if (Array.isArray(record.customers)) return record.customers;
   if (Array.isArray(record.products)) return record.products;
+  if (Array.isArray(record.providers)) return record.providers;
+  if (Array.isArray(record.contracts)) return record.contracts;
+  if (Array.isArray(record.agents)) return record.agents;
 
   if (record.data && typeof record.data === "object") {
     const nested = record.data as ApiListResponse;
@@ -200,6 +240,9 @@ function normalizeApiList(payload: unknown): unknown[] {
     if (Array.isArray(nested.items)) return nested.items;
     if (Array.isArray(nested.customers)) return nested.customers;
     if (Array.isArray(nested.products)) return nested.products;
+    if (Array.isArray(nested.providers)) return nested.providers;
+    if (Array.isArray(nested.contracts)) return nested.contracts;
+    if (Array.isArray(nested.agents)) return nested.agents;
   }
 
   return [];
@@ -217,8 +260,15 @@ function normalizeCustomer(item: unknown): CustomerOption {
 
   return {
     id: (obj.id ?? "") as number | string,
-    name: String(obj.full_name ?? obj.name ?? obj.customer_name ?? "-"),
-    phone: String(obj.phone ?? obj.mobile ?? ""),
+    name: String(
+      obj.display_name ??
+        obj.full_name ??
+        obj.name ??
+        obj.customer_name ??
+        obj.customer_code ??
+        "-",
+    ),
+    phone: String(obj.phone_number ?? obj.whatsapp_number ?? obj.phone ?? obj.mobile ?? ""),
     email: String(obj.email ?? ""),
     status: String(obj.status ?? ""),
   };
@@ -244,6 +294,64 @@ function normalizeProduct(item: unknown): ProductOption {
   };
 }
 
+function normalizeProvider(item: unknown): ProviderOption {
+  const obj = (item || {}) as Record<string, unknown>;
+
+  return {
+    id: (obj.id ?? "") as number | string,
+    name: String(
+      obj.name ??
+        obj.display_name ??
+        obj.provider_name ??
+        obj.center_name ??
+        obj.legal_name ??
+        "-",
+    ),
+    code: String(obj.code ?? obj.provider_code ?? obj.center_code ?? ""),
+    city: String(obj.city ?? obj.city_name ?? ""),
+    status: String(obj.status ?? ""),
+  };
+}
+
+function normalizeContract(item: unknown): ContractOption {
+  const obj = (item || {}) as Record<string, unknown>;
+  const provider = (obj.provider || {}) as Record<string, unknown>;
+
+  return {
+    id: (obj.id ?? "") as number | string,
+    title: String(obj.title ?? obj.name ?? obj.contract_name ?? "-"),
+    contractNumber: String(obj.contract_number ?? obj.number ?? obj.code ?? ""),
+    providerId: String(obj.provider_id ?? provider.id ?? ""),
+    providerName: String(
+      obj.provider_name ??
+        provider.name ??
+        provider.display_name ??
+        provider.provider_name ??
+        "",
+    ),
+    status: String(obj.status ?? ""),
+  };
+}
+
+function normalizeAgent(item: unknown): AgentOption {
+  const obj = (item || {}) as Record<string, unknown>;
+
+  return {
+    id: (obj.id ?? "") as number | string,
+    name: String(
+      obj.display_name ??
+        obj.full_name ??
+        obj.name ??
+        obj.agent_name ??
+        obj.agent_code ??
+        "-",
+    ),
+    code: String(obj.agent_code ?? obj.code ?? ""),
+    phone: String(obj.phone_number ?? obj.phone ?? obj.mobile ?? ""),
+    status: String(obj.status ?? ""),
+  };
+}
+
 /* ============================================================
    📚 Dictionary
 ============================================================ */
@@ -254,8 +362,8 @@ function dictionary(locale: AppLocale) {
   return {
     pageTitle: isArabic ? "إنشاء طلب جديد" : "Create New Order",
     pageSubtitle: isArabic
-      ? "إنشاء طلب جديد وربط العميل بالمنتج مع احتساب المبالغ والحالة وربطها مباشرة بواجهة الطلبات."
-      : "Create a new order, link customer with product, calculate totals and connect it directly with orders API.",
+      ? "إنشاء طلب كامل وربط العميل بالمنتج والمركز والعقد والمندوب ضمن دورة الطلب التشغيلية."
+      : "Create a full order and link customer, product, provider, contract and agent within the order lifecycle.",
 
     back: isArabic ? "رجوع" : "Back",
     save: isArabic ? "حفظ الطلب" : "Save Order",
@@ -266,14 +374,20 @@ function dictionary(locale: AppLocale) {
 
     heroBadge1: isArabic ? "وحدة الطلبات" : "Orders Module",
     heroBadge2: isArabic ? "إنشاء" : "Create",
-    ready: isArabic ? "جاهز للربط" : "Ready",
 
     customerProductSection: isArabic
       ? "بيانات العميل والمنتج"
       : "Customer and Product",
     customerProductDesc: isArabic
-      ? "اختر العميل والمنتج المرتبط بهذا الطلب."
-      : "Select the customer and product linked to this order.",
+      ? "اختر العميل والمنتج أو البرنامج أو الخدمة المرتبطة بهذا الطلب."
+      : "Select the customer and the product, program or service linked to this order.",
+
+    lifecycleSection: isArabic
+      ? "الربط التشغيلي للطلب"
+      : "Order Operational Links",
+    lifecycleDesc: isArabic
+      ? "اربط الطلب بالمركز أو مقدم الخدمة والعقد والمندوب عند الحاجة."
+      : "Link the order to provider, contract and agent when needed.",
 
     orderStatusSection: isArabic ? "حالة الطلب" : "Order Status",
     orderStatusDesc: isArabic
@@ -296,11 +410,22 @@ function dictionary(locale: AppLocale) {
       : "Quick review before saving the order.",
 
     customer: isArabic ? "العميل" : "Customer",
-    product: isArabic ? "المنتج" : "Product",
+    product: isArabic ? "المنتج / البرنامج / الخدمة" : "Product / Program / Service",
+    provider: isArabic ? "المركز / مقدم الخدمة" : "Provider / Center",
+    contract: isArabic ? "العقد" : "Contract",
+    agent: isArabic ? "المندوب" : "Agent",
+
     selectCustomer: isArabic ? "اختر العميل" : "Select customer",
     selectProduct: isArabic ? "اختر المنتج" : "Select product",
+    selectProvider: isArabic ? "اختر المركز / مقدم الخدمة" : "Select provider / center",
+    selectContract: isArabic ? "اختر العقد" : "Select contract",
+    selectAgent: isArabic ? "اختر المندوب" : "Select agent",
+
     noCustomers: isArabic ? "لا يوجد عملاء" : "No customers",
     noProducts: isArabic ? "لا توجد منتجات" : "No products",
+    noProviders: isArabic ? "لا توجد مراكز" : "No providers",
+    noContracts: isArabic ? "لا توجد عقود" : "No contracts",
+    noAgents: isArabic ? "لا يوجد مندوبون" : "No agents",
 
     source: isArabic ? "مصدر الطلب" : "Order Source",
     status: isArabic ? "حالة الطلب" : "Order Status",
@@ -353,6 +478,16 @@ function dictionary(locale: AppLocale) {
     loadProductsError: isArabic
       ? "تعذر تحميل المنتجات."
       : "Unable to load products.",
+    loadProvidersError: isArabic
+      ? "تعذر تحميل المراكز / مقدمي الخدمة."
+      : "Unable to load providers.",
+    loadContractsError: isArabic
+      ? "تعذر تحميل العقود."
+      : "Unable to load contracts.",
+    loadAgentsError: isArabic
+      ? "تعذر تحميل المندوبين."
+      : "Unable to load agents.",
+
     createSuccess: isArabic
       ? "تم إنشاء الطلب بنجاح."
       : "Order created successfully.",
@@ -360,6 +495,9 @@ function dictionary(locale: AppLocale) {
 
     previewCustomer: isArabic ? "العميل المختار" : "Selected Customer",
     previewProduct: isArabic ? "المنتج المختار" : "Selected Product",
+    previewProvider: isArabic ? "المركز / مقدم الخدمة" : "Provider / Center",
+    previewContract: isArabic ? "العقد" : "Contract",
+    previewAgent: isArabic ? "المندوب" : "Agent",
     previewFinancial: isArabic ? "الملخص المالي" : "Financial Summary",
     previewOperational: isArabic ? "الملخص التشغيلي" : "Operational Summary",
 
@@ -440,6 +578,11 @@ function SectionIcon({ icon: Icon }: { icon: ElementType }) {
   );
 }
 
+function optionLabel(main: string, extra?: string) {
+  if (!extra) return main;
+  return `${main} - ${extra}`;
+}
+
 /* ============================================================
    ✅ Page
 ============================================================ */
@@ -450,6 +593,9 @@ export default function SystemOrdersCreatePage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [products, setProducts] = useState<ProductOption[]>([]);
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [contracts, setContracts] = useState<ContractOption[]>([]);
+  const [agents, setAgents] = useState<AgentOption[]>([]);
   const [isLoadingOptions, setIsLoadingOptions] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<OrderFormErrors>({});
@@ -457,6 +603,9 @@ export default function SystemOrdersCreatePage() {
   const [formData, setFormData] = useState<OrderFormData>({
     customerId: "",
     productId: "",
+    providerId: "",
+    contractId: "",
+    agentId: "",
     status: "pending",
     paymentStatus: "unpaid",
     fulfillmentStatus: "not_started",
@@ -482,6 +631,27 @@ export default function SystemOrdersCreatePage() {
   const selectedProduct = useMemo(() => {
     return products.find((item) => String(item.id) === formData.productId);
   }, [products, formData.productId]);
+
+  const selectedProvider = useMemo(() => {
+    return providers.find((item) => String(item.id) === formData.providerId);
+  }, [providers, formData.providerId]);
+
+  const filteredContracts = useMemo(() => {
+    if (!formData.providerId) return contracts;
+
+    return contracts.filter((item) => {
+      if (!item.providerId) return true;
+      return String(item.providerId) === String(formData.providerId);
+    });
+  }, [contracts, formData.providerId]);
+
+  const selectedContract = useMemo(() => {
+    return contracts.find((item) => String(item.id) === formData.contractId);
+  }, [contracts, formData.contractId]);
+
+  const selectedAgent = useMemo(() => {
+    return agents.find((item) => String(item.id) === formData.agentId);
+  }, [agents, formData.agentId]);
 
   const calculations = useMemo(() => {
     const quantity = Math.max(toNumber(formData.quantity), 0);
@@ -591,6 +761,9 @@ export default function SystemOrdersCreatePage() {
     setFormData({
       customerId: "",
       productId: "",
+      providerId: "",
+      contractId: "",
+      agentId: "",
       status: "pending",
       paymentStatus: "unpaid",
       fulfillmentStatus: "not_started",
@@ -609,37 +782,89 @@ export default function SystemOrdersCreatePage() {
     setErrors({});
   }
 
+  async function loadCollection<T>(
+    path: string,
+    normalize: (item: unknown) => T,
+    onError: string,
+  ): Promise<T[]> {
+    try {
+      const result = await apiGet<ApiListResponse>(path, {
+        page_size: 100,
+      });
+
+      if (!result.ok) {
+        toast.error(onError);
+        return [];
+      }
+
+      return normalizeApiList(result.data).map(normalize);
+    } catch (error) {
+      console.error(`Failed to load collection from ${path}:`, error);
+      toast.error(onError);
+      return [];
+    }
+  }
+
   async function loadOptions() {
     try {
       setIsLoadingOptions(true);
 
-      const [customersResult, productsResult] = await Promise.all([
-        apiGet<ApiListResponse>(API_PATHS.customers.list, {
-          page_size: 100,
-        }),
-        apiGet<ApiListResponse>(API_PATHS.products.list, {
-          page_size: 100,
-        }),
+      const [
+        customersData,
+        productsData,
+        providersData,
+        contractsData,
+        agentsData,
+      ] = await Promise.all([
+        loadCollection<CustomerOption>(
+          API_PATHS.customers.list,
+          normalizeCustomer,
+          t.loadCustomersError,
+        ),
+        loadCollection<ProductOption>(
+          API_PATHS.products.list,
+          normalizeProduct,
+          t.loadProductsError,
+        ),
+        loadCollection<ProviderOption>(
+          "/api/providers/",
+          normalizeProvider,
+          t.loadProvidersError,
+        ),
+        loadCollection<ContractOption>(
+          "/api/contracts/",
+          normalizeContract,
+          t.loadContractsError,
+        ),
+        loadCollection<AgentOption>(
+          "/api/agents/",
+          normalizeAgent,
+          t.loadAgentsError,
+        ),
       ]);
 
-      if (!customersResult.ok) {
-        toast.error(t.loadCustomersError);
-      } else {
-        setCustomers(normalizeApiList(customersResult.data).map(normalizeCustomer));
-      }
-
-      if (!productsResult.ok) {
-        toast.error(t.loadProductsError);
-      } else {
-        setProducts(normalizeApiList(productsResult.data).map(normalizeProduct));
-      }
-    } catch (error) {
-      console.error("Failed to load order options:", error);
-      toast.error(t.loadCustomersError);
-      toast.error(t.loadProductsError);
+      setCustomers(customersData);
+      setProducts(productsData);
+      setProviders(providersData);
+      setContracts(contractsData);
+      setAgents(agentsData);
     } finally {
       setIsLoadingOptions(false);
     }
+  }
+
+  function extractCreatedOrderId(result: {
+    data?: OrderCreateResponse | OrderCreateResponse["data"];
+  }) {
+    const data = result.data;
+
+    if (!data) return null;
+
+    if ("id" in data && data.id) return data.id;
+
+    if ("data" in data && data.data?.id) return data.data.id;
+
+    return null;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -652,7 +877,7 @@ export default function SystemOrdersCreatePage() {
     try {
       setIsSubmitting(true);
 
-      const payload = {
+      const payload: Record<string, string | number> = {
         customer_id: formData.customerId,
         product_id: formData.productId,
         status: formData.status,
@@ -670,6 +895,18 @@ export default function SystemOrdersCreatePage() {
         cancellation_reason: formData.cancellationReason.trim(),
       };
 
+      if (formData.providerId) {
+        payload.provider_id = formData.providerId;
+      }
+
+      if (formData.contractId) {
+        payload.contract_id = formData.contractId;
+      }
+
+      if (formData.agentId) {
+        payload.agent_id = formData.agentId;
+      }
+
       const result = await apiPost<OrderCreateResponse>(
         API_PATHS.orders.list,
         payload,
@@ -681,7 +918,7 @@ export default function SystemOrdersCreatePage() {
 
       toast.success(t.createSuccess);
 
-      const createdId = result.data?.data?.id;
+      const createdId = extractCreatedOrderId(result);
 
       if (createdId) {
         router.push(`/system/orders/${createdId}`);
@@ -741,6 +978,21 @@ export default function SystemOrdersCreatePage() {
       };
     });
   }, [selectedProduct]);
+
+  useEffect(() => {
+    if (!formData.providerId || !formData.contractId) return;
+
+    const isSelectedContractAvailable = filteredContracts.some(
+      (contract) => String(contract.id) === formData.contractId,
+    );
+
+    if (!isSelectedContractAvailable) {
+      setFormData((current) => ({
+        ...current,
+        contractId: "",
+      }));
+    }
+  }, [filteredContracts, formData.contractId, formData.providerId]);
 
   return (
     <form
@@ -858,8 +1110,10 @@ export default function SystemOrdersCreatePage() {
 
                   {customers.map((customer) => (
                     <option key={customer.id} value={String(customer.id)}>
-                      {customer.name}
-                      {customer.phone ? ` - ${customer.phone}` : ""}
+                      {optionLabel(
+                        customer.name,
+                        customer.phone || customer.email,
+                      )}
                     </option>
                   ))}
                 </select>
@@ -900,12 +1154,127 @@ export default function SystemOrdersCreatePage() {
 
                   {products.map((product) => (
                     <option key={product.id} value={String(product.id)}>
-                      {product.name}
-                      {product.code ? ` - ${product.code}` : ""}
+                      {optionLabel(
+                        product.name,
+                        product.code || product.productType,
+                      )}
                     </option>
                   ))}
                 </select>
                 <FieldError message={errors.productId} />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Lifecycle Links */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <div className="flex items-start gap-3">
+                <SectionIcon icon={Handshake} />
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.lifecycleSection}
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    {t.lifecycleDesc}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="providerId">
+                  {t.provider}{" "}
+                  <span className="text-muted-foreground">({t.optional})</span>
+                </Label>
+                <select
+                  id="providerId"
+                  name="providerId"
+                  value={formData.providerId}
+                  onChange={(event) => {
+                    const providerId = event.target.value;
+
+                    setFormData((current) => ({
+                      ...current,
+                      providerId,
+                      contractId: "",
+                    }));
+                  }}
+                  disabled={isLoadingOptions}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">
+                    {isLoadingOptions ? t.loading : t.selectProvider}
+                  </option>
+
+                  {providers.map((provider) => (
+                    <option key={provider.id} value={String(provider.id)}>
+                      {optionLabel(provider.name, provider.code || provider.city)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="contractId">
+                  {t.contract}{" "}
+                  <span className="text-muted-foreground">({t.optional})</span>
+                </Label>
+                <select
+                  id="contractId"
+                  name="contractId"
+                  value={formData.contractId}
+                  onChange={handleInputChange}
+                  disabled={isLoadingOptions}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">
+                    {isLoadingOptions ? t.loading : t.selectContract}
+                  </option>
+
+                  {filteredContracts.map((contract) => (
+                    <option key={contract.id} value={String(contract.id)}>
+                      {optionLabel(
+                        contract.title,
+                        contract.contractNumber || contract.providerName,
+                      )}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="agentId">
+                  {t.agent}{" "}
+                  <span className="text-muted-foreground">({t.optional})</span>
+                </Label>
+                <select
+                  id="agentId"
+                  name="agentId"
+                  value={formData.agentId}
+                  onChange={(event) => {
+                    const agentId = event.target.value;
+
+                    setFormData((current) => ({
+                      ...current,
+                      agentId,
+                      source: agentId ? "agent" : current.source,
+                    }));
+                  }}
+                  disabled={isLoadingOptions}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">
+                    {isLoadingOptions ? t.loading : t.selectAgent}
+                  </option>
+
+                  {agents.map((agent) => (
+                    <option key={agent.id} value={String(agent.id)}>
+                      {optionLabel(agent.name, agent.code || agent.phone)}
+                    </option>
+                  ))}
+                </select>
               </div>
             </CardContent>
           </Card>
@@ -1227,6 +1596,52 @@ export default function SystemOrdersCreatePage() {
 
               <div className="rounded-xl border bg-background p-4">
                 <div className="mb-3 flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-semibold">{t.previewProvider}</p>
+                </div>
+
+                <p className="text-sm font-medium">
+                  {selectedProvider?.name || t.selectProvider}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedProvider?.code || selectedProvider?.city || "-"}
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+                <div className="rounded-xl border bg-background p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <FileSignature className="h-4 w-4 text-muted-foreground" />
+                    <p className="font-semibold">{t.previewContract}</p>
+                  </div>
+
+                  <p className="text-sm font-medium">
+                    {selectedContract?.title || t.selectContract}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {selectedContract?.contractNumber ||
+                      selectedContract?.providerName ||
+                      "-"}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border bg-background p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <UsersRound className="h-4 w-4 text-muted-foreground" />
+                    <p className="font-semibold">{t.previewAgent}</p>
+                  </div>
+
+                  <p className="text-sm font-medium">
+                    {selectedAgent?.name || t.selectAgent}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {selectedAgent?.code || selectedAgent?.phone || "-"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border bg-background p-4">
+                <div className="mb-3 flex items-center gap-2">
                   <Wallet className="h-4 w-4 text-muted-foreground" />
                   <p className="font-semibold">{t.previewFinancial}</p>
                 </div>
@@ -1282,6 +1697,7 @@ export default function SystemOrdersCreatePage() {
 
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="secondary" className="rounded-full">
+                    <BriefcaseBusiness className="h-3.5 w-3.5" />
                     {t.sourceLabels[formData.source]}
                   </Badge>
                   <Badge variant="outline" className="rounded-full">

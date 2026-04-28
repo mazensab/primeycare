@@ -5,7 +5,17 @@
 # ✅ Parsing / Validation / Serialization
 # ✅ Filtering / Pagination
 # ✅ Create / Update Order
+# ✅ Full Order Lifecycle:
+#    - pending
+#    - confirmed
+#    - completed
+#    - cancelled
 # ✅ Status history tracking
+# ✅ Optional relation resolving:
+#    - provider
+#    - contract
+#    - agent
+#    - invoice عبر العلاقة العكسية من Invoice.order
 # ============================================================
 
 from __future__ import annotations
@@ -14,10 +24,13 @@ import json
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Q, QuerySet
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from customers.models import Customer
 from orders.models import Order, OrderStatusHistory
@@ -88,6 +101,23 @@ def parse_decimal(value: Any, default: Decimal | None = None) -> Decimal | None:
         raise ValidationError(f"Invalid decimal value: {value}")
 
 
+def parse_datetime_value(value: Any):
+    if value in (None, ""):
+        return None
+
+    if hasattr(value, "isoformat"):
+        return value
+
+    parsed = parse_datetime(str(value))
+    if parsed is None:
+        raise ValidationError(f"Invalid datetime value: {value}")
+
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+
+    return parsed
+
+
 # ============================================================
 # 🔹 Pagination
 # ============================================================
@@ -122,8 +152,13 @@ def apply_order_filters(queryset: QuerySet[Order], params) -> QuerySet[Order]:
     payment_status = normalize_text(params.get("payment_status"))
     fulfillment_status = normalize_text(params.get("fulfillment_status"))
     source = normalize_text(params.get("source"))
+
     customer_id = parse_int(params.get("customer_id"))
     product_id = parse_int(params.get("product_id"))
+    provider_id = parse_int(params.get("provider_id"))
+    contract_id = parse_int(params.get("contract_id"))
+    agent_id = parse_int(params.get("agent_id"))
+    invoice_id = parse_int(params.get("invoice_id"))
     created_by_id = parse_int(params.get("created_by_id"))
 
     if q:
@@ -131,8 +166,10 @@ def apply_order_filters(queryset: QuerySet[Order], params) -> QuerySet[Order]:
             Q(order_number__icontains=q)
             | Q(product_name__icontains=q)
             | Q(product_type__icontains=q)
-            | Q(customer__full_name__icontains=q)
-            | Q(customer__phone__icontains=q)
+            | Q(customer__customer_code__icontains=q)
+            | Q(customer__display_name__icontains=q)
+            | Q(customer__phone_number__icontains=q)
+            | Q(customer__whatsapp_number__icontains=q)
             | Q(customer__email__icontains=q)
             | Q(product__name__icontains=q)
             | Q(product__code__icontains=q)
@@ -159,6 +196,18 @@ def apply_order_filters(queryset: QuerySet[Order], params) -> QuerySet[Order]:
     if product_id:
         queryset = queryset.filter(product_id=product_id)
 
+    if provider_id:
+        queryset = queryset.filter(provider_id=provider_id)
+
+    if contract_id:
+        queryset = queryset.filter(contract_id=contract_id)
+
+    if agent_id:
+        queryset = queryset.filter(agent_id=agent_id)
+
+    if invoice_id:
+        queryset = queryset.filter(invoice__id=invoice_id)
+
     if created_by_id:
         queryset = queryset.filter(created_by_id=created_by_id)
 
@@ -166,7 +215,7 @@ def apply_order_filters(queryset: QuerySet[Order], params) -> QuerySet[Order]:
 
 
 # ============================================================
-# 🔹 Validation / Resolve Helpers
+# 🔹 Validation Helpers
 # ============================================================
 
 def _validate_status(value: str) -> str:
@@ -197,6 +246,43 @@ def _validate_source(value: str) -> str:
     return value
 
 
+def _validate_status_transition(from_status: str, to_status: str) -> None:
+    if from_status == to_status:
+        return
+
+    allowed_transitions = {
+        Order.Status.DRAFT: {
+            Order.Status.PENDING,
+            Order.Status.CANCELLED,
+        },
+        Order.Status.PENDING: {
+            Order.Status.CONFIRMED,
+            Order.Status.CANCELLED,
+        },
+        Order.Status.CONFIRMED: {
+            Order.Status.PROCESSING,
+            Order.Status.COMPLETED,
+            Order.Status.CANCELLED,
+        },
+        Order.Status.PROCESSING: {
+            Order.Status.COMPLETED,
+            Order.Status.CANCELLED,
+        },
+        Order.Status.COMPLETED: {
+            Order.Status.REFUNDED,
+        },
+        Order.Status.CANCELLED: set(),
+        Order.Status.REFUNDED: set(),
+    }
+
+    if to_status not in allowed_transitions.get(from_status, set()):
+        raise ValidationError(f"Invalid order status transition: {from_status} -> {to_status}")
+
+
+# ============================================================
+# 🔹 Resolve Helpers
+# ============================================================
+
 def _resolve_customer(customer_id: Any) -> Customer:
     if customer_id in (None, "", 0, "0"):
         raise ValidationError("Customer is required.")
@@ -217,9 +303,106 @@ def _resolve_product(product_id: Any) -> Product:
         raise ValidationError("Selected product does not exist.")
 
 
+def _resolve_optional_model(app_label: str, model_name: str, value: Any, error_message: str):
+    if value in (None, "", 0, "0"):
+        return None
+
+    model = apps.get_model(app_label, model_name)
+
+    try:
+        return model.objects.get(pk=int(value))
+    except (model.DoesNotExist, TypeError, ValueError):
+        raise ValidationError(error_message)
+
+
+def _resolve_provider(provider_id: Any):
+    return _resolve_optional_model(
+        "providers",
+        "Provider",
+        provider_id,
+        "Selected provider does not exist.",
+    )
+
+
+def _resolve_contract(contract_id: Any):
+    return _resolve_optional_model(
+        "contracts",
+        "Contract",
+        contract_id,
+        "Selected contract does not exist.",
+    )
+
+
+def _resolve_agent(agent_id: Any):
+    return _resolve_optional_model(
+        "agents",
+        "Agent",
+        agent_id,
+        "Selected agent does not exist.",
+    )
+
+
+def _resolve_invoice(invoice_id: Any):
+    return _resolve_optional_model(
+        "invoices",
+        "Invoice",
+        invoice_id,
+        "Selected invoice does not exist.",
+    )
+
+
 # ============================================================
-# 🔹 Serialization
+# 🔹 Invoice Reverse Relation Helpers
 # ============================================================
+
+def _get_linked_invoice(order: Order):
+    try:
+        invoice = order.invoice
+    except Exception:
+        return None
+
+    if hasattr(invoice, "all"):
+        return invoice.all().first()
+
+    return invoice
+
+
+def _attach_invoice_to_order(*, order: Order, invoice) -> None:
+    if not invoice:
+        return
+
+    invoice.order = order
+    invoice.save(update_fields=["order"])
+
+
+# ============================================================
+# 🔹 Serialization Helpers
+# ============================================================
+
+def _safe_attr(obj: Any, *names: str, default: Any = "") -> Any:
+    if not obj:
+        return default
+
+    for name in names:
+        value = getattr(obj, name, None)
+        if value not in (None, ""):
+            return value
+
+    return default
+
+
+def _serialize_user_name(user) -> str:
+    if not user:
+        return ""
+
+    get_full_name = getattr(user, "get_full_name", None)
+    if callable(get_full_name):
+        full_name = get_full_name()
+        if full_name:
+            return full_name
+
+    return getattr(user, "username", "") or getattr(user, "email", "") or ""
+
 
 def serialize_order_status_history(obj: OrderStatusHistory) -> dict[str, Any]:
     return {
@@ -229,40 +412,85 @@ def serialize_order_status_history(obj: OrderStatusHistory) -> dict[str, Any]:
         "to_status": obj.to_status,
         "note": obj.note,
         "changed_by_id": obj.changed_by_id,
-        "changed_by_name": getattr(obj.changed_by, "get_full_name", lambda: "")() if obj.changed_by_id else "",
+        "changed_by_name": _serialize_user_name(obj.changed_by) if obj.changed_by_id else "",
         "created_at": obj.created_at.isoformat() if obj.created_at else None,
     }
 
 
 def serialize_order(obj: Order, include_history: bool = True) -> dict[str, Any]:
+    invoice = _get_linked_invoice(obj)
+
     data = {
         "id": obj.id,
         "order_number": obj.order_number,
+
         "customer_id": obj.customer_id,
         "customer": {
             "id": obj.customer.id,
-            "full_name": getattr(obj.customer, "full_name", ""),
-            "phone": getattr(obj.customer, "phone", ""),
-            "email": getattr(obj.customer, "email", ""),
-            "status": getattr(obj.customer, "status", ""),
+            "customer_code": _safe_attr(obj.customer, "customer_code"),
+            "display_name": _safe_attr(obj.customer, "display_name", "full_name"),
+            "phone_number": _safe_attr(obj.customer, "phone_number", "phone"),
+            "whatsapp_number": _safe_attr(obj.customer, "whatsapp_number"),
+            "email": _safe_attr(obj.customer, "email"),
+            "status": _safe_attr(obj.customer, "status"),
         } if obj.customer_id else None,
+
         "product_id": obj.product_id,
         "product": {
             "id": obj.product.id,
-            "name": obj.product.name,
-            "code": obj.product.code,
-            "slug": obj.product.slug,
-            "product_type": obj.product.product_type,
-            "status": obj.product.status,
-            "currency_code": obj.product.currency_code,
-            "price": str(obj.product.price),
-            "sale_price": str(obj.product.sale_price) if obj.product.sale_price is not None else None,
-            "effective_price": str(obj.product.effective_price),
+            "name": _safe_attr(obj.product, "name"),
+            "code": _safe_attr(obj.product, "code"),
+            "slug": _safe_attr(obj.product, "slug"),
+            "product_type": _safe_attr(obj.product, "product_type"),
+            "status": _safe_attr(obj.product, "status"),
+            "currency_code": _safe_attr(obj.product, "currency_code", default="SAR"),
+            "price": str(_safe_attr(obj.product, "price", default=Decimal("0.00"))),
+            "sale_price": (
+                str(getattr(obj.product, "sale_price"))
+                if getattr(obj.product, "sale_price", None) is not None
+                else None
+            ),
+            "effective_price": str(_safe_attr(obj.product, "effective_price", "price", default=Decimal("0.00"))),
         } if obj.product_id else None,
+
+        "provider_id": obj.provider_id,
+        "provider": {
+            "id": obj.provider.id,
+            "name": _safe_attr(obj.provider, "name", "display_name", "provider_name"),
+            "code": _safe_attr(obj.provider, "code", "provider_code"),
+            "status": _safe_attr(obj.provider, "status"),
+        } if obj.provider_id else None,
+
+        "contract_id": obj.contract_id,
+        "contract": {
+            "id": obj.contract.id,
+            "contract_number": _safe_attr(obj.contract, "contract_number", "number"),
+            "title": _safe_attr(obj.contract, "title", "name"),
+            "status": _safe_attr(obj.contract, "status"),
+        } if obj.contract_id else None,
+
+        "agent_id": obj.agent_id,
+        "agent": {
+            "id": obj.agent.id,
+            "agent_code": _safe_attr(obj.agent, "agent_code", "code"),
+            "name": _safe_attr(obj.agent, "display_name", "full_name", "name"),
+            "phone_number": _safe_attr(obj.agent, "phone_number", "phone"),
+            "status": _safe_attr(obj.agent, "status"),
+        } if obj.agent_id else None,
+
+        "invoice_id": invoice.id if invoice else None,
+        "invoice": {
+            "id": invoice.id,
+            "invoice_number": _safe_attr(invoice, "invoice_number", "number"),
+            "status": _safe_attr(invoice, "status"),
+            "total_amount": str(_safe_attr(invoice, "total_amount", default=Decimal("0.00"))),
+        } if invoice else None,
+
         "status": obj.status,
         "payment_status": obj.payment_status,
         "fulfillment_status": obj.fulfillment_status,
         "source": obj.source,
+
         "product_name": obj.product_name,
         "product_type": obj.product_type,
         "currency_code": obj.currency_code,
@@ -275,11 +503,15 @@ def serialize_order(obj: Order, include_history: bool = True) -> dict[str, Any]:
         "amount_paid": str(obj.amount_paid),
         "remaining_amount": str(obj.remaining_amount),
         "is_paid": obj.is_paid,
+        "has_invoice": bool(invoice),
+
         "issue_reference": obj.issue_reference,
         "issued_at": obj.issued_at.isoformat() if obj.issued_at else None,
+
         "customer_notes": obj.customer_notes,
         "internal_notes": obj.internal_notes,
         "cancellation_reason": obj.cancellation_reason,
+
         "created_by_id": obj.created_by_id,
         "updated_by_id": obj.updated_by_id,
         "created_at": obj.created_at.isoformat() if obj.created_at else None,
@@ -324,6 +556,11 @@ def create_order(*, payload: dict[str, Any], user=None) -> Order:
     customer = _resolve_customer(payload.get("customer_id"))
     product = _resolve_product(payload.get("product_id"))
 
+    provider = _resolve_provider(payload.get("provider_id"))
+    contract = _resolve_contract(payload.get("contract_id"))
+    agent = _resolve_agent(payload.get("agent_id"))
+    invoice = _resolve_invoice(payload.get("invoice_id"))
+
     status = normalize_text(payload.get("status")) or Order.Status.PENDING
     payment_status = normalize_text(payload.get("payment_status")) or Order.PaymentStatus.UNPAID
     fulfillment_status = normalize_text(payload.get("fulfillment_status")) or Order.FulfillmentStatus.NOT_STARTED
@@ -334,9 +571,15 @@ def create_order(*, payload: dict[str, Any], user=None) -> Order:
     fulfillment_status = _validate_fulfillment_status(fulfillment_status)
     source = _validate_source(source)
 
+    if status == Order.Status.CANCELLED and not normalize_text(payload.get("cancellation_reason")):
+        raise ValidationError("Cancellation reason is required when order is cancelled.")
+
     order = Order(
         customer=customer,
         product=product,
+        provider=provider,
+        contract=contract,
+        agent=agent,
         status=status,
         payment_status=payment_status,
         fulfillment_status=fulfillment_status,
@@ -347,7 +590,7 @@ def create_order(*, payload: dict[str, Any], user=None) -> Order:
         tax_amount=parse_decimal(payload.get("tax_amount"), Decimal("0.00")) or Decimal("0.00"),
         amount_paid=parse_decimal(payload.get("amount_paid"), Decimal("0.00")) or Decimal("0.00"),
         issue_reference=normalize_text(payload.get("issue_reference")),
-        issued_at=payload.get("issued_at") or None,
+        issued_at=parse_datetime_value(payload.get("issued_at")),
         customer_notes=normalize_text(payload.get("customer_notes")),
         internal_notes=normalize_text(payload.get("internal_notes")),
         cancellation_reason=normalize_text(payload.get("cancellation_reason")),
@@ -359,11 +602,14 @@ def create_order(*, payload: dict[str, Any], user=None) -> Order:
         order.full_clean()
         order.save()
 
+        if invoice:
+            _attach_invoice_to_order(order=order, invoice=invoice)
+
         create_status_history(
             order=order,
             from_status="",
             to_status=order.status,
-            note="Order created",
+            note=normalize_text(payload.get("status_note"), "Order created"),
             user=user,
         )
 
@@ -372,12 +618,26 @@ def create_order(*, payload: dict[str, Any], user=None) -> Order:
 
 def update_order(*, instance: Order, payload: dict[str, Any], user=None) -> Order:
     previous_status = instance.status
+    invoice_to_attach = None
+    should_attach_invoice = "invoice_id" in payload and payload.get("invoice_id") not in (None, "", 0, "0")
 
     if "customer_id" in payload:
         instance.customer = _resolve_customer(payload.get("customer_id"))
 
     if "product_id" in payload:
         instance.product = _resolve_product(payload.get("product_id"))
+
+    if "provider_id" in payload:
+        instance.provider = _resolve_provider(payload.get("provider_id"))
+
+    if "contract_id" in payload:
+        instance.contract = _resolve_contract(payload.get("contract_id"))
+
+    if "agent_id" in payload:
+        instance.agent = _resolve_agent(payload.get("agent_id"))
+
+    if should_attach_invoice:
+        invoice_to_attach = _resolve_invoice(payload.get("invoice_id"))
 
     if "status" in payload:
         instance.status = normalize_text(payload.get("status"))
@@ -410,7 +670,7 @@ def update_order(*, instance: Order, payload: dict[str, Any], user=None) -> Orde
         instance.issue_reference = normalize_text(payload.get("issue_reference"))
 
     if "issued_at" in payload:
-        instance.issued_at = payload.get("issued_at") or None
+        instance.issued_at = parse_datetime_value(payload.get("issued_at"))
 
     if "customer_notes" in payload:
         instance.customer_notes = normalize_text(payload.get("customer_notes"))
@@ -426,12 +686,19 @@ def update_order(*, instance: Order, payload: dict[str, Any], user=None) -> Orde
     instance.fulfillment_status = _validate_fulfillment_status(instance.fulfillment_status)
     instance.source = _validate_source(instance.source)
 
+    allow_any_status = parse_bool(payload.get("allow_any_status"), False)
+    if not allow_any_status:
+        _validate_status_transition(previous_status, instance.status)
+
     if getattr(user, "is_authenticated", False):
         instance.updated_by = user
 
     with transaction.atomic():
         instance.full_clean()
         instance.save()
+
+        if invoice_to_attach:
+            _attach_invoice_to_order(order=instance, invoice=invoice_to_attach)
 
         if previous_status != instance.status:
             create_status_history(
@@ -441,5 +708,169 @@ def update_order(*, instance: Order, payload: dict[str, Any], user=None) -> Orde
                 note=normalize_text(payload.get("status_note"), "Status updated"),
                 user=user,
             )
+
+    return instance
+
+
+# ============================================================
+# 🔹 Lifecycle Actions
+# ============================================================
+
+def confirm_order(*, instance: Order, user=None, note: str = "") -> Order:
+    previous_status = instance.status
+    _validate_status_transition(previous_status, Order.Status.CONFIRMED)
+
+    instance.status = Order.Status.CONFIRMED
+    instance.fulfillment_status = Order.FulfillmentStatus.NOT_STARTED
+
+    if getattr(user, "is_authenticated", False):
+        instance.updated_by = user
+
+    with transaction.atomic():
+        instance.full_clean()
+        instance.save()
+
+        create_status_history(
+            order=instance,
+            from_status=previous_status,
+            to_status=instance.status,
+            note=normalize_text(note, "Order confirmed"),
+            user=user,
+        )
+
+    return instance
+
+
+def start_processing_order(*, instance: Order, user=None, note: str = "") -> Order:
+    previous_status = instance.status
+    _validate_status_transition(previous_status, Order.Status.PROCESSING)
+
+    instance.status = Order.Status.PROCESSING
+    instance.fulfillment_status = Order.FulfillmentStatus.IN_PROGRESS
+
+    if getattr(user, "is_authenticated", False):
+        instance.updated_by = user
+
+    with transaction.atomic():
+        instance.full_clean()
+        instance.save()
+
+        create_status_history(
+            order=instance,
+            from_status=previous_status,
+            to_status=instance.status,
+            note=normalize_text(note, "Order processing started"),
+            user=user,
+        )
+
+    return instance
+
+
+def complete_order(*, instance: Order, user=None, note: str = "") -> Order:
+    previous_status = instance.status
+    _validate_status_transition(previous_status, Order.Status.COMPLETED)
+
+    instance.status = Order.Status.COMPLETED
+
+    if instance.fulfillment_status in {
+        Order.FulfillmentStatus.NOT_STARTED,
+        Order.FulfillmentStatus.IN_PROGRESS,
+    }:
+        instance.fulfillment_status = Order.FulfillmentStatus.DELIVERED
+
+    if not instance.issued_at:
+        instance.issued_at = timezone.now()
+
+    if getattr(user, "is_authenticated", False):
+        instance.updated_by = user
+
+    with transaction.atomic():
+        instance.full_clean()
+        instance.save()
+
+        create_status_history(
+            order=instance,
+            from_status=previous_status,
+            to_status=instance.status,
+            note=normalize_text(note, "Order completed"),
+            user=user,
+        )
+
+    return instance
+
+
+def cancel_order(*, instance: Order, reason: str, user=None, note: str = "") -> Order:
+    reason = normalize_text(reason)
+
+    if not reason:
+        raise ValidationError("Cancellation reason is required.")
+
+    previous_status = instance.status
+    _validate_status_transition(previous_status, Order.Status.CANCELLED)
+
+    instance.status = Order.Status.CANCELLED
+    instance.fulfillment_status = Order.FulfillmentStatus.FAILED
+    instance.cancellation_reason = reason
+
+    if getattr(user, "is_authenticated", False):
+        instance.updated_by = user
+
+    with transaction.atomic():
+        instance.full_clean()
+        instance.save()
+
+        create_status_history(
+            order=instance,
+            from_status=previous_status,
+            to_status=instance.status,
+            note=normalize_text(note, reason),
+            user=user,
+        )
+
+    return instance
+
+
+def refund_order(*, instance: Order, user=None, note: str = "") -> Order:
+    previous_status = instance.status
+    _validate_status_transition(previous_status, Order.Status.REFUNDED)
+
+    instance.status = Order.Status.REFUNDED
+    instance.payment_status = Order.PaymentStatus.REFUNDED
+
+    if getattr(user, "is_authenticated", False):
+        instance.updated_by = user
+
+    with transaction.atomic():
+        instance.full_clean()
+        instance.save()
+
+        create_status_history(
+            order=instance,
+            from_status=previous_status,
+            to_status=instance.status,
+            note=normalize_text(note, "Order refunded"),
+            user=user,
+        )
+
+    return instance
+
+
+def attach_invoice(*, instance: Order, invoice_id: Any, user=None, note: str = "") -> Order:
+    invoice = _resolve_invoice(invoice_id)
+
+    with transaction.atomic():
+        _attach_invoice_to_order(order=instance, invoice=invoice)
+
+        if getattr(user, "is_authenticated", False):
+            instance.updated_by = user
+            instance.save(update_fields=["updated_by", "updated_at"])
+
+        create_status_history(
+            order=instance,
+            from_status=instance.status,
+            to_status=instance.status,
+            note=normalize_text(note, "Invoice attached to order"),
+            user=user,
+        )
 
     return instance

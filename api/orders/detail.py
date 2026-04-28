@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 api/orders/detail.py
-# 🧭 Primey Care — Orders API Detail/Update/Delete
+# 🧭 Primey Care — Orders API Detail/Update/Cancel
 # ============================================================
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 
 from orders.models import Order
 from orders.services import (
+    cancel_order,
     parse_json_body,
     serialize_order,
     update_order,
@@ -42,6 +43,22 @@ def _ensure_authenticated(request):
     return request.user, None
 
 
+def _orders_queryset():
+    return (
+        Order.objects.select_related(
+            "customer",
+            "product",
+            "provider",
+            "contract",
+            "agent",
+            "created_by",
+            "updated_by",
+        )
+        .prefetch_related("status_history")
+        .all()
+    )
+
+
 # ============================================================
 # 🔹 Order Detail API
 # ============================================================
@@ -52,11 +69,7 @@ def order_detail_api(request, order_id: int):
     if auth_error:
         return auth_error
 
-    order = get_object_or_404(
-        Order.objects.select_related("customer", "product", "created_by", "updated_by")
-        .prefetch_related("status_history"),
-        pk=order_id,
-    )
+    order = get_object_or_404(_orders_queryset(), pk=order_id)
 
     if request.method == "GET":
         return JsonResponse(
@@ -71,18 +84,14 @@ def order_detail_api(request, order_id: int):
     if request.method == "PATCH":
         try:
             payload = parse_json_body(request)
-            order = update_order(instance=order, payload=payload, user=user)
-            order.refresh_from_db()
+            updated_order = update_order(instance=order, payload=payload, user=user)
+            fresh_order = _orders_queryset().get(pk=updated_order.pk)
 
             return JsonResponse(
                 {
                     "ok": True,
                     "message": "Order updated successfully.",
-                    "data": serialize_order(
-                        Order.objects.select_related("customer", "product", "created_by", "updated_by")
-                        .prefetch_related("status_history")
-                        .get(pk=order.pk)
-                    ),
+                    "data": serialize_order(fresh_order),
                 },
                 status=200,
             )
@@ -92,14 +101,31 @@ def order_detail_api(request, order_id: int):
             logger.exception("Failed to update order %s: %s", order_id, exc)
             return _json_error("Unexpected error while updating order.", 500)
 
-    if not order.can_be_cancelled:
-        return _json_error("This order cannot be deleted in its current state.", 400)
+    if request.method == "DELETE":
+        try:
+            payload = parse_json_body(request)
+            reason = payload.get("reason") or payload.get("cancellation_reason") or "Cancelled from order detail API."
 
-    order.delete()
-    return JsonResponse(
-        {
-            "ok": True,
-            "message": "Order deleted successfully.",
-        },
-        status=200,
-    )
+            cancelled_order = cancel_order(
+                instance=order,
+                reason=reason,
+                user=user,
+                note=payload.get("status_note") or reason,
+            )
+            fresh_order = _orders_queryset().get(pk=cancelled_order.pk)
+
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "message": "Order cancelled successfully.",
+                    "data": serialize_order(fresh_order),
+                },
+                status=200,
+            )
+        except ValidationError as exc:
+            return _json_error("Validation failed while cancelling order.", 400, errors=exc.messages)
+        except Exception as exc:
+            logger.exception("Failed to cancel order %s: %s", order_id, exc)
+            return _json_error("Unexpected error while cancelling order.", 500)
+
+    return _json_error("Unsupported method.", 405)
