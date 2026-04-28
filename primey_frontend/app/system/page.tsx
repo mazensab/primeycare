@@ -67,6 +67,8 @@ import {
    ✅ يدعم اللوكل والإنتاج عبر /api + next.config rewrite
    ✅ يدعم تبديل اللغة من الهيدر عبر primey-locale
    ✅ يدعم RTL / LTR
+   ✅ إصلاح LatestOperation status type
+   ✅ إصلاح getDataObject generic constraint
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -265,7 +267,7 @@ type ServiceItem = {
   is_featured?: boolean;
 };
 
-type NotificationOverview = {
+type NotificationOverview = Record<string, unknown> & {
   counts?: {
     notifications?: number;
     events?: number;
@@ -276,7 +278,7 @@ type NotificationOverview = {
   };
 };
 
-type SystemLogSummary = {
+type SystemLogSummary = Record<string, unknown> & {
   counts?: {
     total_logs?: number;
     system_scope_logs?: number;
@@ -356,12 +358,14 @@ type LatestCustomer = {
   href: string;
 };
 
+type LatestOperationStatus = "success" | "warning" | "info";
+
 type LatestOperation = {
   title: string;
   module: string;
   time: string;
   href: string;
-  status: "success" | "warning" | "info";
+  status: LatestOperationStatus;
 };
 
 type ServiceHealth = {
@@ -484,7 +488,7 @@ function toMoney(value: unknown) {
 
 function moneyValue(value: string, alt: string) {
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-1.5" dir="ltr">
       <span>{value}</span>
       <Image
         src="/currency/sar.svg"
@@ -508,7 +512,14 @@ function toneClass(tone: MetricTone) {
 function isPaidStatus(status?: string) {
   const normalized = String(status || "").toUpperCase();
   return ["PAID", "COMPLETED", "CONFIRMED", "PARTIALLY_PAID"].includes(
-    normalized
+    normalized,
+  );
+}
+
+function isSuccessOperationStatus(status?: string) {
+  const normalized = String(status || "").toUpperCase();
+  return ["PAID", "COMPLETED", "CONFIRMED", "APPROVED", "ISSUED"].includes(
+    normalized,
   );
 }
 
@@ -560,9 +571,7 @@ function formatRelativeTime(value?: string | null, locale: AppLocale = "ar") {
   if (diffMinutes < 1) return isArabic ? "الآن" : "Now";
 
   if (diffMinutes < 60) {
-    return isArabic
-      ? `قبل ${diffMinutes} دقيقة`
-      : `${diffMinutes} min ago`;
+    return isArabic ? `قبل ${diffMinutes} دقيقة` : `${diffMinutes} min ago`;
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
@@ -631,7 +640,7 @@ function statusLabel(value?: string, locale: AppLocale = "ar") {
 
 function serviceStatusBadge(
   status: ServiceHealth["status"],
-  labels: ReturnType<typeof dictionary>
+  labels: ReturnType<typeof dictionary>,
 ) {
   if (status === "ready") {
     return (
@@ -661,7 +670,7 @@ function serviceStatusBadge(
 
 function activityBadge(
   status: LatestOperation["status"],
-  labels: ReturnType<typeof dictionary>
+  labels: ReturnType<typeof dictionary>,
 ) {
   if (status === "success") {
     return <Badge className="rounded-full px-3 py-1">{labels.success}</Badge>;
@@ -1164,7 +1173,7 @@ async function loadSystemDashboardData(): Promise<DashboardData> {
     apiGet<unknown>(API_PATHS.systemLog.summary),
   ]);
 
-  function unwrapList<T>(result: PromiseSettledResult<unknown>) {
+  function unwrapList<T>(result: PromiseSettledResult<unknown>): T[] {
     if (result.status !== "fulfilled") return [];
 
     const apiResult = result.value as {
@@ -1199,8 +1208,8 @@ async function loadSystemDashboardData(): Promise<DashboardData> {
   }
 
   function unwrapDataObject<T extends Record<string, unknown>>(
-    result: PromiseSettledResult<unknown>
-  ) {
+    result: PromiseSettledResult<unknown>,
+  ): T | null {
     if (result.status !== "fulfilled") return null;
 
     const apiResult = result.value as {
@@ -1265,7 +1274,7 @@ export default function SystemDashboardPage() {
         toast.success(
           locale === "ar"
             ? "تم تحديث لوحة النظام بنجاح"
-            : "System dashboard updated successfully"
+            : "System dashboard updated successfully",
         );
       }
     } catch (error) {
@@ -1319,11 +1328,11 @@ export default function SystemDashboardPage() {
     const activeSubscriptions = products.filter(isSubscriptionProduct).length;
     const openInvoices = invoices.filter((item) => isOpenInvoice(item.status)).length;
     const confirmedPayments = payments.filter((item) =>
-      isPaidStatus(item.status)
+      isPaidStatus(item.status),
     );
     const confirmedPaymentsTotal = confirmedPayments.reduce(
       (total, item) => total + toNumber(item.amount),
-      0
+      0,
     );
 
     const failedDeliveries =
@@ -1338,7 +1347,9 @@ export default function SystemDashboardPage() {
       name:
         order.customer?.full_name ||
         order.customer?.email ||
-        (isArabic ? `عميل #${order.customer_id || order.id}` : `Customer #${order.customer_id || order.id}`),
+        (isArabic
+          ? `عميل #${order.customer_id || order.id}`
+          : `Customer #${order.customer_id || order.id}`),
       phone: order.customer?.phone || order.customer?.email || "—",
       product:
         order.product?.name ||
@@ -1351,41 +1362,52 @@ export default function SystemDashboardPage() {
     }));
 
     const latestSystemLogs: LatestOperation[] =
-      data?.systemLogSummary?.recent_logs?.slice(0, 3).map((log) => ({
-        title:
-          log.message ||
-          log.event_code ||
-          log.action ||
-          (isArabic ? "عملية نظام" : "System operation"),
-        module: log.module || "System Log",
-        time: formatRelativeTime(log.created_at, locale),
-        href: "/system/system-log",
-        status:
-          log.severity === "error" || log.severity === "critical"
-            ? "warning"
-            : "info",
-      })) || [];
+      data?.systemLogSummary?.recent_logs?.slice(0, 3).map(
+        (log): LatestOperation => {
+          const severity = String(log.severity || "").toUpperCase();
+          const operationStatus: LatestOperationStatus =
+            severity === "ERROR" || severity === "CRITICAL"
+              ? "warning"
+              : "info";
+
+          return {
+            title:
+              log.message ||
+              log.event_code ||
+              log.action ||
+              (isArabic ? "عملية نظام" : "System operation"),
+            module: log.module || "System Log",
+            time: formatRelativeTime(log.created_at, locale),
+            href: "/system/system-log",
+            status: operationStatus,
+          };
+        },
+      ) || [];
 
     const latestOperations: LatestOperation[] = [
       ...latestSystemLogs,
-      ...orders.slice(0, 2).map((order) => ({
-        title: isArabic
-          ? `طلب ${order.order_number || `#${order.id}`}`
-          : `Order ${order.order_number || `#${order.id}`}`,
-        module: isArabic ? "الطلبات" : "Orders",
-        time: formatRelativeTime(order.created_at, locale),
-        href: `/system/orders/${order.id}`,
-        status: order.status === "COMPLETED" ? "success" : "info",
-      })),
-      ...payments.slice(0, 2).map((payment) => ({
-        title: isArabic
-          ? `دفعة ${payment.reference || `#${payment.id}`}`
-          : `Payment ${payment.reference || `#${payment.id}`}`,
-        module: isArabic ? "المدفوعات" : "Payments",
-        time: formatRelativeTime(payment.payment_date, locale),
-        href: `/system/payments/${payment.id}`,
-        status: isPaidStatus(payment.status) ? "success" : "warning",
-      })),
+      ...orders.slice(0, 2).map(
+        (order): LatestOperation => ({
+          title: isArabic
+            ? `طلب ${order.order_number || `#${order.id}`}`
+            : `Order ${order.order_number || `#${order.id}`}`,
+          module: isArabic ? "الطلبات" : "Orders",
+          time: formatRelativeTime(order.created_at, locale),
+          href: `/system/orders/${order.id}`,
+          status: isSuccessOperationStatus(order.status) ? "success" : "info",
+        }),
+      ),
+      ...payments.slice(0, 2).map(
+        (payment): LatestOperation => ({
+          title: isArabic
+            ? `دفعة ${payment.reference || `#${payment.id}`}`
+            : `Payment ${payment.reference || `#${payment.id}`}`,
+          module: isArabic ? "المدفوعات" : "Payments",
+          time: formatRelativeTime(payment.payment_date, locale),
+          href: `/system/payments/${payment.id}`,
+          status: isPaidStatus(payment.status) ? "success" : "warning",
+        }),
+      ),
     ].slice(0, 6);
 
     const metrics: MetricCard[] = [
@@ -1535,7 +1557,9 @@ export default function SystemDashboardPage() {
           : "Centers, contracts, and services.",
         href: "/system/providers",
         status: providers.length || contracts.length ? "ready" : "partial",
-        value: String((data?.totals.providers || 0) + (data?.totals.contracts || 0)),
+        value: String(
+          (data?.totals.providers || 0) + (data?.totals.contracts || 0),
+        ),
         icon: Building2,
       },
       {
@@ -1545,7 +1569,9 @@ export default function SystemDashboardPage() {
           : "Invoice issuing and payment collection.",
         href: "/system/invoices",
         status: invoices.length || payments.length ? "ready" : "partial",
-        value: String((data?.totals.invoices || 0) + (data?.totals.payments || 0)),
+        value: String(
+          (data?.totals.invoices || 0) + (data?.totals.payments || 0),
+        ),
         icon: CreditCard,
       },
       {
@@ -1555,7 +1581,9 @@ export default function SystemDashboardPage() {
           : "Contract services and order items.",
         href: "/system/service-items",
         status: serviceItems.length || orderItems.length ? "ready" : "partial",
-        value: String((data?.totals.serviceItems || 0) + (data?.totals.orderItems || 0)),
+        value: String(
+          (data?.totals.serviceItems || 0) + (data?.totals.orderItems || 0),
+        ),
         icon: ClipboardList,
       },
       {
@@ -1578,7 +1606,7 @@ export default function SystemDashboardPage() {
         value: String(
           data?.notificationOverview?.counts?.notifications ||
             data?.notificationOverview?.counts?.events ||
-            0
+            0,
         ),
         icon: Bell,
       },

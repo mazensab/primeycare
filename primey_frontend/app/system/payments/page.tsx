@@ -1,22 +1,32 @@
+"use client";
+
+import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  ArrowDownUp,
   ArrowLeft,
   BadgeCheck,
-  Building2,
+  Banknote,
+  BarChart3,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
   CreditCard,
-  Eye,
   FileText,
-  Filter,
-  HandCoins,
-  Landmark,
+  Loader2,
   Plus,
   ReceiptText,
+  RefreshCcw,
   Search,
   ShieldCheck,
   Sparkles,
   Wallet,
+  XCircle,
+  type LucideIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,564 +38,987 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+
+/* =====================================================
+   TYPES
+===================================================== */
 
 type AppLocale = "ar" | "en";
 
-function detectLocale(): AppLocale {
+type ApiPayment = {
+  id: number;
+  reference?: string | null;
+  status?: string | null;
+  payment_method?: string | null;
+  invoice_id?: number | null;
+  customer_id?: number | null;
+  amount?: string | number | null;
+  payment_date?: string | null;
+};
+
+type PaymentsApiResponse = {
+  ok?: boolean;
+  count?: number;
+  results?: ApiPayment[];
+  message?: string;
+};
+
+type StatusMeta = {
+  labelAr: string;
+  labelEn: string;
+  className: string;
+};
+
+type MethodMeta = {
+  labelAr: string;
+  labelEn: string;
+};
+
+/* =====================================================
+   CONSTANTS
+===================================================== */
+
+const SAR_ICON_PATH = "/currency/sar.svg";
+
+const STATUS_META: Record<string, StatusMeta> = {
+  PENDING: {
+    labelAr: "قيد الانتظار",
+    labelEn: "Pending",
+    className:
+      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300",
+  },
+  PROCESSING: {
+    labelAr: "قيد المعالجة",
+    labelEn: "Processing",
+    className:
+      "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300",
+  },
+  PAID: {
+    labelAr: "مدفوع",
+    labelEn: "Paid",
+    className:
+      "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300",
+  },
+  PARTIALLY_PAID: {
+    labelAr: "مدفوع جزئيًا",
+    labelEn: "Partially Paid",
+    className:
+      "border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900/60 dark:bg-cyan-950/40 dark:text-cyan-300",
+  },
+  FAILED: {
+    labelAr: "فشل",
+    labelEn: "Failed",
+    className:
+      "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300",
+  },
+  CANCELLED: {
+    labelAr: "ملغي",
+    labelEn: "Cancelled",
+    className:
+      "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300",
+  },
+  REFUNDED: {
+    labelAr: "مسترد",
+    labelEn: "Refunded",
+    className:
+      "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900/60 dark:bg-purple-950/40 dark:text-purple-300",
+  },
+  PARTIALLY_REFUNDED: {
+    labelAr: "مسترد جزئيًا",
+    labelEn: "Partially Refunded",
+    className:
+      "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-900/60 dark:bg-fuchsia-950/40 dark:text-fuchsia-300",
+  },
+};
+
+const METHOD_META: Record<string, MethodMeta> = {
+  CASH: { labelAr: "نقدي", labelEn: "Cash" },
+  BANK_TRANSFER: { labelAr: "تحويل بنكي", labelEn: "Bank Transfer" },
+  CREDIT_CARD: { labelAr: "بطاقة ائتمانية", labelEn: "Credit Card" },
+  DEBIT_CARD: { labelAr: "مدى / خصم", labelEn: "Debit Card" },
+  WALLET: { labelAr: "محفظة", labelEn: "Wallet" },
+  APPLE_PAY: { labelAr: "Apple Pay", labelEn: "Apple Pay" },
+  STC_PAY: { labelAr: "STC Pay", labelEn: "STC Pay" },
+  TAMARA: { labelAr: "تمارا", labelEn: "Tamara" },
+  TABBY: { labelAr: "تابي", labelEn: "Tabby" },
+  OTHER: { labelAr: "أخرى", labelEn: "Other" },
+};
+
+/* =====================================================
+   LOCALE HELPERS
+===================================================== */
+
+function getInitialLocale(): AppLocale {
+  if (typeof window === "undefined") return "ar";
+
+  const stored = window.localStorage.getItem("primey-locale");
+  if (stored === "ar" || stored === "en") return stored;
+
+  const htmlLang = document.documentElement.lang;
+  if (htmlLang === "en") return "en";
+
   return "ar";
 }
 
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
+function applyLocaleToDocument(locale: AppLocale) {
+  if (typeof document === "undefined") return;
 
-  return {
-    title: isArabic ? "إدارة المدفوعات" : "Payments Management",
-    subtitle: isArabic
-      ? "هذه الصفحة تمثل الواجهة الإدارية الرئيسية لإدارة المدفوعات داخل Primey Care، وتشمل الملخص العام، التهيئة الأولية للعرض، والوصول السريع إلى مسارات التحصيل والتسويات والفواتير والعملاء."
-      : "This page is the main administrative interface for managing payments inside Primey Care, including overview, initial layout, and quick access to collections, settlements, invoices, and customers.",
+  document.documentElement.lang = locale;
+  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+  document.body.dir = locale === "ar" ? "rtl" : "ltr";
+}
 
-    heroBadge1: isArabic ? "System Module" : "System Module",
-    heroBadge2: isArabic ? "Payments" : "Payments",
+/* =====================================================
+   FORMAT HELPERS
+===================================================== */
 
-    addPayment: isArabic ? "إضافة دفعة جديدة" : "Add New Payment",
-    paymentReports: isArabic ? "تقارير المدفوعات" : "Payment Reports",
+function toNumber(value: string | number | null | undefined): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (!value) return 0;
 
-    quickStats: isArabic ? "ملخص سريع" : "Quick Summary",
-    operationalOverview: isArabic ? "نظرة تشغيلية" : "Operational Overview",
-    searchPlaceholder: isArabic
-      ? "ابحث برقم الدفعة أو العميل أو المرجع..."
-      : "Search by payment number, customer, or reference...",
-    search: isArabic ? "بحث" : "Search",
-    filter: isArabic ? "تصفية" : "Filter",
+  const parsed = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
-    operationalCards: isArabic ? "بطاقات تشغيلية" : "Operational Cards",
-    quickActions: isArabic ? "إجراءات سريعة" : "Quick Actions",
-    currentStatus: isArabic ? "الحالة الحالية" : "Current Status",
-    nextStep: isArabic ? "الخطوة التالية" : "Next Step",
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(value || 0);
+}
 
-    nextStepText: isArabic
-      ? "الأساس البصري لصفحة المدفوعات أصبح جاهزًا تحت مساحة النظام الرسمية. الخطوة الصحيحة التالية هي بناء القائمة الفعلية للمدفوعات وربطها لاحقًا بالفواتير والطلبات والعملاء والخزينة والمحاسبة."
-      : "The visual foundation for payments is now ready under the official system workspace. The correct next step is to build the actual payments list and later connect it with invoices, orders, customers, treasury, and accounting.",
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value || 0);
+}
 
-    stats: [
-      {
-        title: isArabic ? "إجمالي المدفوعات" : "Total Payments",
-        value: "0",
-        note: isArabic ? "سيظهر العدد الفعلي بعد الربط" : "Live count after integration",
-        icon: CreditCard,
-      },
-      {
-        title: isArabic ? "المدفوعات المؤكدة" : "Confirmed Payments",
-        value: "0",
-        note: isArabic ? "جاهز لحالة التأكيد" : "Ready for confirmation status",
-        icon: BadgeCheck,
-      },
-      {
-        title: isArabic ? "إجمالي التحصيل" : "Total Collections",
-        value: "0 SAR",
-        note: isArabic ? "يرتبط لاحقًا بالخزينة" : "Will connect to treasury later",
-        icon: Wallet,
-      },
-    ],
+function formatDate(value: string | null | undefined, locale: AppLocale): string {
+  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
 
-    overviewCards: [
-      {
-        title: isArabic ? "ملف الدفعة الأساسي" : "Payment Core Profile",
-        description: isArabic
-          ? "إدارة رقم الدفعة، المرجع، العميل، وطريقة الدفع كأساس لكل العمليات اللاحقة."
-          : "Manage payment number, reference, customer, and payment method as the foundation for future operations.",
-        icon: ReceiptText,
-      },
-      {
-        title: isArabic ? "التحصيل والتسوية" : "Collection & Settlement",
-        description: isArabic
-          ? "تهيئة طبقة التحصيل، التسوية، المطابقة، وربط المدفوعات بالحالات المالية."
-          : "Prepare the layer for collections, settlements, matching, and linking payments to financial statuses.",
-        icon: HandCoins,
-      },
-      {
-        title: isArabic ? "الارتباطات التشغيلية" : "Operational Links",
-        description: isArabic
-          ? "ربط الدفعة لاحقًا بالطلبات، الفواتير، الخزينة، والمحاسبة والتقارير."
-          : "Later connect the payment with orders, invoices, treasury, accounting, and reports.",
-        icon: Activity,
-      },
-    ],
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return locale === "ar" ? "غير محدد" : "Not set";
 
-    actionCards: [
-      {
-        title: isArabic ? "قائمة المدفوعات" : "Payments List",
-        description: isArabic
-          ? "هذه الصفحة تمثل نقطة الدخول لمسار المدفوعات، وسيتم لاحقًا توسيعها إلى قائمة فعلية كاملة."
-          : "This page is the entry point for the payments flow and will later expand into a full payments list.",
-        href: "/system/payments",
-        cta: isArabic ? "الصفحة الحالية" : "Current Page",
-        icon: CreditCard,
-      },
-      {
-        title: isArabic ? "إضافة دفعة" : "Create Payment",
-        description: isArabic
-          ? "بناء صفحة إضافة دفعة جديدة بنفس هوية النظام المعتمدة."
-          : "Build the create-payment page using the approved system UI identity.",
-        href: "/system/payments/create",
-        cta: isArabic ? "فتح الصفحة" : "Open Page",
-        icon: Plus,
-      },
-      {
-        title: isArabic ? "تفاصيل الدفعة" : "Payment Detail",
-        description: isArabic
-          ? "تجهيز صفحة التفاصيل وربطها لاحقًا بالفاتورة والطلب وحالة التسوية."
-          : "Prepare the detail page and later connect it with invoice, order, and settlement status.",
-        href: "/system/payments/[id]",
-        cta: isArabic ? "لاحقًا" : "Later",
-        icon: Eye,
-      },
-      {
-        title: isArabic ? "تقارير المدفوعات" : "Payment Reports",
-        description: isArabic
-          ? "إعداد واجهات تقارير المدفوعات والتحليلات المالية لاحقًا."
-          : "Prepare payment reporting and financial analytics interfaces later.",
-        href: "/system/payments/reports",
-        cta: isArabic ? "قريبًا" : "Coming Soon",
-        icon: Sparkles,
-      },
-    ],
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
 
-    statusItems: [
-      {
-        label: isArabic ? "حالة الصفحة" : "Page Status",
-        value: isArabic ? "جاهزة كأساس UI" : "Ready as UI base",
-        icon: BadgeCheck,
-      },
-      {
-        label: isArabic ? "المسار الرسمي" : "Official Route",
-        value: "/system/payments",
-        icon: ShieldCheck,
-      },
-      {
-        label: isArabic ? "الربط مع API" : "API Integration",
-        value: isArabic ? "لم يبدأ بعد" : "Not started yet",
-        icon: CreditCard,
-      },
-      {
-        label: isArabic ? "الخطوة المعتمدة" : "Approved Next Step",
-        value: isArabic ? "list / create / detail" : "list / create / detail",
-        icon: ArrowLeft,
-      },
-      {
-        label: isArabic ? "الربط التشغيلي" : "Operational Mapping",
-        value: isArabic
-          ? "طلبات / فواتير / خزينة"
-          : "Orders / Invoices / Treasury",
-        icon: Landmark,
-      },
-    ],
+function getStatusLabel(status: string | null | undefined, locale: AppLocale): string {
+  const key = String(status || "PENDING").toUpperCase();
+  const meta = STATUS_META[key];
 
-    sampleRowsTitle: isArabic ? "تصور أولي للقائمة" : "Initial List Preview",
-    sampleRowsDesc: isArabic
-      ? "عرض شكلي مؤقت لما ستكون عليه قائمة المدفوعات بعد الربط."
-      : "A temporary visual preview of how the payments list will look after integration.",
+  if (!meta) return status || (locale === "ar" ? "غير محدد" : "Unknown");
 
-    tableHeaders: {
-      payment: isArabic ? "الدفعة" : "Payment",
-      customer: isArabic ? "العميل" : "Customer",
-      method: isArabic ? "الطريقة" : "Method",
-      status: isArabic ? "الحالة" : "Status",
-      amount: isArabic ? "القيمة" : "Amount",
-      actions: isArabic ? "الإجراءات" : "Actions",
+  return locale === "ar" ? meta.labelAr : meta.labelEn;
+}
+
+function getStatusClassName(status: string | null | undefined): string {
+  const key = String(status || "PENDING").toUpperCase();
+  return STATUS_META[key]?.className || STATUS_META.PENDING.className;
+}
+
+function getMethodLabel(method: string | null | undefined, locale: AppLocale): string {
+  const key = String(method || "OTHER").toUpperCase();
+  const meta = METHOD_META[key];
+
+  if (!meta) return method || (locale === "ar" ? "غير محدد" : "Unknown");
+
+  return locale === "ar" ? meta.labelAr : meta.labelEn;
+}
+
+/* =====================================================
+   API HELPER
+===================================================== */
+
+async function fetchPayments(): Promise<ApiPayment[]> {
+  const response = await fetch("/api/payments/?limit=200", {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
     },
+    cache: "no-store",
+  });
 
-    noDataTitle: isArabic ? "لا توجد بيانات فعلية بعد" : "No live data yet",
-    noDataText: isArabic
-      ? "تم تجهيز صفحة المدفوعات كأساس احترافي للواجهة، وسيتم إظهار المدفوعات الحقيقية بعد ربط الـ APIs وبناء مسار القائمة الفعلي."
-      : "The payments page has been prepared as a professional UI foundation. Live payments will appear after API integration and after building the actual list flow.",
-  };
-}
+  const data = (await response.json().catch(() => null)) as PaymentsApiResponse | null;
 
-const previewRows = [
-  {
-    id: 1,
-    paymentNo: "PAY-2026-001",
-    customer: "Ahmed Ali",
-    method: "Bank Transfer",
-    status: "CONFIRMED",
-    amount: "299 SAR",
-    reference: "TRX-1001",
-  },
-  {
-    id: 2,
-    paymentNo: "PAY-2026-002",
-    customer: "Sara Hassan",
-    method: "Card",
-    status: "PENDING",
-    amount: "499 SAR",
-    reference: "TRX-1002",
-  },
-  {
-    id: 3,
-    paymentNo: "PAY-2026-003",
-    customer: "Mohammed Salem",
-    method: "Cash",
-    status: "FAILED",
-    amount: "149 SAR",
-    reference: "TRX-1003",
-  },
-];
-
-function statusBadge(status: string, locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  if (status === "CONFIRMED") {
-    return (
-      <Badge className="rounded-full px-3 py-1">
-        {isArabic ? "مؤكدة" : "Confirmed"}
-      </Badge>
-    );
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.message || "Failed to load payments.");
   }
 
-  if (status === "PENDING") {
-    return (
-      <Badge variant="secondary" className="rounded-full px-3 py-1">
-        {isArabic ? "معلقة" : "Pending"}
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {isArabic ? "فاشلة" : "Failed"}
-    </Badge>
-  );
+  return Array.isArray(data.results) ? data.results : [];
 }
+
+/* =====================================================
+   PAGE
+===================================================== */
 
 export default function SystemPaymentsPage() {
-  const locale = detectLocale();
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
+  const [locale, setLocale] = useState<AppLocale>("ar");
+  const [payments, setPayments] = useState<ApiPayment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const isAr = locale === "ar";
+
+  const t = useMemo(
+    () => ({
+      badge: isAr ? "وحدة المدفوعات" : "Payments Module",
+      title: isAr ? "إدارة المدفوعات" : "Payments Management",
+      subtitle: isAr
+        ? "لوحة تشغيلية لمتابعة التحصيل، طرق الدفع، حالات العمليات، وربط المدفوعات بالفواتير والعملاء."
+        : "Operational dashboard for collections, payment methods, transaction statuses, and payment links to invoices and customers.",
+      refresh: isAr ? "تحديث" : "Refresh",
+      create: isAr ? "تسجيل دفعة" : "Create Payment",
+      list: isAr ? "قائمة المدفوعات" : "Payments List",
+      reports: isAr ? "تقارير المدفوعات" : "Payments Reports",
+      invoices: isAr ? "الفواتير" : "Invoices",
+      details: isAr ? "التفاصيل" : "Details",
+      confirm: isAr ? "تأكيد" : "Confirm",
+      search: isAr
+        ? "ابحث برقم الدفعة أو العميل أو الفاتورة أو طريقة الدفع..."
+        : "Search by payment, customer, invoice, or method...",
+      latest: isAr ? "آخر المدفوعات" : "Latest Payments",
+      latestDesc: isAr
+        ? "آخر العمليات المسجلة من واجهة المدفوعات."
+        : "Latest records from the payments API.",
+      overview: isAr ? "ملخص المدفوعات" : "Payments Overview",
+      overviewDesc: isAr
+        ? "مؤشرات مباشرة مبنية على المدفوعات الحالية."
+        : "Live indicators based on current payments.",
+      empty: isAr ? "لا توجد مدفوعات مطابقة حاليًا." : "No matching payments found.",
+      loading: isAr ? "جاري تحميل بيانات المدفوعات..." : "Loading payments data...",
+      totalPayments: isAr ? "إجمالي المدفوعات" : "Total Payments",
+      paidPayments: isAr ? "مدفوعات مؤكدة" : "Confirmed Payments",
+      pendingPayments: isAr ? "قيد الانتظار" : "Pending Payments",
+      failedPayments: isAr ? "عمليات فاشلة" : "Failed Payments",
+      refundedPayments: isAr ? "عمليات مستردة" : "Refunded Payments",
+      totalAmount: isAr ? "إجمالي التحصيل" : "Collected Total",
+      pendingAmount: isAr ? "مبالغ معلقة" : "Pending Amount",
+      failedAmount: isAr ? "مبالغ فاشلة" : "Failed Amount",
+      activity: isAr ? "الحركة المالية" : "Financial Activity",
+      activityDesc: isAr
+        ? "قراءة سريعة لحالة المدفوعات حسب المرحلة."
+        : "Quick reading of payment status distribution.",
+      methodReport: isAr ? "طرق الدفع" : "Payment Methods",
+      methodReportDesc: isAr
+        ? "توزيع المدفوعات حسب طريقة التحصيل."
+        : "Payments distribution by collection method.",
+      quickLinks: isAr ? "اختصارات الوحدة" : "Module Shortcuts",
+      quickLinksDesc: isAr
+        ? "تنقل سريع بين صفحات وحدة المدفوعات."
+        : "Fast navigation between payment module pages.",
+      payment: isAr ? "الدفعة" : "Payment",
+      customer: isAr ? "العميل" : "Customer",
+      invoice: isAr ? "الفاتورة" : "Invoice",
+      method: isAr ? "الطريقة" : "Method",
+      status: isAr ? "الحالة" : "Status",
+      date: isAr ? "التاريخ" : "Date",
+      amount: isAr ? "المبلغ" : "Amount",
+      notAvailable: isAr ? "غير متاح" : "N/A",
+      sar: isAr ? "ريال" : "SAR",
+      refreshSuccess: isAr ? "تم تحديث بيانات المدفوعات بنجاح" : "Payments refreshed successfully",
+      loadError: isAr ? "تعذر تحميل بيانات المدفوعات" : "Failed to load payments",
+    }),
+    [isAr]
+  );
+
+  const loadPayments = async (mode: "initial" | "refresh" = "initial") => {
+    try {
+      if (mode === "initial") setLoading(true);
+      if (mode === "refresh") setRefreshing(true);
+
+      const data = await fetchPayments();
+      setPayments(data);
+
+      if (mode === "refresh") {
+        toast.success(t.refreshSuccess);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error(t.loadError);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    const currentLocale = getInitialLocale();
+    setLocale(currentLocale);
+    applyLocaleToDocument(currentLocale);
+
+    const syncLocale = () => {
+      const nextLocale = getInitialLocale();
+      setLocale(nextLocale);
+      applyLocaleToDocument(nextLocale);
+    };
+
+    window.addEventListener("primey-locale-changed", syncLocale);
+    window.addEventListener("storage", syncLocale);
+
+    const timeout = window.setTimeout(syncLocale, 50);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", syncLocale);
+      window.removeEventListener("storage", syncLocale);
+      window.clearTimeout(timeout);
+    };
+  }, []);
+
+  useEffect(() => {
+    loadPayments("initial");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const filteredPayments = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+
+    if (!keyword) return payments;
+
+    return payments.filter((payment) => {
+      const haystack = [
+        payment.id,
+        payment.reference,
+        payment.status,
+        getStatusLabel(payment.status, "ar"),
+        getStatusLabel(payment.status, "en"),
+        payment.payment_method,
+        getMethodLabel(payment.payment_method, "ar"),
+        getMethodLabel(payment.payment_method, "en"),
+        payment.customer_id,
+        payment.invoice_id,
+        payment.amount,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(keyword);
+    });
+  }, [payments, search]);
+
+  const stats = useMemo(() => {
+    const totalPayments = payments.length;
+
+    const paidPayments = payments.filter((payment) => {
+      const status = String(payment.status || "").toUpperCase();
+      return status === "PAID" || status === "PARTIALLY_PAID";
+    }).length;
+
+    const pendingPayments = payments.filter((payment) => {
+      const status = String(payment.status || "").toUpperCase();
+      return status === "PENDING" || status === "PROCESSING";
+    }).length;
+
+    const failedPayments = payments.filter(
+      (payment) => String(payment.status || "").toUpperCase() === "FAILED"
+    ).length;
+
+    const refundedPayments = payments.filter((payment) => {
+      const status = String(payment.status || "").toUpperCase();
+      return status === "REFUNDED" || status === "PARTIALLY_REFUNDED";
+    }).length;
+
+    const totalAmount = payments.reduce((sum, payment) => {
+      const status = String(payment.status || "").toUpperCase();
+      if (status === "PAID" || status === "PARTIALLY_PAID") {
+        return sum + toNumber(payment.amount);
+      }
+      return sum;
+    }, 0);
+
+    const pendingAmount = payments.reduce((sum, payment) => {
+      const status = String(payment.status || "").toUpperCase();
+      if (status === "PENDING" || status === "PROCESSING") {
+        return sum + toNumber(payment.amount);
+      }
+      return sum;
+    }, 0);
+
+    const failedAmount = payments.reduce((sum, payment) => {
+      const status = String(payment.status || "").toUpperCase();
+      if (status === "FAILED") return sum + toNumber(payment.amount);
+      return sum;
+    }, 0);
+
+    return {
+      totalPayments,
+      paidPayments,
+      pendingPayments,
+      failedPayments,
+      refundedPayments,
+      totalAmount,
+      pendingAmount,
+      failedAmount,
+    };
+  }, [payments]);
+
+  const latestPayments = useMemo(() => filteredPayments.slice(0, 8), [filteredPayments]);
+
+  const paidRate = useMemo(() => {
+    if (!stats.totalPayments) return 0;
+    return Math.round((stats.paidPayments / stats.totalPayments) * 100);
+  }, [stats.paidPayments, stats.totalPayments]);
+
+  const pendingRate = useMemo(() => {
+    if (!stats.totalPayments) return 0;
+    return Math.round((stats.pendingPayments / stats.totalPayments) * 100);
+  }, [stats.pendingPayments, stats.totalPayments]);
+
+  const failedRate = useMemo(() => {
+    if (!stats.totalPayments) return 0;
+    return Math.round((stats.failedPayments / stats.totalPayments) * 100);
+  }, [stats.failedPayments, stats.totalPayments]);
+
+  const methodRows = useMemo(() => {
+    const map = new Map<string, { method: string; count: number; total: number }>();
+
+    payments.forEach((payment) => {
+      const method = String(payment.payment_method || "OTHER").toUpperCase();
+      const existing = map.get(method) || { method, count: 0, total: 0 };
+
+      existing.count += 1;
+      existing.total += toNumber(payment.amount);
+
+      map.set(method, existing);
+    });
+
+    return Array.from(map.values())
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6);
+  }, [payments]);
+
+  const statCards = [
+    {
+      title: t.totalPayments,
+      value: formatNumber(stats.totalPayments),
+      icon: ReceiptText,
+      href: "/system/payments/list",
+      description: isAr ? "كل المدفوعات المسجلة" : "All registered payments",
+    },
+    {
+      title: t.paidPayments,
+      value: formatNumber(stats.paidPayments),
+      icon: CheckCircle2,
+      href: "/system/payments/list?status=PAID",
+      description: isAr ? "مدفوعات مكتملة أو مؤكدة" : "Completed or confirmed payments",
+    },
+    {
+      title: t.pendingPayments,
+      value: formatNumber(stats.pendingPayments),
+      icon: Clock3,
+      href: "/system/payments/list?status=PENDING",
+      description: isAr ? "مدفوعات تحتاج متابعة" : "Payments requiring follow-up",
+    },
+    {
+      title: t.failedPayments,
+      value: formatNumber(stats.failedPayments),
+      icon: XCircle,
+      href: "/system/payments/list?status=FAILED",
+      description: isAr ? "عمليات لم تكتمل" : "Transactions not completed",
+    },
+  ];
 
   return (
-    <div className="space-y-6">
-      <Card className="overflow-hidden rounded-3xl border-white/20 bg-white/70 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-        <CardContent className="p-6 md:p-7">
-          <div className="grid gap-6 lg:grid-cols-[1.35fr_0.85fr] lg:items-center">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge className="rounded-full px-3 py-1">{t.heroBadge1}</Badge>
-                <Badge variant="secondary" className="rounded-full px-3 py-1">
-                  {t.heroBadge2}
-                </Badge>
-              </div>
+    <main className="min-h-screen bg-background">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+        {/* =====================================================
+            HERO
+        ===================================================== */}
+        <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm">
+          <div className="pointer-events-none absolute -top-24 end-10 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
 
-              <div className="space-y-3">
-                <h1 className="text-2xl font-bold tracking-tight md:text-4xl">
+          <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-3xl space-y-4">
+              <Badge
+                variant="outline"
+                className="w-fit rounded-full border-primary/20 bg-primary/5 px-3 py-1 text-primary"
+              >
+                <Sparkles className="me-2 h-3.5 w-3.5" />
+                {t.badge}
+              </Badge>
+
+              <div className="space-y-2">
+                <h1 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
                   {t.title}
                 </h1>
-                <p className="text-muted-foreground max-w-3xl text-sm leading-7 md:text-base">
+                <p className="max-w-2xl text-sm leading-7 text-muted-foreground md:text-base">
                   {t.subtitle}
                 </p>
               </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Link href="/system/payments/create" className="w-full sm:w-auto">
-                  <Button className="w-full rounded-2xl sm:w-auto">
-                    <Plus className="ms-2 h-4 w-4" />
-                    {t.addPayment}
-                  </Button>
-                </Link>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button asChild className="rounded-2xl">
+                  <Link href="/system/payments/create">
+                    <Plus className="me-2 h-4 w-4" />
+                    {t.create}
+                  </Link>
+                </Button>
 
-                <Link href="/system/payments/reports" className="w-full sm:w-auto">
-                  <Button
-                    variant="outline"
-                    className="w-full rounded-2xl sm:w-auto"
-                  >
-                    <FileText className="ms-2 h-4 w-4" />
-                    {t.paymentReports}
-                  </Button>
-                </Link>
+                <Button asChild variant="outline" className="rounded-2xl">
+                  <Link href="/system/payments/list">
+                    <FileText className="me-2 h-4 w-4" />
+                    {t.list}
+                  </Link>
+                </Button>
+
+                <Button asChild variant="ghost" className="rounded-2xl">
+                  <Link href="/system/payments/reports">
+                    <BarChart3 className="me-2 h-4 w-4" />
+                    {t.reports}
+                  </Link>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="rounded-2xl"
+                  onClick={() => loadPayments("refresh")}
+                  disabled={refreshing}
+                >
+                  {refreshing ? (
+                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="me-2 h-4 w-4" />
+                  )}
+                  {t.refresh}
+                </Button>
               </div>
             </div>
 
-            <Card className="rounded-3xl border-white/20 bg-white/75 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+            <Card className="w-full rounded-[1.5rem] border-primary/10 bg-card/80 shadow-sm backdrop-blur lg:max-w-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t.quickStats}</CardTitle>
-                <CardDescription>{t.operationalOverview}</CardDescription>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Wallet className="h-5 w-5 text-primary" />
+                  {t.totalAmount}
+                </CardTitle>
+                <CardDescription>{t.overviewDesc}</CardDescription>
               </CardHeader>
-
-              <CardContent className="space-y-3">
-                {t.stats.map((item) => {
-                  const Icon = item.icon;
-
-                  return (
-                    <div
-                      key={item.title}
-                      className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5"
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="bg-primary/10 text-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl">
-                          <Icon className="h-5 w-5" />
-                        </div>
-
-                        <div className="min-w-0">
-                          <p className="text-muted-foreground text-xs">
-                            {item.title}
-                          </p>
-                          <p className="truncate text-sm font-semibold">
-                            {item.value}
-                          </p>
-                        </div>
-                      </div>
-
-                      <Badge variant="secondary" className="rounded-full">
-                        {item.note}
-                      </Badge>
+              <CardContent className="space-y-4">
+                <div className="flex items-end justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Image
+                        src={SAR_ICON_PATH}
+                        alt="SAR"
+                        width={18}
+                        height={18}
+                        className="shrink-0"
+                      />
+                      <p className="text-3xl font-bold">
+                        {formatMoney(stats.totalAmount)}
+                      </p>
                     </div>
-                  );
-                })}
+                    <p className="mt-1 text-xs text-muted-foreground">{t.sar}</p>
+                  </div>
+
+                  <Badge
+                    variant="outline"
+                    className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+                  >
+                    {formatNumber(paidRate)}%
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">{t.pendingAmount}</p>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
+                      <p className="font-semibold">{formatMoney(stats.pendingAmount)}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">{t.refundedPayments}</p>
+                    <p className="mt-1 font-semibold">
+                      {formatNumber(stats.refundedPayments)}
+                    </p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>
-        </CardContent>
-      </Card>
+        </section>
 
-      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-        <CardContent className="p-5">
-          <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
-            <div className="relative">
-              <Search
-                className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                  isArabic ? "right-3" : "left-3"
-                }`}
-              />
-              <Input
-                placeholder={t.searchPlaceholder}
-                className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-              />
-            </div>
-
-            <Button variant="outline" className="rounded-2xl">
-              <Search className="ms-2 h-4 w-4" />
-              {t.search}
-            </Button>
-
-            <Button variant="outline" className="rounded-2xl">
-              <Filter className="ms-2 h-4 w-4" />
-              {t.filter}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <section className="space-y-4">
-        <div className="px-1">
-          <h2 className="text-lg font-bold tracking-tight">
-            {t.operationalCards}
-          </h2>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {t.overviewCards.map((item) => {
+        {/* =====================================================
+            STATS
+        ===================================================== */}
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {statCards.map((item) => {
             const Icon = item.icon;
 
             return (
-              <Card
-                key={item.title}
-                className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5"
-              >
-                <CardHeader className="space-y-4">
-                  <div className="bg-primary/10 text-primary flex h-14 w-14 items-center justify-center rounded-2xl">
-                    <Icon className="h-6 w-6" />
-                  </div>
+              <Link key={item.title} href={item.href} className="group">
+                <Card className="h-full rounded-[1.5rem] transition hover:-translate-y-0.5 hover:shadow-md">
+                  <CardContent className="flex h-full items-center justify-between gap-4 p-5">
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">{item.title}</p>
+                      <p className="text-3xl font-bold tracking-tight">{item.value}</p>
+                      <p className="text-xs text-muted-foreground">{item.description}</p>
+                    </div>
 
-                  <div>
-                    <CardTitle className="text-lg">{item.title}</CardTitle>
-                    <CardDescription className="mt-2 leading-7">
-                      {item.description}
-                    </CardDescription>
-                  </div>
-                </CardHeader>
-              </Card>
-            );
-          })}
-        </div>
-      </section>
-
-      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-        <CardHeader>
-          <CardTitle>{t.sampleRowsTitle}</CardTitle>
-          <CardDescription>{t.sampleRowsDesc}</CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          <div className="overflow-x-auto rounded-3xl border border-white/20 dark:border-white/10">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t.tableHeaders.payment}</TableHead>
-                  <TableHead>{t.tableHeaders.customer}</TableHead>
-                  <TableHead>{t.tableHeaders.method}</TableHead>
-                  <TableHead>{t.tableHeaders.status}</TableHead>
-                  <TableHead>{t.tableHeaders.amount}</TableHead>
-                  <TableHead>{t.tableHeaders.actions}</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {previewRows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                          <CreditCard className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="font-semibold">{row.paymentNo}</p>
-                          <p className="text-muted-foreground text-xs">
-                            {row.reference}
-                          </p>
-                        </div>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
-                      <div className="space-y-1">
-                        <p className="font-medium">{row.customer}</p>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
-                      <Badge variant="secondary" className="rounded-full px-3 py-1">
-                        {row.method}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell>{statusBadge(row.status, locale)}</TableCell>
-
-                    <TableCell>
-                      <Badge variant="secondary" className="rounded-full px-3 py-1">
-                        {row.amount}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell>
-                      <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" size="sm" className="rounded-xl">
-                          <Eye className="ms-2 h-4 w-4" />
-                          {isArabic ? "عرض" : "View"}
-                        </Button>
-                        <Button variant="outline" size="sm" className="rounded-xl">
-                          <ReceiptText className="ms-2 h-4 w-4" />
-                          {isArabic ? "الفاتورة" : "Invoice"}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="rounded-2xl border border-dashed border-white/30 bg-black/5 p-4 dark:border-white/10 dark:bg-white/5">
-            <div className="mb-2 flex items-center gap-2">
-              <Badge className="rounded-full px-3 py-1">Preview</Badge>
-            </div>
-            <p className="text-muted-foreground text-sm leading-7">
-              {t.noDataText}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-          <CardHeader>
-            <CardTitle>{t.quickActions}</CardTitle>
-            <CardDescription>{t.operationalOverview}</CardDescription>
-          </CardHeader>
-
-          <CardContent className="grid gap-4 md:grid-cols-2">
-            {t.actionCards.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <Card
-                  key={item.title}
-                  className="rounded-3xl border-white/20 bg-white/80 shadow-none dark:border-white/10 dark:bg-white/5"
-                >
-                  <CardHeader className="space-y-4">
-                    <div className="bg-primary/10 text-primary flex h-12 w-12 items-center justify-center rounded-2xl">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary transition group-hover:scale-105">
                       <Icon className="h-5 w-5" />
                     </div>
-
-                    <div>
-                      <CardTitle className="text-base">{item.title}</CardTitle>
-                      <CardDescription className="mt-2 leading-7">
-                        {item.description}
-                      </CardDescription>
-                    </div>
-                  </CardHeader>
-
-                  <CardContent className="pt-0">
-                    <Link href={item.href}>
-                      <Button variant="outline" className="w-full rounded-2xl">
-                        {item.cta}
-                      </Button>
-                    </Link>
                   </CardContent>
                 </Card>
-              );
-            })}
-          </CardContent>
-        </Card>
+              </Link>
+            );
+          })}
+        </section>
 
-        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-          <CardHeader>
-            <CardTitle>{t.currentStatus}</CardTitle>
-            <CardDescription>{t.nextStep}</CardDescription>
-          </CardHeader>
+        {/* =====================================================
+            CONTENT GRID
+        ===================================================== */}
+        <section className="grid gap-6 xl:grid-cols-[1.7fr_1fr]">
+          <Card className="rounded-[1.5rem]">
+            <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <CreditCard className="h-5 w-5 text-primary" />
+                  {t.latest}
+                </CardTitle>
+                <CardDescription>{t.latestDesc}</CardDescription>
+              </div>
 
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
-              {t.statusItems.map((item) => {
-                const Icon = item.icon;
+              <div className="relative w-full md:max-w-xs">
+                <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={t.search}
+                  className="rounded-2xl ps-9"
+                />
+              </div>
+            </CardHeader>
 
-                return (
-                  <div
-                    key={item.label}
-                    className="flex items-start gap-3 rounded-2xl border border-white/20 bg-white/80 p-4 dark:border-white/10 dark:bg-white/5"
-                  >
-                    <div className="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl">
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-muted-foreground text-xs">
-                        {item.label}
+            <CardContent>
+              {loading ? (
+                <div className="flex min-h-72 flex-col items-center justify-center gap-3 text-muted-foreground">
+                  <Loader2 className="h-7 w-7 animate-spin text-primary" />
+                  <p className="text-sm">{t.loading}</p>
+                </div>
+              ) : latestPayments.length === 0 ? (
+                <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
+                  <CreditCard className="h-10 w-10 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">{t.empty}</p>
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-3xl border">
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[860px] text-sm">
+                      <thead className="bg-muted/50 text-xs text-muted-foreground">
+                        <tr>
+                          <th className="px-4 py-3 text-start font-medium">{t.payment}</th>
+                          <th className="px-4 py-3 text-start font-medium">{t.customer}</th>
+                          <th className="px-4 py-3 text-start font-medium">{t.invoice}</th>
+                          <th className="px-4 py-3 text-start font-medium">{t.method}</th>
+                          <th className="px-4 py-3 text-start font-medium">{t.status}</th>
+                          <th className="px-4 py-3 text-start font-medium">{t.date}</th>
+                          <th className="px-4 py-3 text-start font-medium">{t.amount}</th>
+                          <th className="px-4 py-3 text-end font-medium">{t.details}</th>
+                        </tr>
+                      </thead>
+
+                      <tbody className="divide-y">
+                        {latestPayments.map((payment) => {
+                          const status = String(payment.status || "PENDING").toUpperCase();
+
+                          return (
+                            <tr key={payment.id} className="bg-card transition hover:bg-muted/30">
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                                    <CreditCard className="h-4 w-4" />
+                                  </div>
+                                  <div>
+                                    <p className="font-medium">
+                                      {payment.reference || `PAY-${payment.id}`}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      ID: {payment.id}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-3">
+                                {payment.customer_id ? `#${payment.customer_id}` : t.notAvailable}
+                              </td>
+
+                              <td className="px-4 py-3">
+                                {payment.invoice_id ? `#${payment.invoice_id}` : t.notAvailable}
+                              </td>
+
+                              <td className="px-4 py-3">
+                                <Badge variant="secondary" className="rounded-full">
+                                  {getMethodLabel(payment.payment_method, locale)}
+                                </Badge>
+                              </td>
+
+                              <td className="px-4 py-3">
+                                <Badge
+                                  variant="outline"
+                                  className={`rounded-full ${getStatusClassName(status)}`}
+                                >
+                                  {getStatusLabel(status, locale)}
+                                </Badge>
+                              </td>
+
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                  <CalendarDays className="h-4 w-4" />
+                                  {formatDate(payment.payment_date, locale)}
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-1.5 font-medium">
+                                  <Image
+                                    src={SAR_ICON_PATH}
+                                    alt="SAR"
+                                    width={14}
+                                    height={14}
+                                  />
+                                  {formatMoney(toNumber(payment.amount))}
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-3 text-end">
+                                <Button
+                                  asChild
+                                  variant="ghost"
+                                  size="sm"
+                                  className="rounded-xl"
+                                >
+                                  <Link href={`/system/payments/${payment.id}`}>
+                                    {t.details}
+                                    {isAr ? (
+                                      <ArrowLeft className="ms-2 h-4 w-4" />
+                                    ) : (
+                                      <ArrowLeft className="ms-2 h-4 w-4 rotate-180" />
+                                    )}
+                                  </Link>
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="space-y-6">
+            <Card className="rounded-[1.5rem]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-primary" />
+                  {t.activity}
+                </CardTitle>
+                <CardDescription>{t.activityDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="space-y-4">
+                <StatusProgress
+                  label={t.paidPayments}
+                  value={paidRate}
+                  count={stats.paidPayments}
+                  icon={CheckCircle2}
+                />
+                <StatusProgress
+                  label={t.pendingPayments}
+                  value={pendingRate}
+                  count={stats.pendingPayments}
+                  icon={Clock3}
+                />
+                <StatusProgress
+                  label={t.failedPayments}
+                  value={failedRate}
+                  count={stats.failedPayments}
+                  icon={XCircle}
+                />
+
+                <div className="rounded-3xl border bg-muted/20 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">{t.failedAmount}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {isAr ? "إجمالي عمليات لم تكتمل" : "Total incomplete transactions"}
                       </p>
-                      <p className="mt-1 text-sm font-semibold">{item.value}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <Image src={SAR_ICON_PATH} alt="SAR" width={15} height={15} />
+                      {formatMoney(stats.failedAmount)}
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              </CardContent>
+            </Card>
 
-            <div className="rounded-2xl border border-dashed border-white/30 bg-black/5 p-4 dark:border-white/10 dark:bg-white/5">
-              <div className="mb-2 flex items-center gap-2">
-                <Badge className="rounded-full px-3 py-1">
-                  {t.noDataTitle}
-                </Badge>
-              </div>
-              <p className="text-sm leading-7">{t.nextStepText}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
+            <Card className="rounded-[1.5rem]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Banknote className="h-5 w-5 text-primary" />
+                  {t.methodReport}
+                </CardTitle>
+                <CardDescription>{t.methodReportDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="space-y-3">
+                {methodRows.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                    {t.empty}
+                  </div>
+                ) : (
+                  methodRows.map((row) => (
+                    <div key={row.method} className="rounded-3xl border bg-card p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                            <CreditCard className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold">
+                              {getMethodLabel(row.method, locale)}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {formatNumber(row.count)} {t.totalPayments}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 font-bold">
+                          <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
+                          {formatMoney(row.total)}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[1.5rem]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-primary" />
+                  {t.quickLinks}
+                </CardTitle>
+                <CardDescription>{t.quickLinksDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="grid gap-3">
+                <QuickLink
+                  href="/system/payments/list"
+                  icon={FileText}
+                  title={t.list}
+                  description={isAr ? "استعراض المدفوعات والفلترة" : "Browse and filter payments"}
+                />
+                <QuickLink
+                  href="/system/payments/create"
+                  icon={Plus}
+                  title={t.create}
+                  description={isAr ? "تسجيل عملية دفع جديدة" : "Register a new payment"}
+                />
+                <QuickLink
+                  href="/system/payments/reports"
+                  icon={BarChart3}
+                  title={t.reports}
+                  description={isAr ? "تحليلات وتصدير Excel" : "Analytics and Excel export"}
+                />
+                <QuickLink
+                  href="/system/invoices"
+                  icon={ReceiptText}
+                  title={t.invoices}
+                  description={isAr ? "متابعة الفواتير المرتبطة" : "Track linked invoices"}
+                />
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+/* =====================================================
+   SMALL COMPONENTS
+===================================================== */
+
+function StatusProgress({
+  label,
+  value,
+  count,
+  icon: Icon,
+}: {
+  label: string;
+  value: number;
+  count: number;
+  icon: LucideIcon;
+}) {
+  return (
+    <div className="space-y-2 rounded-3xl border bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-primary" />
+          <p className="text-sm font-medium">{label}</p>
+        </div>
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <span>{formatNumber(count)}</span>
+          <span className="text-muted-foreground">/</span>
+          <span>{formatNumber(value)}%</span>
+        </div>
+      </div>
+
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-all"
+          style={{ width: `${Math.max(0, Math.min(value, 100))}%` }}
+        />
+      </div>
     </div>
+  );
+}
+
+function QuickLink({
+  href,
+  icon: Icon,
+  title,
+  description,
+}: {
+  href: string;
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-center justify-between gap-3 rounded-3xl border bg-card p-4 transition hover:-translate-y-0.5 hover:bg-muted/30 hover:shadow-sm"
+    >
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary transition group-hover:scale-105">
+          <Icon className="h-5 w-5" />
+        </div>
+
+        <div>
+          <p className="text-sm font-semibold">{title}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        </div>
+      </div>
+
+      <ArrowDownUp className="h-4 w-4 text-muted-foreground transition group-hover:text-primary" />
+    </Link>
   );
 }

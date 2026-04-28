@@ -5,6 +5,8 @@
 # ✅ نقطة تجميع جميع APIs الخاصة بالنظام
 # ✅ يعتمد على include لكل موديول
 # ✅ متوافق مع Frontend API-first
+# ✅ تم ربط Treasury API رسميًا ضمن Finance APIs
+# ✅ تم ربط Users API رسميًا ضمن System Modules APIs
 # ============================================================
 
 from django.urls import include, path
@@ -31,6 +33,11 @@ urlpatterns = [
     path("service-items/", include("api.service_items.urls")),
 
     # --------------------------------------------------------
+    # 👤 Users & Access Management APIs
+    # --------------------------------------------------------
+    path("users/", include("api.users.urls")),
+
+    # --------------------------------------------------------
     # 🧾 Orders & Operations APIs
     # --------------------------------------------------------
     path("orders/", include("api.orders.urls")),
@@ -43,6 +50,7 @@ urlpatterns = [
     path("payments/", include("api.payments.urls")),
     path("payment-gateways/", include("api.payment_gateways.urls")),
     path("accounting/", include("api.accounting.urls")),
+    path("treasury/", include("api.treasury.urls")),
 
     # --------------------------------------------------------
     # 📈 System Modules APIs

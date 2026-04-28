@@ -3,10 +3,8 @@
    Primey Care - Frontend API Client
    ------------------------------------------------------------
    ✅ ملف موحد لكل طلبات API داخل الفرونت
-   ✅ بدون hardcoded localhost
-   ✅ متوافق مع اللوكل والإنتاج
-   ✅ يعتمد على /api في المتصفح
-   ✅ يعتمد على NEXT_PUBLIC_API_URL عند التنفيذ من السيرفر
+   ✅ بدون hardcoded localhost داخل الكود
+   ✅ متوافق مع اللوكل والإنتاج عبر NEXT_PUBLIC_API_URL
    ✅ يدعم الكوكيز والجلسة
    ✅ يدعم CSRF للطلبات غير GET
    ✅ يعالج الأخطاء بشكل موحد
@@ -79,13 +77,6 @@ export type PaginatedApiResponse<T> = {
 
 const DEFAULT_ERROR_MESSAGE = "تعذر الاتصال بالخادم. حاول مرة أخرى.";
 
-/* ============================================================
-   🌐 API Base URL
-   ------------------------------------------------------------
-   - في المتصفح: نستخدم /api مباشرة حتى يعمل rewrite في اللوكل
-   - في السيرفر: نستخدم NEXT_PUBLIC_API_URL إن وُجد
-============================================================ */
-
 function isBrowser() {
   return typeof window !== "undefined";
 }
@@ -106,10 +97,6 @@ function normalizePath(path: string) {
 }
 
 export function getApiBaseUrl() {
-  if (isBrowser()) {
-    return "";
-  }
-
   return normalizeBaseUrl(
     process.env.NEXT_PUBLIC_API_URL ||
       process.env.API_URL ||
@@ -145,10 +132,6 @@ export function buildApiUrl(path: string, query?: ApiQuery) {
   return `${url}${url.includes("?") ? "&" : "?"}${queryString}`;
 }
 
-/* ============================================================
-   🔐 CSRF Helpers
-============================================================ */
-
 function getCookie(name: string) {
   if (!isBrowser()) return "";
 
@@ -170,10 +153,6 @@ function shouldAttachCsrf(method: ApiMethod) {
   return !["GET"].includes(method);
 }
 
-/* ============================================================
-   🧠 Response Helpers
-============================================================ */
-
 function extractErrorMessage(payload: unknown, fallback = DEFAULT_ERROR_MESSAGE) {
   if (!payload || typeof payload !== "object") return fallback;
 
@@ -189,6 +168,18 @@ function extractErrorMessage(payload: unknown, fallback = DEFAULT_ERROR_MESSAGE)
 
   if (typeof record.detail === "string" && record.detail.trim()) {
     return record.detail;
+  }
+
+  if (Array.isArray(record.errors)) {
+    return record.errors.filter(Boolean).join("، ") || fallback;
+  }
+
+  if (record.errors && typeof record.errors === "object") {
+    try {
+      return JSON.stringify(record.errors);
+    } catch {
+      return fallback;
+    }
   }
 
   return fallback;
@@ -207,10 +198,6 @@ async function readJsonSafely(response: Response) {
     return null;
   }
 }
-
-/* ============================================================
-   🚀 Main API Request
-============================================================ */
 
 export async function apiRequest<T = unknown>(
   path: string,
@@ -282,10 +269,6 @@ export async function apiRequest<T = unknown>(
   }
 }
 
-/* ============================================================
-   🧩 Shortcuts
-============================================================ */
-
 export function apiGet<T = unknown>(
   path: string,
   query?: ApiQuery,
@@ -346,12 +329,6 @@ export function apiDelete<T = unknown>(
   });
 }
 
-/* ============================================================
-   🛡️ Safe Helpers
-   ------------------------------------------------------------
-   تستخدم في الداشبورد حتى لا تسقط الصفحة إذا فشل API واحد
-============================================================ */
-
 export async function safeApiGet<T = unknown>(
   path: string,
   query?: ApiQuery,
@@ -402,10 +379,6 @@ export function getDataObject<T extends Record<string, unknown>>(
   return record as T;
 }
 
-/* ============================================================
-   📌 Primey Care API Paths
-============================================================ */
-
 export const API_PATHS = {
   auth: {
     csrf: "/api/auth/csrf/",
@@ -437,6 +410,8 @@ export const API_PATHS = {
   },
 
   customers: {
+    list: "/api/customers/",
+    detail: (id: number | string) => `/api/customers/${id}/`,
     statement: (id: number | string) => `/api/customers/${id}/statement/`,
   },
 

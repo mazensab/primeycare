@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 /* =========================================================
    🌍 Locale Types
 ========================================================= */
+
 type AppLocale = "ar" | "en";
 
 interface Notification {
@@ -34,25 +35,47 @@ interface Notification {
   created_at: string;
 }
 
+type NotificationsApiResponse = {
+  results?: Notification[];
+  unread_count?: number;
+  count?: number;
+  data?: {
+    results?: Notification[];
+    unread_count?: number;
+  };
+};
+
 /* =========================================================
    🔗 Helpers - Resolve API & WS Base Safely
 ========================================================= */
+
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+function normalizeApiBase(value: string): string {
+  const cleanValue = trimTrailingSlash(value.trim());
+
+  if (cleanValue.endsWith("/api")) {
+    return cleanValue.slice(0, -4);
+  }
+
+  return cleanValue;
+}
+
 function resolveApiBase(): string {
-  const envApi = process.env.NEXT_PUBLIC_API_URL?.trim();
+  const envApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+  const envApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
 
-  if (envApi) {
-    return trimTrailingSlash(envApi);
+  if (envApiBase) {
+    return normalizeApiBase(envApiBase);
   }
 
-  if (typeof window !== "undefined") {
-    return trimTrailingSlash(window.location.origin);
+  if (envApiUrl) {
+    return normalizeApiBase(envApiUrl);
   }
 
-  return "";
+  return "http://127.0.0.1:8000";
 }
 
 function resolveWsBase(): string {
@@ -62,13 +85,46 @@ function resolveWsBase(): string {
     return trimTrailingSlash(envWs);
   }
 
-  if (typeof window !== "undefined") {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${window.location.host}`;
+  const envApiBase =
+    process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_API_URL?.trim();
+
+  if (envApiBase) {
+    const cleanApiBase = normalizeApiBase(envApiBase);
+
+    try {
+      const url = new URL(cleanApiBase);
+      const protocol = url.protocol === "https:" ? "wss:" : "ws:";
+
+      return `${protocol}//${url.host}`;
+    } catch {
+      return "";
+    }
   }
 
-  return "";
+  return "ws://127.0.0.1:8000";
 }
+
+function extractNotifications(payload: NotificationsApiResponse) {
+  const results = Array.isArray(payload.results)
+    ? payload.results
+    : Array.isArray(payload.data?.results)
+      ? payload.data.results
+      : [];
+
+  const unreadCount = Number(
+    payload.unread_count ?? payload.data?.unread_count ?? 0,
+  );
+
+  return {
+    results,
+    unreadCount: Number.isFinite(unreadCount) ? unreadCount : 0,
+  };
+}
+
+/* =========================================================
+   Component
+========================================================= */
 
 const Notifications = () => {
   const isMobile = useIsMobile();
@@ -88,8 +144,9 @@ const Notifications = () => {
   /* =========================================================
      🧭 Detect Current Scope
   ========================================================= */
+
   const isCompanyScope = useMemo(() => {
-    return pathname?.startsWith("/company");
+    return pathname?.startsWith("/company") || pathname?.startsWith("/center");
   }, [pathname]);
 
   const apiRoot = useMemo(() => resolveApiBase(), []);
@@ -106,7 +163,6 @@ const Notifications = () => {
   const wsNotificationsUrl = useMemo(() => {
     if (!wsRoot) return "";
 
-    // حالياً قناة النظام تعمل على مستوى المستخدم الحالي
     return `${wsRoot}/ws/system/notifications/`;
   }, [wsRoot]);
 
@@ -117,22 +173,38 @@ const Notifications = () => {
   /* =========================================================
      🍪 Load Locale from localStorage
   ========================================================= */
-  useEffect(() => {
-    try {
-      const savedLocale =
-        typeof window !== "undefined"
-          ? (window.localStorage.getItem("primey-locale") as AppLocale | null)
-          : null;
 
-      setLocale(savedLocale === "en" ? "en" : "ar");
-    } catch (error) {
-      console.error("Notifications locale initialization error", error);
-    }
+  useEffect(() => {
+    const syncLocale = () => {
+      try {
+        const savedLocale =
+          typeof window !== "undefined"
+            ? (window.localStorage.getItem("primey-locale") as AppLocale | null)
+            : null;
+
+        setLocale(savedLocale === "en" ? "en" : "ar");
+      } catch (error) {
+        console.error("Notifications locale initialization error", error);
+        setLocale("ar");
+      }
+    };
+
+    syncLocale();
+
+    window.addEventListener("primey-locale-changed", syncLocale);
+    window.addEventListener("storage", syncLocale);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", syncLocale);
+      window.removeEventListener("storage", syncLocale);
+    };
   }, []);
 
   /* =========================================================
      📥 Load Notifications from Backend
+     لا تكسر الهيدر أو الصفحات إذا API غير موجود
   ========================================================= */
+
   async function loadNotifications() {
     if (!apiBase) {
       setNotifications([]);
@@ -146,16 +218,35 @@ const Notifications = () => {
       const res = await fetch(`${apiBase}/`, {
         credentials: "include",
         cache: "no-store",
+        headers: {
+          Accept: "application/json",
+        },
       });
 
-      if (!res.ok) {
-        throw new Error(`Failed to load notifications: ${res.status}`);
+      if (res.status === 404) {
+        setNotifications([]);
+        setUnreadCount(0);
+        return;
       }
 
-      const data = await res.json();
+      if (res.status === 401 || res.status === 403) {
+        setNotifications([]);
+        setUnreadCount(0);
+        return;
+      }
 
-      setNotifications(Array.isArray(data.results) ? data.results : []);
-      setUnreadCount(Number(data.unread_count || 0));
+      if (!res.ok) {
+        console.warn(`Notifications API unavailable: ${res.status}`);
+        setNotifications([]);
+        setUnreadCount(0);
+        return;
+      }
+
+      const data = (await res.json()) as NotificationsApiResponse;
+      const parsed = extractNotifications(data);
+
+      setNotifications(parsed.results);
+      setUnreadCount(parsed.unreadCount);
     } catch (err) {
       console.error("Notifications load error", err);
       setNotifications([]);
@@ -172,7 +263,9 @@ const Notifications = () => {
 
   /* =========================================================
      🔔 WebSocket Realtime Notifications
+     لا يكسر النظام إذا WS غير جاهز
   ========================================================= */
+
   useEffect(() => {
     if (!wsNotificationsUrl) return;
 
@@ -186,19 +279,27 @@ const Notifications = () => {
         try {
           const payload = JSON.parse(event.data) as Notification;
 
-          setNotifications((prev) => [payload, ...prev]);
+          if (!payload?.id) return;
+
+          setNotifications((prev) => {
+            const exists = prev.some((item) => item.id === payload.id);
+            if (exists) return prev;
+
+            return [payload, ...prev];
+          });
+
           setUnreadCount((prev) => prev + 1);
         } catch (err) {
           console.error("Realtime notification parse error", err);
         }
       };
 
-      socket.onerror = (error) => {
-        console.error("Notification socket error", error);
+      socket.onerror = () => {
+        socketRef.current = null;
       };
 
       socket.onclose = () => {
-        console.log("Notification socket closed");
+        socketRef.current = null;
       };
     } catch (error) {
       console.error("Notification socket initialization error", error);
@@ -206,6 +307,7 @@ const Notifications = () => {
 
     return () => {
       try {
+        socket?.close();
         socketRef.current?.close();
       } catch (error) {
         console.error("Notification socket close error", error);
@@ -218,6 +320,7 @@ const Notifications = () => {
   /* =========================================================
      ✅ Mark Single Notification as Read
   ========================================================= */
+
   async function markAsRead(id: number) {
     if (!apiBase) return;
 
@@ -225,14 +328,27 @@ const Notifications = () => {
       const res = await fetch(`${apiBase}/read/${id}/`, {
         method: "POST",
         credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
       });
 
+      if (res.status === 404 || res.status === 401 || res.status === 403) {
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
+        );
+
+        setUnreadCount((prev) => (prev > 0 ? prev - 1 : 0));
+        return;
+      }
+
       if (!res.ok) {
-        throw new Error(`Failed to mark notification as read: ${res.status}`);
+        console.warn(`Failed to mark notification as read: ${res.status}`);
+        return;
       }
 
       setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
       );
 
       setUnreadCount((prev) => (prev > 0 ? prev - 1 : 0));
@@ -244,6 +360,7 @@ const Notifications = () => {
   /* =========================================================
      ✅ Mark All Notifications as Read
   ========================================================= */
+
   async function markAllAsRead() {
     if (unreadCount <= 0 || !apiBase) return;
 
@@ -253,10 +370,20 @@ const Notifications = () => {
       const res = await fetch(`${apiBase}/read-all/`, {
         method: "POST",
         credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
       });
 
+      if (res.status === 404 || res.status === 401 || res.status === 403) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+        setUnreadCount(0);
+        return;
+      }
+
       if (!res.ok) {
-        throw new Error(`Failed to mark all notifications as read: ${res.status}`);
+        console.warn(`Failed to mark all notifications as read: ${res.status}`);
+        return;
       }
 
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
@@ -271,9 +398,16 @@ const Notifications = () => {
   /* =========================================================
      🕒 Format Date by Locale
   ========================================================= */
+
   function formatNotificationDate(value: string) {
     try {
-      return new Date(value).toLocaleString(isArabic ? "ar-SA" : "en-US");
+      return new Intl.DateTimeFormat("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(value));
     } catch {
       return value;
     }
@@ -282,6 +416,7 @@ const Notifications = () => {
   /* =========================================================
      🖱️ Handle Notification Click
   ========================================================= */
+
   async function handleNotificationClick(item: Notification) {
     if (!item.is_read) {
       await markAsRead(item.id);
@@ -298,11 +433,11 @@ const Notifications = () => {
         <Button size="icon-sm" variant="ghost" className="relative">
           <BellIcon />
 
-          {unreadCount > 0 && (
+          {unreadCount > 0 ? (
             <span className="bg-destructive absolute end-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] text-white">
-              {unreadCount}
+              {unreadCount > 99 ? "99+" : unreadCount}
             </span>
-          )}
+          ) : null}
         </Button>
       </DropdownMenuTrigger>
 
@@ -310,86 +445,91 @@ const Notifications = () => {
         align={isMobile ? "center" : isArabic ? "start" : "end"}
         className="ms-4 w-80 p-0"
       >
-        <DropdownMenuLabel className="bg-background dark:bg-muted sticky top-0 z-10 p-0">
-          <div className="flex items-center justify-between border-b px-4 py-4">
-            <div className="font-medium">
-              {isArabic ? "الإشعارات" : "Notifications"}
+        <div dir={isArabic ? "rtl" : "ltr"}>
+          <DropdownMenuLabel className="bg-background dark:bg-muted sticky top-0 z-10 p-0">
+            <div className="flex items-center justify-between border-b px-4 py-4">
+              <div className="font-medium">
+                {isArabic ? "الإشعارات" : "Notifications"}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={markAllAsRead}
+                  disabled={unreadCount <= 0 || markingAll}
+                  className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <CheckCheckIcon className="size-3.5" />
+                  {isArabic ? "قراءة الكل" : "Read all"}
+                </button>
+
+                <Link
+                  href={pageHref}
+                  className="text-muted-foreground hover:text-foreground text-xs transition"
+                >
+                  {isArabic ? "عرض الكل" : "View all"}
+                </Link>
+              </div>
             </div>
+          </DropdownMenuLabel>
 
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={markAllAsRead}
-                disabled={unreadCount <= 0 || markingAll}
-                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <CheckCheckIcon className="size-3.5" />
-                {isArabic ? "قراءة الكل" : "Read all"}
-              </button>
+          <ScrollArea className="h-[350px]">
+            {loading ? (
+              <div className="text-muted-foreground p-6 text-center text-sm">
+                {isArabic
+                  ? "جاري تحميل الإشعارات..."
+                  : "Loading notifications..."}
+              </div>
+            ) : null}
 
-              <Link
-                href={pageHref}
-                className="text-muted-foreground hover:text-foreground text-xs transition"
-              >
-                {isArabic ? "عرض الكل" : "View all"}
-              </Link>
-            </div>
-          </div>
-        </DropdownMenuLabel>
+            {!loading && notifications.length === 0 ? (
+              <div className="text-muted-foreground p-6 text-center text-sm">
+                {isArabic ? "لا توجد إشعارات" : "No notifications"}
+              </div>
+            ) : null}
 
-        <ScrollArea className="h-[350px]">
-          {loading && (
-            <div className="text-muted-foreground p-6 text-center text-sm">
-              {isArabic ? "جاري تحميل الإشعارات..." : "Loading notifications..."}
-            </div>
-          )}
+            {!loading
+              ? notifications.map((item) => (
+                  <DropdownMenuItem
+                    key={item.id}
+                    onClick={() => handleNotificationClick(item)}
+                    className="group flex cursor-pointer items-start gap-3 rounded-none border-b px-4 py-3"
+                  >
+                    <div className="flex flex-1 items-start gap-2">
+                      <div className="flex-none">
+                        <Avatar className="size-8">
+                          <AvatarFallback>
+                            {item.title?.charAt(0) || (isArabic ? "إ" : "N")}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
 
-          {!loading && notifications.length === 0 && (
-            <div className="text-muted-foreground p-6 text-center text-sm">
-              {isArabic ? "لا توجد إشعارات" : "No notifications"}
-            </div>
-          )}
+                      <div className="flex flex-1 flex-col gap-1">
+                        <div className="truncate text-sm font-medium">
+                          {item.title}
+                        </div>
 
-          {!loading &&
-            notifications.map((item) => (
-              <DropdownMenuItem
-                key={item.id}
-                onClick={() => handleNotificationClick(item)}
-                className="group flex cursor-pointer items-start gap-9 rounded-none border-b px-4 py-3"
-              >
-                <div className="flex flex-1 items-start gap-2">
-                  <div className="flex-none">
-                    <Avatar className="size-8">
-                      <AvatarFallback>
-                        {item.title?.charAt(0) || (isArabic ? "إ" : "N")}
-                      </AvatarFallback>
-                    </Avatar>
-                  </div>
+                        <div className="text-muted-foreground line-clamp-1 text-xs">
+                          {item.message}
+                        </div>
 
-                  <div className="flex flex-1 flex-col gap-1">
-                    <div className="truncate text-sm font-medium">
-                      {item.title}
+                        <div className="text-muted-foreground flex items-center gap-1 text-xs">
+                          <ClockIcon className="size-3" />
+                          {formatNotificationDate(item.created_at)}
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="text-muted-foreground line-clamp-1 text-xs">
-                      {item.message}
-                    </div>
-
-                    <div className="text-muted-foreground flex items-center gap-1 text-xs">
-                      <ClockIcon className="size-3" />
-                      {formatNotificationDate(item.created_at)}
-                    </div>
-                  </div>
-                </div>
-
-                {!item.is_read && (
-                  <div className="flex-0">
-                    <span className="bg-destructive/80 block size-2 rounded-full border" />
-                  </div>
-                )}
-              </DropdownMenuItem>
-            ))}
-        </ScrollArea>
+                    {!item.is_read ? (
+                      <div className="flex-0">
+                        <span className="bg-destructive/80 block size-2 rounded-full border" />
+                      </div>
+                    ) : null}
+                  </DropdownMenuItem>
+                ))
+              : null}
+          </ScrollArea>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

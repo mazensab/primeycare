@@ -1,19 +1,27 @@
 # ===============================================================
 # 📂 الملف: auth_center/models.py
 # 🧭 Primey Care — Auth Center Models
-# 🚀 الإصدار: Primey Care Auth Core V1.0
+# 🚀 الإصدار: Primey Care Auth Core V1.1
 # ---------------------------------------------------------------
 # ✅ نواة هوية عامة تخدم:
-#    - مستخدمي النظام
-#    - مستخدمي الشركات
+#    - سوبر أدمن النظام
+#    - المحاسبين
+#    - موظفي النظام
 #    - العملاء
 #    - المندوبين
+#    - الوكلاء
+#    - المراكز
 #    - مزودي الخدمة
 #    - أي Actor مستقبلي داخل المنصة
 # ---------------------------------------------------------------
 # ✅ بدون أي ربط مباشر مع HR / Company / Billing
 # ✅ قابلة للتوسع بدون إعادة بناء لاحقة
 # ✅ تدعم جلسات نشطة متعددة وتتبع الهوية العامة
+# ✅ متوافقة مع مساحات Primey Care:
+#    /system
+#    /provider
+#    /customer
+#    /agent
 # ===============================================================
 
 from __future__ import annotations
@@ -33,17 +41,38 @@ User = get_user_model()
 
 class UserType(models.TextChoices):
     """
-    نوع المستخدم العام داخل Primey Care
-    موديول auth_center لا يربط نفسه بأي app تشغيلي،
+    نوع المستخدم العام داخل Primey Care.
+
+    موديول auth_center لا يربط نفسه بأي app تشغيلي مباشرة،
     بل يوفّر تصنيفًا عامًا يمكن لباقي الموديولات الاعتماد عليه.
+
+    ملاحظة مهمة:
+    - COMPANY أبقيناه كتوافق خلفي فقط حتى لا نكسر أي بيانات أو اختبارات قديمة.
+    - المساحات الرسمية الجديدة في الواجهة:
+        SYSTEM / SUPER_ADMIN / STAFF / ACCOUNTANT -> /system
+        PROVIDER / CENTER                         -> /provider
+        CUSTOMER                                  -> /customer
+        AGENT / BROKER                            -> /agent
     """
+
+    SUPER_ADMIN = "SUPER_ADMIN", "Super Admin"
     SYSTEM = "SYSTEM", "System User"
-    COMPANY = "COMPANY", "Company User"
-    CUSTOMER = "CUSTOMER", "Customer"
-    AGENT = "AGENT", "Agent"
-    PROVIDER = "PROVIDER", "Provider"
     STAFF = "STAFF", "Staff"
+    ACCOUNTANT = "ACCOUNTANT", "Accountant"
+
+    CUSTOMER = "CUSTOMER", "Customer"
+
+    AGENT = "AGENT", "Agent"
+    BROKER = "BROKER", "Broker"
+
+    PROVIDER = "PROVIDER", "Provider"
+    CENTER = "CENTER", "Center"
+
     PARTNER = "PARTNER", "Partner"
+
+    # توافق خلفي مؤقت
+    COMPANY = "COMPANY", "Company User"
+
     OTHER = "OTHER", "Other"
 
 
@@ -53,11 +82,32 @@ class UserType(models.TextChoices):
 
 class UserProfile(models.Model):
     """
-    👤 ملف هوية عام للمستخدم داخل المنصة
+    👤 ملف هوية عام للمستخدم داخل المنصة.
 
     هذا الملف هو الطبقة الموحدة للبيانات العامة المشتركة بين جميع أنواع المستخدمين.
-    لا يحتوي على ربط مباشر مع company / employee / customer / agent ...
-    لأن هذا الربط يجب أن يبقى داخل الموديولات المتخصصة.
+    لا يحتوي على ربط مباشر مع company / employee / customer / agent / center / provider
+    لأن هذا الربط يجب أن يبقى داخل الموديولات المتخصصة أو داخل extra_data بشكل مرن.
+
+    أمثلة extra_data:
+    {
+        "customer_id": 10
+    }
+
+    {
+        "provider_id": 5
+    }
+
+    {
+        "center_id": 3
+    }
+
+    {
+        "agent_id": 8
+    }
+
+    {
+        "broker_id": 2
+    }
     """
 
     user = models.OneToOneField(
@@ -71,7 +121,7 @@ class UserProfile(models.Model):
     # 🧭 التصنيف العام للمستخدم
     # -----------------------------------------------------------
     user_type = models.CharField(
-        max_length=20,
+        max_length=30,
         choices=UserType.choices,
         default=UserType.OTHER,
         db_index=True,
@@ -246,7 +296,7 @@ class UserProfile(models.Model):
 
 class ActiveUserSession(models.Model):
     """
-    🔐 تسجيل الجلسات النشطة داخل النظام
+    🔐 تسجيل الجلسات النشطة داخل النظام.
 
     ✔ يدعم Multi-Login
     ✔ يدعم Session Monitor

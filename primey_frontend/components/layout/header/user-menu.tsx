@@ -30,39 +30,113 @@ import { Progress } from "@/components/ui/progress";
 
 type AppLocale = "ar" | "en";
 
+type HeaderUser = {
+  id?: number | string | null;
+  full_name?: string | null;
+  username?: string | null;
+  email?: string | null;
+  avatar?: string | null;
+  image?: string | null;
+};
+
+type HeaderSubscription = {
+  days_remaining?: number | null;
+};
+
+type HeaderAuthSession = {
+  user?: HeaderUser | null;
+  subscription?: HeaderSubscription | null;
+};
+
+function readLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
+
+    const savedLocale = window.localStorage.getItem("primey-locale");
+    return savedLocale === "en" ? "en" : "ar";
+  } catch {
+    return "ar";
+  }
+}
+
+function normalizeApiBase(value: string | undefined): string {
+  const cleanValue = String(value || "").trim().replace(/\/+$/, "");
+
+  if (!cleanValue) {
+    return "http://127.0.0.1:8000";
+  }
+
+  if (cleanValue.endsWith("/api")) {
+    return cleanValue.slice(0, -4);
+  }
+
+  return cleanValue;
+}
+
+function getApiBaseUrl(): string {
+  return normalizeApiBase(
+    process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL,
+  );
+}
+
+function getCSRFToken(): string {
+  if (typeof document === "undefined") return "";
+
+  const match = document.cookie.match(/csrftoken=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 export default function UserMenu() {
   const router = useRouter();
-  const session = useAuth();
+  const authSession = useAuth() as HeaderAuthSession | null;
 
   const [loading, setLoading] = useState(false);
   const [locale, setLocale] = useState<AppLocale>("ar");
 
   const isArabic = locale === "ar";
 
+  const sessionUser = (authSession?.user || {}) as HeaderUser;
+  const subscription = (authSession?.subscription || {}) as HeaderSubscription;
+
+  const userName =
+    sessionUser.full_name ||
+    sessionUser.username ||
+    (isArabic ? "مستخدم" : "User");
+
+  const userEmail = sessionUser.email || "";
+  const userAvatar = sessionUser.avatar || sessionUser.image || "";
+
+  const avatarFallback =
+    userName?.charAt(0)?.toUpperCase() || (isArabic ? "م" : "U");
+
+  const daysRemaining = subscription.days_remaining;
+
   useEffect(() => {
-    try {
-      const savedLocale =
-        typeof window !== "undefined"
-          ? (window.localStorage.getItem("primey-locale") as AppLocale | null)
-          : null;
+    const syncLocale = () => {
+      try {
+        setLocale(readLocale());
+      } catch (error) {
+        console.error("User menu locale initialization error:", error);
+        setLocale("ar");
+      }
+    };
 
-      setLocale(savedLocale === "en" ? "en" : "ar");
-    } catch (error) {
-      console.error("User menu locale initialization error:", error);
-    }
+    syncLocale();
+
+    window.addEventListener("primey-locale-changed", syncLocale);
+    window.addEventListener("storage", syncLocale);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", syncLocale);
+      window.removeEventListener("storage", syncLocale);
+    };
   }, []);
-
-  const userName = session?.user?.full_name || session?.user?.username || (isArabic ? "مستخدم" : "User");
-
-  const userEmail = session?.user?.email || "";
-
-  const avatarFallback = userName?.charAt(0)?.toUpperCase() || (isArabic ? "م" : "U");
-
-  const daysRemaining = session?.subscription?.days_remaining;
 
   const subscriptionRemainingText = useMemo(() => {
     if (typeof daysRemaining !== "number") {
-      return isArabic ? "مدة الاشتراك غير متوفرة" : "Subscription duration unavailable";
+      return isArabic
+        ? "مدة الاشتراك غير متوفرة"
+        : "Subscription duration unavailable";
     }
 
     if (daysRemaining < 0) {
@@ -74,7 +148,9 @@ export default function UserMenu() {
     }
 
     if (daysRemaining === 1) {
-      return isArabic ? "متبقي يوم واحد على الاشتراك" : "1 day remaining in subscription";
+      return isArabic
+        ? "متبقي يوم واحد على الاشتراك"
+        : "1 day remaining in subscription";
     }
 
     return isArabic
@@ -90,50 +166,58 @@ export default function UserMenu() {
     return Math.max(0, Math.min(100, Math.round((daysRemaining / 365) * 100)));
   }, [daysRemaining]);
 
-  const getCSRFToken = () => {
-    const match = document.cookie.match(/csrftoken=([^;]+)/);
-    return match ? match[1] : "";
-  };
-
   const handleLogout = async () => {
     if (loading) return;
+
     setLoading(true);
 
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/csrf/`, {
+      const apiBaseUrl = getApiBaseUrl();
+
+      await fetch(`${apiBaseUrl}/api/auth/csrf/`, {
         method: "GET",
         credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
       });
 
       const csrfToken = getCSRFToken();
 
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/logout/`, {
+      await fetch(`${apiBaseUrl}/api/auth/logout/`, {
         method: "POST",
         credentials: "include",
         headers: {
+          Accept: "application/json",
           "Content-Type": "application/json",
           "X-CSRFToken": csrfToken,
         },
       });
-    } catch {
-      // Force client logout anyway
-    }
+    } catch (error) {
+      console.error("Logout request error:", error);
+    } finally {
+      try {
+        window.localStorage.setItem("primey_logout", Date.now().toString());
+      } catch {
+        // ignore
+      }
 
-    localStorage.setItem("primey_logout", Date.now().toString());
-    router.replace("/login");
+      router.replace("/login");
+    }
   };
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Avatar>
-          {session?.user?.avatar ? (
+        <Avatar className="cursor-pointer">
+          {userAvatar ? (
             <AvatarImage
-              src={session.user.avatar}
+              src={userAvatar}
               alt={userName}
               referrerPolicy="no-referrer"
             />
           ) : null}
+
           <AvatarFallback className="rounded-lg">{avatarFallback}</AvatarFallback>
         </Avatar>
       </DropdownMenuTrigger>
@@ -142,101 +226,126 @@ export default function UserMenu() {
         className="w-(--radix-dropdown-menu-trigger-width) min-w-60"
         align={isArabic ? "start" : "end"}
       >
-        <DropdownMenuLabel className="p-0">
-          <div className={`flex items-center gap-2 px-1 py-1.5 text-sm ${isArabic ? "text-right" : "text-left"}`}>
-            <Avatar>
-              {session?.user?.avatar ? (
-                <AvatarImage
-                  src={session.user.avatar}
-                  alt={userName}
-                  referrerPolicy="no-referrer"
-                />
-              ) : null}
-              <AvatarFallback className="rounded-lg">{avatarFallback}</AvatarFallback>
-            </Avatar>
+        <div dir={isArabic ? "rtl" : "ltr"}>
+          <DropdownMenuLabel className="p-0">
+            <div
+              className={`flex items-center gap-2 px-1 py-1.5 text-sm ${
+                isArabic ? "text-right" : "text-left"
+              }`}
+            >
+              <Avatar>
+                {userAvatar ? (
+                  <AvatarImage
+                    src={userAvatar}
+                    alt={userName}
+                    referrerPolicy="no-referrer"
+                  />
+                ) : null}
 
-            <div className={`grid flex-1 text-sm leading-tight ${isArabic ? "text-right" : "text-left"}`}>
-              <span className="truncate font-semibold">{userName}</span>
-              <span className="text-muted-foreground truncate text-xs">{userEmail}</span>
-            </div>
-          </div>
-        </DropdownMenuLabel>
+                <AvatarFallback className="rounded-lg">
+                  {avatarFallback}
+                </AvatarFallback>
+              </Avatar>
 
-        <DropdownMenuSeparator />
-
-        <DropdownMenuGroup>
-          <DropdownMenuItem asChild>
-            <Link href="https://shadcnuikit.com/pricing" target="_blank">
-              <Sparkles />
-              {isArabic ? "الترقية إلى النسخة الاحترافية" : "Upgrade to Pro"}
-            </Link>
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-
-        <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => router.push("/company/profile")}>
-            <BadgeCheck />
-            {isArabic ? "الحساب" : "Account"}
-          </DropdownMenuItem>
-
-          <DropdownMenuItem onClick={() => router.push("/company/billing")}>
-            <CreditCard />
-            {isArabic ? "الفوترة" : "Billing"}
-          </DropdownMenuItem>
-
-          <DropdownMenuItem asChild>
-            <Link href="/company/notifications">
-              <Bell />
-              {isArabic ? "الإشعارات" : "Notifications"}
-            </Link>
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuItem
-          onClick={handleLogout}
-          disabled={loading}
-          className="cursor-pointer text-red-600 focus:text-red-600"
-        >
-          <LogOut />
-          {loading ? (isArabic ? "جارٍ تسجيل الخروج..." : "Signing out...") : isArabic ? "تسجيل الخروج" : "Log out"}
-        </DropdownMenuItem>
-
-        <div className="bg-muted mt-1.5 rounded-md border">
-          <div className="space-y-3 p-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-medium">
-                {isArabic ? "الاشتراك" : "Subscription"}
-              </h4>
-
-              <div className="text-muted-foreground flex items-center text-sm">
-                {isArabic ? (
-                  <>
-                    <ChevronLeftIcon className="ml-1 h-4 w-4" />
-                    <span>
-                      {typeof daysRemaining === "number"
-                        ? `${Math.max(daysRemaining, 0)} ${isArabic ? "ي" : "d"}`
-                        : "--"}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span>
-                      {typeof daysRemaining === "number"
-                        ? `${Math.max(daysRemaining, 0)}d`
-                        : "--"}
-                    </span>
-                    <ChevronRightIcon className="ml-1 h-4 w-4" />
-                  </>
-                )}
+              <div
+                className={`grid flex-1 text-sm leading-tight ${
+                  isArabic ? "text-right" : "text-left"
+                }`}
+              >
+                <span className="truncate font-semibold">{userName}</span>
+                <span className="text-muted-foreground truncate text-xs">
+                  {userEmail}
+                </span>
               </div>
             </div>
+          </DropdownMenuLabel>
 
-            <Progress value={progressValue} indicatorColor="bg-primary" />
+          <DropdownMenuSeparator />
 
-            <div className={`text-muted-foreground flex items-center text-sm ${isArabic ? "text-right" : "text-left"}`}>
-              {subscriptionRemainingText}
+          <DropdownMenuGroup>
+            <DropdownMenuItem asChild>
+              <Link href="https://shadcnuikit.com/pricing" target="_blank">
+                <Sparkles />
+                {isArabic ? "الترقية إلى النسخة الاحترافية" : "Upgrade to Pro"}
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+
+          <DropdownMenuGroup>
+            <DropdownMenuItem onClick={() => router.push("/company/profile")}>
+              <BadgeCheck />
+              {isArabic ? "الحساب" : "Account"}
+            </DropdownMenuItem>
+
+            <DropdownMenuItem onClick={() => router.push("/company/billing")}>
+              <CreditCard />
+              {isArabic ? "الفوترة" : "Billing"}
+            </DropdownMenuItem>
+
+            <DropdownMenuItem asChild>
+              <Link href="/company/notifications">
+                <Bell />
+                {isArabic ? "الإشعارات" : "Notifications"}
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuItem
+            onClick={handleLogout}
+            disabled={loading}
+            className="cursor-pointer text-red-600 focus:text-red-600"
+          >
+            <LogOut />
+            {loading
+              ? isArabic
+                ? "جارٍ تسجيل الخروج..."
+                : "Signing out..."
+              : isArabic
+                ? "تسجيل الخروج"
+                : "Log out"}
+          </DropdownMenuItem>
+
+          <div className="bg-muted mt-1.5 rounded-md border">
+            <div className="space-y-3 p-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-medium">
+                  {isArabic ? "الاشتراك" : "Subscription"}
+                </h4>
+
+                <div className="text-muted-foreground flex items-center text-sm">
+                  {isArabic ? (
+                    <>
+                      <ChevronLeftIcon className="ml-1 h-4 w-4" />
+                      <span>
+                        {typeof daysRemaining === "number"
+                          ? `${Math.max(daysRemaining, 0)} ي`
+                          : "--"}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span>
+                        {typeof daysRemaining === "number"
+                          ? `${Math.max(daysRemaining, 0)}d`
+                          : "--"}
+                      </span>
+                      <ChevronRightIcon className="ml-1 h-4 w-4" />
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <Progress value={progressValue} indicatorColor="bg-primary" />
+
+              <div
+                className={`text-muted-foreground flex items-center text-sm ${
+                  isArabic ? "text-right" : "text-left"
+                }`}
+              >
+                {subscriptionRemainingText}
+              </div>
             </div>
           </div>
         </div>

@@ -6,6 +6,11 @@
 # ✅ Returns anonymous-safe payload when not authenticated
 # ✅ Returns normalized workspace / redirect payload
 # ✅ Compatible with frontend login + middleware guards
+# ✅ Compatible with Primey Care workspaces:
+#    /system
+#    /provider
+#    /customer
+#    /agent
 # ===============================================================
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from auth_center.models import ActiveUserSession, UserProfile
 
 
 # ===============================================================
-# 🧩 Helpers
+# 🧩 Role / Workspace Constants
 # ===============================================================
 
 SYSTEM_ROLE_NAMES = {
@@ -29,14 +34,32 @@ SYSTEM_ROLE_NAMES = {
     "SUPPORT",
     "INTERNAL",
     "ADMIN",
+    "STAFF",
+    "ACCOUNTANT",
 }
 
+ACCOUNTANT_ROLE_NAMES = {
+    "ACCOUNTANT",
+    "FINANCE",
+    "FINANCE_MANAGER",
+    "TREASURY",
+}
+
+# توافق خلفي فقط، لا نستخدمه كمساحة واجهة جديدة.
 COMPANY_ROLE_NAMES = {
     "COMPANY",
     "COMPANY_ADMIN",
     "COMPANY_OWNER",
     "OWNER",
     "HR",
+}
+
+PROVIDER_ROLE_NAMES = {
+    "PROVIDER",
+    "PROVIDER_ADMIN",
+    "CENTER",
+    "CENTER_ADMIN",
+    "SERVICE_PROVIDER",
 }
 
 CENTER_ROLE_NAMES = {
@@ -50,8 +73,20 @@ CUSTOMER_ROLE_NAMES = {
 
 AGENT_ROLE_NAMES = {
     "AGENT",
+    "BROKER",
+    "AGENT_ADMIN",
+    "BROKER_ADMIN",
 }
 
+BROKER_ROLE_NAMES = {
+    "BROKER",
+    "BROKER_ADMIN",
+}
+
+
+# ===============================================================
+# 🧩 Helpers
+# ===============================================================
 
 def _safe_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
@@ -70,13 +105,29 @@ def _normalize_upper(value: Any) -> str:
     return str(value or "").strip().upper()
 
 
-def _resolve_context_ids(profile: UserProfile | None) -> tuple[int | None, int | None, int | None, int | None]:
+def _resolve_context_ids(
+    profile: UserProfile | None,
+) -> tuple[
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+]:
     """
-    نحاول قراءة المعرّفات من extra_data أو من خصائص مباشرة إن وُجدت.
-    هذا يجعل whoami مرنًا حتى لو تغيّرت بنية UserProfile لاحقًا.
+    قراءة معرفات السياق من extra_data أو من خصائص مباشرة إن وُجدت.
+
+    الترتيب:
+    company_id   -> توافق خلفي فقط
+    provider_id  -> مقدم خدمة
+    center_id    -> مركز
+    customer_id  -> عميل
+    agent_id     -> مندوب
+    broker_id    -> وكيل
     """
     if not profile:
-        return None, None, None, None
+        return None, None, None, None, None, None
 
     extra_data = _safe_dict(getattr(profile, "extra_data", {}) or {})
 
@@ -85,26 +136,55 @@ def _resolve_context_ids(profile: UserProfile | None) -> tuple[int | None, int |
         or extra_data.get("company")
         or getattr(profile, "company_id", None)
     )
+
+    provider_id = _safe_int(
+        extra_data.get("provider_id")
+        or extra_data.get("provider")
+        or extra_data.get("service_provider_id")
+        or extra_data.get("service_provider")
+        or getattr(profile, "provider_id", None)
+    )
+
     center_id = _safe_int(
         extra_data.get("center_id")
         or extra_data.get("center")
         or getattr(profile, "center_id", None)
     )
+
     customer_id = _safe_int(
         extra_data.get("customer_id")
         or extra_data.get("customer")
         or getattr(profile, "customer_id", None)
     )
+
     agent_id = _safe_int(
         extra_data.get("agent_id")
         or extra_data.get("agent")
         or getattr(profile, "agent_id", None)
     )
 
-    return company_id, center_id, customer_id, agent_id
+    broker_id = _safe_int(
+        extra_data.get("broker_id")
+        or extra_data.get("broker")
+        or getattr(profile, "broker_id", None)
+    )
+
+    return company_id, provider_id, center_id, customer_id, agent_id, broker_id
 
 
 def _resolve_system_user(user, profile: UserProfile | None, groups: list[str]) -> bool:
+    """
+    تحديد هل المستخدم من مساحة النظام أم لا.
+
+    يدخل /system:
+    - superuser
+    - staff
+    - SYSTEM
+    - SUPER_ADMIN
+    - STAFF
+    - ACCOUNTANT
+    - أي مجموعة داخل SYSTEM_ROLE_NAMES
+    """
     if user.is_superuser or user.is_staff:
         return True
 
@@ -112,15 +192,21 @@ def _resolve_system_user(user, profile: UserProfile | None, groups: list[str]) -
     if normalized_groups & SYSTEM_ROLE_NAMES:
         return True
 
+    if normalized_groups & ACCOUNTANT_ROLE_NAMES:
+        return True
+
     if profile:
         user_type = _normalize_upper(getattr(profile, "user_type", ""))
-        if user_type in SYSTEM_ROLE_NAMES:
+        if user_type in SYSTEM_ROLE_NAMES or user_type in ACCOUNTANT_ROLE_NAMES:
             return True
 
     return False
 
 
 def _resolve_role(user, profile: UserProfile | None, is_system_user: bool) -> str:
+    """
+    تحديد الدور العام للمستخدم.
+    """
     if user.is_superuser:
         return "SUPER_ADMIN"
 
@@ -136,40 +222,101 @@ def _resolve_role(user, profile: UserProfile | None, is_system_user: bool) -> st
 
 
 def _resolve_workspace(
+    *,
     is_system_user: bool,
-    company_id: int | None,
+    provider_id: int | None,
     center_id: int | None,
     customer_id: int | None,
     agent_id: int | None,
+    broker_id: int | None,
     role: str,
 ) -> str:
+    """
+    Primey Care workspace resolver.
+
+    المساحات الرسمية:
+    - system
+    - provider
+    - customer
+    - agent
+
+    ملاحظة:
+    company لم تعد مساحة واجهة رسمية هنا.
+    أي COMPANY قديم يتم توجيهه إلى system لحين تصفيته أو ترحيله.
+    """
+    normalized_role = _normalize_upper(role)
+
     if is_system_user:
         return "system"
 
-    if company_id or role in COMPANY_ROLE_NAMES:
-        return "company"
+    if provider_id or center_id or normalized_role in PROVIDER_ROLE_NAMES or normalized_role in CENTER_ROLE_NAMES:
+        return "provider"
 
-    if center_id or role in CENTER_ROLE_NAMES:
-        return "center"
-
-    if customer_id or role in CUSTOMER_ROLE_NAMES:
+    if customer_id or normalized_role in CUSTOMER_ROLE_NAMES:
         return "customer"
 
-    if agent_id or role in AGENT_ROLE_NAMES:
+    if agent_id or broker_id or normalized_role in AGENT_ROLE_NAMES or normalized_role in BROKER_ROLE_NAMES:
         return "agent"
+
+    if normalized_role in COMPANY_ROLE_NAMES:
+        return "system"
 
     return "system"
 
 
 def _resolve_dashboard_path(workspace: str) -> str:
+    """
+    مسار الداشبورد النهائي بعد تسجيل الدخول.
+    """
     mapping = {
         "system": "/system",
-        "company": "/company",
-        "center": "/center",
+        "provider": "/provider",
         "customer": "/customer",
         "agent": "/agent",
     }
     return mapping.get(workspace, "/system")
+
+
+def _resolve_entity(
+    *,
+    workspace: str,
+    role: str,
+    provider_id: int | None,
+    center_id: int | None,
+    customer_id: int | None,
+    agent_id: int | None,
+    broker_id: int | None,
+) -> tuple[str | None, int | None]:
+    """
+    إرجاع entity_type / entity_id بشكل موحد للفرونت.
+
+    أمثلة:
+    CUSTOMER -> customer / customer_id
+    PROVIDER -> provider / provider_id
+    CENTER -> center / center_id
+    AGENT -> agent / agent_id
+    BROKER -> broker / broker_id
+    SYSTEM -> system / None
+    """
+    normalized_role = _normalize_upper(role)
+
+    if workspace == "system":
+        return "system", None
+
+    if workspace == "provider":
+        if center_id or normalized_role in CENTER_ROLE_NAMES:
+            return "center", center_id
+        return "provider", provider_id
+
+    if workspace == "customer":
+        return "customer", customer_id
+
+    if workspace == "agent":
+        if broker_id or normalized_role in BROKER_ROLE_NAMES:
+            return "broker", broker_id
+        return "agent", agent_id
+
+    return None, None
 
 
 def _anonymous_payload():
@@ -181,10 +328,14 @@ def _anonymous_payload():
         "role": None,
         "user_type": None,
         "scope_type": None,
+        "entity_type": None,
+        "entity_id": None,
         "company_id": None,
+        "provider_id": None,
         "center_id": None,
         "customer_id": None,
         "agent_id": None,
+        "broker_id": None,
         "is_superuser": False,
         "is_staff": False,
         "user": None,
@@ -231,20 +382,42 @@ def whoami_api(request):
     full_name = (user.get_full_name() or "").strip()
     groups = list(user.groups.values_list("name", flat=True))
 
-    company_id, center_id, customer_id, agent_id = _resolve_context_ids(profile)
+    (
+        company_id,
+        provider_id,
+        center_id,
+        customer_id,
+        agent_id,
+        broker_id,
+    ) = _resolve_context_ids(profile)
+
     is_system_user = _resolve_system_user(user, profile, groups)
     role = _resolve_role(user, profile, is_system_user)
     user_type = _normalize_upper(getattr(profile, "user_type", "OTHER")) if profile else "OTHER"
-    scope_type = "SYSTEM" if is_system_user else role
+
     workspace = _resolve_workspace(
         is_system_user=is_system_user,
-        company_id=company_id,
+        provider_id=provider_id,
         center_id=center_id,
         customer_id=customer_id,
         agent_id=agent_id,
+        broker_id=broker_id,
         role=role,
     )
+
     dashboard_path = _resolve_dashboard_path(workspace)
+
+    entity_type, entity_id = _resolve_entity(
+        workspace=workspace,
+        role=role,
+        provider_id=provider_id,
+        center_id=center_id,
+        customer_id=customer_id,
+        agent_id=agent_id,
+        broker_id=broker_id,
+    )
+
+    scope_type = "SYSTEM" if is_system_user else _normalize_upper(entity_type or role)
 
     return JsonResponse(
         {
@@ -259,10 +432,22 @@ def whoami_api(request):
             "role": role,
             "user_type": user_type,
             "scope_type": scope_type,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+
+            # ---------------------------------------------------
+            # ✅ Context IDs
+            # ---------------------------------------------------
             "company_id": company_id,
+            "provider_id": provider_id,
             "center_id": center_id,
             "customer_id": customer_id,
             "agent_id": agent_id,
+            "broker_id": broker_id,
+
+            # ---------------------------------------------------
+            # ✅ Django user flags
+            # ---------------------------------------------------
             "is_superuser": user.is_superuser,
             "is_staff": user.is_staff,
 

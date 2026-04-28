@@ -1,22 +1,27 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   BadgeCheck,
-  Building2,
+  Banknote,
+  BarChart3,
   CheckCircle2,
   CreditCard,
   FileText,
-  Landmark,
   Loader2,
   Plus,
   ReceiptText,
+  RefreshCcw,
   Save,
+  Search,
   ShieldCheck,
+  ShoppingCart,
   Sparkles,
   Wallet,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -31,848 +36,1213 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+
+/* =====================================================
+   TYPES
+===================================================== */
 
 type AppLocale = "ar" | "en";
 
-type PaymentFormData = {
-  paymentNumber: string;
-  customerName: string;
-  customerCode: string;
-  relatedInvoice: string;
-  relatedOrder: string;
-  paymentMethod: string;
-  paymentChannel: string;
-  paymentStatus: string;
-  paymentDate: string;
-  amount: string;
-  currency: string;
-  referenceNumber: string;
-  transactionId: string;
-  treasuryAccount: string;
-  bankAccount: string;
-  payerName: string;
-  payerPhone: string;
-  notes: string;
+type PaymentMethod =
+  | "CASH"
+  | "BANK_TRANSFER"
+  | "CREDIT_CARD"
+  | "DEBIT_CARD"
+  | "WALLET"
+  | "APPLE_PAY"
+  | "STC_PAY"
+  | "TAMARA"
+  | "TABBY"
+  | "OTHER";
+
+type PaymentProvider =
+  | "INTERNAL"
+  | "TAP"
+  | "TAMARA"
+  | "TABBY"
+  | "MANUAL"
+  | "OTHER";
+
+type ApiOrder = {
+  id: number;
+  number?: string | null;
+  order_number?: string | null;
+  reference?: string | null;
+  status?: string | null;
+  customer_id?: number | null;
+  customer_name?: string | null;
+  customer?: {
+    id?: number;
+    name?: string | null;
+    full_name?: string | null;
+  } | null;
+  total_amount?: string | number | null;
+  paid_amount?: string | number | null;
+  due_amount?: string | number | null;
+  subtotal?: string | number | null;
+  tax_amount?: string | number | null;
+  created_at?: string | null;
+  order_date?: string | null;
 };
 
-type PaymentFormErrors = Partial<Record<keyof PaymentFormData, string>>;
+type OrdersApiResponse = {
+  ok?: boolean;
+  count?: number;
+  results?: ApiOrder[];
+  orders?: ApiOrder[];
+  message?: string;
+};
 
-function detectLocale(): AppLocale {
+type CreatePaymentPayload = {
+  order_id: number;
+  customer_id: number | null;
+  payment_method: PaymentMethod;
+  provider: PaymentProvider;
+  amount: string;
+  paid_amount: string;
+  currency: "SAR";
+  external_reference: string;
+  transaction_id: string;
+  gateway_response_code: string;
+  gateway_message: string;
+  notes: string;
+  auto_confirm: boolean;
+  auto_create_treasury_movement: boolean;
+  auto_post_accounting: boolean;
+};
+
+type CreatePaymentResponse = {
+  ok?: boolean;
+  message?: string;
+  payment?: {
+    id?: number;
+    reference?: string;
+    payment_number?: string;
+    status?: string;
+  };
+};
+
+/* =====================================================
+   CONSTANTS
+===================================================== */
+
+const SAR_ICON_PATH = "/currency/sar.svg";
+
+const PAYMENT_METHODS: Array<{
+  value: PaymentMethod;
+  labelAr: string;
+  labelEn: string;
+  descriptionAr: string;
+  descriptionEn: string;
+}> = [
+  {
+    value: "CASH",
+    labelAr: "نقدي",
+    labelEn: "Cash",
+    descriptionAr: "تحصيل نقدي مباشر من العميل أو المندوب.",
+    descriptionEn: "Direct cash collection from customer or agent.",
+  },
+  {
+    value: "BANK_TRANSFER",
+    labelAr: "تحويل بنكي",
+    labelEn: "Bank Transfer",
+    descriptionAr: "تحويل بنكي يحتاج مرجع عملية أو إيصال.",
+    descriptionEn: "Bank transfer requiring a transaction reference or receipt.",
+  },
+  {
+    value: "CREDIT_CARD",
+    labelAr: "بطاقة ائتمانية",
+    labelEn: "Credit Card",
+    descriptionAr: "دفع بالبطاقة الائتمانية.",
+    descriptionEn: "Payment by credit card.",
+  },
+  {
+    value: "DEBIT_CARD",
+    labelAr: "بطاقة مدى / خصم",
+    labelEn: "Debit Card",
+    descriptionAr: "دفع ببطاقة الخصم أو مدى.",
+    descriptionEn: "Payment by debit card or Mada.",
+  },
+  {
+    value: "WALLET",
+    labelAr: "محفظة",
+    labelEn: "Wallet",
+    descriptionAr: "دفع من محفظة رقمية.",
+    descriptionEn: "Payment from a digital wallet.",
+  },
+  {
+    value: "APPLE_PAY",
+    labelAr: "Apple Pay",
+    labelEn: "Apple Pay",
+    descriptionAr: "دفع عبر Apple Pay.",
+    descriptionEn: "Payment through Apple Pay.",
+  },
+  {
+    value: "STC_PAY",
+    labelAr: "STC Pay",
+    labelEn: "STC Pay",
+    descriptionAr: "دفع عبر STC Pay.",
+    descriptionEn: "Payment through STC Pay.",
+  },
+  {
+    value: "TAMARA",
+    labelAr: "تمارا",
+    labelEn: "Tamara",
+    descriptionAr: "دفع عبر تمارا.",
+    descriptionEn: "Payment through Tamara.",
+  },
+  {
+    value: "TABBY",
+    labelAr: "تابي",
+    labelEn: "Tabby",
+    descriptionAr: "دفع عبر تابي.",
+    descriptionEn: "Payment through Tabby.",
+  },
+  {
+    value: "OTHER",
+    labelAr: "أخرى",
+    labelEn: "Other",
+    descriptionAr: "طريقة دفع أخرى.",
+    descriptionEn: "Other payment method.",
+  },
+];
+
+const PAYMENT_PROVIDERS: Array<{
+  value: PaymentProvider;
+  labelAr: string;
+  labelEn: string;
+}> = [
+  { value: "INTERNAL", labelAr: "داخلي", labelEn: "Internal" },
+  { value: "TAP", labelAr: "Tap", labelEn: "Tap" },
+  { value: "TAMARA", labelAr: "Tamara", labelEn: "Tamara" },
+  { value: "TABBY", labelAr: "Tabby", labelEn: "Tabby" },
+  { value: "MANUAL", labelAr: "يدوي", labelEn: "Manual" },
+  { value: "OTHER", labelAr: "أخرى", labelEn: "Other" },
+];
+
+/* =====================================================
+   LOCALE HELPERS
+===================================================== */
+
+function getInitialLocale(): AppLocale {
+  if (typeof window === "undefined") return "ar";
+
+  const stored = window.localStorage.getItem("primey-locale");
+  if (stored === "ar" || stored === "en") return stored;
+
+  const htmlLang = document.documentElement.lang;
+  if (htmlLang === "en") return "en";
+
   return "ar";
 }
 
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
+function applyLocaleToDocument(locale: AppLocale) {
+  if (typeof document === "undefined") return;
 
-  return {
-    pageTitle: isArabic ? "إضافة دفعة جديدة" : "Create New Payment",
-    pageSubtitle: isArabic
-      ? "هذه الصفحة مخصصة لإنشاء دفعة جديدة داخل النظام بنفس هوية Primey Care المعتمدة، مع تجهيز احترافي لمرحلة الربط اللاحقة مع الـ APIs والفواتير والطلبات والعملاء والخزينة."
-      : "This page is designed to create a new payment inside the system using the approved Primey Care UI, with a professional foundation for later API, invoices, orders, customers, and treasury integration.",
-
-    heroBadge1: isArabic ? "System Module" : "System Module",
-    heroBadge2: isArabic ? "Create Payment" : "Create Payment",
-
-    backToPayments: isArabic ? "العودة إلى المدفوعات" : "Back to Payments",
-    saveDraft: isArabic ? "حفظ مبدئي" : "Save Draft",
-    createPayment: isArabic ? "إنشاء الدفعة" : "Create Payment",
-
-    basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
-    relationsInfo: isArabic ? "الارتباطات" : "Relations",
-    paymentInfo: isArabic ? "بيانات الدفع" : "Payment Information",
-    treasuryInfo: isArabic ? "الخزينة والتحويل" : "Treasury & Transfer",
-    extraInfo: isArabic ? "بيانات إضافية" : "Additional Information",
-    quickGuide: isArabic ? "إرشادات سريعة" : "Quick Guide",
-    createSummary: isArabic ? "ملخص الإنشاء" : "Creation Summary",
-
-    paymentNumber: isArabic ? "رقم الدفعة" : "Payment Number",
-    customerName: isArabic ? "اسم العميل" : "Customer Name",
-    customerCode: isArabic ? "كود العميل" : "Customer Code",
-    relatedInvoice: isArabic ? "الفاتورة المرتبطة" : "Related Invoice",
-    relatedOrder: isArabic ? "الطلب المرتبط" : "Related Order",
-    paymentMethod: isArabic ? "طريقة الدفع" : "Payment Method",
-    paymentChannel: isArabic ? "قناة الدفع" : "Payment Channel",
-    paymentStatus: isArabic ? "حالة الدفع" : "Payment Status",
-    paymentDate: isArabic ? "تاريخ الدفع" : "Payment Date",
-    amount: isArabic ? "المبلغ" : "Amount",
-    currency: isArabic ? "العملة" : "Currency",
-    referenceNumber: isArabic ? "رقم المرجع" : "Reference Number",
-    transactionId: isArabic ? "رقم العملية" : "Transaction ID",
-    treasuryAccount: isArabic ? "حساب الخزينة" : "Treasury Account",
-    bankAccount: isArabic ? "الحساب البنكي" : "Bank Account",
-    payerName: isArabic ? "اسم الدافع" : "Payer Name",
-    payerPhone: isArabic ? "جوال الدافع" : "Payer Phone",
-    notes: isArabic ? "ملاحظات" : "Notes",
-
-    placeholders: {
-      paymentNumber: isArabic ? "مثال: PAY-2026-001" : "Example: PAY-2026-001",
-      customerName: isArabic ? "مثال: أحمد علي" : "Example: Ahmed Ali",
-      customerCode: isArabic ? "مثال: CUS-001" : "Example: CUS-001",
-      relatedInvoice: isArabic ? "مثال: INV-2026-001" : "Example: INV-2026-001",
-      relatedOrder: isArabic ? "مثال: ORD-2026-001" : "Example: ORD-2026-001",
-      paymentMethod: isArabic
-        ? "مثال: تحويل بنكي / بطاقة / نقدًا"
-        : "Example: Bank Transfer / Card / Cash",
-      paymentChannel: isArabic
-        ? "مثال: Stripe / Tap / يدوي"
-        : "Example: Stripe / Tap / Manual",
-      paymentStatus: isArabic
-        ? "مثال: مؤكد / معلق / فاشل"
-        : "Example: Confirmed / Pending / Failed",
-      amount: isArabic ? "مثال: 299" : "Example: 299",
-      currency: "SAR",
-      referenceNumber: isArabic ? "مثال: REF-1001" : "Example: REF-1001",
-      transactionId: isArabic ? "مثال: TRX-5001" : "Example: TRX-5001",
-      treasuryAccount: isArabic
-        ? "مثال: الخزينة الرئيسية"
-        : "Example: Main Treasury",
-      bankAccount: isArabic
-        ? "مثال: بنك الراجحي - الحساب التشغيلي"
-        : "Example: Al Rajhi - Operating Account",
-      payerName: isArabic ? "مثال: أحمد علي" : "Example: Ahmed Ali",
-      payerPhone: isArabic ? "05xxxxxxxx" : "05xxxxxxxx",
-      notes: isArabic
-        ? "أي ملاحظات إضافية عن الدفعة"
-        : "Any additional notes about the payment",
-    },
-
-    tips: [
-      isArabic
-        ? "ابدأ الآن ببناء واجهة الإنشاء، والربط مع API سيتم لاحقًا بدون تغيير الهوية."
-        : "Start with the create UI now; API integration can be added later without changing the visual identity.",
-      isArabic
-        ? "يفضل توحيد ترقيم الدفعات وطرق الدفع وحالات الدفع من البداية."
-        : "Keep payment numbering, payment methods, and payment statuses standardized from the beginning.",
-      isArabic
-        ? "يمكن لاحقًا ربط الدفعة بالفاتورة والطلب والعميل والخزينة والتسويات المحاسبية بشكل كامل."
-        : "Later you can fully connect the payment with invoice, order, customer, treasury, and accounting settlements.",
-    ],
-
-    summaryItems: [
-      {
-        label: isArabic ? "حالة الصفحة" : "Page Status",
-        value: isArabic ? "جاهزة كبداية UI" : "Ready as UI base",
-        icon: BadgeCheck,
-      },
-      {
-        label: isArabic ? "الربط الخلفي" : "Backend Integration",
-        value: isArabic ? "غير مربوط بعد" : "Not connected yet",
-        icon: ShieldCheck,
-      },
-      {
-        label: isArabic ? "المرحلة الحالية" : "Current Stage",
-        value: isArabic ? "بناء واجهات النظام" : "System frontend build",
-        icon: Sparkles,
-      },
-      {
-        label: isArabic ? "الارتباط المستقبلي" : "Future Mapping",
-        value: isArabic
-          ? "فواتير / طلبات / خزينة"
-          : "Invoices / Orders / Treasury",
-        icon: Wallet,
-      },
-    ],
-
-    sectionDescriptions: {
-      basicInfo: isArabic
-        ? "أدخل البيانات الأساسية للدفعة التي سيتم اعتمادها داخل النظام."
-        : "Enter the payment core information to be used across the system.",
-      relationsInfo: isArabic
-        ? "حدد العميل والكيانات التشغيلية المرتبطة بالدفعة."
-        : "Define the customer and the operational entities linked to the payment.",
-      paymentInfo: isArabic
-        ? "أدخل تفاصيل الدفع الفعلية."
-        : "Enter the actual payment details.",
-      treasuryInfo: isArabic
-        ? "أضف بيانات الخزينة أو البنك والتحويل المرجعي."
-        : "Add treasury or bank account details and transfer reference.",
-      extraInfo: isArabic
-        ? "أضف بيانات إضافية وملاحظات تشغيلية."
-        : "Add extra data and operational notes.",
-    },
-
-    validation: {
-      required: isArabic ? "هذا الحقل مطلوب" : "This field is required",
-      invalidDate: isArabic ? "التاريخ غير صالح" : "Invalid date",
-      invalidAmount: isArabic ? "المبلغ غير صحيح" : "Invalid amount",
-      invalidPhone: isArabic ? "رقم الجوال غير صالح" : "Invalid phone number",
-    },
-
-    successTitle: isArabic ? "تم تجهيز النموذج" : "Form prepared",
-    successText: isArabic
-      ? "واجهة إنشاء الدفعة جاهزة، وسيتم لاحقًا ربط زر الحفظ مع الـ API."
-      : "The create payment UI is ready. The save action will be connected to the API later.",
-
-    draftTitle: isArabic ? "تم حفظ القيم محليًا" : "Values prepared locally",
-    draftText: isArabic
-      ? "تم التحقق من الحقول الأساسية محليًا كنموذج أولي."
-      : "Basic fields have been validated locally as a first draft.",
-
-    requiredFields: isArabic ? "الحقول الأساسية" : "Required Fields",
-  };
+  document.documentElement.lang = locale;
+  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+  document.body.dir = locale === "ar" ? "rtl" : "ltr";
 }
 
-function isValidDate(value: string) {
-  if (!value.trim()) return false;
+/* =====================================================
+   FORMAT HELPERS
+===================================================== */
+
+function toNumber(value: string | number | null | undefined): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (!value) return 0;
+
+  const parsed = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(value || 0);
+}
+
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value || 0);
+}
+
+function formatDate(value: string | null | undefined, locale: AppLocale): string {
+  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+
   const date = new Date(value);
-  return !Number.isNaN(date.getTime());
+  if (Number.isNaN(date.getTime())) return locale === "ar" ? "غير محدد" : "Not set";
+
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
-function isValidAmount(value: string) {
-  if (!value.trim()) return true;
-  const numeric = Number(value);
-  return !Number.isNaN(numeric) && numeric >= 0;
+function normalizeDecimalInput(value: string): string {
+  const normalized = value.replace(/[^\d.]/g, "");
+  const parts = normalized.split(".");
+
+  if (parts.length <= 2) return normalized;
+
+  return `${parts[0]}.${parts.slice(1).join("")}`;
 }
 
-function isValidPhone(value: string) {
-  const cleaned = value.replace(/[^\d+]/g, "");
-  return cleaned.length >= 9;
+function getCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
+
+  return "";
 }
 
-export default function SystemCreatePaymentPage() {
-  const locale = detectLocale();
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
+function resolveOrderNumber(order: ApiOrder): string {
+  return order.number || order.order_number || order.reference || `ORD-${order.id}`;
+}
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState<PaymentFormData>({
-    paymentNumber: "",
-    customerName: "",
-    customerCode: "",
-    relatedInvoice: "",
-    relatedOrder: "",
-    paymentMethod: "",
-    paymentChannel: "",
-    paymentStatus: "",
-    paymentDate: "",
-    amount: "",
-    currency: "SAR",
-    referenceNumber: "",
-    transactionId: "",
-    treasuryAccount: "",
-    bankAccount: "",
-    payerName: "",
-    payerPhone: "",
-    notes: "",
+function resolveCustomerName(order: ApiOrder, fallback: string): string {
+  return (
+    order.customer_name ||
+    order.customer?.name ||
+    order.customer?.full_name ||
+    (order.customer_id ? `#${order.customer_id}` : fallback)
+  );
+}
+
+function resolveOrderTotal(order: ApiOrder): number {
+  return toNumber(order.total_amount);
+}
+
+function resolveOrderPaid(order: ApiOrder): number {
+  return toNumber(order.paid_amount);
+}
+
+function resolveOrderDue(order: ApiOrder): number {
+  const explicitDue = toNumber(order.due_amount);
+
+  if (explicitDue > 0) return explicitDue;
+
+  const total = resolveOrderTotal(order);
+  const paid = resolveOrderPaid(order);
+
+  return Math.max(total - paid, 0);
+}
+
+function getMethodLabel(method: PaymentMethod, locale: AppLocale): string {
+  const item = PAYMENT_METHODS.find((option) => option.value === method);
+  if (!item) return method;
+
+  return locale === "ar" ? item.labelAr : item.labelEn;
+}
+
+function getProviderLabel(provider: PaymentProvider, locale: AppLocale): string {
+  const item = PAYMENT_PROVIDERS.find((option) => option.value === provider);
+  if (!item) return provider;
+
+  return locale === "ar" ? item.labelAr : item.labelEn;
+}
+
+/* =====================================================
+   API HELPERS
+===================================================== */
+
+async function fetchOrders(): Promise<ApiOrder[]> {
+  const response = await fetch("/api/orders/?limit=200", {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+    },
+    cache: "no-store",
   });
-  const [errors, setErrors] = useState<PaymentFormErrors>({});
 
-  const completionStats = useMemo(() => {
-    const values = Object.values(formData);
-    const filled = values.filter((value) => value.trim().length > 0).length;
-    const total = values.length;
-    const percent = Math.round((filled / total) * 100);
-    return { filled, total, percent };
-  }, [formData]);
+  const data = (await response.json().catch(() => null)) as OrdersApiResponse | null;
 
-  function setField<K extends keyof PaymentFormData>(
-    key: K,
-    value: PaymentFormData[K]
-  ) {
-    setFormData((prev) => ({ ...prev, [key]: value }));
-    setErrors((prev) => ({ ...prev, [key]: undefined }));
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.message || "Failed to load orders.");
   }
 
-  function validateForm() {
-    const nextErrors: PaymentFormErrors = {};
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.orders)) return data.orders;
 
-    if (!formData.paymentNumber.trim()) {
-      nextErrors.paymentNumber = t.validation.required;
-    }
+  return [];
+}
 
-    if (!formData.customerName.trim()) {
-      nextErrors.customerName = t.validation.required;
-    }
+async function createPayment(
+  payload: CreatePaymentPayload
+): Promise<CreatePaymentResponse> {
+  const csrfToken = getCookie("csrftoken");
 
-    if (!formData.paymentMethod.trim()) {
-      nextErrors.paymentMethod = t.validation.required;
-    }
+  const response = await fetch("/api/payments/create/", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
 
-    if (!formData.paymentDate.trim()) {
-      nextErrors.paymentDate = t.validation.required;
-    } else if (!isValidDate(formData.paymentDate)) {
-      nextErrors.paymentDate = t.validation.invalidDate;
-    }
+  const data = (await response.json().catch(() => null)) as CreatePaymentResponse | null;
 
-    if (!formData.amount.trim()) {
-      nextErrors.amount = t.validation.required;
-    } else if (!isValidAmount(formData.amount)) {
-      nextErrors.amount = t.validation.invalidAmount;
-    }
-
-    if (formData.payerPhone.trim() && !isValidPhone(formData.payerPhone)) {
-      nextErrors.payerPhone = t.validation.invalidPhone;
-    }
-
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.message || "Payment create API is not available.");
   }
 
-  async function handleSaveDraft() {
-    const valid = validateForm();
+  return data;
+}
 
-    if (!valid) {
-      toast.error(t.validation.required);
-      return;
-    }
+/* =====================================================
+   PAGE
+===================================================== */
 
-    toast.success(t.draftTitle, {
-      description: t.draftText,
+export default function SystemPaymentCreatePage() {
+  const [locale, setLocale] = useState<AppLocale>("ar");
+  const [orders, setOrders] = useState<ApiOrder[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(true);
+  const [refreshingOrders, setRefreshingOrders] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [search, setSearch] = useState("");
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
+  const [provider, setProvider] = useState<PaymentProvider>("INTERNAL");
+  const [amount, setAmount] = useState("");
+  const [externalReference, setExternalReference] = useState("");
+  const [transactionId, setTransactionId] = useState("");
+  const [gatewayResponseCode, setGatewayResponseCode] = useState("");
+  const [gatewayMessage, setGatewayMessage] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const [autoConfirm, setAutoConfirm] = useState(true);
+  const [autoCreateTreasuryMovement, setAutoCreateTreasuryMovement] = useState(true);
+  const [autoPostAccounting, setAutoPostAccounting] = useState(true);
+
+  const isAr = locale === "ar";
+
+  const t = useMemo(
+    () => ({
+      badge: isAr ? "تسجيل دفعة" : "Create Payment",
+      title: isAr ? "تسجيل دفعة جديدة" : "Create New Payment",
+      subtitle: isAr
+        ? "اختر الطلب، حدد طريقة الدفع والمبلغ، ثم سجل الدفعة مع خيارات التأكيد والخزينة والمحاسبة."
+        : "Select an order, set payment method and amount, then register the payment with confirmation, treasury, and accounting options.",
+      back: isAr ? "قائمة المدفوعات" : "Payments List",
+      dashboard: isAr ? "لوحة المدفوعات" : "Payments Dashboard",
+      reports: isAr ? "التقارير" : "Reports",
+      save: isAr ? "حفظ الدفعة" : "Save Payment",
+      saving: isAr ? "جاري الحفظ..." : "Saving...",
+      refresh: isAr ? "تحديث الطلبات" : "Refresh Orders",
+      selectOrder: isAr ? "اختيار الطلب" : "Select Order",
+      selectOrderDesc: isAr
+        ? "ابحث واختر الطلب الذي سيتم تسجيل الدفعة عليه."
+        : "Search and select the order to register this payment against.",
+      searchOrder: isAr
+        ? "ابحث برقم الطلب أو العميل أو الحالة..."
+        : "Search by order number, customer, or status...",
+      paymentData: isAr ? "بيانات الدفعة" : "Payment Data",
+      paymentDataDesc: isAr
+        ? "حدد طريقة الدفع والمبلغ والمراجع التشغيلية."
+        : "Set payment method, amount, and operational references.",
+      paymentMethod: isAr ? "طريقة الدفع" : "Payment Method",
+      provider: isAr ? "مزود الدفع" : "Payment Provider",
+      amount: isAr ? "المبلغ" : "Amount",
+      externalReference: isAr ? "المرجع الخارجي" : "External Reference",
+      transactionId: isAr ? "رقم العملية" : "Transaction ID",
+      gatewayResponseCode: isAr ? "كود البوابة" : "Gateway Code",
+      gatewayMessage: isAr ? "رسالة البوابة" : "Gateway Message",
+      notes: isAr ? "ملاحظات" : "Notes",
+      externalReferencePlaceholder: isAr
+        ? "رقم التحويل أو مرجع مزود الدفع..."
+        : "Transfer number or payment provider reference...",
+      transactionIdPlaceholder: isAr
+        ? "Transaction ID إن وجد..."
+        : "Transaction ID if available...",
+      gatewayCodePlaceholder: isAr
+        ? "كود استجابة البوابة إن وجد..."
+        : "Gateway response code if available...",
+      gatewayMessagePlaceholder: isAr
+        ? "رسالة البوابة أو البنك..."
+        : "Gateway or bank message...",
+      notesPlaceholder: isAr
+        ? "ملاحظات داخلية عن عملية الدفع..."
+        : "Internal notes about this payment...",
+      autoConfirm: isAr ? "تأكيد الدفعة مباشرة" : "Confirm payment immediately",
+      autoTreasury: isAr ? "إنشاء حركة خزينة تلقائيًا" : "Create treasury movement automatically",
+      autoAccounting: isAr ? "ترحيل محاسبي تلقائي" : "Automatic accounting posting",
+      orderSummary: isAr ? "ملخص الطلب" : "Order Summary",
+      customer: isAr ? "العميل" : "Customer",
+      order: isAr ? "الطلب" : "Order",
+      status: isAr ? "الحالة" : "Status",
+      date: isAr ? "التاريخ" : "Date",
+      total: isAr ? "إجمالي الطلب" : "Order Total",
+      paid: isAr ? "مدفوع سابقًا" : "Already Paid",
+      due: isAr ? "المتبقي" : "Due Amount",
+      newDue: isAr ? "المتبقي بعد الدفعة" : "Due After Payment",
+      notAvailable: isAr ? "غير متاح" : "N/A",
+      noOrders: isAr ? "لا توجد طلبات مطابقة حاليًا." : "No matching orders found.",
+      loadingOrders: isAr ? "جاري تحميل الطلبات..." : "Loading orders...",
+      loadError: isAr ? "تعذر تحميل الطلبات" : "Failed to load orders",
+      refreshSuccess: isAr ? "تم تحديث الطلبات بنجاح" : "Orders refreshed successfully",
+      selectOrderError: isAr ? "اختر طلبًا أولًا قبل تسجيل الدفعة" : "Select an order first",
+      amountError: isAr ? "أدخل مبلغًا صحيحًا أكبر من صفر" : "Enter a valid amount greater than zero",
+      amountMoreThanDueWarning: isAr
+        ? "المبلغ أكبر من المتبقي على الطلب"
+        : "Amount is greater than the order due amount",
+      createSuccess: isAr ? "تم تسجيل الدفعة بنجاح" : "Payment created successfully",
+      createApiMissing: isAr
+        ? "واجهة إنشاء الدفعة غير مفعّلة في الباكند حاليًا. الصفحة جاهزة وتحتاج إضافة API الإنشاء."
+        : "Payment create API is not active in backend yet. The page is ready and needs the create API.",
+      sar: isAr ? "ريال" : "SAR",
+    }),
+    [isAr]
+  );
+
+  const selectedOrder = useMemo(
+    () => orders.find((order) => order.id === selectedOrderId) || null,
+    [orders, selectedOrderId]
+  );
+
+  const selectedMethod = useMemo(
+    () =>
+      PAYMENT_METHODS.find((item) => item.value === paymentMethod) ||
+      PAYMENT_METHODS[0],
+    [paymentMethod]
+  );
+
+  const filteredOrders = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+
+    if (!keyword) return orders;
+
+    return orders.filter((order) => {
+      const haystack = [
+        order.id,
+        resolveOrderNumber(order),
+        order.status,
+        order.customer_id,
+        order.customer_name,
+        order.customer?.name,
+        order.customer?.full_name,
+        order.total_amount,
+        order.due_amount,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(keyword);
     });
-  }
+  }, [orders, search]);
 
-  async function handleSubmit() {
-    const valid = validateForm();
+  const summary = useMemo(() => {
+    const total = selectedOrder ? resolveOrderTotal(selectedOrder) : 0;
+    const paid = selectedOrder ? resolveOrderPaid(selectedOrder) : 0;
+    const due = selectedOrder ? resolveOrderDue(selectedOrder) : 0;
+    const paymentAmount = toNumber(amount);
+    const newDue = Math.max(due - paymentAmount, 0);
 
-    if (!valid) {
-      toast.error(t.validation.required);
+    return {
+      total,
+      paid,
+      due,
+      paymentAmount,
+      newDue,
+    };
+  }, [amount, selectedOrder]);
+
+  const loadOrders = async (mode: "initial" | "refresh" = "initial") => {
+    try {
+      if (mode === "initial") setLoadingOrders(true);
+      if (mode === "refresh") setRefreshingOrders(true);
+
+      const data = await fetchOrders();
+      setOrders(data);
+
+      if (mode === "refresh") {
+        toast.success(t.refreshSuccess);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error(t.loadError);
+    } finally {
+      setLoadingOrders(false);
+      setRefreshingOrders(false);
+    }
+  };
+
+  useEffect(() => {
+    const currentLocale = getInitialLocale();
+    setLocale(currentLocale);
+    applyLocaleToDocument(currentLocale);
+
+    const syncLocale = () => {
+      const nextLocale = getInitialLocale();
+      setLocale(nextLocale);
+      applyLocaleToDocument(nextLocale);
+    };
+
+    window.addEventListener("primey-locale-changed", syncLocale);
+    window.addEventListener("storage", syncLocale);
+
+    const timeout = window.setTimeout(syncLocale, 50);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", syncLocale);
+      window.removeEventListener("storage", syncLocale);
+      window.clearTimeout(timeout);
+    };
+  }, []);
+
+  useEffect(() => {
+    loadOrders("initial");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!selectedOrder) return;
+
+    const due = resolveOrderDue(selectedOrder);
+    if (!amount && due > 0) {
+      setAmount(due.toFixed(2));
+    }
+  }, [amount, selectedOrder]);
+
+  useEffect(() => {
+    if (
+      paymentMethod === "CASH" ||
+      paymentMethod === "BANK_TRANSFER" ||
+      paymentMethod === "OTHER"
+    ) {
+      setProvider("MANUAL");
       return;
     }
+
+    if (paymentMethod === "TAMARA") {
+      setProvider("TAMARA");
+      return;
+    }
+
+    if (paymentMethod === "TABBY") {
+      setProvider("TABBY");
+      return;
+    }
+
+    if (
+      paymentMethod === "CREDIT_CARD" ||
+      paymentMethod === "DEBIT_CARD" ||
+      paymentMethod === "APPLE_PAY"
+    ) {
+      setProvider("TAP");
+    }
+  }, [paymentMethod]);
+
+  const validateForm = () => {
+    if (!selectedOrderId) {
+      toast.error(t.selectOrderError);
+      return false;
+    }
+
+    const paymentAmount = toNumber(amount);
+    if (paymentAmount <= 0) {
+      toast.error(t.amountError);
+      return false;
+    }
+
+    if (selectedOrder && summary.due > 0 && paymentAmount > summary.due) {
+      toast.warning(t.amountMoreThanDueWarning);
+    }
+
+    return true;
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!validateForm() || !selectedOrderId) return;
 
     try {
-      setIsSubmitting(true);
+      setSaving(true);
 
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      const paymentAmount = toNumber(amount).toFixed(2);
 
-      toast.success(t.successTitle, {
-        description: t.successText,
-      });
-    } catch {
-      toast.error(isArabic ? "حدث خطأ غير متوقع" : "Unexpected error occurred");
+      const payload: CreatePaymentPayload = {
+        order_id: selectedOrderId,
+        customer_id: selectedOrder?.customer_id || selectedOrder?.customer?.id || null,
+        payment_method: paymentMethod,
+        provider,
+        amount: paymentAmount,
+        paid_amount: autoConfirm ? paymentAmount : "0.00",
+        currency: "SAR",
+        external_reference: externalReference.trim(),
+        transaction_id: transactionId.trim(),
+        gateway_response_code: gatewayResponseCode.trim(),
+        gateway_message: gatewayMessage.trim(),
+        notes: notes.trim(),
+        auto_confirm: autoConfirm,
+        auto_create_treasury_movement: autoCreateTreasuryMovement,
+        auto_post_accounting: autoPostAccounting,
+      };
+
+      const result = await createPayment(payload);
+
+      toast.success(result.message || t.createSuccess);
+
+      const paymentId = result.payment?.id;
+      if (paymentId) {
+        window.location.href = `/system/payments/${paymentId}`;
+      } else {
+        window.location.href = "/system/payments/list";
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error(t.createApiMissing);
     } finally {
-      setIsSubmitting(false);
+      setSaving(false);
     }
-  }
+  };
 
   return (
-    <div className="space-y-6">
-      <Card className="overflow-hidden rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-        <CardContent className="p-0">
-          <div className="grid gap-0 xl:grid-cols-[1.3fr_0.7fr]">
-            <div className="space-y-6 p-6 md:p-8">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary" className="rounded-full px-3 py-1">
-                  {t.heroBadge1}
-                </Badge>
-                <Badge className="rounded-full px-3 py-1">{t.heroBadge2}</Badge>
-              </div>
+    <main className="min-h-screen bg-background">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+        {/* =====================================================
+            HERO
+        ===================================================== */}
+        <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm">
+          <div className="pointer-events-none absolute -top-24 end-12 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
 
-              <div className="space-y-3">
+          <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-4">
+              <Badge
+                variant="outline"
+                className="w-fit rounded-full border-primary/20 bg-primary/5 px-3 py-1 text-primary"
+              >
+                <Sparkles className="me-2 h-3.5 w-3.5" />
+                {t.badge}
+              </Badge>
+
+              <div className="space-y-2">
                 <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
-                  {t.pageTitle}
+                  {t.title}
                 </h1>
-                <p className="text-muted-foreground max-w-3xl leading-8">
-                  {t.pageSubtitle}
+                <p className="max-w-3xl text-sm leading-7 text-muted-foreground md:text-base">
+                  {t.subtitle}
                 </p>
               </div>
+            </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Link href="/system/payments" className="w-full sm:w-auto">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full rounded-2xl sm:w-auto"
-                  >
-                    <ArrowLeft className="ms-2 h-4 w-4" />
-                    {t.backToPayments}
-                  </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button asChild variant="outline" className="rounded-2xl">
+                <Link href="/system/payments/list">
+                  {isAr ? (
+                    <ArrowLeft className="me-2 h-4 w-4" />
+                  ) : (
+                    <ArrowLeft className="me-2 h-4 w-4 rotate-180" />
+                  )}
+                  {t.back}
                 </Link>
+              </Button>
+
+              <Button asChild variant="secondary" className="rounded-2xl">
+                <Link href="/system/payments">
+                  <CreditCard className="me-2 h-4 w-4" />
+                  {t.dashboard}
+                </Link>
+              </Button>
+
+              <Button asChild variant="ghost" className="rounded-2xl">
+                <Link href="/system/payments/reports">
+                  <BarChart3 className="me-2 h-4 w-4" />
+                  {t.reports}
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <form onSubmit={handleSubmit} className="grid gap-6 xl:grid-cols-[1.35fr_0.85fr]">
+          {/* =====================================================
+              LEFT SIDE
+          ===================================================== */}
+          <div className="space-y-6">
+            <Card className="rounded-[1.5rem]">
+              <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <ShoppingCart className="h-5 w-5 text-primary" />
+                    {t.selectOrder}
+                  </CardTitle>
+                  <CardDescription>{t.selectOrderDesc}</CardDescription>
+                </div>
 
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full rounded-2xl sm:w-auto"
-                  onClick={handleSaveDraft}
+                  className="rounded-2xl"
+                  onClick={() => loadOrders("refresh")}
+                  disabled={refreshingOrders}
                 >
-                  <Save className="ms-2 h-4 w-4" />
-                  {t.saveDraft}
-                </Button>
-
-                <Button
-                  type="button"
-                  className="w-full rounded-2xl sm:w-auto"
-                  onClick={handleSubmit}
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="ms-2 h-4 w-4 animate-spin" />
+                  {refreshingOrders ? (
+                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
                   ) : (
-                    <Plus className="ms-2 h-4 w-4" />
+                    <RefreshCcw className="me-2 h-4 w-4" />
                   )}
-                  {t.createPayment}
+                  {t.refresh}
                 </Button>
-              </div>
-            </div>
-
-            <Card className="rounded-none border-0 bg-transparent shadow-none">
-              <CardHeader className="pb-3 pt-6 md:pt-8">
-                <CardTitle className="text-base">{t.createSummary}</CardTitle>
-                <CardDescription>
-                  {isArabic
-                    ? "ملخص سريع عن جاهزية النموذج الحالي."
-                    : "Quick summary about the current form readiness."}
-                </CardDescription>
               </CardHeader>
 
-              <CardContent className="space-y-3 px-6 pb-6 md:px-8 md:pb-8">
-                <div className="rounded-2xl border border-white/20 bg-white/80 p-4 dark:border-white/10 dark:bg-white/5">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-sm font-semibold">{t.requiredFields}</p>
-                    <Badge variant="secondary" className="rounded-full">
-                      {completionStats.filled}/{completionStats.total}
-                    </Badge>
-                  </div>
-                  <p className="text-muted-foreground text-xs leading-6">
-                    {isArabic
-                      ? "يشمل ذلك رقم الدفعة، العميل، طريقة الدفع، التاريخ، والمبلغ القابل للربط لاحقًا."
-                      : "This includes payment number, customer, payment method, date, and amount that will later be connected."}
-                  </p>
+              <CardContent className="space-y-4">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={t.searchOrder}
+                    className="rounded-2xl ps-9"
+                  />
                 </div>
 
-                {t.summaryItems.map((item) => {
-                  const Icon = item.icon;
+                {loadingOrders ? (
+                  <div className="flex min-h-72 flex-col items-center justify-center gap-3 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="text-sm">{t.loadingOrders}</p>
+                  </div>
+                ) : filteredOrders.length === 0 ? (
+                  <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
+                    <FileText className="h-10 w-10 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">{t.noOrders}</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-3">
+                    {filteredOrders.slice(0, 12).map((order) => {
+                      const isSelected = selectedOrderId === order.id;
+                      const due = resolveOrderDue(order);
 
-                  return (
-                    <div
-                      key={item.label}
-                      className="flex items-start gap-3 rounded-2xl border border-white/20 bg-white/80 p-4 dark:border-white/10 dark:bg-white/5"
+                      return (
+                        <button
+                          key={order.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedOrderId(order.id);
+                            if (due > 0) {
+                              setAmount(due.toFixed(2));
+                            }
+                          }}
+                          className={`w-full rounded-3xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-sm ${
+                            isSelected
+                              ? "border-primary bg-primary/5 shadow-sm"
+                              : "bg-card hover:bg-muted/30"
+                          }`}
+                        >
+                          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                            <div className="flex items-start gap-3">
+                              <div
+                                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
+                                  isSelected
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-primary/10 text-primary"
+                                }`}
+                              >
+                                {isSelected ? (
+                                  <CheckCircle2 className="h-5 w-5" />
+                                ) : (
+                                  <ShoppingCart className="h-5 w-5" />
+                                )}
+                              </div>
+
+                              <div className="space-y-1">
+                                <p className="font-semibold">{resolveOrderNumber(order)}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {t.customer}: {resolveCustomerName(order, t.notAvailable)}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-2 pt-1">
+                                  <Badge variant="secondary" className="rounded-full">
+                                    ID: {order.id}
+                                  </Badge>
+                                  {order.status ? (
+                                    <Badge variant="outline" className="rounded-full">
+                                      {order.status}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="grid gap-1 text-end">
+                              <div className="flex items-center justify-end gap-2 font-bold">
+                                <Image src={SAR_ICON_PATH} alt="SAR" width={16} height={16} />
+                                {formatMoney(resolveOrderTotal(order))}
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                {t.due}: {formatMoney(due)}
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[1.5rem]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CreditCard className="h-5 w-5 text-primary" />
+                  {t.paymentData}
+                </CardTitle>
+                <CardDescription>{t.paymentDataDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="grid gap-5">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="grid gap-2">
+                    <Label htmlFor="payment_method">{t.paymentMethod}</Label>
+                    <select
+                      id="payment_method"
+                      value={paymentMethod}
+                      onChange={(event) =>
+                        setPaymentMethod(event.target.value as PaymentMethod)
+                      }
+                      className="h-11 rounded-2xl border border-input bg-background px-3 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
                     >
-                      <div className="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl">
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-muted-foreground text-xs">
-                          {item.label}
-                        </p>
-                        <p className="mt-1 text-sm font-semibold">{item.value}</p>
-                      </div>
+                      {PAYMENT_METHODS.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {isAr ? item.labelAr : item.labelEn}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="provider">{t.provider}</Label>
+                    <select
+                      id="provider"
+                      value={provider}
+                      onChange={(event) =>
+                        setProvider(event.target.value as PaymentProvider)
+                      }
+                      className="h-11 rounded-2xl border border-input bg-background px-3 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                    >
+                      {PAYMENT_PROVIDERS.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {isAr ? item.labelAr : item.labelEn}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="amount">{t.amount}</Label>
+                    <Input
+                      id="amount"
+                      value={amount}
+                      onChange={(event) =>
+                        setAmount(normalizeDecimalInput(event.target.value))
+                      }
+                      inputMode="decimal"
+                      className="rounded-2xl"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border bg-muted/20 p-4">
+                  <div className="flex items-start gap-3">
+                    <BadgeCheck className="mt-0.5 h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm font-semibold">
+                        {isAr ? selectedMethod.labelAr : selectedMethod.labelEn}
+                      </p>
+                      <p className="mt-1 text-xs leading-6 text-muted-foreground">
+                        {isAr
+                          ? selectedMethod.descriptionAr
+                          : selectedMethod.descriptionEn}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t.provider}: {getProviderLabel(provider, locale)}
+                      </p>
                     </div>
-                  );
-                })}
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="external_reference">{t.externalReference}</Label>
+                    <Input
+                      id="external_reference"
+                      value={externalReference}
+                      onChange={(event) => setExternalReference(event.target.value)}
+                      placeholder={t.externalReferencePlaceholder}
+                      className="rounded-2xl"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="transaction_id">{t.transactionId}</Label>
+                    <Input
+                      id="transaction_id"
+                      value={transactionId}
+                      onChange={(event) => setTransactionId(event.target.value)}
+                      placeholder={t.transactionIdPlaceholder}
+                      className="rounded-2xl"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="gateway_response_code">
+                      {t.gatewayResponseCode}
+                    </Label>
+                    <Input
+                      id="gateway_response_code"
+                      value={gatewayResponseCode}
+                      onChange={(event) =>
+                        setGatewayResponseCode(event.target.value)
+                      }
+                      placeholder={t.gatewayCodePlaceholder}
+                      className="rounded-2xl"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="gateway_message">{t.gatewayMessage}</Label>
+                    <Input
+                      id="gateway_message"
+                      value={gatewayMessage}
+                      onChange={(event) => setGatewayMessage(event.target.value)}
+                      placeholder={t.gatewayMessagePlaceholder}
+                      className="rounded-2xl"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="notes">{t.notes}</Label>
+                  <textarea
+                    id="notes"
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder={t.notesPlaceholder}
+                    className="min-h-32 rounded-2xl border border-input bg-background px-3 py-3 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  />
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <ToggleCard
+                    checked={autoConfirm}
+                    onChange={setAutoConfirm}
+                    title={t.autoConfirm}
+                    description={
+                      isAr
+                        ? "يتم اعتماد الدفعة كمدفوعة مباشرة عند الحفظ."
+                        : "Marks the payment as paid immediately on save."
+                    }
+                    icon={CheckCircle2}
+                  />
+
+                  <ToggleCard
+                    checked={autoCreateTreasuryMovement}
+                    onChange={setAutoCreateTreasuryMovement}
+                    title={t.autoTreasury}
+                    description={
+                      isAr
+                        ? "يتم إنشاء حركة خزينة بعد نجاح الحفظ."
+                        : "Creates treasury movement after successful save."
+                    }
+                    icon={Wallet}
+                  />
+
+                  <ToggleCard
+                    checked={autoPostAccounting}
+                    onChange={setAutoPostAccounting}
+                    title={t.autoAccounting}
+                    description={
+                      isAr
+                        ? "يتم جدولة الترحيل المحاسبي بعد نجاح الحفظ."
+                        : "Schedules accounting posting after successful save."
+                    }
+                    icon={ShieldCheck}
+                  />
+                </div>
               </CardContent>
             </Card>
           </div>
-        </CardContent>
-      </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-        <div className="space-y-6">
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.basicInfo}</CardTitle>
-              <CardDescription>{t.sectionDescriptions.basicInfo}</CardDescription>
-            </CardHeader>
+          {/* =====================================================
+              RIGHT SIDE
+          ===================================================== */}
+          <aside className="space-y-6">
+            <Card className="sticky top-6 rounded-[1.5rem]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Banknote className="h-5 w-5 text-primary" />
+                  {t.orderSummary}
+                </CardTitle>
+                <CardDescription>
+                  {selectedOrder
+                    ? resolveOrderNumber(selectedOrder)
+                    : isAr
+                      ? "اختر طلبًا لعرض ملخص الدفع"
+                      : "Select an order to view payment summary"}
+                </CardDescription>
+              </CardHeader>
 
-            <CardContent className="grid gap-5 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="paymentNumber">{t.paymentNumber}</Label>
-                <Input
-                  id="paymentNumber"
-                  value={formData.paymentNumber}
-                  onChange={(e) => setField("paymentNumber", e.target.value)}
-                  placeholder={t.placeholders.paymentNumber}
-                  className="rounded-2xl"
-                />
-                {errors.paymentNumber ? (
-                  <p className="text-sm text-red-500">{errors.paymentNumber}</p>
-                ) : null}
-              </div>
+              <CardContent className="space-y-4">
+                {selectedOrder ? (
+                  <>
+                    <div className="rounded-3xl border bg-muted/20 p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                          <ShoppingCart className="h-5 w-5" />
+                        </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="customerName">{t.customerName}</Label>
-                <Input
-                  id="customerName"
-                  value={formData.customerName}
-                  onChange={(e) => setField("customerName", e.target.value)}
-                  placeholder={t.placeholders.customerName}
-                  className="rounded-2xl"
-                />
-                {errors.customerName ? (
-                  <p className="text-sm text-red-500">{errors.customerName}</p>
-                ) : null}
-              </div>
+                        <div className="min-w-0 space-y-1">
+                          <p className="truncate font-semibold">
+                            {resolveOrderNumber(selectedOrder)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {t.customer}:{" "}
+                            {resolveCustomerName(selectedOrder, t.notAvailable)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {t.date}:{" "}
+                            {formatDate(
+                              selectedOrder.order_date || selectedOrder.created_at,
+                              locale
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="customerCode">{t.customerCode}</Label>
-                <Input
-                  id="customerCode"
-                  value={formData.customerCode}
-                  onChange={(e) => setField("customerCode", e.target.value)}
-                  placeholder={t.placeholders.customerCode}
-                  className="rounded-2xl"
-                />
-              </div>
+                    <SummaryLine label={t.total} value={summary.total} />
+                    <SummaryLine label={t.paid} value={summary.paid} />
+                    <SummaryLine label={t.due} value={summary.due} />
 
-              <div className="space-y-2">
-                <Label htmlFor="payerName">{t.payerName}</Label>
-                <Input
-                  id="payerName"
-                  value={formData.payerName}
-                  onChange={(e) => setField("payerName", e.target.value)}
-                  placeholder={t.placeholders.payerName}
-                  className="rounded-2xl"
-                />
-              </div>
-            </CardContent>
-          </Card>
+                    <div className="rounded-3xl border border-primary/20 bg-primary/5 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold">{t.amount}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {getMethodLabel(paymentMethod, locale)}
+                          </p>
+                        </div>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.relationsInfo}</CardTitle>
-              <CardDescription>{t.sectionDescriptions.relationsInfo}</CardDescription>
-            </CardHeader>
+                        <div className="flex items-center gap-2 text-2xl font-bold">
+                          <Image src={SAR_ICON_PATH} alt="SAR" width={20} height={20} />
+                          {formatMoney(summary.paymentAmount)}
+                        </div>
+                      </div>
+                    </div>
 
-            <CardContent className="grid gap-5 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="relatedInvoice">{t.relatedInvoice}</Label>
-                <Input
-                  id="relatedInvoice"
-                  value={formData.relatedInvoice}
-                  onChange={(e) => setField("relatedInvoice", e.target.value)}
-                  placeholder={t.placeholders.relatedInvoice}
-                  className="rounded-2xl"
-                />
-              </div>
+                    <SummaryLine label={t.newDue} value={summary.newDue} strong />
 
-              <div className="space-y-2">
-                <Label htmlFor="relatedOrder">{t.relatedOrder}</Label>
-                <Input
-                  id="relatedOrder"
-                  value={formData.relatedOrder}
-                  onChange={(e) => setField("relatedOrder", e.target.value)}
-                  placeholder={t.placeholders.relatedOrder}
-                  className="rounded-2xl"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.paymentInfo}</CardTitle>
-              <CardDescription>{t.sectionDescriptions.paymentInfo}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-5 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="paymentMethod">{t.paymentMethod}</Label>
-                <Input
-                  id="paymentMethod"
-                  value={formData.paymentMethod}
-                  onChange={(e) => setField("paymentMethod", e.target.value)}
-                  placeholder={t.placeholders.paymentMethod}
-                  className="rounded-2xl"
-                />
-                {errors.paymentMethod ? (
-                  <p className="text-sm text-red-500">{errors.paymentMethod}</p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="paymentChannel">{t.paymentChannel}</Label>
-                <Input
-                  id="paymentChannel"
-                  value={formData.paymentChannel}
-                  onChange={(e) => setField("paymentChannel", e.target.value)}
-                  placeholder={t.placeholders.paymentChannel}
-                  className="rounded-2xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="paymentStatus">{t.paymentStatus}</Label>
-                <Input
-                  id="paymentStatus"
-                  value={formData.paymentStatus}
-                  onChange={(e) => setField("paymentStatus", e.target.value)}
-                  placeholder={t.placeholders.paymentStatus}
-                  className="rounded-2xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="paymentDate">{t.paymentDate}</Label>
-                <Input
-                  id="paymentDate"
-                  type="date"
-                  value={formData.paymentDate}
-                  onChange={(e) => setField("paymentDate", e.target.value)}
-                  className="rounded-2xl"
-                />
-                {errors.paymentDate ? (
-                  <p className="text-sm text-red-500">{errors.paymentDate}</p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="amount">{t.amount}</Label>
-                <Input
-                  id="amount"
-                  value={formData.amount}
-                  onChange={(e) => setField("amount", e.target.value)}
-                  placeholder={t.placeholders.amount}
-                  className="rounded-2xl"
-                />
-                {errors.amount ? (
-                  <p className="text-sm text-red-500">{errors.amount}</p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="currency">{t.currency}</Label>
-                <Input
-                  id="currency"
-                  value={formData.currency}
-                  onChange={(e) => setField("currency", e.target.value)}
-                  placeholder={t.placeholders.currency}
-                  className="rounded-2xl"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.treasuryInfo}</CardTitle>
-              <CardDescription>{t.sectionDescriptions.treasuryInfo}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-5 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="referenceNumber">{t.referenceNumber}</Label>
-                <Input
-                  id="referenceNumber"
-                  value={formData.referenceNumber}
-                  onChange={(e) => setField("referenceNumber", e.target.value)}
-                  placeholder={t.placeholders.referenceNumber}
-                  className="rounded-2xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="transactionId">{t.transactionId}</Label>
-                <Input
-                  id="transactionId"
-                  value={formData.transactionId}
-                  onChange={(e) => setField("transactionId", e.target.value)}
-                  placeholder={t.placeholders.transactionId}
-                  className="rounded-2xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="treasuryAccount">{t.treasuryAccount}</Label>
-                <Input
-                  id="treasuryAccount"
-                  value={formData.treasuryAccount}
-                  onChange={(e) => setField("treasuryAccount", e.target.value)}
-                  placeholder={t.placeholders.treasuryAccount}
-                  className="rounded-2xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="bankAccount">{t.bankAccount}</Label>
-                <Input
-                  id="bankAccount"
-                  value={formData.bankAccount}
-                  onChange={(e) => setField("bankAccount", e.target.value)}
-                  placeholder={t.placeholders.bankAccount}
-                  className="rounded-2xl"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.extraInfo}</CardTitle>
-              <CardDescription>{t.sectionDescriptions.extraInfo}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-5">
-              <div className="space-y-2">
-                <Label htmlFor="payerPhone">{t.payerPhone}</Label>
-                <Input
-                  id="payerPhone"
-                  value={formData.payerPhone}
-                  onChange={(e) => setField("payerPhone", e.target.value)}
-                  placeholder={t.placeholders.payerPhone}
-                  className="rounded-2xl"
-                />
-                {errors.payerPhone ? (
-                  <p className="text-sm text-red-500">{errors.payerPhone}</p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="notes">{t.notes}</Label>
-                <Textarea
-                  id="notes"
-                  value={formData.notes}
-                  onChange={(e) => setField("notes", e.target.value)}
-                  placeholder={t.placeholders.notes}
-                  className="min-h-[120px] rounded-2xl"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-6">
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.quickGuide}</CardTitle>
-              <CardDescription>
-                {isArabic
-                  ? "ملاحظات تشغيلية سريعة قبل ربط الصفحة فعليًا."
-                  : "Quick operational notes before connecting the page for real."}
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              {t.tips.map((tip, index) => (
-                <div
-                  key={index}
-                  className="flex items-start gap-3 rounded-2xl border border-white/20 bg-white/80 p-4 dark:border-white/10 dark:bg-white/5"
-                >
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl">
-                    {index === 0 ? (
-                      <CheckCircle2 className="h-4 w-4" />
-                    ) : index === 1 ? (
-                      <CreditCard className="h-4 w-4" />
-                    ) : (
-                      <Sparkles className="h-4 w-4" />
-                    )}
-                  </div>
-                  <p className="text-sm leading-7">{tip}</p>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>
-                {isArabic ? "مؤشرات النموذج" : "Form Indicators"}
-              </CardTitle>
-              <CardDescription>
-                {isArabic
-                  ? "متابعة سريعة للحقول الرئيسية داخل الصفحة."
-                  : "Quick tracking for the main fields in this page."}
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                    <CreditCard className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">
-                      {isArabic ? "اكتمال النموذج" : "Form completion"}
-                    </p>
-                    <p className="text-sm font-semibold">
-                      {completionStats.percent}%
+                    <Button
+                      type="submit"
+                      className="h-11 w-full rounded-2xl"
+                      disabled={saving}
+                    >
+                      {saving ? (
+                        <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="me-2 h-4 w-4" />
+                      )}
+                      {saving ? t.saving : t.save}
+                    </Button>
+                  </>
+                ) : (
+                  <div className="flex min-h-80 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
+                    <ReceiptText className="h-12 w-12 text-muted-foreground" />
+                    <p className="max-w-xs text-sm leading-7 text-muted-foreground">
+                      {isAr
+                        ? "اختر طلبًا من القائمة حتى يتم تجهيز ملخص الدفع قبل الحفظ."
+                        : "Select an order from the list to prepare the payment summary before saving."}
                     </p>
                   </div>
-                </div>
-                <Badge variant="secondary" className="rounded-full">
-                  {completionStats.filled}/{completionStats.total}
-                </Badge>
-              </div>
+                )}
+              </CardContent>
+            </Card>
+          </aside>
+        </form>
+      </div>
+    </main>
+  );
+}
 
-              <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                    <ReceiptText className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">{t.relatedInvoice}</p>
-                    <p className="text-sm font-semibold">
-                      {formData.relatedInvoice || (isArabic ? "غير مدخل" : "Not entered")}
-                    </p>
-                  </div>
-                </div>
-              </div>
+/* =====================================================
+   SMALL COMPONENTS
+===================================================== */
 
-              <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                    <Wallet className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">{t.amount}</p>
-                    <p className="text-sm font-semibold">
-                      {formData.amount || (isArabic ? "غير مدخل" : "Not entered")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                    <Landmark className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">{t.treasuryAccount}</p>
-                    <p className="text-sm font-semibold">
-                      {formData.treasuryAccount || (isArabic ? "غير مدخل" : "Not entered")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-dashed border-white/30 bg-black/5 p-4 dark:border-white/10 dark:bg-white/5">
-                <p className="text-sm leading-7">
-                  {isArabic
-                    ? "تم اعتماد الصفحة لتعمل ضمن shell النظام الرسمي وباستخدام UI الداخلي فقط. عند ربط الـ API لاحقًا سيتم فقط توصيل الحفظ الفعلي دون تغيير التصميم."
-                    : "This page is aligned with the official system shell and uses only the internal UI. When the API is connected later, only the save action will be wired without changing the design."}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{isArabic ? "روابط سريعة" : "Quick Links"}</CardTitle>
-              <CardDescription>
-                {isArabic
-                  ? "تنقل سريع داخل نفس موديول المدفوعات."
-                  : "Quick navigation within the payments module."}
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              <Link href="/system/payments" className="block">
-                <Button variant="outline" className="w-full rounded-2xl">
-                  <ArrowLeft className="ms-2 h-4 w-4" />
-                  {t.backToPayments}
-                </Button>
-              </Link>
-
-              <Link href="/system/payments" className="block">
-                <Button variant="outline" className="w-full rounded-2xl">
-                  <FileText className="ms-2 h-4 w-4" />
-                  {isArabic ? "قائمة المدفوعات" : "Payments List"}
-                </Button>
-              </Link>
-
-              <Link href="/system" className="block">
-                <Button variant="outline" className="w-full rounded-2xl">
-                  <Building2 className="ms-2 h-4 w-4" />
-                  {isArabic
-                    ? "العودة إلى لوحة النظام"
-                    : "Back to System Dashboard"}
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-        </div>
+function SummaryLine({
+  label,
+  value,
+  strong = false,
+}: {
+  label: string;
+  value: number;
+  strong?: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 rounded-2xl border p-3 ${
+        strong ? "border-primary/20 bg-primary/5" : "bg-card"
+      }`}
+    >
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <div className={`flex items-center gap-1.5 ${strong ? "font-bold" : "font-semibold"}`}>
+        <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
+        {formatMoney(value)}
       </div>
     </div>
+  );
+}
+
+function ToggleCard({
+  checked,
+  onChange,
+  title,
+  description,
+  icon: Icon,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={`rounded-3xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-sm ${
+        checked
+          ? "border-primary bg-primary/5"
+          : "bg-card hover:bg-muted/30"
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
+            checked ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary"
+          }`}
+        >
+          {checked ? <CheckCircle2 className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
+        </div>
+
+        <div>
+          <p className="text-sm font-semibold">{title}</p>
+          <p className="mt-1 text-xs leading-6 text-muted-foreground">{description}</p>
+        </div>
+      </div>
+    </button>
   );
 }

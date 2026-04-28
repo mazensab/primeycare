@@ -1,25 +1,28 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { ChangeEvent, ElementType, FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   BadgeCheck,
-  Building2,
-  CalendarRange,
+  Calculator,
   CheckCircle2,
   CreditCard,
   FileText,
   Loader2,
   Package,
   Plus,
+  RotateCcw,
   Save,
   ShieldCheck,
-  ShoppingCart,
+  ShoppingBag,
   Sparkles,
-  Tag,
   Truck,
   UserRound,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -36,941 +39,1281 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
+import { API_PATHS, apiGet, apiPost } from "@/lib/api";
+
+/* ============================================================
+   📂 app/system/orders/create/page.tsx
+   🧠 Primey Care | Create Order Page
+   ------------------------------------------------------------
+   ✅ نفس نمط صفحات create السابقة
+   ✅ ربط حقيقي مع /api/orders/
+   ✅ تحميل العملاء من /api/customers/
+   ✅ تحميل المنتجات من /api/products/
+   ✅ استخدام UI الداخلي فقط
+   ✅ دعم عربي / إنجليزي عبر primey-locale
+   ✅ الأرقام دائمًا بالإنجليزية
+   ✅ استخدام /currency/sar.svg
+   ✅ بدون hardcoded localhost
+   ✅ إصلاح t.loading
+   ✅ إصلاح React.ElementType
+============================================================ */
+
 type AppLocale = "ar" | "en";
 
+type OrderStatus =
+  | "draft"
+  | "pending"
+  | "confirmed"
+  | "processing"
+  | "completed"
+  | "cancelled"
+  | "refunded";
+
+type PaymentStatus =
+  | "unpaid"
+  | "partially_paid"
+  | "paid"
+  | "failed"
+  | "refunded";
+
+type FulfillmentStatus =
+  | "not_started"
+  | "in_progress"
+  | "issued"
+  | "delivered"
+  | "failed";
+
+type OrderSource =
+  | "website"
+  | "whatsapp"
+  | "agent"
+  | "admin"
+  | "mobile_app"
+  | "other";
+
+type CustomerOption = {
+  id: number | string;
+  name: string;
+  phone: string;
+  email: string;
+  status: string;
+};
+
+type ProductOption = {
+  id: number | string;
+  name: string;
+  code: string;
+  productType: string;
+  status: string;
+  currencyCode: string;
+  price: number;
+  salePrice: number;
+  effectivePrice: number;
+};
+
 type OrderFormData = {
-  orderNumber: string;
-  customerName: string;
-  customerCode: string;
-  productName: string;
-  productCode: string;
-  contractNumber: string;
-  centerName: string;
-  providerName: string;
-  orderDate: string;
-  deliveryDate: string;
-  orderStatus: string;
-  paymentStatus: string;
+  customerId: string;
+  productId: string;
+  status: OrderStatus;
+  paymentStatus: PaymentStatus;
+  fulfillmentStatus: FulfillmentStatus;
+  source: OrderSource;
   quantity: string;
   unitPrice: string;
   discountAmount: string;
   taxAmount: string;
-  totalAmount: string;
-  deliveryMethod: string;
-  deliveryAddress: string;
-  notes: string;
+  amountPaid: string;
+  issueReference: string;
+  customerNotes: string;
+  internalNotes: string;
+  cancellationReason: string;
 };
 
 type OrderFormErrors = Partial<Record<keyof OrderFormData, string>>;
 
-function detectLocale(): AppLocale {
-  return "ar";
+type ApiListResponse = {
+  ok?: boolean;
+  message?: string;
+  results?: unknown[];
+  data?: unknown[] | Record<string, unknown>;
+  items?: unknown[];
+  customers?: unknown[];
+  products?: unknown[];
+};
+
+type OrderCreateResponse = {
+  ok?: boolean;
+  message?: string;
+  data?: {
+    id?: number | string;
+    order_number?: string;
+  };
+};
+
+/* ============================================================
+   🌐 Locale
+============================================================ */
+
+function readLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
+
+    const savedLocale = window.localStorage.getItem("primey-locale");
+    if (savedLocale === "en") return "en";
+    if (savedLocale === "ar") return "ar";
+
+    return document.documentElement.lang === "en" ? "en" : "ar";
+  } catch {
+    return "ar";
+  }
 }
+
+function applyDocumentLocale(locale: AppLocale) {
+  if (typeof document === "undefined") return;
+
+  document.documentElement.lang = locale;
+  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+  document.body.dir = locale === "ar" ? "rtl" : "ltr";
+}
+
+/* ============================================================
+   🔁 Normalizers
+============================================================ */
+
+function normalizeApiList(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) return payload;
+
+  if (!payload || typeof payload !== "object") return [];
+
+  const record = payload as ApiListResponse;
+
+  if (Array.isArray(record.results)) return record.results;
+  if (Array.isArray(record.data)) return record.data;
+  if (Array.isArray(record.items)) return record.items;
+  if (Array.isArray(record.customers)) return record.customers;
+  if (Array.isArray(record.products)) return record.products;
+
+  if (record.data && typeof record.data === "object") {
+    const nested = record.data as ApiListResponse;
+
+    if (Array.isArray(nested.results)) return nested.results;
+    if (Array.isArray(nested.items)) return nested.items;
+    if (Array.isArray(nested.customers)) return nested.customers;
+    if (Array.isArray(nested.products)) return nested.products;
+  }
+
+  return [];
+}
+
+function toNumber(value: unknown): number {
+  if (value === null || value === undefined || value === "") return 0;
+
+  const parsed = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeCustomer(item: unknown): CustomerOption {
+  const obj = (item || {}) as Record<string, unknown>;
+
+  return {
+    id: (obj.id ?? "") as number | string,
+    name: String(obj.full_name ?? obj.name ?? obj.customer_name ?? "-"),
+    phone: String(obj.phone ?? obj.mobile ?? ""),
+    email: String(obj.email ?? ""),
+    status: String(obj.status ?? ""),
+  };
+}
+
+function normalizeProduct(item: unknown): ProductOption {
+  const obj = (item || {}) as Record<string, unknown>;
+
+  const price = toNumber(obj.price);
+  const salePrice = toNumber(obj.sale_price);
+  const effectivePrice = toNumber(obj.effective_price || salePrice || price);
+
+  return {
+    id: (obj.id ?? "") as number | string,
+    name: String(obj.name ?? obj.title ?? "-"),
+    code: String(obj.code ?? obj.product_code ?? ""),
+    productType: String(obj.product_type ?? obj.type ?? ""),
+    status: String(obj.status ?? ""),
+    currencyCode: String(obj.currency_code ?? "SAR"),
+    price,
+    salePrice,
+    effectivePrice,
+  };
+}
+
+/* ============================================================
+   📚 Dictionary
+============================================================ */
 
 function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    pageTitle: isArabic ? "إضافة طلب جديد" : "Create New Order",
+    pageTitle: isArabic ? "إنشاء طلب جديد" : "Create New Order",
     pageSubtitle: isArabic
-      ? "هذه الصفحة مخصصة لإنشاء طلب جديد داخل النظام بنفس هوية Primey Care المعتمدة، مع تجهيز احترافي لمرحلة الربط اللاحقة مع الـ APIs والعملاء والمنتجات والعقود والفواتير والمدفوعات."
-      : "This page is designed to create a new order inside the system using the approved Primey Care UI, with a professional foundation for later API, customers, products, contracts, invoices, and payments integration.",
+      ? "إنشاء طلب جديد وربط العميل بالمنتج مع احتساب المبالغ والحالة وربطها مباشرة بواجهة الطلبات."
+      : "Create a new order, link customer with product, calculate totals and connect it directly with orders API.",
 
-    heroBadge1: isArabic ? "System Module" : "System Module",
-    heroBadge2: isArabic ? "Create Order" : "Create Order",
+    back: isArabic ? "رجوع" : "Back",
+    save: isArabic ? "حفظ الطلب" : "Save Order",
+    saving: isArabic ? "جاري الحفظ..." : "Saving...",
+    loading: isArabic ? "جاري التحميل..." : "Loading...",
+    reset: isArabic ? "إعادة تعيين" : "Reset",
+    ordersList: isArabic ? "قائمة الطلبات" : "Orders List",
 
-    backToOrders: isArabic ? "العودة إلى الطلبات" : "Back to Orders",
-    saveDraft: isArabic ? "حفظ مبدئي" : "Save Draft",
-    createOrder: isArabic ? "إنشاء الطلب" : "Create Order",
+    heroBadge1: isArabic ? "وحدة الطلبات" : "Orders Module",
+    heroBadge2: isArabic ? "إنشاء" : "Create",
+    ready: isArabic ? "جاهز للربط" : "Ready",
 
-    basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
-    relationsInfo: isArabic ? "الارتباطات" : "Relations",
-    timelineInfo: isArabic ? "التواريخ والحالة" : "Dates & Status",
-    financialInfo: isArabic ? "البيانات المالية" : "Financial Information",
-    deliveryInfo: isArabic ? "التسليم والملاحظات" : "Delivery & Notes",
-    quickGuide: isArabic ? "إرشادات سريعة" : "Quick Guide",
-    createSummary: isArabic ? "ملخص الإنشاء" : "Creation Summary",
+    customerProductSection: isArabic
+      ? "بيانات العميل والمنتج"
+      : "Customer and Product",
+    customerProductDesc: isArabic
+      ? "اختر العميل والمنتج المرتبط بهذا الطلب."
+      : "Select the customer and product linked to this order.",
 
-    orderNumber: isArabic ? "رقم الطلب" : "Order Number",
-    customerName: isArabic ? "اسم العميل" : "Customer Name",
-    customerCode: isArabic ? "كود العميل" : "Customer Code",
-    productName: isArabic ? "اسم المنتج / الخدمة" : "Product / Service Name",
-    productCode: isArabic ? "كود المنتج" : "Product Code",
-    contractNumber: isArabic ? "رقم العقد" : "Contract Number",
-    centerName: isArabic ? "المركز" : "Center",
-    providerName: isArabic ? "مقدم الخدمة" : "Provider",
-    orderDate: isArabic ? "تاريخ الطلب" : "Order Date",
-    deliveryDate: isArabic ? "تاريخ التسليم" : "Delivery Date",
-    orderStatus: isArabic ? "حالة الطلب" : "Order Status",
+    orderStatusSection: isArabic ? "حالة الطلب" : "Order Status",
+    orderStatusDesc: isArabic
+      ? "حدد مصدر الطلب وحالات الطلب والدفع والتنفيذ."
+      : "Set order source, order status, payment and fulfillment status.",
+
+    amountsSection: isArabic ? "المبالغ والحسابات" : "Amounts and Calculation",
+    amountsDesc: isArabic
+      ? "يتم احتساب الإجمالي تلقائيًا بناءً على الكمية والسعر والخصم والضريبة."
+      : "Total is calculated automatically based on quantity, price, discount and tax.",
+
+    notesSection: isArabic ? "الملاحظات" : "Notes",
+    notesDesc: isArabic
+      ? "أضف ملاحظات العميل والملاحظات الداخلية عند الحاجة."
+      : "Add customer notes and internal notes when needed.",
+
+    summarySection: isArabic ? "ملخص الطلب" : "Order Summary",
+    summaryDesc: isArabic
+      ? "مراجعة سريعة قبل حفظ الطلب."
+      : "Quick review before saving the order.",
+
+    customer: isArabic ? "العميل" : "Customer",
+    product: isArabic ? "المنتج" : "Product",
+    selectCustomer: isArabic ? "اختر العميل" : "Select customer",
+    selectProduct: isArabic ? "اختر المنتج" : "Select product",
+    noCustomers: isArabic ? "لا يوجد عملاء" : "No customers",
+    noProducts: isArabic ? "لا توجد منتجات" : "No products",
+
+    source: isArabic ? "مصدر الطلب" : "Order Source",
+    status: isArabic ? "حالة الطلب" : "Order Status",
     paymentStatus: isArabic ? "حالة الدفع" : "Payment Status",
+    fulfillmentStatus: isArabic ? "حالة التنفيذ" : "Fulfillment Status",
+
     quantity: isArabic ? "الكمية" : "Quantity",
     unitPrice: isArabic ? "سعر الوحدة" : "Unit Price",
-    discountAmount: isArabic ? "قيمة الخصم" : "Discount Amount",
-    taxAmount: isArabic ? "قيمة الضريبة" : "Tax Amount",
-    totalAmount: isArabic ? "الإجمالي النهائي" : "Total Amount",
-    deliveryMethod: isArabic ? "طريقة التسليم" : "Delivery Method",
-    deliveryAddress: isArabic ? "عنوان التسليم" : "Delivery Address",
-    notes: isArabic ? "ملاحظات" : "Notes",
+    discountAmount: isArabic ? "الخصم" : "Discount",
+    taxAmount: isArabic ? "الضريبة" : "Tax",
+    amountPaid: isArabic ? "المبلغ المدفوع" : "Amount Paid",
+    subtotalAmount: isArabic ? "الإجمالي قبل الخصم" : "Subtotal",
+    totalAmount: isArabic ? "الإجمالي النهائي" : "Total",
+    remainingAmount: isArabic ? "المتبقي" : "Remaining",
 
-    placeholders: {
-      orderNumber: isArabic ? "مثال: ORD-2026-001" : "Example: ORD-2026-001",
-      customerName: isArabic ? "مثال: أحمد علي" : "Example: Ahmed Ali",
-      customerCode: isArabic ? "مثال: CUS-001" : "Example: CUS-001",
-      productName: isArabic
-        ? "مثال: باقة رعاية سنوية"
-        : "Example: Annual Care Package",
-      productCode: isArabic ? "مثال: PRD-001" : "Example: PRD-001",
-      contractNumber: isArabic ? "مثال: CTR-2026-001" : "Example: CTR-2026-001",
-      centerName: isArabic
-        ? "مثال: Prime Care Jeddah"
-        : "Example: Prime Care Jeddah",
-      providerName: isArabic
-        ? "مثال: Al Noor Medical"
-        : "Example: Al Noor Medical",
-      orderStatus: isArabic
-        ? "مثال: جديد / مؤكد / قيد التنفيذ"
-        : "Example: New / Confirmed / Processing",
-      paymentStatus: isArabic
-        ? "مثال: غير مدفوع / جزئي / مدفوع"
-        : "Example: Unpaid / Partial / Paid",
-      quantity: isArabic ? "مثال: 1" : "Example: 1",
-      unitPrice: isArabic ? "مثال: 1000" : "Example: 1000",
-      discountAmount: isArabic ? "مثال: 50" : "Example: 50",
-      taxAmount: isArabic ? "مثال: 150" : "Example: 150",
-      totalAmount: isArabic ? "مثال: 1100" : "Example: 1100",
-      deliveryMethod: isArabic
-        ? "مثال: حضوري / رقمي / شحن"
-        : "Example: In-person / Digital / Shipping",
-      deliveryAddress: isArabic
-        ? "اكتب عنوان التسليم الكامل"
-        : "Write the full delivery address",
-      notes: isArabic
-        ? "أي ملاحظات إضافية عن الطلب"
-        : "Any additional notes about the order",
-    },
+    issueReference: isArabic ? "مرجع الإصدار" : "Issue Reference",
+    customerNotes: isArabic ? "ملاحظات العميل" : "Customer Notes",
+    internalNotes: isArabic ? "ملاحظات داخلية" : "Internal Notes",
+    cancellationReason: isArabic ? "سبب الإلغاء" : "Cancellation Reason",
 
-    tips: [
-      isArabic
-        ? "ابدأ الآن ببناء واجهة الإنشاء، والربط مع API سيتم لاحقًا بدون تغيير الهوية."
-        : "Start with the create UI now; API integration can be added later without changing the visual identity.",
-      isArabic
-        ? "يفضل توحيد ترقيم الطلبات وحالات الطلب والدفع من البداية."
-        : "Keep order numbering and order/payment statuses standardized from the beginning.",
-      isArabic
-        ? "يمكن لاحقًا ربط الطلب بالعميل والمنتج والعقد والفاتورة والدفع والتنفيذ بشكل كامل."
-        : "Later you can fully connect the order with the customer, product, contract, invoice, payment, and fulfillment.",
-    ],
+    optional: isArabic ? "اختياري" : "Optional",
 
-    summaryItems: [
-      {
-        label: isArabic ? "حالة الصفحة" : "Page Status",
-        value: isArabic ? "جاهزة كبداية UI" : "Ready as UI base",
-        icon: BadgeCheck,
-      },
-      {
-        label: isArabic ? "الربط الخلفي" : "Backend Integration",
-        value: isArabic ? "غير مربوط بعد" : "Not connected yet",
-        icon: ShieldCheck,
-      },
-      {
-        label: isArabic ? "المرحلة الحالية" : "Current Stage",
-        value: isArabic ? "بناء واجهات النظام" : "System frontend build",
-        icon: Sparkles,
-      },
-      {
-        label: isArabic ? "الارتباط المستقبلي" : "Future Mapping",
-        value: isArabic
-          ? "عملاء / منتجات / فواتير"
-          : "Customers / Products / Invoices",
-        icon: FileText,
-      },
-    ],
+    validationCustomer: isArabic ? "اختر العميل." : "Select a customer.",
+    validationProduct: isArabic ? "اختر المنتج." : "Select a product.",
+    validationQuantity: isArabic
+      ? "الكمية يجب أن تكون أكبر من صفر."
+      : "Quantity must be greater than zero.",
+    validationUnitPrice: isArabic
+      ? "سعر الوحدة لا يمكن أن يكون أقل من صفر."
+      : "Unit price cannot be negative.",
+    validationDiscount: isArabic
+      ? "الخصم لا يمكن أن يكون أقل من صفر."
+      : "Discount cannot be negative.",
+    validationTax: isArabic
+      ? "الضريبة لا يمكن أن تكون أقل من صفر."
+      : "Tax cannot be negative.",
+    validationPaid: isArabic
+      ? "المبلغ المدفوع لا يمكن أن يكون أقل من صفر."
+      : "Amount paid cannot be negative.",
+    validationDiscountMax: isArabic
+      ? "الخصم لا يمكن أن يتجاوز الإجمالي قبل الخصم."
+      : "Discount cannot exceed subtotal.",
+    validationCancellation: isArabic
+      ? "سبب الإلغاء مطلوب عند اختيار حالة ملغي."
+      : "Cancellation reason is required when status is cancelled.",
 
-    sectionDescriptions: {
-      basicInfo: isArabic
-        ? "أدخل البيانات الأساسية للطلب التي سيتم اعتمادها داخل النظام."
-        : "Enter the order core information to be used across the system.",
-      relationsInfo: isArabic
-        ? "حدد العميل والمنتج والجهات التشغيلية المرتبطة بالطلب."
-        : "Define the customer, product, and operational entities linked to the order.",
-      timelineInfo: isArabic
-        ? "أدخل التواريخ والحالات الأساسية للطلب."
-        : "Enter the main dates and statuses for the order.",
-      financialInfo: isArabic
-        ? "أضف القيم المالية الرئيسية الخاصة بالطلب."
-        : "Add the main financial values for the order.",
-      deliveryInfo: isArabic
-        ? "أضف معلومات التسليم والملاحظات التشغيلية."
-        : "Add delivery information and operational notes.",
-    },
+    loadCustomersError: isArabic
+      ? "تعذر تحميل العملاء."
+      : "Unable to load customers.",
+    loadProductsError: isArabic
+      ? "تعذر تحميل المنتجات."
+      : "Unable to load products.",
+    createSuccess: isArabic
+      ? "تم إنشاء الطلب بنجاح."
+      : "Order created successfully.",
+    createError: isArabic ? "تعذر إنشاء الطلب." : "Unable to create order.",
 
-    validation: {
-      required: isArabic ? "هذا الحقل مطلوب" : "This field is required",
-      invalidDate: isArabic ? "التاريخ غير صالح" : "Invalid date",
-      invalidDateRange: isArabic
-        ? "تاريخ التسليم يجب أن يكون في نفس اليوم أو بعد تاريخ الطلب"
-        : "Delivery date must be on or after order date",
-      invalidAmount: isArabic ? "القيمة المالية غير صحيحة" : "Invalid financial amount",
-      invalidQuantity: isArabic ? "الكمية غير صحيحة" : "Invalid quantity",
-    },
+    previewCustomer: isArabic ? "العميل المختار" : "Selected Customer",
+    previewProduct: isArabic ? "المنتج المختار" : "Selected Product",
+    previewFinancial: isArabic ? "الملخص المالي" : "Financial Summary",
+    previewOperational: isArabic ? "الملخص التشغيلي" : "Operational Summary",
 
-    successTitle: isArabic ? "تم تجهيز النموذج" : "Form prepared",
-    successText: isArabic
-      ? "واجهة إنشاء الطلب جاهزة، وسيتم لاحقًا ربط زر الحفظ مع الـ API."
-      : "The create order UI is ready. The save action will be connected to the API later.",
+    statusLabels: {
+      draft: isArabic ? "مسودة" : "Draft",
+      pending: isArabic ? "قيد الانتظار" : "Pending",
+      confirmed: isArabic ? "مؤكد" : "Confirmed",
+      processing: isArabic ? "قيد المعالجة" : "Processing",
+      completed: isArabic ? "مكتمل" : "Completed",
+      cancelled: isArabic ? "ملغي" : "Cancelled",
+      refunded: isArabic ? "مسترد" : "Refunded",
+    } satisfies Record<OrderStatus, string>,
 
-    draftTitle: isArabic ? "تم حفظ القيم محليًا" : "Values prepared locally",
-    draftText: isArabic
-      ? "تم التحقق من الحقول الأساسية محليًا كنموذج أولي."
-      : "Basic fields have been validated locally as a first draft.",
+    paymentLabels: {
+      unpaid: isArabic ? "غير مدفوع" : "Unpaid",
+      partially_paid: isArabic ? "مدفوع جزئيًا" : "Partially Paid",
+      paid: isArabic ? "مدفوع" : "Paid",
+      failed: isArabic ? "فشل الدفع" : "Failed",
+      refunded: isArabic ? "مسترد" : "Refunded",
+    } satisfies Record<PaymentStatus, string>,
 
-    requiredFields: isArabic ? "الحقول الأساسية" : "Required Fields",
+    fulfillmentLabels: {
+      not_started: isArabic ? "لم يبدأ" : "Not Started",
+      in_progress: isArabic ? "قيد التنفيذ" : "In Progress",
+      issued: isArabic ? "مصدر" : "Issued",
+      delivered: isArabic ? "تم التسليم" : "Delivered",
+      failed: isArabic ? "فشل التنفيذ" : "Failed",
+    } satisfies Record<FulfillmentStatus, string>,
+
+    sourceLabels: {
+      website: isArabic ? "الموقع" : "Website",
+      whatsapp: isArabic ? "واتساب" : "WhatsApp",
+      agent: isArabic ? "مندوب" : "Agent",
+      admin: isArabic ? "النظام" : "Admin",
+      mobile_app: isArabic ? "تطبيق الجوال" : "Mobile App",
+      other: isArabic ? "أخرى" : "Other",
+    } satisfies Record<OrderSource, string>,
   };
 }
 
-function isValidDate(value: string) {
-  if (!value.trim()) return false;
-  const date = new Date(value);
-  return !Number.isNaN(date.getTime());
+/* ============================================================
+   🎨 UI Helpers
+============================================================ */
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
-function isValidAmount(value: string) {
-  if (!value.trim()) return true;
-  const numeric = Number(value);
-  return !Number.isNaN(numeric) && numeric >= 0;
+function CurrencyAmount({ value }: { value: number }) {
+  return (
+    <span className="inline-flex items-center gap-1 font-semibold" dir="ltr">
+      <span>{formatMoney(value)}</span>
+      <Image
+        src="/currency/sar.svg"
+        alt="SAR"
+        width={14}
+        height={14}
+        className="opacity-80"
+      />
+    </span>
+  );
 }
 
-function isValidQuantity(value: string) {
-  if (!value.trim()) return true;
-  const numeric = Number(value);
-  return !Number.isNaN(numeric) && numeric > 0;
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+
+  return <p className="mt-1 text-xs text-destructive">{message}</p>;
 }
 
-export default function SystemCreateOrderPage() {
-  const locale = detectLocale();
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
+function SectionIcon({ icon: Icon }: { icon: ElementType }) {
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+      <Icon className="h-5 w-5" />
+    </div>
+  );
+}
 
+/* ============================================================
+   ✅ Page
+============================================================ */
+
+export default function SystemOrdersCreatePage() {
+  const router = useRouter();
+
+  const [locale, setLocale] = useState<AppLocale>("ar");
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [isLoadingOptions, setIsLoadingOptions] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState<OrderFormData>({
-    orderNumber: "",
-    customerName: "",
-    customerCode: "",
-    productName: "",
-    productCode: "",
-    contractNumber: "",
-    centerName: "",
-    providerName: "",
-    orderDate: "",
-    deliveryDate: "",
-    orderStatus: "",
-    paymentStatus: "",
-    quantity: "",
-    unitPrice: "",
-    discountAmount: "",
-    taxAmount: "",
-    totalAmount: "",
-    deliveryMethod: "",
-    deliveryAddress: "",
-    notes: "",
-  });
   const [errors, setErrors] = useState<OrderFormErrors>({});
 
-  const completionStats = useMemo(() => {
-    const values = Object.values(formData);
-    const filled = values.filter((value) => value.trim().length > 0).length;
-    const total = values.length;
-    const percent = Math.round((filled / total) * 100);
-    return { filled, total, percent };
-  }, [formData]);
+  const [formData, setFormData] = useState<OrderFormData>({
+    customerId: "",
+    productId: "",
+    status: "pending",
+    paymentStatus: "unpaid",
+    fulfillmentStatus: "not_started",
+    source: "admin",
+    quantity: "1",
+    unitPrice: "0.00",
+    discountAmount: "0.00",
+    taxAmount: "0.00",
+    amountPaid: "0.00",
+    issueReference: "",
+    customerNotes: "",
+    internalNotes: "",
+    cancellationReason: "",
+  });
 
-  function setField<K extends keyof OrderFormData>(
+  const t = useMemo(() => dictionary(locale), [locale]);
+  const isArabic = locale === "ar";
+
+  const selectedCustomer = useMemo(() => {
+    return customers.find((item) => String(item.id) === formData.customerId);
+  }, [customers, formData.customerId]);
+
+  const selectedProduct = useMemo(() => {
+    return products.find((item) => String(item.id) === formData.productId);
+  }, [products, formData.productId]);
+
+  const calculations = useMemo(() => {
+    const quantity = Math.max(toNumber(formData.quantity), 0);
+    const unitPrice = Math.max(toNumber(formData.unitPrice), 0);
+    const discount = Math.max(toNumber(formData.discountAmount), 0);
+    const tax = Math.max(toNumber(formData.taxAmount), 0);
+    const paid = Math.max(toNumber(formData.amountPaid), 0);
+
+    const subtotal = quantity * unitPrice;
+    const total = Math.max(subtotal - discount + tax, 0);
+    const remaining = Math.max(total - paid, 0);
+
+    return {
+      quantity,
+      unitPrice,
+      discount,
+      tax,
+      paid,
+      subtotal,
+      total,
+      remaining,
+    };
+  }, [
+    formData.quantity,
+    formData.unitPrice,
+    formData.discountAmount,
+    formData.taxAmount,
+    formData.amountPaid,
+  ]);
+
+  function updateField<K extends keyof OrderFormData>(
     key: K,
-    value: OrderFormData[K]
+    value: OrderFormData[K],
   ) {
-    setFormData((prev) => ({ ...prev, [key]: value }));
-    setErrors((prev) => ({ ...prev, [key]: undefined }));
+    setFormData((current) => ({
+      ...current,
+      [key]: value,
+    }));
+
+    setErrors((current) => ({
+      ...current,
+      [key]: undefined,
+    }));
+  }
+
+  function handleInputChange(
+    event: ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >,
+  ) {
+    const { name, value } = event.target;
+    updateField(name as keyof OrderFormData, value as never);
   }
 
   function validateForm() {
     const nextErrors: OrderFormErrors = {};
 
-    if (!formData.orderNumber.trim()) {
-      nextErrors.orderNumber = t.validation.required;
+    const quantity = toNumber(formData.quantity);
+    const unitPrice = toNumber(formData.unitPrice);
+    const discount = toNumber(formData.discountAmount);
+    const tax = toNumber(formData.taxAmount);
+    const paid = toNumber(formData.amountPaid);
+    const subtotal = quantity * unitPrice;
+
+    if (!formData.customerId) {
+      nextErrors.customerId = t.validationCustomer;
     }
 
-    if (!formData.customerName.trim()) {
-      nextErrors.customerName = t.validation.required;
+    if (!formData.productId) {
+      nextErrors.productId = t.validationProduct;
     }
 
-    if (!formData.productName.trim()) {
-      nextErrors.productName = t.validation.required;
+    if (quantity <= 0) {
+      nextErrors.quantity = t.validationQuantity;
     }
 
-    if (!formData.orderDate.trim()) {
-      nextErrors.orderDate = t.validation.required;
-    } else if (!isValidDate(formData.orderDate)) {
-      nextErrors.orderDate = t.validation.invalidDate;
+    if (unitPrice < 0) {
+      nextErrors.unitPrice = t.validationUnitPrice;
     }
 
-    if (!formData.deliveryDate.trim()) {
-      nextErrors.deliveryDate = t.validation.required;
-    } else if (!isValidDate(formData.deliveryDate)) {
-      nextErrors.deliveryDate = t.validation.invalidDate;
+    if (discount < 0) {
+      nextErrors.discountAmount = t.validationDiscount;
     }
 
-    if (
-      formData.orderDate.trim() &&
-      formData.deliveryDate.trim() &&
-      isValidDate(formData.orderDate) &&
-      isValidDate(formData.deliveryDate)
-    ) {
-      const orderDate = new Date(formData.orderDate).getTime();
-      const deliveryDate = new Date(formData.deliveryDate).getTime();
-      if (deliveryDate < orderDate) {
-        nextErrors.deliveryDate = t.validation.invalidDateRange;
-      }
+    if (tax < 0) {
+      nextErrors.taxAmount = t.validationTax;
     }
 
-    if (formData.quantity.trim() && !isValidQuantity(formData.quantity)) {
-      nextErrors.quantity = t.validation.invalidQuantity;
+    if (paid < 0) {
+      nextErrors.amountPaid = t.validationPaid;
     }
 
-    if (formData.unitPrice.trim() && !isValidAmount(formData.unitPrice)) {
-      nextErrors.unitPrice = t.validation.invalidAmount;
+    if (subtotal > 0 && discount > subtotal) {
+      nextErrors.discountAmount = t.validationDiscountMax;
     }
 
-    if (
-      formData.discountAmount.trim() &&
-      !isValidAmount(formData.discountAmount)
-    ) {
-      nextErrors.discountAmount = t.validation.invalidAmount;
-    }
-
-    if (formData.taxAmount.trim() && !isValidAmount(formData.taxAmount)) {
-      nextErrors.taxAmount = t.validation.invalidAmount;
-    }
-
-    if (formData.totalAmount.trim() && !isValidAmount(formData.totalAmount)) {
-      nextErrors.totalAmount = t.validation.invalidAmount;
+    if (formData.status === "cancelled" && !formData.cancellationReason.trim()) {
+      nextErrors.cancellationReason = t.validationCancellation;
     }
 
     setErrors(nextErrors);
+
     return Object.keys(nextErrors).length === 0;
   }
 
-  async function handleSaveDraft() {
-    const valid = validateForm();
-
-    if (!valid) {
-      toast.error(t.validation.required);
-      return;
-    }
-
-    toast.success(t.draftTitle, {
-      description: t.draftText,
+  function resetForm() {
+    setFormData({
+      customerId: "",
+      productId: "",
+      status: "pending",
+      paymentStatus: "unpaid",
+      fulfillmentStatus: "not_started",
+      source: "admin",
+      quantity: "1",
+      unitPrice: "0.00",
+      discountAmount: "0.00",
+      taxAmount: "0.00",
+      amountPaid: "0.00",
+      issueReference: "",
+      customerNotes: "",
+      internalNotes: "",
+      cancellationReason: "",
     });
+
+    setErrors({});
   }
 
-  async function handleSubmit() {
-    const valid = validateForm();
+  async function loadOptions() {
+    try {
+      setIsLoadingOptions(true);
 
-    if (!valid) {
-      toast.error(t.validation.required);
+      const [customersResult, productsResult] = await Promise.all([
+        apiGet<ApiListResponse>(API_PATHS.customers.list, {
+          page_size: 100,
+        }),
+        apiGet<ApiListResponse>(API_PATHS.products.list, {
+          page_size: 100,
+        }),
+      ]);
+
+      if (!customersResult.ok) {
+        toast.error(t.loadCustomersError);
+      } else {
+        setCustomers(normalizeApiList(customersResult.data).map(normalizeCustomer));
+      }
+
+      if (!productsResult.ok) {
+        toast.error(t.loadProductsError);
+      } else {
+        setProducts(normalizeApiList(productsResult.data).map(normalizeProduct));
+      }
+    } catch (error) {
+      console.error("Failed to load order options:", error);
+      toast.error(t.loadCustomersError);
+      toast.error(t.loadProductsError);
+    } finally {
+      setIsLoadingOptions(false);
+    }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!validateForm()) {
       return;
     }
 
     try {
       setIsSubmitting(true);
 
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      const payload = {
+        customer_id: formData.customerId,
+        product_id: formData.productId,
+        status: formData.status,
+        payment_status: formData.paymentStatus,
+        fulfillment_status: formData.fulfillmentStatus,
+        source: formData.source,
+        quantity: calculations.quantity,
+        unit_price: calculations.unitPrice.toFixed(2),
+        discount_amount: calculations.discount.toFixed(2),
+        tax_amount: calculations.tax.toFixed(2),
+        amount_paid: calculations.paid.toFixed(2),
+        issue_reference: formData.issueReference.trim(),
+        customer_notes: formData.customerNotes.trim(),
+        internal_notes: formData.internalNotes.trim(),
+        cancellation_reason: formData.cancellationReason.trim(),
+      };
 
-      toast.success(t.successTitle, {
-        description: t.successText,
-      });
-    } catch {
-      toast.error(isArabic ? "حدث خطأ غير متوقع" : "Unexpected error occurred");
+      const result = await apiPost<OrderCreateResponse>(
+        API_PATHS.orders.list,
+        payload,
+      );
+
+      if (!result.ok) {
+        throw new Error(result.message || t.createError);
+      }
+
+      toast.success(t.createSuccess);
+
+      const createdId = result.data?.data?.id;
+
+      if (createdId) {
+        router.push(`/system/orders/${createdId}`);
+        return;
+      }
+
+      router.push("/system/orders/list");
+    } catch (error) {
+      console.error("Create order error:", error);
+      toast.error(error instanceof Error ? error.message : t.createError);
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  useEffect(() => {
+    const syncLocale = () => {
+      const nextLocale = readLocale();
+
+      applyDocumentLocale(nextLocale);
+      setLocale(nextLocale);
+    };
+
+    const syncAfterPaint = () => {
+      syncLocale();
+
+      window.setTimeout(() => {
+        syncLocale();
+      }, 0);
+    };
+
+    syncAfterPaint();
+
+    window.addEventListener("primey-locale-changed", syncAfterPaint);
+    window.addEventListener("storage", syncAfterPaint);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", syncAfterPaint);
+      window.removeEventListener("storage", syncAfterPaint);
+    };
+  }, []);
+
+  useEffect(() => {
+    loadOptions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locale]);
+
+  useEffect(() => {
+    if (!selectedProduct) return;
+
+    setFormData((current) => {
+      if (toNumber(current.unitPrice) > 0) return current;
+
+      return {
+        ...current,
+        unitPrice: selectedProduct.effectivePrice.toFixed(2),
+      };
+    });
+  }, [selectedProduct]);
+
   return (
-    <div className="space-y-6">
-      <Card className="overflow-hidden rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-        <CardContent className="p-0">
-          <div className="grid gap-0 xl:grid-cols-[1.3fr_0.7fr]">
-            <div className="space-y-6 p-6 md:p-8">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary" className="rounded-full px-3 py-1">
-                  {t.heroBadge1}
-                </Badge>
-                <Badge className="rounded-full px-3 py-1">{t.heroBadge2}</Badge>
-              </div>
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-4"
+      dir={isArabic ? "rtl" : "ltr"}
+    >
+      {/* Header */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Button
+              asChild
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-xl"
+            >
+              <Link href="/system/orders">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Link>
+            </Button>
 
-              <div className="space-y-3">
-                <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
-                  {t.pageTitle}
-                </h1>
-                <p className="text-muted-foreground max-w-3xl leading-8">
-                  {t.pageSubtitle}
-                </p>
-              </div>
+            <Badge variant="secondary" className="rounded-full">
+              <Sparkles className="h-3.5 w-3.5" />
+              {t.heroBadge1}
+            </Badge>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Link href="/system/orders" className="w-full sm:w-auto">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full rounded-2xl sm:w-auto"
-                  >
-                    <ArrowLeft className="ms-2 h-4 w-4" />
-                    {t.backToOrders}
-                  </Button>
-                </Link>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full rounded-2xl sm:w-auto"
-                  onClick={handleSaveDraft}
-                >
-                  <Save className="ms-2 h-4 w-4" />
-                  {t.saveDraft}
-                </Button>
-
-                <Button
-                  type="button"
-                  className="w-full rounded-2xl sm:w-auto"
-                  onClick={handleSubmit}
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="ms-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="ms-2 h-4 w-4" />
-                  )}
-                  {t.createOrder}
-                </Button>
-              </div>
-            </div>
-
-            <Card className="rounded-none border-0 bg-transparent shadow-none">
-              <CardHeader className="pb-3 pt-6 md:pt-8">
-                <CardTitle className="text-base">{t.createSummary}</CardTitle>
-                <CardDescription>
-                  {isArabic
-                    ? "ملخص سريع عن جاهزية النموذج الحالي."
-                    : "Quick summary about the current form readiness."}
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-3 px-6 pb-6 md:px-8 md:pb-8">
-                <div className="rounded-2xl border border-white/20 bg-white/80 p-4 dark:border-white/10 dark:bg-white/5">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-sm font-semibold">{t.requiredFields}</p>
-                    <Badge variant="secondary" className="rounded-full">
-                      {completionStats.filled}/{completionStats.total}
-                    </Badge>
-                  </div>
-                  <p className="text-muted-foreground text-xs leading-6">
-                    {isArabic
-                      ? "يشمل ذلك رقم الطلب، العميل، المنتج، التواريخ، والحقول المالية القابلة للربط لاحقًا."
-                      : "This includes order number, customer, product, dates, and financial fields that will later be connected."}
-                  </p>
-                </div>
-
-                {t.summaryItems.map((item) => {
-                  const Icon = item.icon;
-
-                  return (
-                    <div
-                      key={item.label}
-                      className="flex items-start gap-3 rounded-2xl border border-white/20 bg-white/80 p-4 dark:border-white/10 dark:bg-white/5"
-                    >
-                      <div className="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl">
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-muted-foreground text-xs">
-                          {item.label}
-                        </p>
-                        <p className="mt-1 text-sm font-semibold">{item.value}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
+            <Badge variant="outline" className="rounded-full">
+              <BadgeCheck className="h-3.5 w-3.5" />
+              {t.heroBadge2}
+            </Badge>
           </div>
-        </CardContent>
-      </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-        <div className="space-y-6">
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.basicInfo}</CardTitle>
-              <CardDescription>{t.sectionDescriptions.basicInfo}</CardDescription>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+            {t.pageTitle}
+          </h1>
+          <p className="text-muted-foreground mt-1 max-w-3xl text-sm leading-6">
+            {t.pageSubtitle}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Button
+            asChild
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-xl sm:w-auto"
+          >
+            <Link href="/system/orders/list">
+              <ShoppingBag className="h-4 w-4" />
+              {t.ordersList}
+            </Link>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={resetForm}
+            disabled={isSubmitting}
+          >
+            <RotateCcw className="h-4 w-4" />
+            {t.reset}
+          </Button>
+
+          <Button
+            type="submit"
+            className="h-10 rounded-xl"
+            disabled={isSubmitting || isLoadingOptions}
+          >
+            {isSubmitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            {isSubmitting ? t.saving : t.save}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.4fr_0.6fr]">
+        <div className="space-y-4">
+          {/* Customer + Product */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <div className="flex items-start gap-3">
+                <SectionIcon icon={UserRound} />
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.customerProductSection}
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    {t.customerProductDesc}
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
 
-            <CardContent className="grid gap-5 md:grid-cols-2">
+            <CardContent className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="orderNumber">{t.orderNumber}</Label>
-                <Input
-                  id="orderNumber"
-                  value={formData.orderNumber}
-                  onChange={(e) => setField("orderNumber", e.target.value)}
-                  placeholder={t.placeholders.orderNumber}
-                  className="rounded-2xl"
-                />
-                {errors.orderNumber ? (
-                  <p className="text-sm text-red-500">{errors.orderNumber}</p>
-                ) : null}
+                <Label htmlFor="customerId">{t.customer}</Label>
+                <select
+                  id="customerId"
+                  name="customerId"
+                  value={formData.customerId}
+                  onChange={handleInputChange}
+                  disabled={isLoadingOptions}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">
+                    {isLoadingOptions ? t.loading : t.selectCustomer}
+                  </option>
+
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={String(customer.id)}>
+                      {customer.name}
+                      {customer.phone ? ` - ${customer.phone}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <FieldError message={errors.customerId} />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="productName">{t.productName}</Label>
-                <Input
-                  id="productName"
-                  value={formData.productName}
-                  onChange={(e) => setField("productName", e.target.value)}
-                  placeholder={t.placeholders.productName}
-                  className="rounded-2xl"
-                />
-                {errors.productName ? (
-                  <p className="text-sm text-red-500">{errors.productName}</p>
-                ) : null}
-              </div>
+                <Label htmlFor="productId">{t.product}</Label>
+                <select
+                  id="productId"
+                  name="productId"
+                  value={formData.productId}
+                  onChange={(event) => {
+                    const productId = event.target.value;
+                    const product = products.find(
+                      (item) => String(item.id) === productId,
+                    );
 
-              <div className="space-y-2">
-                <Label htmlFor="productCode">{t.productCode}</Label>
-                <Input
-                  id="productCode"
-                  value={formData.productCode}
-                  onChange={(e) => setField("productCode", e.target.value)}
-                  placeholder={t.placeholders.productCode}
-                  className="rounded-2xl"
-                />
-              </div>
+                    setFormData((current) => ({
+                      ...current,
+                      productId,
+                      unitPrice: product
+                        ? product.effectivePrice.toFixed(2)
+                        : current.unitPrice,
+                    }));
 
-              <div className="space-y-2">
-                <Label htmlFor="contractNumber">{t.contractNumber}</Label>
-                <Input
-                  id="contractNumber"
-                  value={formData.contractNumber}
-                  onChange={(e) => setField("contractNumber", e.target.value)}
-                  placeholder={t.placeholders.contractNumber}
-                  className="rounded-2xl"
-                />
+                    setErrors((current) => ({
+                      ...current,
+                      productId: undefined,
+                    }));
+                  }}
+                  disabled={isLoadingOptions}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">
+                    {isLoadingOptions ? t.loading : t.selectProduct}
+                  </option>
+
+                  {products.map((product) => (
+                    <option key={product.id} value={String(product.id)}>
+                      {product.name}
+                      {product.code ? ` - ${product.code}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <FieldError message={errors.productId} />
               </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.relationsInfo}</CardTitle>
-              <CardDescription>{t.sectionDescriptions.relationsInfo}</CardDescription>
+          {/* Status */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <div className="flex items-start gap-3">
+                <SectionIcon icon={ShieldCheck} />
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.orderStatusSection}
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    {t.orderStatusDesc}
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
 
-            <CardContent className="grid gap-5 md:grid-cols-2">
+            <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div className="space-y-2">
-                <Label htmlFor="customerName">{t.customerName}</Label>
-                <Input
-                  id="customerName"
-                  value={formData.customerName}
-                  onChange={(e) => setField("customerName", e.target.value)}
-                  placeholder={t.placeholders.customerName}
-                  className="rounded-2xl"
-                />
-                {errors.customerName ? (
-                  <p className="text-sm text-red-500">{errors.customerName}</p>
-                ) : null}
+                <Label htmlFor="source">{t.source}</Label>
+                <select
+                  id="source"
+                  name="source"
+                  value={formData.source}
+                  onChange={handleInputChange}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {(Object.keys(t.sourceLabels) as OrderSource[]).map(
+                    (source) => (
+                      <option key={source} value={source}>
+                        {t.sourceLabels[source]}
+                      </option>
+                    ),
+                  )}
+                </select>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="customerCode">{t.customerCode}</Label>
-                <Input
-                  id="customerCode"
-                  value={formData.customerCode}
-                  onChange={(e) => setField("customerCode", e.target.value)}
-                  placeholder={t.placeholders.customerCode}
-                  className="rounded-2xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="centerName">{t.centerName}</Label>
-                <Input
-                  id="centerName"
-                  value={formData.centerName}
-                  onChange={(e) => setField("centerName", e.target.value)}
-                  placeholder={t.placeholders.centerName}
-                  className="rounded-2xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="providerName">{t.providerName}</Label>
-                <Input
-                  id="providerName"
-                  value={formData.providerName}
-                  onChange={(e) => setField("providerName", e.target.value)}
-                  placeholder={t.placeholders.providerName}
-                  className="rounded-2xl"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.timelineInfo}</CardTitle>
-              <CardDescription>{t.sectionDescriptions.timelineInfo}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-5 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="orderDate">{t.orderDate}</Label>
-                <Input
-                  id="orderDate"
-                  type="date"
-                  value={formData.orderDate}
-                  onChange={(e) => setField("orderDate", e.target.value)}
-                  className="rounded-2xl"
-                />
-                {errors.orderDate ? (
-                  <p className="text-sm text-red-500">{errors.orderDate}</p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="deliveryDate">{t.deliveryDate}</Label>
-                <Input
-                  id="deliveryDate"
-                  type="date"
-                  value={formData.deliveryDate}
-                  onChange={(e) => setField("deliveryDate", e.target.value)}
-                  className="rounded-2xl"
-                />
-                {errors.deliveryDate ? (
-                  <p className="text-sm text-red-500">{errors.deliveryDate}</p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="orderStatus">{t.orderStatus}</Label>
-                <Input
-                  id="orderStatus"
-                  value={formData.orderStatus}
-                  onChange={(e) => setField("orderStatus", e.target.value)}
-                  placeholder={t.placeholders.orderStatus}
-                  className="rounded-2xl"
-                />
+                <Label htmlFor="status">{t.status}</Label>
+                <select
+                  id="status"
+                  name="status"
+                  value={formData.status}
+                  onChange={handleInputChange}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {(Object.keys(t.statusLabels) as OrderStatus[]).map(
+                    (status) => (
+                      <option key={status} value={status}>
+                        {t.statusLabels[status]}
+                      </option>
+                    ),
+                  )}
+                </select>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="paymentStatus">{t.paymentStatus}</Label>
-                <Input
+                <select
                   id="paymentStatus"
+                  name="paymentStatus"
                   value={formData.paymentStatus}
-                  onChange={(e) => setField("paymentStatus", e.target.value)}
-                  placeholder={t.placeholders.paymentStatus}
-                  className="rounded-2xl"
-                />
+                  onChange={handleInputChange}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {(Object.keys(t.paymentLabels) as PaymentStatus[]).map(
+                    (status) => (
+                      <option key={status} value={status}>
+                        {t.paymentLabels[status]}
+                      </option>
+                    ),
+                  )}
+                </select>
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="fulfillmentStatus">{t.fulfillmentStatus}</Label>
+                <select
+                  id="fulfillmentStatus"
+                  name="fulfillmentStatus"
+                  value={formData.fulfillmentStatus}
+                  onChange={handleInputChange}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {(
+                    Object.keys(t.fulfillmentLabels) as FulfillmentStatus[]
+                  ).map((status) => (
+                    <option key={status} value={status}>
+                      {t.fulfillmentLabels[status]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {formData.status === "cancelled" ? (
+                <div className="space-y-2 md:col-span-2 xl:col-span-4">
+                  <Label htmlFor="cancellationReason">
+                    {t.cancellationReason}
+                  </Label>
+                  <Textarea
+                    id="cancellationReason"
+                    name="cancellationReason"
+                    value={formData.cancellationReason}
+                    onChange={handleInputChange}
+                    className="min-h-24 rounded-xl"
+                  />
+                  <FieldError message={errors.cancellationReason} />
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.financialInfo}</CardTitle>
-              <CardDescription>{t.sectionDescriptions.financialInfo}</CardDescription>
+          {/* Amounts */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <div className="flex items-start gap-3">
+                <SectionIcon icon={Calculator} />
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.amountsSection}
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    {t.amountsDesc}
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
 
-            <CardContent className="grid gap-5 md:grid-cols-2">
+            <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               <div className="space-y-2">
                 <Label htmlFor="quantity">{t.quantity}</Label>
                 <Input
                   id="quantity"
+                  name="quantity"
+                  type="number"
+                  min="1"
+                  step="1"
                   value={formData.quantity}
-                  onChange={(e) => setField("quantity", e.target.value)}
-                  placeholder={t.placeholders.quantity}
-                  className="rounded-2xl"
+                  onChange={handleInputChange}
+                  className="rounded-xl"
                 />
-                {errors.quantity ? (
-                  <p className="text-sm text-red-500">{errors.quantity}</p>
-                ) : null}
+                <FieldError message={errors.quantity} />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="unitPrice">{t.unitPrice}</Label>
                 <Input
                   id="unitPrice"
+                  name="unitPrice"
+                  type="number"
+                  min="0"
+                  step="0.01"
                   value={formData.unitPrice}
-                  onChange={(e) => setField("unitPrice", e.target.value)}
-                  placeholder={t.placeholders.unitPrice}
-                  className="rounded-2xl"
+                  onChange={handleInputChange}
+                  className="rounded-xl"
                 />
-                {errors.unitPrice ? (
-                  <p className="text-sm text-red-500">{errors.unitPrice}</p>
-                ) : null}
+                <FieldError message={errors.unitPrice} />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="discountAmount">{t.discountAmount}</Label>
                 <Input
                   id="discountAmount"
+                  name="discountAmount"
+                  type="number"
+                  min="0"
+                  step="0.01"
                   value={formData.discountAmount}
-                  onChange={(e) => setField("discountAmount", e.target.value)}
-                  placeholder={t.placeholders.discountAmount}
-                  className="rounded-2xl"
+                  onChange={handleInputChange}
+                  className="rounded-xl"
                 />
-                {errors.discountAmount ? (
-                  <p className="text-sm text-red-500">{errors.discountAmount}</p>
-                ) : null}
+                <FieldError message={errors.discountAmount} />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="taxAmount">{t.taxAmount}</Label>
                 <Input
                   id="taxAmount"
+                  name="taxAmount"
+                  type="number"
+                  min="0"
+                  step="0.01"
                   value={formData.taxAmount}
-                  onChange={(e) => setField("taxAmount", e.target.value)}
-                  placeholder={t.placeholders.taxAmount}
-                  className="rounded-2xl"
+                  onChange={handleInputChange}
+                  className="rounded-xl"
                 />
-                {errors.taxAmount ? (
-                  <p className="text-sm text-red-500">{errors.taxAmount}</p>
-                ) : null}
+                <FieldError message={errors.taxAmount} />
               </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="totalAmount">{t.totalAmount}</Label>
+              <div className="space-y-2">
+                <Label htmlFor="amountPaid">{t.amountPaid}</Label>
                 <Input
-                  id="totalAmount"
-                  value={formData.totalAmount}
-                  onChange={(e) => setField("totalAmount", e.target.value)}
-                  placeholder={t.placeholders.totalAmount}
-                  className="rounded-2xl"
+                  id="amountPaid"
+                  name="amountPaid"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={formData.amountPaid}
+                  onChange={handleInputChange}
+                  className="rounded-xl"
                 />
-                {errors.totalAmount ? (
-                  <p className="text-sm text-red-500">{errors.totalAmount}</p>
-                ) : null}
+                <FieldError message={errors.amountPaid} />
               </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.deliveryInfo}</CardTitle>
-              <CardDescription>{t.sectionDescriptions.deliveryInfo}</CardDescription>
+          {/* Notes */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <div className="flex items-start gap-3">
+                <SectionIcon icon={FileText} />
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.notesSection}
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    {t.notesDesc}
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
 
-            <CardContent className="grid gap-5">
+            <CardContent className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="deliveryMethod">{t.deliveryMethod}</Label>
+                <Label htmlFor="issueReference">
+                  {t.issueReference}{" "}
+                  <span className="text-muted-foreground">({t.optional})</span>
+                </Label>
                 <Input
-                  id="deliveryMethod"
-                  value={formData.deliveryMethod}
-                  onChange={(e) => setField("deliveryMethod", e.target.value)}
-                  placeholder={t.placeholders.deliveryMethod}
-                  className="rounded-2xl"
+                  id="issueReference"
+                  name="issueReference"
+                  value={formData.issueReference}
+                  onChange={handleInputChange}
+                  className="rounded-xl"
+                />
+              </div>
+
+              <div className="hidden md:block" />
+
+              <div className="space-y-2">
+                <Label htmlFor="customerNotes">
+                  {t.customerNotes}{" "}
+                  <span className="text-muted-foreground">({t.optional})</span>
+                </Label>
+                <Textarea
+                  id="customerNotes"
+                  name="customerNotes"
+                  value={formData.customerNotes}
+                  onChange={handleInputChange}
+                  className="min-h-28 rounded-xl"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="deliveryAddress">{t.deliveryAddress}</Label>
+                <Label htmlFor="internalNotes">
+                  {t.internalNotes}{" "}
+                  <span className="text-muted-foreground">({t.optional})</span>
+                </Label>
                 <Textarea
-                  id="deliveryAddress"
-                  value={formData.deliveryAddress}
-                  onChange={(e) => setField("deliveryAddress", e.target.value)}
-                  placeholder={t.placeholders.deliveryAddress}
-                  className="min-h-[110px] rounded-2xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="notes">{t.notes}</Label>
-                <Textarea
-                  id="notes"
-                  value={formData.notes}
-                  onChange={(e) => setField("notes", e.target.value)}
-                  placeholder={t.placeholders.notes}
-                  className="min-h-[120px] rounded-2xl"
+                  id="internalNotes"
+                  name="internalNotes"
+                  value={formData.internalNotes}
+                  onChange={handleInputChange}
+                  className="min-h-28 rounded-xl"
                 />
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <div className="space-y-6">
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.quickGuide}</CardTitle>
-              <CardDescription>
-                {isArabic
-                  ? "ملاحظات تشغيلية سريعة قبل ربط الصفحة فعليًا."
-                  : "Quick operational notes before connecting the page for real."}
-              </CardDescription>
+        {/* Summary */}
+        <div className="space-y-4">
+          <Card className="sticky top-4 rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <div className="flex items-start gap-3">
+                <SectionIcon icon={ShoppingBag} />
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.summarySection}
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    {t.summaryDesc}
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
 
-            <CardContent className="space-y-3">
-              {t.tips.map((tip, index) => (
-                <div
-                  key={index}
-                  className="flex items-start gap-3 rounded-2xl border border-white/20 bg-white/80 p-4 dark:border-white/10 dark:bg-white/5"
-                >
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl">
-                    {index === 0 ? (
-                      <CheckCircle2 className="h-4 w-4" />
-                    ) : index === 1 ? (
-                      <Tag className="h-4 w-4" />
-                    ) : (
-                      <Sparkles className="h-4 w-4" />
-                    )}
-                  </div>
-                  <p className="text-sm leading-7">{tip}</p>
+            <CardContent className="space-y-4">
+              <div className="rounded-xl border bg-background p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <UserRound className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-semibold">{t.previewCustomer}</p>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>
-                {isArabic ? "مؤشرات النموذج" : "Form Indicators"}
-              </CardTitle>
-              <CardDescription>
-                {isArabic
-                  ? "متابعة سريعة للحقول الرئيسية داخل الصفحة."
-                  : "Quick tracking for the main fields in this page."}
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                    <ShoppingCart className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">
-                      {isArabic ? "اكتمال النموذج" : "Form completion"}
-                    </p>
-                    <p className="text-sm font-semibold">
-                      {completionStats.percent}%
-                    </p>
-                  </div>
-                </div>
-                <Badge variant="secondary" className="rounded-full">
-                  {completionStats.filled}/{completionStats.total}
-                </Badge>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                    <UserRound className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">{t.customerName}</p>
-                    <p className="text-sm font-semibold">
-                      {formData.customerName || (isArabic ? "غير مدخل" : "Not entered")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                    <Package className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">{t.productName}</p>
-                    <p className="text-sm font-semibold">
-                      {formData.productName || (isArabic ? "غير مدخل" : "Not entered")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                    <CalendarRange className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">{t.orderDate}</p>
-                    <p className="text-sm font-semibold">
-                      {formData.orderDate || (isArabic ? "غير مدخل" : "Not entered")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                    <Truck className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">{t.deliveryMethod}</p>
-                    <p className="text-sm font-semibold">
-                      {formData.deliveryMethod || (isArabic ? "غير مدخل" : "Not entered")}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-dashed border-white/30 bg-black/5 p-4 dark:border-white/10 dark:bg-white/5">
-                <p className="text-sm leading-7">
-                  {isArabic
-                    ? "تم اعتماد الصفحة لتعمل ضمن shell النظام الرسمي وباستخدام UI الداخلي فقط. عند ربط الـ API لاحقًا سيتم فقط توصيل الحفظ الفعلي دون تغيير التصميم."
-                    : "This page is aligned with the official system shell and uses only the internal UI. When the API is connected later, only the save action will be wired without changing the design."}
+                <p className="text-sm font-medium">
+                  {selectedCustomer?.name || t.selectCustomer}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedCustomer?.phone || selectedCustomer?.email || "-"}
                 </p>
               </div>
-            </CardContent>
-          </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{isArabic ? "روابط سريعة" : "Quick Links"}</CardTitle>
-              <CardDescription>
-                {isArabic
-                  ? "تنقل سريع داخل نفس موديول الطلبات."
-                  : "Quick navigation within the orders module."}
-              </CardDescription>
-            </CardHeader>
+              <div className="rounded-xl border bg-background p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Package className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-semibold">{t.previewProduct}</p>
+                </div>
 
-            <CardContent className="space-y-3">
-              <Link href="/system/orders" className="block">
-                <Button variant="outline" className="w-full rounded-2xl">
-                  <ArrowLeft className="ms-2 h-4 w-4" />
-                  {t.backToOrders}
-                </Button>
-              </Link>
+                <p className="text-sm font-medium">
+                  {selectedProduct?.name || t.selectProduct}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedProduct?.code || selectedProduct?.productType || "-"}
+                </p>
+              </div>
 
-              <Link href="/system/orders" className="block">
-                <Button variant="outline" className="w-full rounded-2xl">
-                  <FileText className="ms-2 h-4 w-4" />
-                  {isArabic ? "قائمة الطلبات" : "Orders List"}
-                </Button>
-              </Link>
+              <div className="rounded-xl border bg-background p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Wallet className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-semibold">{t.previewFinancial}</p>
+                </div>
 
-              <Link href="/system" className="block">
-                <Button variant="outline" className="w-full rounded-2xl">
-                  <Building2 className="ms-2 h-4 w-4" />
-                  {isArabic
-                    ? "العودة إلى لوحة النظام"
-                    : "Back to System Dashboard"}
-                </Button>
-              </Link>
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">
+                      {t.subtotalAmount}
+                    </span>
+                    <CurrencyAmount value={calculations.subtotal} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">
+                      {t.discountAmount}
+                    </span>
+                    <CurrencyAmount value={calculations.discount} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">{t.taxAmount}</span>
+                    <CurrencyAmount value={calculations.tax} />
+                  </div>
+
+                  <div className="border-t pt-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold">{t.totalAmount}</span>
+                      <CurrencyAmount value={calculations.total} />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">
+                      {t.amountPaid}
+                    </span>
+                    <CurrencyAmount value={calculations.paid} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">
+                      {t.remainingAmount}
+                    </span>
+                    <CurrencyAmount value={calculations.remaining} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border bg-background p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Truck className="h-4 w-4 text-muted-foreground" />
+                  <p className="font-semibold">{t.previewOperational}</p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="secondary" className="rounded-full">
+                    {t.sourceLabels[formData.source]}
+                  </Badge>
+                  <Badge variant="outline" className="rounded-full">
+                    {t.statusLabels[formData.status]}
+                  </Badge>
+                  <Badge variant="outline" className="rounded-full">
+                    <CreditCard className="h-3.5 w-3.5" />
+                    {t.paymentLabels[formData.paymentStatus]}
+                  </Badge>
+                  <Badge variant="outline" className="rounded-full">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {t.fulfillmentLabels[formData.fulfillmentStatus]}
+                  </Badge>
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                className="h-11 w-full rounded-xl"
+                disabled={isSubmitting || isLoadingOptions}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                {isSubmitting ? t.saving : t.save}
+              </Button>
             </CardContent>
           </Card>
         </div>
       </div>
-    </div>
+    </form>
   );
 }

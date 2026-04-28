@@ -1,23 +1,32 @@
+"use client";
+
+import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Activity,
-  ArrowLeft,
-  BadgeCheck,
-  BookOpenText,
+  BarChart3,
+  BookOpenCheck,
+  Building2,
   Calculator,
-  Eye,
-  FileBarChart2,
-  FileSpreadsheet,
+  CheckCircle2,
+  Download,
+  FileText,
   Filter,
   Landmark,
-  LineChart,
+  Layers3,
+  ListChecks,
+  Loader2,
+  PieChart,
   Plus,
-  Scale,
+  ReceiptText,
+  RefreshCcw,
   Search,
   ShieldCheck,
-  Sparkles,
-  Wallet,
+  TrendingDown,
+  TrendingUp,
+  WalletCards,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,581 +38,1076 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+
+/* ============================================================
+   📂 app/system/accounting/page.tsx
+   🧠 Primey Care | Accounting Module Home
+   ------------------------------------------------------------
+   ✅ نفس تنسيق صفحة المراكز
+   ✅ نفس توزيع المساحات والكروت
+   ✅ بيانات المحاسبة من API الحقيقي
+   ✅ دعم عربي / إنجليزي
+   ✅ أرقام إنجليزية دائمًا
+   ✅ رمز العملة الرسمي
+============================================================ */
 
 type AppLocale = "ar" | "en";
 
-function detectLocale(): AppLocale {
-  return "ar";
+type ApiEnvelope<T> = {
+  ok?: boolean;
+  report_code?: string;
+  data?: T;
+  message?: string;
+};
+
+type TrialBalancePayload = {
+  currency: string;
+  date_from: string | null;
+  date_to: string | null;
+  total_accounts: number;
+  total_debit: string;
+  total_credit: string;
+  rows: Array<{
+    account_id: number;
+    account_code: string;
+    account_name: string;
+    account_type: string;
+    is_group: boolean;
+    total_debit: string;
+    total_credit: string;
+    net_debit: string;
+    net_credit: string;
+  }>;
+};
+
+type ProfitLossPayload = {
+  currency: string;
+  date_from: string | null;
+  date_to: string | null;
+  revenue: {
+    title: string;
+    total_amount: string;
+    rows: unknown[];
+  };
+  expenses: {
+    title: string;
+    total_amount: string;
+    rows: unknown[];
+  };
+  net_profit: string;
+};
+
+type BalanceSheetPayload = {
+  currency: string;
+  as_of_date: string | null;
+  assets: {
+    title: string;
+    total_amount: string;
+    rows: unknown[];
+  };
+  liabilities: {
+    title: string;
+    total_amount: string;
+    rows: unknown[];
+  };
+  equity: {
+    title: string;
+    total_amount: string;
+    rows: unknown[];
+  };
+  total_liabilities_and_equity: string;
+  is_balanced: boolean;
+};
+
+type JournalEntry = {
+  id: number;
+  entry_number: string;
+  entry_date: string | null;
+  status: string;
+  posting_source: string;
+  reference: string;
+  external_reference: string;
+  description: string;
+  notes: string;
+  currency: string;
+  total_debit: string;
+  total_credit: string;
+  is_balanced: boolean;
+  posted_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type JournalsPayload = {
+  filters: Record<string, unknown>;
+  summary: {
+    total_entries: number;
+    total_debit: string;
+    total_credit: string;
+    balanced_entries_count: number;
+    unbalanced_entries_count: number;
+    is_balanced_total: boolean;
+  };
+  pagination: {
+    page: number;
+    page_size: number;
+    total_pages: number;
+    total_items: number;
+    has_next: boolean;
+    has_previous: boolean;
+    next_page: number | null;
+    previous_page: number | null;
+  };
+  results: JournalEntry[];
+};
+
+type AccountingState = {
+  trialBalance: TrialBalancePayload | null;
+  profitLoss: ProfitLossPayload | null;
+  balanceSheet: BalanceSheetPayload | null;
+  journals: JournalsPayload | null;
+};
+
+const CURRENCY_ICON_PATH = "/currency/sar.svg";
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://127.0.0.1:8000";
+
+/* ============================================================
+   Locale
+============================================================ */
+
+function readStoredLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
+
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
+
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
+
+    return document.documentElement.lang === "en" ? "en" : "ar";
+  } catch {
+    return "ar";
+  }
 }
 
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
+function applyLocale(locale: AppLocale) {
+  try {
+    if (typeof document === "undefined") return;
+
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch {
+    // ignore
+  }
+}
+
+/* ============================================================
+   Helpers
+============================================================ */
+
+function toNumber(value: string | number | null | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatNumber(value: string | number | null | undefined): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(toNumber(value));
+}
+
+function formatMoney(value: string | number | null | undefined): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(toNumber(value));
+}
+
+function formatPercent(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function formatDate(value: string | null | undefined, locale: AppLocale): string {
+  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  }).format(date);
+}
+
+function getApiUrl(path: string): string {
+  const cleanBase = API_BASE_URL.replace(/\/$/, "");
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `${cleanBase}${cleanPath}`;
+}
+
+async function fetchAccountingData<T>(path: string): Promise<T> {
+  const response = await fetch(getApiUrl(path), {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const payload = (await response.json()) as ApiEnvelope<T>;
+
+  if (payload.ok === false) {
+    throw new Error(payload.message || "Accounting request failed");
+  }
+
+  if (!payload.data) {
+    throw new Error("Accounting response does not contain data");
+  }
+
+  return payload.data;
+}
+
+function openExport(path: string) {
+  if (typeof window === "undefined") return;
+  window.open(getApiUrl(path), "_blank", "noopener,noreferrer");
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
+
+function getText(locale: AppLocale) {
+  const ar = locale === "ar";
 
   return {
-    title: isArabic ? "المحاسبة والتقارير المالية" : "Accounting & Financial Reports",
-    subtitle: isArabic
-      ? "هذه الصفحة تمثل الواجهة الإدارية الرئيسية لمسار المحاسبة داخل Primey Care، وتشمل الملخص العام، التهيئة الأولية للعرض، والوصول السريع إلى القيود والتقارير والسجلات المالية."
-      : "This page is the main administrative interface for the accounting flow inside Primey Care, including overview, initial layout, and quick access to journals, reports, and financial records.",
+    pageTitle: ar ? "المحاسبة" : "Accounting",
+    pageSubtitle: ar
+      ? "متابعة القيود اليومية، دليل الحسابات، دفتر الأستاذ، والتقارير المالية من بيانات حقيقية."
+      : "Monitor journals, chart of accounts, ledger, and financial reports from live data.",
 
-    heroBadge1: isArabic ? "System Module" : "System Module",
-    heroBadge2: isArabic ? "Accounting" : "Accounting",
+    refresh: ar ? "تحديث" : "Refresh",
+    reports: ar ? "التقارير" : "Reports",
+    export: ar ? "تصدير" : "Export",
+    createEntry: ar ? "إنشاء قيد" : "Create Entry",
 
-    addJournal: isArabic ? "إضافة قيد جديد" : "Add New Journal",
-    accountingReports: isArabic ? "التقارير المحاسبية" : "Accounting Reports",
+    accountingStatus: ar ? "حالة المحاسبة" : "Accounting Status",
+    accountingStatusDesc: ar
+      ? "تحليل سريع لحالة القيود والتوازن المحاسبي."
+      : "Quick analysis of journals and accounting balance.",
 
-    quickStats: isArabic ? "ملخص سريع" : "Quick Summary",
-    operationalOverview: isArabic ? "نظرة تشغيلية" : "Operational Overview",
-    searchPlaceholder: isArabic
-      ? "ابحث بالحساب أو القيد أو التقرير..."
-      : "Search by account, journal, or report...",
-    search: isArabic ? "بحث" : "Search",
-    filter: isArabic ? "تصفية" : "Filter",
+    featuredReports: ar ? "التقارير المهمة" : "Featured Reports",
+    featuredReportsDesc: ar
+      ? "عرض مختصر لأهم التقارير المالية الحالية."
+      : "A compact view of key financial reports.",
 
-    operationalCards: isArabic ? "بطاقات تشغيلية" : "Operational Cards",
-    quickActions: isArabic ? "إجراءات سريعة" : "Quick Actions",
-    currentStatus: isArabic ? "الحالة الحالية" : "Current Status",
-    nextStep: isArabic ? "الخطوة التالية" : "Next Step",
+    total: ar ? "الإجمالي" : "Total",
+    posted: ar ? "مرحل" : "Posted",
+    unbalanced: ar ? "غير متوازن" : "Unbalanced",
+    accounts: ar ? "الحسابات" : "Accounts",
 
-    nextStepText: isArabic
-      ? "الأساس البصري لصفحة المحاسبة أصبح جاهزًا تحت مساحة النظام الرسمية. الخطوة الصحيحة التالية هي بناء صفحات القيود، دفتر الأستاذ، ميزان المراجعة، الأرباح والخسائر، والمركز المالي وربطها لاحقًا بالـ APIs الحالية."
-      : "The visual foundation for accounting is now ready under the official system workspace. The correct next step is to build pages for journals, general ledger, trial balance, profit & loss, and balance sheet, then connect them to the current APIs.",
+    searchPlaceholder: ar ? "ابحث في القيود..." : "Search in journals...",
+    settings: ar ? "الأعمدة" : "Columns",
 
-    stats: [
-      {
-        title: isArabic ? "إجمالي القيود" : "Total Journal Entries",
-        value: "0",
-        note: isArabic ? "سيظهر العدد الفعلي بعد الربط" : "Live count after integration",
-        icon: BookOpenText,
-      },
-      {
-        title: isArabic ? "الحسابات النشطة" : "Active Accounts",
-        value: "0",
-        note: isArabic ? "جاهز للربط بدليل الحسابات" : "Ready for chart of accounts",
-        icon: BadgeCheck,
-      },
-      {
-        title: isArabic ? "إجمالي الحركة" : "Total Movement",
-        value: "0 SAR",
-        note: isArabic ? "يرتبط لاحقًا بالتقارير" : "Will connect to reporting later",
-        icon: Wallet,
-      },
-    ],
+    entryNumber: ar ? "رقم القيد" : "Entry No.",
+    description: ar ? "الوصف" : "Description",
+    source: ar ? "المصدر" : "Source",
+    date: ar ? "التاريخ" : "Date",
+    amount: ar ? "المبلغ" : "Amount",
+    status: ar ? "الحالة" : "Status",
+    action: ar ? "الإجراء" : "Action",
 
-    overviewCards: [
-      {
-        title: isArabic ? "القيود اليومية" : "Journal Entries",
-        description: isArabic
-          ? "تهيئة طبقة القيود اليومية وربطها بالفواتير والمدفوعات والحركات المالية."
-          : "Prepare the journal entries layer and link it with invoices, payments, and financial movements.",
-        icon: BookOpenText,
-      },
-      {
-        title: isArabic ? "التقارير المالية" : "Financial Reports",
-        description: isArabic
-          ? "إعداد واجهات ميزان المراجعة، الأرباح والخسائر، والمركز المالي والتقارير التفصيلية."
-          : "Prepare interfaces for trial balance, profit & loss, balance sheet, and detailed financial reporting.",
-        icon: LineChart,
-      },
-      {
-        title: isArabic ? "الربط التشغيلي" : "Operational Integration",
-        description: isArabic
-          ? "ربط المحاسبة لاحقًا بالمدفوعات والفواتير والخزينة والمبيعات."
-          : "Later connect accounting with payments, invoices, treasury, and sales flows.",
-        icon: Activity,
-      },
-    ],
+    noJournals: ar ? "لا توجد قيود بعد" : "No journals yet",
+    noJournalsDesc: ar
+      ? "عند ترحيل الفواتير أو المدفوعات ستظهر القيود هنا مباشرة."
+      : "When invoices or payments are posted, journals will appear here.",
 
-    actionCards: [
-      {
-        title: isArabic ? "القيود اليومية" : "Journal Entries",
-        description: isArabic
-          ? "هذه الصفحة تمثل نقطة الدخول للمحاسبة، وسيتم لاحقًا توسيعها إلى قيود فعلية وتقارير تفصيلية."
-          : "This page is the entry point for accounting and will later expand into actual journals and detailed reports.",
-        href: "/system/accounting",
-        cta: isArabic ? "الصفحة الحالية" : "Current Page",
-        icon: BookOpenText,
-      },
-      {
-        title: isArabic ? "إضافة قيد" : "Create Journal",
-        description: isArabic
-          ? "بناء صفحة إضافة قيد جديد بنفس هوية النظام المعتمدة."
-          : "Build the create-journal page using the approved system UI identity.",
-        href: "/system/accounting/journals/create",
-        cta: isArabic ? "تهيئة الصفحة" : "Prepare Page",
-        icon: Plus,
-      },
-      {
-        title: isArabic ? "التقارير" : "Reports",
-        description: isArabic
-          ? "تجهيز صفحات ميزان المراجعة والأرباح والخسائر والمركز المالي."
-          : "Prepare pages for trial balance, profit & loss, and balance sheet.",
-        href: "/system/accounting/reports",
-        cta: isArabic ? "لاحقًا" : "Later",
-        icon: FileBarChart2,
-      },
-      {
-        title: isArabic ? "دفتر الأستاذ" : "General Ledger",
-        description: isArabic
-          ? "إعداد واجهة دفتر الأستاذ والتفاصيل المحاسبية للحسابات."
-          : "Prepare the general ledger interface and detailed accounting views.",
-        href: "/system/accounting/general-ledger",
-        cta: isArabic ? "قريبًا" : "Coming Soon",
-        icon: FileSpreadsheet,
-      },
-    ],
+    trialBalance: ar ? "ميزان المراجعة" : "Trial Balance",
+    profitLoss: ar ? "الأرباح والخسائر" : "Profit & Loss",
+    balanceSheet: ar ? "المركز المالي" : "Balance Sheet",
 
-    statusItems: [
-      {
-        label: isArabic ? "حالة الصفحة" : "Page Status",
-        value: isArabic ? "جاهزة كأساس UI" : "Ready as UI base",
-        icon: BadgeCheck,
-      },
-      {
-        label: isArabic ? "المسار الرسمي" : "Official Route",
-        value: "/system/accounting",
-        icon: ShieldCheck,
-      },
-      {
-        label: isArabic ? "الربط مع API" : "API Integration",
-        value: isArabic ? "لم يبدأ بعد" : "Not started yet",
-        icon: FileBarChart2,
-      },
-      {
-        label: isArabic ? "الخطوة المعتمدة" : "Approved Next Step",
-        value: isArabic
-          ? "journals / reports / ledger"
-          : "journals / reports / ledger",
-        icon: ArrowLeft,
-      },
-      {
-        label: isArabic ? "الربط التشغيلي" : "Operational Mapping",
-        value: isArabic
-          ? "فواتير / مدفوعات / خزينة"
-          : "Invoices / Payments / Treasury",
-        icon: Landmark,
-      },
-    ],
+    revenue: ar ? "الإيرادات" : "Revenue",
+    expenses: ar ? "المصاريف" : "Expenses",
+    netProfit: ar ? "صافي الربح" : "Net Profit",
+    balancedStatus: ar ? "متوازن" : "Balanced",
 
-    sampleRowsTitle: isArabic ? "تصور أولي للتقارير" : "Initial Reports Preview",
-    sampleRowsDesc: isArabic
-      ? "عرض شكلي مؤقت لما ستكون عليه بعض التقارير والقيم المحاسبية بعد الربط."
-      : "A temporary visual preview of what accounting reports and values will look like after integration.",
+    debit: ar ? "مدين" : "Debit",
+    credit: ar ? "دائن" : "Credit",
 
-    tableHeaders: {
-      report: isArabic ? "التقرير / القيد" : "Report / Entry",
-      category: isArabic ? "الفئة" : "Category",
-      status: isArabic ? "الحالة" : "Status",
-      amount: isArabic ? "القيمة" : "Amount",
-      actions: isArabic ? "الإجراءات" : "Actions",
-    },
+    actionsTitle: ar ? "إجراءات وحدة المحاسبة" : "Accounting Module Actions",
+    actionsDesc: ar
+      ? "اختصارات منظمة للوصول إلى أهم صفحات وحدة المحاسبة بدون عرض روابط خام."
+      : "Organized shortcuts to key accounting pages.",
 
-    noDataTitle: isArabic ? "لا توجد بيانات فعلية بعد" : "No live data yet",
-    noDataText: isArabic
-      ? "تم تجهيز صفحة المحاسبة كأساس احترافي للواجهة، وسيتم إظهار البيانات المحاسبية الحقيقية بعد ربط الـ APIs وبناء المسارات الفعلية."
-      : "The accounting page has been prepared as a professional UI foundation. Live accounting data will appear after API integration and after building the actual flows.",
+    journalsList: ar ? "قائمة القيود" : "Journal List",
+    journalsListDesc: ar
+      ? "استعراض القيود اليومية، البحث، التصفية، ومراجعة التوازن."
+      : "Browse journals, search, filter, and review balance.",
+
+    chartOfAccounts: ar ? "دليل الحسابات" : "Chart of Accounts",
+    chartOfAccountsDesc: ar
+      ? "استعراض شجرة الحسابات السعودية المعتمدة."
+      : "Browse the approved chart of accounts.",
+
+    ledger: ar ? "دفتر الأستاذ" : "General Ledger",
+    ledgerDesc: ar
+      ? "عرض حركة الحسابات مع الرصيد الجاري."
+      : "View account movements with running balance.",
+
+    financialReports: ar ? "تقارير المحاسبة" : "Accounting Reports",
+    financialReportsDesc: ar
+      ? "ميزان المراجعة، الأرباح والخسائر، والمركز المالي."
+      : "Trial balance, profit and loss, and balance sheet.",
+
+    new: ar ? "جديد" : "New",
+    analysis: ar ? "تحليل" : "Analysis",
+    manage: ar ? "إدارة" : "Manage",
+    view: ar ? "عرض" : "View",
+
+    loading: ar ? "جاري تحميل البيانات..." : "Loading data...",
+    loadSuccess: ar ? "تم تحديث بيانات المحاسبة" : "Accounting data refreshed",
+    loadError: ar ? "تعذر تحميل بيانات المحاسبة" : "Unable to load accounting data",
+
+    previous: ar ? "السابق" : "Previous",
+    next: ar ? "التالي" : "Next",
   };
 }
 
-const previewRows = [
-  {
-    id: 1,
-    name: "Trial Balance",
-    category: "Report",
-    status: "READY",
-    amount: "0 SAR",
-  },
-  {
-    id: 2,
-    name: "Profit & Loss",
-    category: "Financial Statement",
-    status: "READY",
-    amount: "0 SAR",
-  },
-  {
-    id: 3,
-    name: "Journal Entry #0001",
-    category: "Journal",
-    status: "DRAFT",
-    amount: "0 SAR",
-  },
-];
+/* ============================================================
+   Components
+============================================================ */
 
-function statusBadge(status: string, locale: AppLocale) {
-  const isArabic = locale === "ar";
+function MoneyValue({
+  value,
+  strong = false,
+}: {
+  value: string | number | null | undefined;
+  strong?: boolean;
+}) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 ${
+        strong ? "font-bold text-slate-950" : ""
+      }`}
+      dir="ltr"
+    >
+      <span>{formatMoney(value)}</span>
+      <Image
+        src={CURRENCY_ICON_PATH}
+        alt="SAR"
+        width={15}
+        height={15}
+        className="shrink-0"
+      />
+    </span>
+  );
+}
 
-  if (status === "READY") {
-    return (
-      <Badge className="rounded-full px-3 py-1">
-        {isArabic ? "جاهز" : "Ready"}
-      </Badge>
-    );
-  }
+function JournalStatusBadge({
+  status,
+  locale,
+}: {
+  status: string;
+  locale: AppLocale;
+}) {
+  const ar = locale === "ar";
+  const normalized = String(status || "").toUpperCase();
 
-  if (status === "DRAFT") {
-    return (
-      <Badge variant="secondary" className="rounded-full px-3 py-1">
-        {isArabic ? "مسودة" : "Draft"}
-      </Badge>
-    );
-  }
+  const labels: Record<string, string> = {
+    POSTED: ar ? "مرحل" : "Posted",
+    DRAFT: ar ? "مسودة" : "Draft",
+    CANCELLED: ar ? "ملغي" : "Cancelled",
+  };
+
+  const className =
+    normalized === "POSTED"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : normalized === "DRAFT"
+      ? "border-amber-200 bg-amber-50 text-amber-700"
+      : normalized === "CANCELLED"
+      ? "border-red-200 bg-red-50 text-red-700"
+      : "border-slate-200 bg-slate-50 text-slate-600";
 
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {isArabic ? "معلق" : "Pending"}
+    <Badge variant="outline" className={`rounded-full ${className}`}>
+      {labels[normalized] || status || "-"}
     </Badge>
   );
 }
 
+/* ============================================================
+   Page
+============================================================ */
+
 export default function SystemAccountingPage() {
-  const locale = detectLocale();
+  const [locale, setLocale] = useState<AppLocale>("ar");
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [state, setState] = useState<AccountingState>({
+    trialBalance: null,
+    profitLoss: null,
+    balanceSheet: null,
+    journals: null,
+  });
+
+  const t = getText(locale);
   const isArabic = locale === "ar";
-  const t = dictionary(locale);
+
+  async function loadData(showToast = false) {
+    try {
+      setLoading(true);
+
+      const [trialBalance, profitLoss, balanceSheet, journals] =
+        await Promise.all([
+          fetchAccountingData<TrialBalancePayload>(
+            "/api/accounting/reports/trial-balance/?posted_only=true"
+          ),
+          fetchAccountingData<ProfitLossPayload>(
+            "/api/accounting/reports/profit-loss/?posted_only=true"
+          ),
+          fetchAccountingData<BalanceSheetPayload>(
+            "/api/accounting/reports/balance-sheet/?posted_only=true"
+          ),
+          fetchAccountingData<JournalsPayload>(
+            "/api/accounting/journals/?page=1&page_size=10&ordering=-entry_date"
+          ),
+        ]);
+
+      setState({
+        trialBalance,
+        profitLoss,
+        balanceSheet,
+        journals,
+      });
+
+      if (showToast) {
+        toast.success(t.loadSuccess);
+      }
+    } catch (error) {
+      console.error("Accounting dashboard load error:", error);
+      toast.error(t.loadError);
+
+      setState({
+        trialBalance: null,
+        profitLoss: null,
+        balanceSheet: null,
+        journals: null,
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const currentLocale = readStoredLocale();
+    setLocale(currentLocale);
+    applyLocale(currentLocale);
+  }, []);
+
+  useEffect(() => {
+    loadData(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const summary = useMemo(() => {
+    const totalDebit =
+      state.trialBalance?.total_debit ||
+      state.journals?.summary.total_debit ||
+      "0.00";
+
+    const totalCredit =
+      state.trialBalance?.total_credit ||
+      state.journals?.summary.total_credit ||
+      "0.00";
+
+    const totalEntries = state.journals?.summary.total_entries || 0;
+    const postedEntries = state.journals?.summary.balanced_entries_count || 0;
+    const unbalancedEntries =
+      state.journals?.summary.unbalanced_entries_count || 0;
+
+    const postedPercent =
+      totalEntries > 0 ? (postedEntries / totalEntries) * 100 : 0;
+
+    const unbalancedPercent =
+      totalEntries > 0 ? (unbalancedEntries / totalEntries) * 100 : 0;
+
+    const isBalanced =
+      state.journals?.summary.is_balanced_total ??
+      state.balanceSheet?.is_balanced ??
+      toNumber(totalDebit) === toNumber(totalCredit);
+
+    return {
+      totalDebit,
+      totalCredit,
+      totalEntries,
+      totalAccounts: state.trialBalance?.total_accounts || 0,
+      postedEntries,
+      unbalancedEntries,
+      postedPercent,
+      unbalancedPercent,
+      isBalanced,
+      revenue: state.profitLoss?.revenue.total_amount || "0.00",
+      expenses: state.profitLoss?.expenses.total_amount || "0.00",
+      netProfit: state.profitLoss?.net_profit || "0.00",
+    };
+  }, [state]);
+
+  const filteredJournals = useMemo(() => {
+    const journals = state.journals?.results || [];
+    const keyword = searchTerm.trim().toLowerCase();
+
+    if (!keyword) return journals;
+
+    return journals.filter((entry) =>
+      [
+        entry.entry_number,
+        entry.description,
+        entry.reference,
+        entry.external_reference,
+        entry.posting_source,
+        entry.status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(keyword)
+    );
+  }, [state.journals?.results, searchTerm]);
+
+  const featuredReports = [
+    {
+      title: t.trialBalance,
+      subtitle: t.accounts,
+      value: formatNumber(summary.totalAccounts),
+      href: "/system/accounting/reports",
+      icon: ListChecks,
+    },
+    {
+      title: t.profitLoss,
+      subtitle: t.netProfit,
+      value: formatMoney(summary.netProfit),
+      href: "/system/accounting/reports",
+      icon: PieChart,
+    },
+    {
+      title: t.balanceSheet,
+      subtitle: t.status,
+      value: summary.isBalanced ? t.balancedStatus : t.unbalanced,
+      href: "/system/accounting/reports",
+      icon: Landmark,
+    },
+  ];
+
+  const summaryCards = [
+    {
+      title: t.revenue,
+      value: summary.revenue,
+      icon: TrendingUp,
+      bg: "bg-emerald-50",
+    },
+    {
+      title: t.expenses,
+      value: summary.expenses,
+      icon: WalletCards,
+      bg: "bg-sky-50",
+    },
+    {
+      title: t.netProfit,
+      value: summary.netProfit,
+      icon: PieChart,
+      bg: "bg-violet-50",
+    },
+    {
+      title: t.status,
+      value: summary.isBalanced ? t.balancedStatus : t.unbalanced,
+      icon: ShieldCheck,
+      bg: "bg-teal-50",
+      isText: true,
+    },
+  ];
+
+  const actionCards = [
+    {
+      title: t.journalsList,
+      description: t.journalsListDesc,
+      href: "/system/accounting/journals",
+      icon: ReceiptText,
+      badge: formatNumber(summary.totalEntries),
+      action: t.manage,
+    },
+    {
+      title: t.chartOfAccounts,
+      description: t.chartOfAccountsDesc,
+      href: "/system/accounting/accounts",
+      icon: Layers3,
+      badge: t.new,
+      action: t.view,
+    },
+    {
+      title: t.ledger,
+      description: t.ledgerDesc,
+      href: "/system/accounting/ledger",
+      icon: BookOpenCheck,
+      badge: t.analysis,
+      action: t.view,
+    },
+    {
+      title: t.financialReports,
+      description: t.financialReportsDesc,
+      href: "/system/accounting/reports",
+      icon: BarChart3,
+      badge: t.reports,
+      action: t.view,
+    },
+  ];
 
   return (
-    <div className="space-y-6">
-      <Card className="overflow-hidden rounded-3xl border-white/20 bg-white/70 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-        <CardContent className="p-6 md:p-7">
-          <div className="grid gap-6 lg:grid-cols-[1.35fr_0.85fr] lg:items-center">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge className="rounded-full px-3 py-1">{t.heroBadge1}</Badge>
-                <Badge variant="secondary" className="rounded-full px-3 py-1">
-                  {t.heroBadge2}
-                </Badge>
-              </div>
+    <div className="space-y-4 p-4 md:p-6" dir="ltr">
+      {/* Header */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            asChild
+            className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
+          >
+            <Link href="/system/accounting/journals">
+              <Plus className="h-4 w-4" />
+              {t.createEntry}
+            </Link>
+          </Button>
 
-              <div className="space-y-3">
-                <h1 className="text-2xl font-bold tracking-tight md:text-4xl">
-                  {t.title}
-                </h1>
-                <p className="text-muted-foreground max-w-3xl text-sm leading-7 md:text-base">
-                  {t.subtitle}
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 gap-2 rounded-xl bg-white px-4"
+            onClick={() => openExport("/api/accounting/journals/excel/")}
+          >
+            <BarChart3 className="h-4 w-4" />
+            {t.reports}
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 gap-2 rounded-xl bg-white px-4"
+            onClick={() => loadData(true)}
+            disabled={loading}
+          >
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+            {t.refresh}
+          </Button>
+        </div>
+
+        <div
+          className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}
+          dir={isArabic ? "rtl" : "ltr"}
+        >
+          <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+            {t.pageTitle}
+          </h1>
+          <p className="text-sm leading-6 text-slate-500">{t.pageSubtitle}</p>
+        </div>
+      </div>
+
+      {/* Main Row */}
+      <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
+        {/* Status Card */}
+        <Card
+          className="rounded-2xl border-slate-200 bg-white shadow-sm"
+          dir={isArabic ? "rtl" : "ltr"}
+        >
+          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
+            <div>
+              <CardTitle className="text-lg font-bold text-slate-950">
+                {t.accountingStatus}
+              </CardTitle>
+              <CardDescription className="mt-1">
+                {t.accountingStatusDesc}
+              </CardDescription>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 gap-2 rounded-xl bg-white"
+              onClick={() =>
+                openExport("/api/accounting/reports/trial-balance/excel/")
+              }
+            >
+              <Download className="h-4 w-4" />
+              {t.export}
+            </Button>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm text-slate-500">
+                  <span>{t.total}</span>
+                  <Building2 className="h-4 w-4 text-slate-400" />
+                </div>
+                <p className="text-2xl font-bold text-slate-950">
+                  {formatNumber(summary.totalEntries)}
                 </p>
+                <div className="h-2 rounded-full bg-slate-100">
+                  <div className="h-2 w-full rounded-full bg-slate-950" />
+                </div>
               </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Link
-                  href="/system/accounting/journals/create"
-                  className="w-full sm:w-auto"
-                >
-                  <Button className="w-full rounded-2xl sm:w-auto">
-                    <Plus className="ms-2 h-4 w-4" />
-                    {t.addJournal}
-                  </Button>
-                </Link>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm text-slate-500">
+                  <span>{t.posted}</span>
+                  <FileText className="h-4 w-4 text-slate-400" />
+                </div>
+                <p className="text-2xl font-bold text-slate-950">
+                  {formatNumber(summary.postedEntries)}
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-emerald-600">
+                    {formatPercent(summary.postedPercent)}%
+                  </span>
+                  <div className="h-2 flex-1 rounded-full bg-slate-100">
+                    <div
+                      className="h-2 rounded-full bg-emerald-500"
+                      style={{
+                        width: `${Math.min(summary.postedPercent, 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
 
-                <Link
-                  href="/system/accounting/reports"
-                  className="w-full sm:w-auto"
-                >
-                  <Button
-                    variant="outline"
-                    className="w-full rounded-2xl sm:w-auto"
-                  >
-                    <FileBarChart2 className="ms-2 h-4 w-4" />
-                    {t.accountingReports}
-                  </Button>
-                </Link>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm text-slate-500">
+                  <span>{t.unbalanced}</span>
+                  <ShieldCheck className="h-4 w-4 text-slate-400" />
+                </div>
+                <p className="text-2xl font-bold text-slate-950">
+                  {formatNumber(summary.unbalancedEntries)}
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-emerald-600">
+                    {formatPercent(summary.unbalancedPercent)}%
+                  </span>
+                  <div className="h-2 flex-1 rounded-full bg-slate-100">
+                    <div
+                      className="h-2 rounded-full bg-amber-500"
+                      style={{
+                        width: `${Math.min(summary.unbalancedPercent, 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm text-slate-500">
+                  <span>{t.accounts}</span>
+                  <Layers3 className="h-4 w-4 text-slate-400" />
+                </div>
+                <p className="text-2xl font-bold text-slate-950">
+                  {formatNumber(summary.totalAccounts)}
+                </p>
+                <div className="h-2 rounded-full bg-slate-100">
+                  <div className="h-2 w-full rounded-full bg-slate-950" />
+                </div>
               </div>
             </div>
 
-            <Card className="rounded-3xl border-white/20 bg-white/75 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t.quickStats}</CardTitle>
-                <CardDescription>{t.operationalOverview}</CardDescription>
-              </CardHeader>
+            <div className="flex flex-col gap-3 md:flex-row">
+              <div className="relative flex-1">
+                <Search
+                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${
+                    isArabic ? "right-3" : "left-3"
+                  }`}
+                />
+                <Input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder={t.searchPlaceholder}
+                  className={`h-11 rounded-xl border-slate-200 bg-white ${
+                    isArabic ? "pr-10" : "pl-10"
+                  }`}
+                />
+              </div>
 
-              <CardContent className="space-y-3">
-                {t.stats.map((item) => {
-                  const Icon = item.icon;
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 gap-2 rounded-xl bg-white"
+              >
+                <Filter className="h-4 w-4" />
+                {t.settings}
+              </Button>
+            </div>
 
-                  return (
+            <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <div className="grid grid-cols-[1.1fr_1.4fr_1fr_1fr_1fr_1fr_0.8fr] border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
+                <div>{t.entryNumber}</div>
+                <div>{t.description}</div>
+                <div>{t.source}</div>
+                <div>{t.date}</div>
+                <div>{t.amount}</div>
+                <div>{t.status}</div>
+                <div>{t.action}</div>
+              </div>
+
+              {loading ? (
+                <div className="flex h-40 items-center justify-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t.loading}
+                </div>
+              ) : filteredJournals.length > 0 ? (
+                <div className="divide-y divide-slate-100">
+                  {filteredJournals.map((entry) => (
                     <div
-                      key={item.title}
-                      className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5"
+                      key={entry.id}
+                      className="grid grid-cols-[1.1fr_1.4fr_1fr_1fr_1fr_1fr_0.8fr] items-center px-4 py-3 text-sm"
                     >
+                      <div className="font-medium text-slate-950">
+                        {entry.entry_number}
+                      </div>
+                      <div className="truncate text-slate-600">
+                        {entry.description || entry.reference || "-"}
+                      </div>
+                      <div className="text-slate-600">
+                        {entry.posting_source || "-"}
+                      </div>
+                      <div className="text-slate-600">
+                        {formatDate(entry.entry_date, locale)}
+                      </div>
+                      <div className="font-semibold text-slate-950">
+                        <MoneyValue value={entry.total_debit} />
+                      </div>
+                      <div>
+                        <JournalStatusBadge
+                          status={entry.status}
+                          locale={locale}
+                        />
+                      </div>
+                      <div>
+                        <Button
+                          asChild
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 rounded-lg px-2"
+                        >
+                          <Link href={`/system/accounting/journals/${entry.id}`}>
+                            {t.view}
+                          </Link>
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-40 flex-col items-center justify-center text-center">
+                  <p className="font-semibold text-slate-950">{t.noJournals}</p>
+                  <p className="mt-2 text-sm text-slate-500">
+                    {t.noJournalsDesc}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end text-sm text-slate-500">
+              <span>
+                {formatNumber(filteredJournals.length)} /{" "}
+                {formatNumber(state.journals?.pagination.total_items || 0)}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Featured Reports Card */}
+        <Card
+          className="rounded-2xl border-slate-200 bg-white shadow-sm"
+          dir={isArabic ? "rtl" : "ltr"}
+        >
+          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
+            <div>
+              <CardTitle className="text-lg font-bold text-slate-950">
+                {t.featuredReports}
+              </CardTitle>
+              <CardDescription className="mt-1">
+                {t.featuredReportsDesc}
+              </CardDescription>
+            </div>
+
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white">
+              <ListChecks className="h-5 w-5 text-slate-700" />
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <div className="space-y-3">
+              {featuredReports.map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <Link
+                    key={item.title}
+                    href={item.href}
+                    className="block rounded-2xl border border-slate-200 bg-white p-4 transition hover:bg-slate-50"
+                  >
+                    <div className="flex items-center justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-3">
-                        <div className="bg-primary/10 text-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-950 text-white">
                           <Icon className="h-5 w-5" />
                         </div>
 
                         <div className="min-w-0">
-                          <p className="text-muted-foreground text-xs">
+                          <p className="font-bold text-slate-950">
                             {item.title}
                           </p>
-                          <p className="truncate text-sm font-semibold">
-                            {item.value}
+                          <p className="mt-1 text-sm text-slate-500">
+                            {item.subtitle}
                           </p>
                         </div>
                       </div>
 
-                      <Badge variant="secondary" className="rounded-full">
-                        {item.note}
-                      </Badge>
+                      <div className="text-left">
+                        <p className="text-lg font-bold text-slate-950">
+                          {item.value}
+                        </p>
+                      </div>
                     </div>
-                  );
-                })}
+                  </Link>
+                );
+              })}
+
+              <div className="rounded-2xl border border-dashed border-slate-200 p-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">{t.debit}</p>
+                    <p className="mt-1 text-lg font-bold text-slate-950">
+                      <MoneyValue value={summary.totalDebit} />
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">{t.credit}</p>
+                    <p className="mt-1 text-lg font-bold text-slate-950">
+                      <MoneyValue value={summary.totalCredit} />
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {summaryCards.map((card) => {
+          const Icon = card.icon;
+
+          return (
+            <Card
+              key={card.title}
+              className="rounded-2xl border-slate-200 bg-white shadow-sm"
+              dir={isArabic ? "rtl" : "ltr"}
+            >
+              <CardContent className="p-5">
+                <div className={`rounded-2xl ${card.bg} p-4`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-slate-500">{card.title}</p>
+                      <p className="mt-2 text-2xl font-bold text-slate-950">
+                        {card.isText ? (
+                          card.value
+                        ) : (
+                          <MoneyValue value={card.value} />
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-950 shadow-sm">
+                      <Icon className="h-5 w-5" />
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
-          </div>
-        </CardContent>
-      </Card>
+          );
+        })}
+      </div>
 
-      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-        <CardContent className="p-5">
-          <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
-            <div className="relative">
-              <Search
-                className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                  isArabic ? "right-3" : "left-3"
-                }`}
-              />
-              <Input
-                placeholder={t.searchPlaceholder}
-                className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-              />
-            </div>
+      {/* Actions */}
+      <Card
+        className="rounded-2xl border-slate-200 bg-white shadow-sm"
+        dir={isArabic ? "rtl" : "ltr"}
+      >
+        <CardHeader>
+          <CardTitle className="text-lg font-bold text-slate-950">
+            {t.actionsTitle}
+          </CardTitle>
+          <CardDescription>{t.actionsDesc}</CardDescription>
+        </CardHeader>
 
-            <Button variant="outline" className="rounded-2xl">
-              <Search className="ms-2 h-4 w-4" />
-              {t.search}
-            </Button>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {actionCards.map((card) => {
+              const Icon = card.icon;
 
-            <Button variant="outline" className="rounded-2xl">
-              <Filter className="ms-2 h-4 w-4" />
-              {t.filter}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+              return (
+                <Link
+                  key={card.href}
+                  href={card.href}
+                  className="group rounded-2xl border border-slate-200 bg-white p-5 transition hover:bg-slate-50 hover:shadow-sm"
+                >
+                  <div className="mb-8 flex items-center justify-between">
+                    <Badge
+                      variant="secondary"
+                      className="rounded-full bg-slate-100 text-slate-700"
+                    >
+                      {card.badge}
+                    </Badge>
 
-      <section className="space-y-4">
-        <div className="px-1">
-          <h2 className="text-lg font-bold tracking-tight">
-            {t.operationalCards}
-          </h2>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {t.overviewCards.map((item) => {
-            const Icon = item.icon;
-
-            return (
-              <Card
-                key={item.title}
-                className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5"
-              >
-                <CardHeader className="space-y-4">
-                  <div className="bg-primary/10 text-primary flex h-14 w-14 items-center justify-center rounded-2xl">
-                    <Icon className="h-6 w-6" />
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white transition group-hover:scale-105">
+                      <Icon className="h-5 w-5" />
+                    </div>
                   </div>
 
                   <div>
-                    <CardTitle className="text-lg">{item.title}</CardTitle>
-                    <CardDescription className="mt-2 leading-7">
-                      {item.description}
-                    </CardDescription>
+                    <h3 className="font-bold text-slate-950">{card.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                      {card.description}
+                    </p>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-5 h-9 rounded-xl bg-white"
+                    >
+                      {card.action}
+                    </Button>
                   </div>
-                </CardHeader>
-              </Card>
-            );
-          })}
-        </div>
-      </section>
-
-      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-        <CardHeader>
-          <CardTitle>{t.sampleRowsTitle}</CardTitle>
-          <CardDescription>{t.sampleRowsDesc}</CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          <div className="overflow-x-auto rounded-3xl border border-white/20 dark:border-white/10">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t.tableHeaders.report}</TableHead>
-                  <TableHead>{t.tableHeaders.category}</TableHead>
-                  <TableHead>{t.tableHeaders.status}</TableHead>
-                  <TableHead>{t.tableHeaders.amount}</TableHead>
-                  <TableHead>{t.tableHeaders.actions}</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {previewRows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                          <Calculator className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="font-semibold">{row.name}</p>
-                          <p className="text-muted-foreground text-xs">
-                            ID-{row.id.toString().padStart(4, "0")}
-                          </p>
-                        </div>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Scale className="text-muted-foreground h-3.5 w-3.5" />
-                        <span>{row.category}</span>
-                      </div>
-                    </TableCell>
-
-                    <TableCell>{statusBadge(row.status, locale)}</TableCell>
-
-                    <TableCell>
-                      <Badge
-                        variant="secondary"
-                        className="rounded-full px-3 py-1"
-                      >
-                        {row.amount}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell>
-                      <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" size="sm" className="rounded-xl">
-                          <Eye className="ms-2 h-4 w-4" />
-                          {isArabic ? "عرض" : "View"}
-                        </Button>
-                        <Button variant="outline" size="sm" className="rounded-xl">
-                          <LineChart className="ms-2 h-4 w-4" />
-                          {isArabic ? "التقرير" : "Report"}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="rounded-2xl border border-dashed border-white/30 bg-black/5 p-4 dark:border-white/10 dark:bg-white/5">
-            <div className="mb-2 flex items-center gap-2">
-              <Badge className="rounded-full px-3 py-1">Preview</Badge>
-            </div>
-            <p className="text-muted-foreground text-sm leading-7">
-              {t.noDataText}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-          <CardHeader>
-            <CardTitle>{t.quickActions}</CardTitle>
-            <CardDescription>{t.operationalOverview}</CardDescription>
-          </CardHeader>
-
-          <CardContent className="grid gap-4 md:grid-cols-2">
-            {t.actionCards.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <Card
-                  key={item.title}
-                  className="rounded-3xl border-white/20 bg-white/80 shadow-none dark:border-white/10 dark:bg-white/5"
-                >
-                  <CardHeader className="space-y-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="bg-primary/10 text-primary flex h-12 w-12 items-center justify-center rounded-2xl">
-                        <Icon className="h-5 w-5" />
-                      </div>
-
-                      <Badge variant="secondary" className="rounded-full">
-                        Module
-                      </Badge>
-                    </div>
-
-                    <div>
-                      <CardTitle className="text-base">{item.title}</CardTitle>
-                      <CardDescription className="mt-2 leading-7">
-                        {item.description}
-                      </CardDescription>
-                    </div>
-                  </CardHeader>
-
-                  <CardContent className="pt-0">
-                    <Link href={item.href}>
-                      <Button
-                        variant="outline"
-                        className="w-full justify-between rounded-2xl"
-                      >
-                        <span>{item.cta}</span>
-                        <ArrowLeft
-                          className={`h-4 w-4 ${isArabic ? "" : "rotate-180"}`}
-                        />
-                      </Button>
-                    </Link>
-                  </CardContent>
-                </Card>
+                </Link>
               );
             })}
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-          <CardHeader>
-            <CardTitle>{t.currentStatus}</CardTitle>
-            <CardDescription>{t.nextStep}</CardDescription>
-          </CardHeader>
-
-          <CardContent className="space-y-3">
-            {t.statusItems.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <div
-                  key={item.label}
-                  className="flex items-center gap-3 rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5"
-                >
-                  <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                    <Icon className="h-4 w-4" />
-                  </div>
-
-                  <div className="min-w-0">
-                    <p className="text-muted-foreground text-xs">{item.label}</p>
-                    <p className="truncate text-sm font-semibold">{item.value}</p>
-                  </div>
-                </div>
-              );
-            })}
-
-            <div className="rounded-2xl border border-dashed border-white/30 bg-black/5 p-4 dark:border-white/10 dark:bg-white/5">
-              <div className="mb-2 flex items-center gap-2">
-                <Badge className="rounded-full px-3 py-1">
-                  {t.noDataTitle}
-                </Badge>
-              </div>
-              <p className="text-muted-foreground text-sm leading-7">
-                {t.noDataText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-
-      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-        <CardContent className="p-6">
-          <div className="space-y-2">
-            <p className="text-sm font-semibold">{t.nextStep}</p>
-            <p className="text-muted-foreground text-sm leading-7">
-              {t.nextStepText}
-            </p>
           </div>
         </CardContent>
       </Card>

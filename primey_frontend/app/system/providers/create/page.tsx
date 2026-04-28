@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { type ElementType, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   BadgeCheck,
@@ -13,14 +14,12 @@ import {
   Mail,
   MapPin,
   Phone,
-  Plus,
   Save,
   ShieldCheck,
   Sparkles,
+  Star,
   Stethoscope,
-  Tag,
   UserRound,
-  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,243 +32,368 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+
+/* ============================================================
+   📂 app/system/providers/create/page.tsx
+   🧠 Primey Care | Create Provider
+   ------------------------------------------------------------
+   ✅ نفس نمط صفحة إنشاء المراكز المرفقة
+   ✅ استخدام UI الداخلي فقط
+   ✅ ربط حقيقي مع POST /api/providers/
+   ✅ دعم عربي / إنجليزي عبر primey-locale
+   ✅ استخدام sonner
+   ✅ بدون hardcoded localhost
+============================================================ */
 
 type AppLocale = "ar" | "en";
 
+type ProviderStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED" | "DRAFT";
+
+type ProviderType =
+  | "HOSPITAL"
+  | "MEDICAL_CENTER"
+  | "PHARMACY"
+  | "PARTNER"
+  | "LAB"
+  | "CLINIC"
+  | "OTHER";
+
 type ProviderFormData = {
-  providerNameAr: string;
-  providerNameEn: string;
-  providerCode: string;
-  providerType: string;
-  specialty: string;
-  contactPerson: string;
+  name: string;
+  code: string;
+  provider_type: ProviderType;
+  status: ProviderStatus;
+  contact_person: string;
   phone: string;
+  mobile: string;
   email: string;
-  city: string;
-  address: string;
   website: string;
-  taxNumber: string;
-  iban: string;
-  contractStatus: string;
+  city: string;
+  area: string;
+  address: string;
+  google_maps_link: string;
   notes: string;
+  is_featured: boolean;
 };
 
 type ProviderFormErrors = Partial<Record<keyof ProviderFormData, string>>;
 
-function detectLocale(): AppLocale {
-  if (typeof document !== "undefined") {
-    const htmlLang = document.documentElement.lang?.toLowerCase();
-    if (htmlLang.startsWith("en")) return "en";
+type ProviderCreateResponse = {
+  ok?: boolean;
+  message?: string;
+  data?: {
+    id?: number | string;
+    name?: string;
+    code?: string;
+  };
+  errors?: unknown;
+};
+
+/* ============================================================
+   🌐 Locale Helpers
+============================================================ */
+
+function readLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
+
+    const savedLocale = window.localStorage.getItem("primey-locale");
+    if (savedLocale === "en") return "en";
+    if (savedLocale === "ar") return "ar";
+
+    return document.documentElement.lang === "en" ? "en" : "ar";
+  } catch (error) {
+    console.error("Read locale error:", error);
+    return "ar";
+  }
+}
+
+function applyDocumentLocale(locale: AppLocale) {
+  try {
+    if (typeof document === "undefined") return;
+
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch (error) {
+    console.error("Apply locale error:", error);
+  }
+}
+
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+
+  if (parts.length === 2) {
+    return parts.pop()?.split(";").shift() || "";
   }
 
-  return "ar";
+  return "";
 }
+
+/* ============================================================
+   📚 Dictionary
+============================================================ */
 
 function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    pageTitle: isArabic ? "إضافة مقدم خدمة جديد" : "Create New Provider",
-    pageSubtitle: isArabic
-      ? "واجهة إنشاء احترافية داخل مساحة system لإضافة مقدم خدمة جديد بنفس الهوية الرسمية المعتمدة في Primey Care، ومهيأة للربط اللاحق مع الـ API والعقود والخدمات."
-      : "A professional create interface inside the system workspace for adding a new provider using the official Primey Care identity, prepared for later API, contract, and service integration.",
+    title: isArabic ? "إنشاء مقدم خدمة جديد" : "Create New Provider",
+    subtitle: isArabic
+      ? "إضافة مقدم خدمة جديد داخل Primey Care وربطه لاحقًا بالعقود والخدمات والطلبات."
+      : "Create a new provider in Primey Care and connect it later with contracts, services, and orders.",
 
-    heroBadge1: isArabic ? "System Workspace" : "System Workspace",
-    heroBadge2: isArabic ? "Create Provider" : "Create Provider",
+    back: isArabic ? "العودة لمقدمي الخدمة" : "Back to Providers",
+    saveDraft: isArabic ? "حفظ كمسودة" : "Save Draft",
+    create: isArabic ? "إنشاء مقدم الخدمة" : "Create Provider",
 
-    backToProviders: isArabic ? "العودة إلى مقدمي الخدمة" : "Back to Providers",
-    saveDraft: isArabic ? "حفظ مبدئي" : "Save Draft",
-    createProvider: isArabic ? "إنشاء مقدم الخدمة" : "Create Provider",
+    liveApi: isArabic ? "ربط حقيقي" : "Live API",
+    route: "/api/providers/",
+
+    stepsTitle: isArabic ? "خطوات الإنشاء" : "Creation Steps",
+    summaryTitle: isArabic ? "ملخص مقدم الخدمة" : "Provider Summary",
+    summaryDesc: isArabic
+      ? "مراجعة سريعة للبيانات قبل الحفظ."
+      : "Quick review before saving.",
 
     basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
-    contactInfo: isArabic ? "بيانات التواصل" : "Contact Information",
-    operationalInfo: isArabic
-      ? "البيانات التشغيلية والمالية"
-      : "Operational & Financial Information",
-    quickGuide: isArabic ? "إرشادات سريعة" : "Quick Guide",
-    createSummary: isArabic ? "ملخص الإنشاء" : "Creation Summary",
+    basicDesc: isArabic
+      ? "اسم مقدم الخدمة، الكود، النوع، وحالة التشغيل."
+      : "Provider name, code, type, and operational status.",
 
-    providerNameAr: isArabic
-      ? "اسم مقدم الخدمة بالعربية"
-      : "Provider Name (Arabic)",
-    providerNameEn: isArabic
-      ? "اسم مقدم الخدمة بالإنجليزية"
-      : "Provider Name (English)",
-    providerCode: isArabic ? "كود المزود" : "Provider Code",
-    providerType: isArabic ? "نوع المزود" : "Provider Type",
-    specialty: isArabic ? "التخصص" : "Specialty",
-    contactPerson: isArabic ? "الشخص المسؤول" : "Contact Person",
-    phone: isArabic ? "رقم الجوال" : "Phone Number",
-    email: isArabic ? "البريد الإلكتروني" : "Email Address",
-    city: isArabic ? "المدينة" : "City",
-    address: isArabic ? "العنوان" : "Address",
-    website: isArabic ? "الموقع الإلكتروني" : "Website",
-    taxNumber: isArabic ? "الرقم الضريبي" : "Tax Number",
-    iban: isArabic ? "رقم الآيبان" : "IBAN",
-    contractStatus: isArabic ? "حالة التعاقد" : "Contract Status",
-    notes: isArabic ? "ملاحظات" : "Notes",
+    contactInfo: isArabic ? "بيانات التواصل" : "Contact Information",
+    contactDesc: isArabic
+      ? "المسؤول، الهاتف، الجوال، البريد، والموقع الإلكتروني."
+      : "Contact person, phone, mobile, email, and website.",
+
+    locationInfo: isArabic ? "بيانات الموقع" : "Location Information",
+    locationDesc: isArabic
+      ? "المدينة، المنطقة، العنوان، ورابط خرائط جوجل."
+      : "City, area, address, and Google Maps link.",
+
+    operationalInfo: isArabic ? "بيانات تشغيلية" : "Operational Information",
+    operationalDesc: isArabic
+      ? "تمييز مقدم الخدمة والملاحظات التشغيلية."
+      : "Featured status and operational notes.",
+
+    labels: {
+      name: isArabic ? "اسم مقدم الخدمة" : "Provider Name",
+      code: isArabic ? "كود مقدم الخدمة" : "Provider Code",
+      providerType: isArabic ? "نوع الجهة" : "Provider Type",
+      status: isArabic ? "الحالة" : "Status",
+      contactPerson: isArabic ? "الشخص المسؤول" : "Contact Person",
+      phone: isArabic ? "رقم الهاتف" : "Phone",
+      mobile: isArabic ? "رقم الجوال" : "Mobile",
+      email: isArabic ? "البريد الإلكتروني" : "Email",
+      website: isArabic ? "الموقع الإلكتروني" : "Website",
+      city: isArabic ? "المدينة" : "City",
+      area: isArabic ? "الحي / المنطقة" : "Area",
+      address: isArabic ? "العنوان" : "Address",
+      googleMaps: isArabic ? "رابط خرائط جوجل" : "Google Maps Link",
+      notes: isArabic ? "ملاحظات" : "Notes",
+      featured: isArabic ? "مقدم خدمة مميز" : "Featured Provider",
+    },
 
     placeholders: {
-      providerNameAr: isArabic
-        ? "مثال: مركز الرعاية الطبية"
-        : "Example: Medical Care Center",
-      providerNameEn: isArabic
-        ? "Example: Medical Care Center"
-        : "Example: Medical Care Center",
-      providerCode: isArabic ? "مثال: PRV-001" : "Example: PRV-001",
-      providerType: isArabic
-        ? "مثال: مركز / مستشفى / عيادة"
-        : "Example: Center / Hospital / Clinic",
-      specialty: isArabic
-        ? "مثال: أسنان / جلدية / عام"
-        : "Example: Dental / Dermatology / General",
-      contactPerson: isArabic
-        ? "اسم الشخص المسؤول"
-        : "Responsible person name",
-      phone: isArabic ? "05xxxxxxxx" : "05xxxxxxxx",
+      name: isArabic
+        ? "مثال: مستشفى برايمي كير جدة"
+        : "Example: Primey Care Hospital Jeddah",
+      code: isArabic ? "مثال: PRV-001" : "Example: PRV-001",
+      contactPerson: isArabic ? "مثال: محمد أحمد" : "Example: Mohammed Ahmed",
+      phone: isArabic ? "011xxxxxxx" : "011xxxxxxx",
+      mobile: isArabic ? "05xxxxxxxx" : "05xxxxxxxx",
       email: isArabic ? "provider@example.com" : "provider@example.com",
-      city: isArabic ? "مثال: جدة" : "Example: Jeddah",
-      address: isArabic ? "اكتب العنوان التفصيلي" : "Enter full address",
       website: isArabic ? "https://example.com" : "https://example.com",
-      taxNumber: isArabic ? "أدخل الرقم الضريبي" : "Enter tax number",
-      iban: isArabic ? "SAxxxxxxxxxxxxxxxxxxxxxx" : "SAxxxxxxxxxxxxxxxxxxxxxx",
-      contractStatus: isArabic
-        ? "مثال: نشط / بانتظار"
-        : "Example: Active / Pending",
+      city: isArabic ? "مثال: جدة" : "Example: Jeddah",
+      area: isArabic ? "مثال: الروضة" : "Example: Al Rawdah",
+      address: isArabic ? "اكتب العنوان التفصيلي" : "Enter full address",
+      googleMaps: isArabic
+        ? "https://maps.google.com/..."
+        : "https://maps.google.com/...",
       notes: isArabic
-        ? "أي ملاحظات إضافية عن المزود"
-        : "Any additional notes about the provider",
+        ? "أي ملاحظات تشغيلية عن مقدم الخدمة..."
+        : "Any operational notes about the provider...",
     },
 
-    tips: [
-      isArabic
-        ? "الصفحة الآن مهيأة بصريًا داخل shell النظام الرسمي، ويمكن ربط الحفظ الفعلي بالـ API لاحقًا دون كسر التصميم."
-        : "The page is visually aligned with the official system shell, and real save integration can be added later without breaking the design.",
-      isArabic
-        ? "يفضل توحيد كود المزود ونوعه وتخصصه من البداية لضمان اتساق التشغيل داخل النظام."
-        : "It is best to standardize provider code, type, and specialty from the start for operational consistency.",
-      isArabic
-        ? "سيتم لاحقًا ربط مقدم الخدمة بالعقود والخدمات والطلبات والفواتير والتقارير."
-        : "Later, the provider will be linked with contracts, services, orders, invoices, and reporting.",
-    ],
+    providerTypes: {
+      HOSPITAL: isArabic ? "مستشفى" : "Hospital",
+      MEDICAL_CENTER: isArabic ? "مركز طبي" : "Medical Center",
+      PHARMACY: isArabic ? "صيدلية" : "Pharmacy",
+      PARTNER: isArabic ? "شريك" : "Partner",
+      LAB: isArabic ? "مختبر" : "Lab",
+      CLINIC: isArabic ? "عيادة" : "Clinic",
+      OTHER: isArabic ? "أخرى" : "Other",
+    } satisfies Record<ProviderType, string>,
 
-    summaryItems: [
-      {
-        label: isArabic ? "حالة الصفحة" : "Page Status",
-        value: isArabic ? "جاهزة كبداية UI" : "Ready as UI base",
-        icon: BadgeCheck,
-      },
-      {
-        label: isArabic ? "الربط الخلفي" : "Backend Integration",
-        value: isArabic ? "غير مربوط بعد" : "Not connected yet",
-        icon: ShieldCheck,
-      },
-      {
-        label: isArabic ? "المرحلة الحالية" : "Current Stage",
-        value: isArabic ? "بناء واجهات النظام" : "System frontend build",
-        icon: Sparkles,
-      },
-      {
-        label: isArabic ? "الارتباط المستقبلي" : "Future Mapping",
-        value: isArabic ? "عقود / خدمات / طلبات" : "Contracts / Services / Orders",
-        icon: FileText,
-      },
-    ],
-
-    sectionDescriptions: {
-      basicInfo: isArabic
-        ? "أدخل البيانات الأساسية المعتمدة لمقدم الخدمة داخل النظام."
-        : "Enter the provider’s essential information used across the system.",
-      contactInfo: isArabic
-        ? "حدد بيانات التواصل الأساسية والمدينة والعنوان."
-        : "Define the provider’s contact details, city, and address.",
-      operationalInfo: isArabic
-        ? "تهيئة البيانات التشغيلية والمالية وحالة التعاقد."
-        : "Prepare operational, financial, and contract-related data.",
-    },
+    statuses: {
+      ACTIVE: isArabic ? "نشط" : "Active",
+      INACTIVE: isArabic ? "غير نشط" : "Inactive",
+      SUSPENDED: isArabic ? "موقوف" : "Suspended",
+      DRAFT: isArabic ? "مسودة" : "Draft",
+    } satisfies Record<ProviderStatus, string>,
 
     validation: {
       required: isArabic ? "هذا الحقل مطلوب" : "This field is required",
       invalidEmail: isArabic ? "صيغة البريد غير صحيحة" : "Invalid email format",
-      invalidWebsite: isArabic ? "رابط الموقع غير صالح" : "Invalid website URL",
-      invalidPhone: isArabic ? "رقم الجوال غير صالح" : "Invalid phone number",
-      invalidIban: isArabic ? "رقم الآيبان غير صالح" : "Invalid IBAN",
+      invalidUrl: isArabic ? "الرابط غير صحيح" : "Invalid URL",
+      invalidPhone: isArabic ? "رقم الهاتف غير صحيح" : "Invalid phone number",
     },
 
-    successTitle: isArabic ? "تم تجهيز النموذج" : "Form prepared",
-    successText: isArabic
-      ? "واجهة إنشاء مقدم الخدمة جاهزة، وسيتم لاحقًا ربط زر الحفظ مع الـ API."
-      : "The create provider UI is ready. The save action will be connected to the API later.",
+    successTitle: isArabic
+      ? "تم إنشاء مقدم الخدمة بنجاح"
+      : "Provider created successfully",
+    successDesc: isArabic
+      ? "تم حفظ مقدم الخدمة داخل النظام ويمكنك الآن ربطه بالعقود والخدمات."
+      : "Provider has been saved and can now be linked with contracts and services.",
+    draftTitle: isArabic ? "تم حفظ المسودة" : "Draft saved",
+    draftDesc: isArabic
+      ? "تم إنشاء مقدم الخدمة كمسودة داخل النظام."
+      : "Provider has been created as a draft.",
+    errorTitle: isArabic
+      ? "تعذر إنشاء مقدم الخدمة"
+      : "Unable to create provider",
 
-    draftTitle: isArabic ? "تم حفظ القيم محليًا" : "Values prepared locally",
-    draftText: isArabic
-      ? "تم التحقق من الحقول الأساسية محليًا كنموذج أولي."
-      : "Basic fields have been validated locally as a first draft.",
-
-    requiredFields: isArabic ? "الحقول الأساسية" : "Required Fields",
+    requiredFields: isArabic ? "الحقول المطلوبة" : "Required Fields",
     optionalFields: isArabic ? "حقول اختيارية" : "Optional Fields",
-    completionLabel: isArabic ? "نسبة اكتمال النموذج" : "Form Completion",
-    completionDesc: isArabic
-      ? "ملخص سريع لحالة تعبئة النموذج."
-      : "Quick summary for the form completion state.",
+
+    quickGuideTitle: isArabic ? "إرشادات سريعة" : "Quick Guide",
+    quickGuideDesc: isArabic
+      ? "تأكد من إدخال بيانات مقدم الخدمة الأساسية بشكل صحيح قبل الحفظ."
+      : "Make sure the provider core data is correct before saving.",
+
+    guide: [
+      isArabic
+        ? "كود مقدم الخدمة يساعد في ربط العقود والخدمات لاحقًا."
+        : "Provider code helps later when linking contracts and services.",
+      isArabic
+        ? "يفضل إدخال الجوال والبريد لتسهيل إرسال التنبيهات."
+        : "Mobile and email are recommended for future notifications.",
+      isArabic
+        ? "يمكن إنشاء مقدم الخدمة كمسودة ثم تفعيله لاحقًا."
+        : "You can create the provider as draft and activate it later.",
+    ],
+
+    completion: isArabic ? "اكتمال البيانات" : "Completion",
+    completedFields: isArabic ? "حقول مكتملة" : "completed fields",
+    backendRoute: isArabic ? "المسار الخلفي" : "Backend Route",
+    workspace: isArabic ? "مساحة العمل" : "Workspace",
+    statusReady: isArabic ? "جاهز للحفظ" : "Ready to Save",
   };
 }
 
+/* ============================================================
+   ✅ Validators
+============================================================ */
+
 function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  if (!value.trim()) return true;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
 function isValidUrl(value: string) {
+  if (!value.trim()) return true;
+
   try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" || parsed.protocol === "http:";
+    const url = new URL(value.trim());
+    return url.protocol === "https:" || url.protocol === "http:";
   } catch {
     return false;
   }
 }
 
 function isValidPhone(value: string) {
-  const cleaned = value.replace(/[^\d+]/g, "");
-  return cleaned.length >= 9;
-}
-
-function isValidIban(value: string) {
   if (!value.trim()) return true;
-  const cleaned = value.replace(/\s+/g, "").toUpperCase();
-  return cleaned.startsWith("SA") && cleaned.length >= 15;
+  const cleaned = value.replace(/[^\d+]/g, "");
+  return cleaned.length >= 7;
 }
 
-export default function SystemCreateProviderPage() {
-  const locale = detectLocale();
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
+/* ============================================================
+   🧩 Page
+============================================================ */
 
+export default function SystemProvidersCreatePage() {
+  const router = useRouter();
+
+  const [locale, setLocale] = useState<AppLocale>("ar");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<ProviderFormData>({
-    providerNameAr: "",
-    providerNameEn: "",
-    providerCode: "",
-    providerType: "",
-    specialty: "",
-    contactPerson: "",
+    name: "",
+    code: "",
+    provider_type: "MEDICAL_CENTER",
+    status: "ACTIVE",
+    contact_person: "",
     phone: "",
+    mobile: "",
     email: "",
-    city: "",
-    address: "",
     website: "",
-    taxNumber: "",
-    iban: "",
-    contractStatus: "",
+    city: "",
+    area: "",
+    address: "",
+    google_maps_link: "",
     notes: "",
+    is_featured: false,
   });
+
   const [errors, setErrors] = useState<ProviderFormErrors>({});
 
-  const completionStats = useMemo(() => {
-    const values = Object.values(formData);
-    const filled = values.filter((value) => value.trim().length > 0).length;
-    const total = values.length;
+  const isArabic = locale === "ar";
+  const t = useMemo(() => dictionary(locale), [locale]);
+
+  useEffect(() => {
+    const syncLocale = () => {
+      const nextLocale = readLocale();
+      setLocale(nextLocale);
+      applyDocumentLocale(nextLocale);
+    };
+
+    syncLocale();
+
+    const handleLocaleChange = () => syncLocale();
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === "primey-locale") syncLocale();
+    };
+
+    window.addEventListener("primey-locale-changed", handleLocaleChange);
+    window.addEventListener("storage", handleStorageChange);
+
+    const timer = window.setTimeout(syncLocale, 50);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("primey-locale-changed", handleLocaleChange);
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, []);
+
+  const completion = useMemo(() => {
+    const keys: Array<keyof ProviderFormData> = [
+      "name",
+      "code",
+      "contact_person",
+      "phone",
+      "mobile",
+      "email",
+      "city",
+      "area",
+      "address",
+      "website",
+      "google_maps_link",
+      "notes",
+    ];
+
+    const filled = keys.filter((key) => {
+      const value = formData[key];
+      return typeof value === "string" && value.trim().length > 0;
+    }).length;
+
+    const total = keys.length;
     const percent = Math.round((filled / total) * 100);
 
     return { filled, total, percent };
@@ -283,74 +407,104 @@ export default function SystemCreateProviderPage() {
 
     setErrors((prev) => {
       if (!prev[key]) return prev;
+
       const next = { ...prev };
       delete next[key];
       return next;
     });
   }
 
-  function validateForm() {
+  function validate(statusOverride?: ProviderStatus) {
     const nextErrors: ProviderFormErrors = {};
 
-    if (!formData.providerNameAr.trim()) {
-      nextErrors.providerNameAr = t.validation.required;
-    }
-    if (!formData.providerNameEn.trim()) {
-      nextErrors.providerNameEn = t.validation.required;
-    }
-    if (!formData.providerCode.trim()) {
-      nextErrors.providerCode = t.validation.required;
-    }
-    if (!formData.providerType.trim()) {
-      nextErrors.providerType = t.validation.required;
-    }
-    if (!formData.specialty.trim()) {
-      nextErrors.specialty = t.validation.required;
-    }
-    if (!formData.contactPerson.trim()) {
-      nextErrors.contactPerson = t.validation.required;
+    if (!formData.name.trim()) {
+      nextErrors.name = t.validation.required;
     }
 
-    if (!formData.phone.trim()) {
-      nextErrors.phone = t.validation.required;
-    } else if (!isValidPhone(formData.phone.trim())) {
-      nextErrors.phone = t.validation.invalidPhone;
+    if (!formData.code.trim()) {
+      nextErrors.code = t.validation.required;
     }
 
-    if (!formData.email.trim()) {
-      nextErrors.email = t.validation.required;
-    } else if (!isValidEmail(formData.email.trim())) {
-      nextErrors.email = t.validation.invalidEmail;
+    if (!formData.contact_person.trim()) {
+      nextErrors.contact_person = t.validation.required;
     }
 
     if (!formData.city.trim()) {
       nextErrors.city = t.validation.required;
     }
+
     if (!formData.address.trim()) {
       nextErrors.address = t.validation.required;
     }
-    if (!formData.contractStatus.trim()) {
-      nextErrors.contractStatus = t.validation.required;
+
+    if (!formData.phone.trim() && !formData.mobile.trim()) {
+      nextErrors.phone = t.validation.required;
+      nextErrors.mobile = t.validation.required;
     }
 
-    if (formData.website.trim() && !isValidUrl(formData.website.trim())) {
-      nextErrors.website = t.validation.invalidWebsite;
+    if (formData.phone.trim() && !isValidPhone(formData.phone)) {
+      nextErrors.phone = t.validation.invalidPhone;
     }
 
-    if (formData.iban.trim() && !isValidIban(formData.iban.trim())) {
-      nextErrors.iban = t.validation.invalidIban;
+    if (formData.mobile.trim() && !isValidPhone(formData.mobile)) {
+      nextErrors.mobile = t.validation.invalidPhone;
+    }
+
+    if (formData.email.trim() && !isValidEmail(formData.email)) {
+      nextErrors.email = t.validation.invalidEmail;
+    }
+
+    if (formData.website.trim() && !isValidUrl(formData.website)) {
+      nextErrors.website = t.validation.invalidUrl;
+    }
+
+    if (
+      formData.google_maps_link.trim() &&
+      !isValidUrl(formData.google_maps_link)
+    ) {
+      nextErrors.google_maps_link = t.validation.invalidUrl;
+    }
+
+    if (statusOverride !== "DRAFT") {
+      if (!formData.provider_type) {
+        nextErrors.provider_type = t.validation.required;
+      }
+
+      if (!formData.status) {
+        nextErrors.status = t.validation.required;
+      }
     }
 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   }
 
-  async function handleSubmit(mode: "draft" | "create") {
-    if (!validateForm()) {
+  function buildPayload(statusOverride?: ProviderStatus) {
+    return {
+      name: formData.name.trim(),
+      code: formData.code.trim().toUpperCase(),
+      provider_type: formData.provider_type,
+      status: statusOverride || formData.status,
+      contact_person: formData.contact_person.trim(),
+      phone: formData.phone.trim(),
+      mobile: formData.mobile.trim() || formData.phone.trim(),
+      email: formData.email.trim(),
+      website: formData.website.trim(),
+      city: formData.city.trim(),
+      area: formData.area.trim(),
+      address: formData.address.trim(),
+      google_maps_link: formData.google_maps_link.trim(),
+      notes: formData.notes.trim(),
+      is_featured: formData.is_featured,
+    };
+  }
+
+  async function submitProvider(statusOverride?: ProviderStatus) {
+    if (!validate(statusOverride)) {
       toast.error(
         isArabic
-          ? "يرجى تصحيح الحقول المطلوبة أولًا"
-          : "Please fix the required fields first"
+          ? "يرجى تصحيح الحقول المطلوبة أولًا."
+          : "Please fix the required fields first."
       );
       return;
     }
@@ -358,592 +512,493 @@ export default function SystemCreateProviderPage() {
     setIsSubmitting(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      const response = await fetch("/api/providers/", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCookie("csrftoken"),
+        },
+        body: JSON.stringify(buildPayload(statusOverride)),
+      });
 
-      if (mode === "draft") {
-        toast.success(t.draftTitle, {
-          description: t.draftText,
-        });
-      } else {
-        toast.success(t.successTitle, {
-          description: t.successText,
-        });
+      const payload = (await response.json().catch(() => null)) as
+        | ProviderCreateResponse
+        | null;
+
+      if (!response.ok || payload?.ok === false) {
+        console.error("Create provider API error:", payload);
+        throw new Error(
+          payload?.message ||
+            (isArabic
+              ? "حدث خطأ أثناء حفظ مقدم الخدمة."
+              : "An error occurred while saving provider.")
+        );
       }
+
+      toast.success(statusOverride === "DRAFT" ? t.draftTitle : t.successTitle, {
+        description: statusOverride === "DRAFT" ? t.draftDesc : t.successDesc,
+      });
+
+      router.push("/system/providers/list");
+      router.refresh();
     } catch (error) {
-      console.error("Create provider form error:", error);
-      toast.error(
-        isArabic ? "حدث خطأ غير متوقع" : "Unexpected error occurred"
-      );
+      console.error("Create provider error:", error);
+      toast.error(t.errorTitle, {
+        description:
+          error instanceof Error
+            ? error.message
+            : isArabic
+              ? "حدث خطأ غير متوقع."
+              : "Unexpected error occurred.",
+      });
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  const summaryItems = [
+    {
+      label: t.backendRoute,
+      value: t.route,
+      icon: ShieldCheck,
+    },
+    {
+      label: t.workspace,
+      value: "System",
+      icon: Sparkles,
+    },
+    {
+      label: t.statusReady,
+      value: t.statuses[formData.status],
+      icon: BadgeCheck,
+    },
+  ];
+
   return (
     <div className="space-y-6">
-      <Card className="overflow-hidden rounded-3xl border-white/20 bg-white/70 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-        <CardContent className="p-6 md:p-7">
-          <div className="grid gap-6 lg:grid-cols-[1.35fr_0.85fr] lg:items-center">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge className="rounded-full px-3 py-1">
-                  {t.heroBadge1}
-                </Badge>
-                <Badge variant="secondary" className="rounded-full px-3 py-1">
-                  {t.heroBadge2}
-                </Badge>
-              </div>
+      {/* =====================================================
+          Header
+      ====================================================== */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="order-2 flex flex-wrap items-center gap-2 lg:order-1">
+          <Link href="/system/providers">
+            <Button variant="outline" className="rounded-xl">
+              <ArrowLeft className="h-4 w-4" />
+              <span>{t.back}</span>
+            </Button>
+          </Link>
 
-              <div className="space-y-3">
-                <h1 className="text-2xl font-bold tracking-tight md:text-4xl">
-                  {t.pageTitle}
-                </h1>
-                <p className="text-muted-foreground max-w-3xl text-sm leading-7 md:text-base">
-                  {t.pageSubtitle}
-                </p>
-              </div>
+          <Button
+            variant="outline"
+            className="rounded-xl"
+            disabled={isSubmitting}
+            onClick={() => submitProvider("DRAFT")}
+          >
+            {isSubmitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            <span>{t.saveDraft}</span>
+          </Button>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Link
-                  href="/system/providers"
-                  className="w-full sm:w-auto"
-                >
-                  <Button
-                    variant="outline"
-                    className="w-full rounded-2xl sm:w-auto"
-                  >
-                    <ArrowLeft
-                      className={`h-4 w-4 ${
-                        isArabic ? "ms-2" : "me-2 rotate-180"
-                      }`}
-                    />
-                    {t.backToProviders}
-                  </Button>
-                </Link>
+          <Button
+            className="rounded-xl"
+            disabled={isSubmitting}
+            onClick={() => submitProvider()}
+          >
+            {isSubmitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            <span>{t.create}</span>
+          </Button>
+        </div>
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full rounded-2xl sm:w-auto"
-                  onClick={() => handleSubmit("draft")}
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="ms-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="ms-2 h-4 w-4" />
-                  )}
-                  {t.saveDraft}
-                </Button>
-
-                <Button
-                  type="button"
-                  className="w-full rounded-2xl sm:w-auto"
-                  onClick={() => handleSubmit("create")}
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="ms-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="ms-2 h-4 w-4" />
-                  )}
-                  {t.createProvider}
-                </Button>
-              </div>
-            </div>
-
-            <Card className="rounded-3xl border-white/20 bg-white/75 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t.createSummary}</CardTitle>
-                <CardDescription>{t.completionDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                {t.summaryItems.map((item) => {
-                  const Icon = item.icon;
-
-                  return (
-                    <div
-                      key={item.label}
-                      className="flex items-center gap-3 rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5"
-                    >
-                      <div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-2xl">
-                        <Icon className="h-4 w-4" />
-                      </div>
-
-                      <div className="min-w-0">
-                        <p className="text-muted-foreground text-xs">
-                          {item.label}
-                        </p>
-                        <p className="truncate text-sm font-semibold">
-                          {item.value}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                <div className="rounded-2xl border border-dashed border-white/30 bg-black/5 p-4 dark:border-white/10 dark:bg-white/5">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold">{t.completionLabel}</p>
-                    <Badge className="rounded-full px-3 py-1">
-                      {completionStats.percent}%
-                    </Badge>
-                  </div>
-
-                  <div className="mb-3 h-2.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
-                    <div
-                      className="bg-primary h-full rounded-full transition-all duration-300"
-                      style={{ width: `${completionStats.percent}%` }}
-                    />
-                  </div>
-
-                  <p className="text-muted-foreground text-sm leading-7">
-                    {isArabic
-                      ? `تمت تعبئة ${completionStats.filled} من أصل ${completionStats.total} حقول.`
-                      : `${completionStats.filled} out of ${completionStats.total} fields are completed.`}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
+        <div className="order-1 max-w-3xl space-y-2 text-right lg:order-2">
+          <div className="flex justify-end gap-2">
+            <Badge variant="secondary" className="rounded-full px-3 py-1">
+              {t.liveApi}
+            </Badge>
+            <Badge variant="outline" className="rounded-full px-3 py-1">
+              {t.route}
+            </Badge>
           </div>
-        </CardContent>
-      </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
+            {t.title}
+          </h1>
+          <p className="text-sm leading-7 text-muted-foreground md:text-base">
+            {t.subtitle}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1fr_0.42fr]">
+        {/* =====================================================
+            Form
+        ====================================================== */}
         <div className="space-y-6">
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.basicInfo}</CardTitle>
-              <CardDescription>
-                {t.sectionDescriptions.basicInfo}
-              </CardDescription>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="text-right">
+              <CardTitle className="flex items-center justify-end gap-2">
+                {t.basicInfo}
+                <Building2 className="h-5 w-5 text-primary" />
+              </CardTitle>
+              <CardDescription>{t.basicDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="providerNameAr">{t.providerNameAr}</Label>
-                <div className="relative">
-                  <Building2
-                    className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    id="providerNameAr"
-                    value={formData.providerNameAr}
-                    onChange={(e) =>
-                      setField("providerNameAr", e.target.value)
-                    }
-                    placeholder={t.placeholders.providerNameAr}
-                    className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-                {errors.providerNameAr ? (
-                  <p className="text-sm text-red-500">
-                    {errors.providerNameAr}
-                  </p>
-                ) : null}
-              </div>
+              <Field
+                id="name"
+                label={t.labels.name}
+                value={formData.name}
+                error={errors.name}
+                placeholder={t.placeholders.name}
+                icon={Building2}
+                isArabic={isArabic}
+                onChange={(value) => setField("name", value)}
+              />
 
-              <div className="space-y-2">
-                <Label htmlFor="providerNameEn">{t.providerNameEn}</Label>
-                <div className="relative">
-                  <Building2
-                    className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    id="providerNameEn"
-                    value={formData.providerNameEn}
-                    onChange={(e) =>
-                      setField("providerNameEn", e.target.value)
-                    }
-                    placeholder={t.placeholders.providerNameEn}
-                    className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-                {errors.providerNameEn ? (
-                  <p className="text-sm text-red-500">
-                    {errors.providerNameEn}
-                  </p>
-                ) : null}
-              </div>
+              <Field
+                id="code"
+                label={t.labels.code}
+                value={formData.code}
+                error={errors.code}
+                placeholder={t.placeholders.code}
+                icon={FileText}
+                isArabic={isArabic}
+                onChange={(value) => setField("code", value.toUpperCase())}
+              />
 
-              <div className="space-y-2">
-                <Label htmlFor="providerCode">{t.providerCode}</Label>
-                <div className="relative">
-                  <Tag
-                    className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    id="providerCode"
-                    value={formData.providerCode}
-                    onChange={(e) =>
-                      setField("providerCode", e.target.value.toUpperCase())
-                    }
-                    placeholder={t.placeholders.providerCode}
-                    className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-                {errors.providerCode ? (
-                  <p className="text-sm text-red-500">
-                    {errors.providerCode}
-                  </p>
-                ) : null}
-              </div>
+              <OptionGroup
+                label={t.labels.providerType}
+                options={[
+                  "HOSPITAL",
+                  "MEDICAL_CENTER",
+                  "CLINIC",
+                  "PHARMACY",
+                  "LAB",
+                  "PARTNER",
+                  "OTHER",
+                ]}
+                value={formData.provider_type}
+                labels={t.providerTypes}
+                onChange={(value) => setField("provider_type", value)}
+              />
 
-              <div className="space-y-2">
-                <Label htmlFor="providerType">{t.providerType}</Label>
-                <Input
-                  id="providerType"
-                  value={formData.providerType}
-                  onChange={(e) => setField("providerType", e.target.value)}
-                  placeholder={t.placeholders.providerType}
-                  className="rounded-2xl"
+              <OptionGroup
+                label={t.labels.status}
+                options={["ACTIVE", "DRAFT", "INACTIVE", "SUSPENDED"]}
+                value={formData.status}
+                labels={t.statuses}
+                onChange={(value) => setField("status", value)}
+              />
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="text-right">
+              <CardTitle className="flex items-center justify-end gap-2">
+                {t.contactInfo}
+                <Phone className="h-5 w-5 text-primary" />
+              </CardTitle>
+              <CardDescription>{t.contactDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <Field
+                id="contact_person"
+                label={t.labels.contactPerson}
+                value={formData.contact_person}
+                error={errors.contact_person}
+                placeholder={t.placeholders.contactPerson}
+                icon={UserRound}
+                isArabic={isArabic}
+                onChange={(value) => setField("contact_person", value)}
+              />
+
+              <Field
+                id="phone"
+                label={t.labels.phone}
+                value={formData.phone}
+                error={errors.phone}
+                placeholder={t.placeholders.phone}
+                icon={Phone}
+                isArabic={isArabic}
+                onChange={(value) => setField("phone", value)}
+              />
+
+              <Field
+                id="mobile"
+                label={t.labels.mobile}
+                value={formData.mobile}
+                error={errors.mobile}
+                placeholder={t.placeholders.mobile}
+                icon={Phone}
+                isArabic={isArabic}
+                onChange={(value) => setField("mobile", value)}
+              />
+
+              <Field
+                id="email"
+                type="email"
+                label={t.labels.email}
+                value={formData.email}
+                error={errors.email}
+                placeholder={t.placeholders.email}
+                icon={Mail}
+                isArabic={isArabic}
+                onChange={(value) => setField("email", value)}
+              />
+
+              <div className="md:col-span-2">
+                <Field
+                  id="website"
+                  label={t.labels.website}
+                  value={formData.website}
+                  error={errors.website}
+                  placeholder={t.placeholders.website}
+                  icon={Globe}
+                  isArabic={isArabic}
+                  onChange={(value) => setField("website", value)}
                 />
-                {errors.providerType ? (
-                  <p className="text-sm text-red-500">
-                    {errors.providerType}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="specialty">{t.specialty}</Label>
-                <div className="relative">
-                  <Stethoscope
-                    className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    id="specialty"
-                    value={formData.specialty}
-                    onChange={(e) => setField("specialty", e.target.value)}
-                    placeholder={t.placeholders.specialty}
-                    className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-                {errors.specialty ? (
-                  <p className="text-sm text-red-500">{errors.specialty}</p>
-                ) : null}
               </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.contactInfo}</CardTitle>
-              <CardDescription>
-                {t.sectionDescriptions.contactInfo}
-              </CardDescription>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="text-right">
+              <CardTitle className="flex items-center justify-end gap-2">
+                {t.locationInfo}
+                <MapPin className="h-5 w-5 text-primary" />
+              </CardTitle>
+              <CardDescription>{t.locationDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="contactPerson">{t.contactPerson}</Label>
-                <div className="relative">
-                  <UserRound
-                    className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    id="contactPerson"
-                    value={formData.contactPerson}
-                    onChange={(e) =>
-                      setField("contactPerson", e.target.value)
-                    }
-                    placeholder={t.placeholders.contactPerson}
-                    className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-                {errors.contactPerson ? (
-                  <p className="text-sm text-red-500">
-                    {errors.contactPerson}
-                  </p>
-                ) : null}
-              </div>
+              <Field
+                id="city"
+                label={t.labels.city}
+                value={formData.city}
+                error={errors.city}
+                placeholder={t.placeholders.city}
+                icon={MapPin}
+                isArabic={isArabic}
+                onChange={(value) => setField("city", value)}
+              />
 
-              <div className="space-y-2">
-                <Label htmlFor="phone">{t.phone}</Label>
-                <div className="relative">
-                  <Phone
-                    className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    id="phone"
-                    value={formData.phone}
-                    onChange={(e) => setField("phone", e.target.value)}
-                    placeholder={t.placeholders.phone}
-                    className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-                {errors.phone ? (
-                  <p className="text-sm text-red-500">{errors.phone}</p>
-                ) : null}
-              </div>
+              <Field
+                id="area"
+                label={t.labels.area}
+                value={formData.area}
+                error={errors.area}
+                placeholder={t.placeholders.area}
+                icon={MapPin}
+                isArabic={isArabic}
+                onChange={(value) => setField("area", value)}
+              />
 
-              <div className="space-y-2">
-                <Label htmlFor="email">{t.email}</Label>
-                <div className="relative">
-                  <Mail
-                    className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    id="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setField("email", e.target.value)}
-                    placeholder={t.placeholders.email}
-                    className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-                {errors.email ? (
-                  <p className="text-sm text-red-500">{errors.email}</p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="city">{t.city}</Label>
-                <div className="relative">
-                  <MapPin
-                    className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    id="city"
-                    value={formData.city}
-                    onChange={(e) => setField("city", e.target.value)}
-                    placeholder={t.placeholders.city}
-                    className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-                {errors.city ? (
-                  <p className="text-sm text-red-500">{errors.city}</p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="address">{t.address}</Label>
-                <Input
+              <div className="md:col-span-2">
+                <TextAreaField
                   id="address"
+                  label={t.labels.address}
                   value={formData.address}
-                  onChange={(e) => setField("address", e.target.value)}
+                  error={errors.address}
                   placeholder={t.placeholders.address}
-                  className="rounded-2xl"
+                  onChange={(value) => setField("address", value)}
                 />
-                {errors.address ? (
-                  <p className="text-sm text-red-500">{errors.address}</p>
-                ) : null}
+              </div>
+
+              <div className="md:col-span-2">
+                <Field
+                  id="google_maps_link"
+                  label={t.labels.googleMaps}
+                  value={formData.google_maps_link}
+                  error={errors.google_maps_link}
+                  placeholder={t.placeholders.googleMaps}
+                  icon={Globe}
+                  isArabic={isArabic}
+                  onChange={(value) => setField("google_maps_link", value)}
+                />
               </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.operationalInfo}</CardTitle>
-              <CardDescription>
-                {t.sectionDescriptions.operationalInfo}
-              </CardDescription>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="text-right">
+              <CardTitle className="flex items-center justify-end gap-2">
+                {t.operationalInfo}
+                <Stethoscope className="h-5 w-5 text-primary" />
+              </CardTitle>
+              <CardDescription>{t.operationalDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="website">{t.website}</Label>
-                <div className="relative">
-                  <Globe
-                    className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    id="website"
-                    value={formData.website}
-                    onChange={(e) => setField("website", e.target.value)}
-                    placeholder={t.placeholders.website}
-                    className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-                {errors.website ? (
-                  <p className="text-sm text-red-500">{errors.website}</p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="taxNumber">{t.taxNumber}</Label>
-                <Input
-                  id="taxNumber"
-                  value={formData.taxNumber}
-                  onChange={(e) => setField("taxNumber", e.target.value)}
-                  placeholder={t.placeholders.taxNumber}
-                  className="rounded-2xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="iban">{t.iban}</Label>
-                <div className="relative">
-                  <Wallet
-                    className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    id="iban"
-                    value={formData.iban}
-                    onChange={(e) =>
-                      setField("iban", e.target.value.toUpperCase())
-                    }
-                    placeholder={t.placeholders.iban}
-                    className={`rounded-2xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-                {errors.iban ? (
-                  <p className="text-sm text-red-500">{errors.iban}</p>
-                ) : null}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="contractStatus">{t.contractStatus}</Label>
-                <Input
-                  id="contractStatus"
-                  value={formData.contractStatus}
-                  onChange={(e) =>
-                    setField("contractStatus", e.target.value)
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-4 rounded-2xl border bg-muted/30 p-4">
+                <Checkbox
+                  id="is_featured"
+                  checked={formData.is_featured}
+                  onCheckedChange={(checked) =>
+                    setField("is_featured", Boolean(checked))
                   }
-                  placeholder={t.placeholders.contractStatus}
-                  className="rounded-2xl"
                 />
-                {errors.contractStatus ? (
-                  <p className="text-sm text-red-500">
-                    {errors.contractStatus}
-                  </p>
-                ) : null}
-              </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="notes">{t.notes}</Label>
-                <Input
-                  id="notes"
-                  value={formData.notes}
-                  onChange={(e) => setField("notes", e.target.value)}
-                  placeholder={t.placeholders.notes}
-                  className="rounded-2xl"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:flex-wrap">
-              <Button
-                type="button"
-                className="w-full rounded-2xl sm:w-auto"
-                onClick={() => handleSubmit("create")}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <Loader2 className="ms-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="ms-2 h-4 w-4" />
-                )}
-                {t.createProvider}
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full rounded-2xl sm:w-auto"
-                onClick={() => handleSubmit("draft")}
-                disabled={isSubmitting}
-              >
-                <Save className="ms-2 h-4 w-4" />
-                {t.saveDraft}
-              </Button>
-
-              <Link
-                href="/system/providers"
-                className="w-full sm:w-auto"
-              >
-                <Button
-                  variant="outline"
-                  className="w-full rounded-2xl sm:w-auto"
+                <Label
+                  htmlFor="is_featured"
+                  className="flex cursor-pointer items-center gap-2 text-right"
                 >
-                  <ArrowLeft
-                    className={`h-4 w-4 ${
-                      isArabic ? "ms-2" : "me-2 rotate-180"
-                    }`}
-                  />
-                  {t.backToProviders}
-                </Button>
-              </Link>
+                  <span>{t.labels.featured}</span>
+                  <Star className="h-4 w-4 text-primary" />
+                </Label>
+              </div>
+
+              <TextAreaField
+                id="notes"
+                label={t.labels.notes}
+                value={formData.notes}
+                error={errors.notes}
+                placeholder={t.placeholders.notes}
+                onChange={(value) => setField("notes", value)}
+              />
             </CardContent>
           </Card>
         </div>
 
+        {/* =====================================================
+            Side Panel
+        ====================================================== */}
         <div className="space-y-6">
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.quickGuide}</CardTitle>
-              <CardDescription>
-                {isArabic
-                  ? "دليل سريع قبل ربط النموذج مع واجهة الـ API."
-                  : "A quick guide before connecting this form to the API."}
-              </CardDescription>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="text-right">
+              <CardTitle>{t.summaryTitle}</CardTitle>
+              <CardDescription>{t.summaryDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-3">
-              {t.tips.map((tip, index) => (
+              {summaryItems.map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <div
+                    key={item.label}
+                    className="flex items-center justify-between gap-3 rounded-2xl border bg-background p-4"
+                  >
+                    <div className="min-w-0 text-right">
+                      <p className="text-xs text-muted-foreground">
+                        {item.label}
+                      </p>
+                      <p className="truncate text-sm font-semibold">
+                        {item.value}
+                      </p>
+                    </div>
+
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <Icon className="h-4 w-4" />
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="rounded-2xl border border-dashed bg-muted/30 p-4">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <Badge className="rounded-full px-3 py-1">
+                    {completion.percent}%
+                  </Badge>
+                  <p className="text-sm font-semibold">{t.completion}</p>
+                </div>
+
+                <div className="mb-3 h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all"
+                    style={{ width: `${completion.percent}%` }}
+                  />
+                </div>
+
+                <p className="text-right text-sm text-muted-foreground">
+                  {completion.filled} / {completion.total} {t.completedFields}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="text-right">
+              <CardTitle>{t.quickGuideTitle}</CardTitle>
+              <CardDescription>{t.quickGuideDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-3">
+              {t.guide.map((item, index) => (
                 <div
-                  key={`${tip}-${index}`}
-                  className="flex items-start gap-3 rounded-2xl border border-white/20 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/5"
+                  key={`${item}-${index}`}
+                  className="flex items-start gap-3 rounded-2xl border bg-background p-4"
                 >
-                  <div className="bg-primary/10 text-primary mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl">
+                  <p className="flex-1 text-right text-sm leading-7">{item}</p>
+
+                  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                     <Sparkles className="h-4 w-4" />
                   </div>
-                  <p className="text-sm leading-7">{tip}</p>
                 </div>
               ))}
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="text-right">
               <CardTitle>{t.requiredFields}</CardTitle>
               <CardDescription>
                 {isArabic
-                  ? "هذه الحقول مطلوبة في النسخة الحالية."
-                  : "These fields are required in the current version."}
+                  ? "هذه الحقول مطلوبة للحفظ."
+                  : "These fields are required to save."}
               </CardDescription>
             </CardHeader>
 
-            <CardContent className="flex flex-wrap gap-2">
+            <CardContent className="flex flex-wrap justify-end gap-2">
               {[
-                t.providerNameAr,
-                t.providerNameEn,
-                t.providerCode,
-                t.providerType,
-                t.specialty,
-                t.contactPerson,
-                t.phone,
-                t.email,
-                t.city,
-                t.address,
-                t.contractStatus,
+                t.labels.name,
+                t.labels.code,
+                t.labels.contactPerson,
+                t.labels.phone,
+                t.labels.city,
+                t.labels.address,
               ].map((item) => (
                 <Badge
                   key={item}
                   variant="secondary"
+                  className="rounded-full px-3 py-1"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {item}
+                </Badge>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="text-right">
+              <CardTitle>{t.optionalFields}</CardTitle>
+              <CardDescription>
+                {isArabic
+                  ? "يمكن إكمالها لاحقًا حسب الحاجة."
+                  : "Can be completed later when needed."}
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="flex flex-wrap justify-end gap-2">
+              {[
+                t.labels.email,
+                t.labels.website,
+                t.labels.googleMaps,
+                t.labels.notes,
+                t.labels.featured,
+              ].map((item) => (
+                <Badge
+                  key={item}
+                  variant="outline"
                   className="rounded-full px-3 py-1"
                 >
                   {item}
@@ -951,26 +1006,131 @@ export default function SystemCreateProviderPage() {
               ))}
             </CardContent>
           </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-lg dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle>{t.optionalFields}</CardTitle>
-              <CardDescription>
-                {isArabic
-                  ? "يمكن ربط هذه الحقول لاحقًا أو تركها فارغة."
-                  : "These fields can stay optional for now."}
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent className="flex flex-wrap gap-2">
-              {[t.website, t.taxNumber, t.iban, t.notes].map((item) => (
-                <Badge key={item} className="rounded-full px-3 py-1">
-                  {item}
-                </Badge>
-              ))}
-            </CardContent>
-          </Card>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   🧱 Components
+============================================================ */
+
+type FieldProps = {
+  id: string;
+  label: string;
+  value: string;
+  error?: string;
+  placeholder: string;
+  type?: string;
+  icon: ElementType;
+  isArabic: boolean;
+  onChange: (value: string) => void;
+};
+
+function Field({
+  id,
+  label,
+  value,
+  error,
+  placeholder,
+  type = "text",
+  icon: Icon,
+  isArabic,
+  onChange,
+}: FieldProps) {
+  return (
+    <div className="space-y-2 text-right">
+      <Label htmlFor={id}>{label}</Label>
+
+      <div className="relative">
+        <Icon
+          className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+            isArabic ? "right-3" : "left-3"
+          }`}
+        />
+        <Input
+          id={id}
+          type={type}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+        />
+      </div>
+
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+type TextAreaFieldProps = {
+  id: string;
+  label: string;
+  value: string;
+  error?: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+};
+
+function TextAreaField({
+  id,
+  label,
+  value,
+  error,
+  placeholder,
+  onChange,
+}: TextAreaFieldProps) {
+  return (
+    <div className="space-y-2 text-right">
+      <Label htmlFor={id}>{label}</Label>
+      <Textarea
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="min-h-28 rounded-xl"
+      />
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+type OptionGroupProps<T extends string> = {
+  label: string;
+  options: T[];
+  value: T;
+  labels: Record<T, string>;
+  onChange: (value: T) => void;
+};
+
+function OptionGroup<T extends string>({
+  label,
+  options,
+  value,
+  labels,
+  onChange,
+}: OptionGroupProps<T>) {
+  return (
+    <div className="space-y-2 text-right">
+      <Label>{label}</Label>
+
+      <div className="grid grid-cols-2 gap-2">
+        {options.map((option) => {
+          const isActive = value === option;
+
+          return (
+            <Button
+              key={option}
+              type="button"
+              variant={isActive ? "default" : "outline"}
+              className="h-10 rounded-xl"
+              onClick={() => onChange(option)}
+            >
+              {labels[option]}
+            </Button>
+          );
+        })}
       </div>
     </div>
   );

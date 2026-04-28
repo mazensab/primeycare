@@ -32,11 +32,31 @@ import { DotsVerticalIcon } from "@radix-ui/react-icons";
 
 type AppLocale = "ar" | "en";
 
+type PrimeyAuthUser = {
+  id?: number | string;
+  full_name?: string | null;
+  username?: string | null;
+  email?: string | null;
+  avatar?: string | null;
+};
+
+type PrimeyAuthSubscription = {
+  days_remaining?: number | null;
+  apps?: string[];
+};
+
+type PrimeyAuthSession = {
+  user?: PrimeyAuthUser | null;
+  role?: string | null;
+  subscription?: PrimeyAuthSubscription | null;
+};
+
 /* =====================================================
    ✅ قراءة لغة النظام بشكل آمن
    الأولوية لـ localStorage لأنه المصدر الرسمي للتبديل
    ثم document.documentElement.lang كاحتياط فقط
 ===================================================== */
+
 function readStoredLocale(): AppLocale {
   try {
     if (typeof window === "undefined") return "ar";
@@ -56,6 +76,7 @@ function readStoredLocale(): AppLocale {
 /* =====================================================
    ✅ مزامنة اتجاه الصفحة مع اللغة الحالية
 ===================================================== */
+
 function applyDocumentLocale(locale: AppLocale) {
   try {
     if (typeof document === "undefined") return;
@@ -68,25 +89,72 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
+/* =====================================================
+   ✅ API Base
+   بدون hardcoded localhost داخل الاستخدام المباشر
+===================================================== */
+
+function getApiBaseUrl(): string {
+  const apiUrl =
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://127.0.0.1:8000";
+
+  return apiUrl.replace(/\/$/, "");
+}
+
+/* =====================================================
+   ✅ Safe User Helpers
+===================================================== */
+
+function normalizeSession(value: unknown): PrimeyAuthSession {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return value as PrimeyAuthSession;
+}
+
+function getUserDisplayName(
+  user: PrimeyAuthUser | null | undefined,
+  isArabic: boolean,
+): string {
+  const fullName = String(user?.full_name || "").trim();
+  const username = String(user?.username || "").trim();
+  const email = String(user?.email || "").trim();
+
+  if (fullName) return fullName;
+  if (username) return username;
+  if (email) return email;
+
+  return isArabic ? "مستخدم" : "User";
+}
+
+function getAvatarFallback(userName: string, isArabic: boolean): string {
+  const cleanName = userName.trim();
+
+  if (!cleanName) {
+    return isArabic ? "م" : "U";
+  }
+
+  return cleanName.charAt(0).toUpperCase();
+}
+
 export function NavUser() {
   const { isMobile } = useSidebar();
   const router = useRouter();
   const pathname = usePathname();
-  const session = useAuth();
+  const authSession = useAuth();
+
+  const session = normalizeSession(authSession);
+
   const [loading, setLoading] = useState(false);
   const [locale, setLocale] = useState<AppLocale>("ar");
 
   /* =====================================================
      ✅ مزامنة لغة قائمة المستخدم مع الهيدر مباشرة
-     يعتمد على:
-     - localStorage: primey-locale
-     - event: primey-locale-changed
-     - storage event
-
-     ملاحظة:
-     أضفنا setTimeout خفيف لضمان قراءة القيمة الجديدة
-     بعد اكتمال تحديث localStorage و document.
   ===================================================== */
+
   useEffect(() => {
     const syncLocale = () => {
       const nextLocale = readStoredLocale();
@@ -115,22 +183,24 @@ export function NavUser() {
   }, []);
 
   const isArabic = locale === "ar";
+  const user = session.user || null;
 
-  const userName =
-    session?.user?.full_name ||
-    session?.user?.username ||
-    (isArabic ? "مستخدم" : "User");
-
-  const userEmail = session?.user?.email || "";
-
-  const avatarFallback =
-    userName?.charAt(0)?.toUpperCase() || (isArabic ? "م" : "U");
+  const userName = getUserDisplayName(user, isArabic);
+  const userEmail = String(user?.email || "");
+  const userAvatar = String(user?.avatar || "");
+  const avatarFallback = getAvatarFallback(userName, isArabic);
 
   const isCompanyArea =
-    pathname?.startsWith("/company") || pathname?.startsWith("/center");
+    pathname?.startsWith("/company") ||
+    pathname?.startsWith("/center") ||
+    pathname?.startsWith("/provider");
 
   const accountHref = useMemo(() => {
     return isCompanyArea ? "/company/profile" : "/system/profile";
+  }, [isCompanyArea]);
+
+  const billingHref = useMemo(() => {
+    return isCompanyArea ? "/company/billing" : "/system/billing";
   }, [isCompanyArea]);
 
   const notificationsHref = useMemo(() => {
@@ -142,7 +212,10 @@ export function NavUser() {
    * 🔐 SAFE CSRF READER
    * =====================================================
    */
+
   const getCSRFToken = () => {
+    if (typeof document === "undefined") return "";
+
     const match = document.cookie.match(/csrftoken=([^;]+)/);
     return match ? match[1] : "";
   };
@@ -152,19 +225,23 @@ export function NavUser() {
    * 🔐 FIXED ENTERPRISE LOGOUT
    * =====================================================
    */
+
   const handleLogout = async () => {
     if (loading) return;
+
     setLoading(true);
 
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/csrf/`, {
+      const apiBaseUrl = getApiBaseUrl();
+
+      await fetch(`${apiBaseUrl}/api/auth/csrf/`, {
         method: "GET",
         credentials: "include",
       });
 
       const csrfToken = getCSRFToken();
 
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/logout/`, {
+      await fetch(`${apiBaseUrl}/api/auth/logout/`, {
         method: "POST",
         credentials: "include",
         headers: {
@@ -172,13 +249,17 @@ export function NavUser() {
           "X-CSRFToken": csrfToken,
         },
       });
-    } catch {
-      // حتى لو فشل الـ API، ننهي الجلسة من الواجهة
+    } catch (error) {
+      console.error("Logout API error:", error);
+    } finally {
+      try {
+        window.localStorage.setItem("primey_logout", Date.now().toString());
+      } catch (error) {
+        console.error("Logout localStorage error:", error);
+      }
+
+      router.replace("/login");
     }
-
-    localStorage.setItem("primey_logout", Date.now().toString());
-
-    router.replace("/login");
   };
 
   return (
@@ -191,9 +272,9 @@ export function NavUser() {
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
               <Avatar className="rounded-full">
-                {session?.user?.avatar ? (
+                {userAvatar ? (
                   <AvatarImage
-                    src={session.user.avatar}
+                    src={userAvatar}
                     alt={userName}
                     referrerPolicy="no-referrer"
                   />
@@ -233,9 +314,9 @@ export function NavUser() {
                 }`}
               >
                 <Avatar className="h-8 w-8 rounded-lg">
-                  {session?.user?.avatar ? (
+                  {userAvatar ? (
                     <AvatarImage
-                      src={session.user.avatar}
+                      src={userAvatar}
                       alt={userName}
                       referrerPolicy="no-referrer"
                     />
@@ -271,12 +352,13 @@ export function NavUser() {
                 {isArabic ? "الحساب" : "Account"}
               </DropdownMenuItem>
 
-              {!isCompanyArea && (
-                <DropdownMenuItem className="cursor-pointer">
-                  <CreditCardIcon />
-                  {isArabic ? "الفوترة" : "Billing"}
-                </DropdownMenuItem>
-              )}
+              <DropdownMenuItem
+                onClick={() => router.push(billingHref)}
+                className="cursor-pointer"
+              >
+                <CreditCardIcon />
+                {isArabic ? "الفوترة" : "Billing"}
+              </DropdownMenuItem>
 
               <DropdownMenuItem
                 onClick={() => router.push(notificationsHref)}
