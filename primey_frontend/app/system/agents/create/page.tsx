@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -14,6 +16,7 @@ import {
   Mail,
   Phone,
   PlusCircle,
+  RefreshCcw,
   Save,
   ShieldCheck,
   UserRound,
@@ -38,13 +41,15 @@ import { Textarea } from "@/components/ui/textarea";
    📂 app/system/agents/create/page.tsx
    🧠 Primey Care | Create Agent
    ------------------------------------------------------------
-   ✅ نفس نمط صفحة إنشاء المراكز
-   ✅ استخدام UI الداخلي فقط
-   ✅ نموذج منظم على بطاقات
+   ✅ Phase 6: Agents + Commissions
+   ✅ ربط حقيقي مع POST /api/agents/create/
+   ✅ نفس هوية Primey Care الرسمية
    ✅ دعم عربي / إنجليزي عبر primey-locale
    ✅ استخدام sonner
-   ✅ ربط مع POST /api/agents/
-   ✅ بدون localhost hardcoded
+   ✅ استخدام رمز SAR الرسمي
+   ✅ حفظ مسودة محليًا بدون إرسال
+   ✅ معالجة أخطاء API وإظهارها على الحقول
+   ✅ بدون localhost
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -71,7 +76,37 @@ type AgentFormData = {
 
 type AgentFormErrors = Partial<Record<keyof AgentFormData, string>>;
 
+type CreateAgentApiResponse = {
+  ok?: boolean;
+  message?: string;
+  errors?: Record<string, string[] | string>;
+  agent?: {
+    id?: number | string;
+    full_name?: string;
+    agent_code?: string;
+    referral_code?: string;
+  };
+};
+
 const SAR_ICON = "/currency/sar.svg";
+const DRAFT_STORAGE_KEY = "primey-agent-create-draft";
+
+const initialFormData: AgentFormData = {
+  fullName: "",
+  agentCode: "",
+  referralCode: "",
+  status: "ACTIVE",
+  phone: "",
+  email: "",
+  city: "",
+  address: "",
+  defaultCommissionType: "PERCENTAGE",
+  defaultCommissionValue: "",
+  bankName: "",
+  bankAccountName: "",
+  iban: "",
+  notes: "",
+};
 
 /* ============================================================
    🌐 Locale Helpers
@@ -133,6 +168,7 @@ function dictionary(locale: AppLocale) {
     back: isArabic ? "لوحة المندوبين" : "Agents Overview",
     list: isArabic ? "قائمة المندوبين" : "Agents List",
     saveDraft: isArabic ? "حفظ مسودة" : "Save Draft",
+    clearDraft: isArabic ? "تفريغ النموذج" : "Clear Form",
     create: isArabic ? "إنشاء المندوب" : "Create Agent",
 
     basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
@@ -199,9 +235,7 @@ function dictionary(locale: AppLocale) {
       bankName: isArabic ? "مثال: الراجحي" : "Example: Al Rajhi Bank",
       bankAccountName: isArabic ? "اسم صاحب الحساب" : "Account holder name",
       iban: isArabic ? "SAxxxxxxxxxxxxxxxxxxxxxx" : "SAxxxxxxxxxxxxxxxxxxxxxx",
-      notes: isArabic
-        ? "أي ملاحظات إضافية"
-        : "Any additional notes",
+      notes: isArabic ? "أي ملاحظات إضافية" : "Any additional notes",
     },
 
     validation: {
@@ -218,9 +252,7 @@ function dictionary(locale: AppLocale) {
       invalidPercentage: isArabic
         ? "النسبة يجب أن تكون بين 0 و 100"
         : "Percentage must be between 0 and 100",
-      invalidIban: isArabic
-        ? "رقم الآيبان غير صحيح"
-        : "Invalid IBAN",
+      invalidIban: isArabic ? "رقم الآيبان غير صحيح" : "Invalid IBAN",
     },
 
     requiredFields: isArabic ? "الحقول المطلوبة" : "Required Fields",
@@ -228,15 +260,17 @@ function dictionary(locale: AppLocale) {
 
     successTitle: isArabic ? "تم إنشاء المندوب" : "Agent Created",
     successText: isArabic
-      ? "تم إرسال بيانات المندوب بنجاح."
-      : "Agent data has been submitted successfully.",
+      ? "تم إنشاء المندوب بنجاح وربطه بوحدة المندوبين."
+      : "The agent has been created and linked to the agents module.",
     draftTitle: isArabic ? "تم حفظ المسودة" : "Draft Saved",
     draftText: isArabic
       ? "تم حفظ بيانات النموذج مؤقتًا في المتصفح."
       : "Form data has been saved temporarily in the browser.",
+    draftRestored: isArabic ? "تم استرجاع المسودة" : "Draft Restored",
+    clearTitle: isArabic ? "تم تفريغ النموذج" : "Form Cleared",
     apiError: isArabic
-      ? "تعذر إنشاء المندوب. تأكد من جاهزية API المندوبين."
-      : "Unable to create the agent. Make sure the Agents API is ready.",
+      ? "تعذر إنشاء المندوب. راجع البيانات وحاول مرة أخرى."
+      : "Unable to create the agent. Review the data and try again.",
     unexpectedError: isArabic ? "حدث خطأ غير متوقع" : "Unexpected error",
 
     checklist: [
@@ -280,6 +314,8 @@ function isValidEmail(value: string) {
 }
 
 function isValidPhone(value: string) {
+  if (!value.trim()) return true;
+
   const cleaned = value.replace(/[^\d+]/g, "");
   return cleaned.length >= 9;
 }
@@ -302,11 +338,11 @@ function normalizeDecimal(value: string) {
 function buildPayload(formData: AgentFormData) {
   return {
     full_name: formData.fullName.trim(),
-    agent_code: formData.agentCode.trim(),
-    referral_code: formData.referralCode.trim(),
+    agent_code: formData.agentCode.trim().toUpperCase(),
+    referral_code: formData.referralCode.trim().toUpperCase(),
     status: formData.status,
     phone: formData.phone.trim(),
-    email: formData.email.trim(),
+    email: formData.email.trim().toLowerCase(),
     city: formData.city.trim(),
     address: formData.address.trim(),
     default_commission_type: formData.defaultCommissionType,
@@ -316,6 +352,46 @@ function buildPayload(formData: AgentFormData) {
     iban: formData.iban.trim().replace(/\s+/g, "").toUpperCase(),
     notes: formData.notes.trim(),
   };
+}
+
+function mapApiErrors(errors?: Record<string, string[] | string>): AgentFormErrors {
+  if (!errors) return {};
+
+  const fieldMap: Record<string, keyof AgentFormData> = {
+    full_name: "fullName",
+    name: "fullName",
+    agent_name: "fullName",
+    agent_code: "agentCode",
+    code: "agentCode",
+    referral_code: "referralCode",
+    ref_code: "referralCode",
+    status: "status",
+    phone: "phone",
+    email: "email",
+    city: "city",
+    address: "address",
+    default_commission_type: "defaultCommissionType",
+    commission_type: "defaultCommissionType",
+    default_commission_value: "defaultCommissionValue",
+    commission_value: "defaultCommissionValue",
+    bank_name: "bankName",
+    bank_account_name: "bankAccountName",
+    iban: "iban",
+    notes: "notes",
+  };
+
+  const mappedErrors: AgentFormErrors = {};
+
+  Object.entries(errors).forEach(([key, value]) => {
+    const formKey = fieldMap[key];
+    if (!formKey) return;
+
+    mappedErrors[formKey] = Array.isArray(value)
+      ? value.join(" ")
+      : String(value);
+  });
+
+  return mappedErrors;
 }
 
 /* ============================================================
@@ -331,7 +407,7 @@ function SelectBox({
   id: string;
   value: string;
   onChange: (value: string) => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <select
@@ -356,26 +432,13 @@ function FieldError({ message }: { message?: string }) {
 ============================================================ */
 
 export default function SystemCreateAgentPage() {
+  const router = useRouter();
+
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDraftLoaded, setIsDraftLoaded] = useState(false);
 
-  const [formData, setFormData] = useState<AgentFormData>({
-    fullName: "",
-    agentCode: "",
-    referralCode: "",
-    status: "ACTIVE",
-    phone: "",
-    email: "",
-    city: "",
-    address: "",
-    defaultCommissionType: "PERCENTAGE",
-    defaultCommissionValue: "",
-    bankName: "",
-    bankAccountName: "",
-    iban: "",
-    notes: "",
-  });
-
+  const [formData, setFormData] = useState<AgentFormData>(initialFormData);
   const [errors, setErrors] = useState<AgentFormErrors>({});
 
   const t = useMemo(() => dictionary(locale), [locale]);
@@ -452,16 +515,8 @@ export default function SystemCreateAgentPage() {
   }
 
   async function handleSaveDraft() {
-    if (!validateForm()) {
-      toast.error(t.validation.required);
-      return;
-    }
-
     try {
-      window.localStorage.setItem(
-        "primey-agent-create-draft",
-        JSON.stringify(formData),
-      );
+      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(formData));
 
       toast.success(t.draftTitle, {
         description: t.draftText,
@@ -470,6 +525,13 @@ export default function SystemCreateAgentPage() {
       console.error("Save draft error:", error);
       toast.error(t.unexpectedError);
     }
+  }
+
+  function handleClearForm() {
+    setFormData(initialFormData);
+    setErrors({});
+    window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+    toast.success(t.clearTitle);
   }
 
   async function handleSubmit() {
@@ -481,7 +543,7 @@ export default function SystemCreateAgentPage() {
     try {
       setIsSubmitting(true);
 
-      const response = await fetch("/api/agents/", {
+      const response = await fetch("/api/agents/create/", {
         method: "POST",
         credentials: "include",
         headers: {
@@ -492,9 +554,16 @@ export default function SystemCreateAgentPage() {
         body: JSON.stringify(buildPayload(formData)),
       });
 
-      const payload = await response.json().catch(() => null);
+      const payload = (await response.json().catch(() => null)) as
+        | CreateAgentApiResponse
+        | null;
 
-      if (!response.ok || payload?.ok === false) {
+      if (!response.ok || !payload?.ok) {
+        const apiFieldErrors = mapApiErrors(payload?.errors);
+        if (Object.keys(apiFieldErrors).length > 0) {
+          setErrors(apiFieldErrors);
+        }
+
         toast.error(payload?.message || t.apiError);
         return;
       }
@@ -503,7 +572,15 @@ export default function SystemCreateAgentPage() {
         description: t.successText,
       });
 
-      window.localStorage.removeItem("primey-agent-create-draft");
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+
+      const createdId = payload.agent?.id;
+      if (createdId) {
+        router.push(`/system/agents/${createdId}`);
+        return;
+      }
+
+      router.push("/system/agents/list");
     } catch (error) {
       console.error("Create agent error:", error);
       toast.error(t.apiError);
@@ -536,6 +613,44 @@ export default function SystemCreateAgentPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (isDraftLoaded) return;
+
+    try {
+      const savedDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (!savedDraft) {
+        setIsDraftLoaded(true);
+        return;
+      }
+
+      const parsed = JSON.parse(savedDraft) as Partial<AgentFormData>;
+
+      setFormData({
+        ...initialFormData,
+        ...parsed,
+        status:
+          parsed.status === "ACTIVE" ||
+          parsed.status === "INACTIVE" ||
+          parsed.status === "SUSPENDED" ||
+          parsed.status === "DRAFT"
+            ? parsed.status
+            : "ACTIVE",
+        defaultCommissionType:
+          parsed.defaultCommissionType === "FIXED" ||
+          parsed.defaultCommissionType === "PERCENTAGE"
+            ? parsed.defaultCommissionType
+            : "PERCENTAGE",
+      });
+
+      toast.success(t.draftRestored);
+    } catch (error) {
+      console.error("Restore draft error:", error);
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } finally {
+      setIsDraftLoaded(true);
+    }
+  }, [isDraftLoaded, t.draftRestored]);
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -561,6 +676,16 @@ export default function SystemCreateAgentPage() {
               <span>{t.list}</span>
             </Button>
           </Link>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={handleClearForm}
+            disabled={isSubmitting}
+          >
+            <RefreshCcw className="h-4 w-4" />
+            <span>{t.clearDraft}</span>
+          </Button>
 
           <Button
             variant="outline"
@@ -617,7 +742,9 @@ export default function SystemCreateAgentPage() {
                 <Input
                   id="agentCode"
                   value={formData.agentCode}
-                  onChange={(event) => setField("agentCode", event.target.value)}
+                  onChange={(event) =>
+                    setField("agentCode", event.target.value.toUpperCase())
+                  }
                   placeholder={t.placeholders.agentCode}
                   className="h-10 rounded-xl"
                 />
@@ -630,7 +757,7 @@ export default function SystemCreateAgentPage() {
                   id="referralCode"
                   value={formData.referralCode}
                   onChange={(event) =>
-                    setField("referralCode", event.target.value)
+                    setField("referralCode", event.target.value.toUpperCase())
                   }
                   placeholder={t.placeholders.referralCode}
                   className="h-10 rounded-xl"
@@ -650,6 +777,7 @@ export default function SystemCreateAgentPage() {
                   <option value="INACTIVE">{t.inactive}</option>
                   <option value="SUSPENDED">{t.suspended}</option>
                 </SelectBox>
+                <FieldError message={errors.status} />
               </div>
             </CardContent>
           </Card>
@@ -711,6 +839,7 @@ export default function SystemCreateAgentPage() {
                   placeholder={t.placeholders.address}
                   className="min-h-[96px] rounded-xl"
                 />
+                <FieldError message={errors.address} />
               </div>
             </CardContent>
           </Card>
@@ -738,6 +867,7 @@ export default function SystemCreateAgentPage() {
                   <option value="PERCENTAGE">{t.percentage}</option>
                   <option value="FIXED">{t.fixed}</option>
                 </SelectBox>
+                <FieldError message={errors.defaultCommissionType} />
               </div>
 
               <div className="space-y-2">
@@ -793,6 +923,7 @@ export default function SystemCreateAgentPage() {
                   placeholder={t.placeholders.bankName}
                   className="h-10 rounded-xl"
                 />
+                <FieldError message={errors.bankName} />
               </div>
 
               <div className="space-y-2">
@@ -806,6 +937,7 @@ export default function SystemCreateAgentPage() {
                   placeholder={t.placeholders.bankAccountName}
                   className="h-10 rounded-xl"
                 />
+                <FieldError message={errors.bankAccountName} />
               </div>
 
               <div className="space-y-2 md:col-span-2">
@@ -813,7 +945,9 @@ export default function SystemCreateAgentPage() {
                 <Input
                   id="iban"
                   value={formData.iban}
-                  onChange={(event) => setField("iban", event.target.value)}
+                  onChange={(event) =>
+                    setField("iban", event.target.value.toUpperCase())
+                  }
                   placeholder={t.placeholders.iban}
                   className="h-10 rounded-xl"
                 />
@@ -840,6 +974,7 @@ export default function SystemCreateAgentPage() {
                 placeholder={t.placeholders.notes}
                 className="min-h-[110px] rounded-xl"
               />
+              <FieldError message={errors.notes} />
             </CardContent>
           </Card>
         </div>
@@ -925,6 +1060,16 @@ export default function SystemCreateAgentPage() {
                 <span>{t.saveDraft}</span>
               </Button>
 
+              <Button
+                variant="outline"
+                className="h-10 w-full rounded-xl"
+                onClick={handleClearForm}
+                disabled={isSubmitting}
+              >
+                <RefreshCcw className="h-4 w-4" />
+                <span>{t.clearDraft}</span>
+              </Button>
+
               <Link href="/system/agents/list">
                 <Button variant="outline" className="h-10 w-full rounded-xl">
                   <CheckCircle2 className="h-4 w-4" />
@@ -946,8 +1091,8 @@ export default function SystemCreateAgentPage() {
                 </p>
                 <p className="text-muted-foreground mt-1 text-sm leading-6">
                   {isArabic
-                    ? "سيظهر المندوب بعد الإنشاء في القائمة والتقارير."
-                    : "The agent will appear in the list and reports after creation."}
+                    ? "سيظهر المندوب بعد الإنشاء في القائمة والتقارير، ويمكن ربطه لاحقًا بالطلبات والعمولات."
+                    : "The agent will appear in the list and reports after creation, and can later be linked with orders and commissions."}
                 </p>
               </div>
             </CardContent>

@@ -1,29 +1,14 @@
 # ============================================================
 # 📂 agents/services.py
-# 🧠 Agent Commission & Statement Services — Primey Care V1.2
+# 🧠 Agent Commission & Statement Services — Primey Care V1.3
 # ------------------------------------------------------------
-# ✅ طبقة خدمات رسمية لاعتماد عمولات المندوبين
-# ✅ مطابقة للموديل الفعلي AgentCommission
-# ✅ تعتمد commission_status بدل status
-# ✅ إطلاق قيد استحقاق العمولة تلقائيًا بعد الاعتماد
-# ✅ خدمة رسمية لكشف حساب المندوب V1
-# ✅ مراعاة idempotency قدر الإمكان عبر طبقة الترحيل
+# ✅ إنشاء ربط الطلب بالمندوب
+# ✅ إنشاء العمولة من ربط الطلب
+# ✅ اعتماد العمولة مع earned_at + approved_at
+# ✅ إطلاق قيد استحقاق العمولة بعد commit
+# ✅ كشف حساب المندوب V1
 # ✅ Logging منظم + أخطاء واضحة
 # ✅ بدون المساس بأي منجز سابق
-# ------------------------------------------------------------
-# ملاحظات:
-# 1) الموديل الفعلي يستخدم:
-#    - commission_status
-#    - approved_at
-#    - earned_at
-#    - paid_at
-# 2) حالة الاعتماد الصحيحة هي APPROVED
-# 3) كشف حساب المندوب في V1 يعتمد على:
-#    - AgentOrder
-#    - AgentCommission
-# 4) الرصيد التراكمي في كشف المندوب:
-#    - العمولة المستحقة/المعتمدة = حركة مدينة على حساب المندوب
-#    - العمولة المصروفة = حركة دائنة تخفّض الرصيد المستحق له
 # ============================================================
 
 from __future__ import annotations
@@ -40,7 +25,13 @@ from django.db import transaction
 from django.db.models import QuerySet, Sum
 from django.utils import timezone
 
-from agents.models import Agent, AgentCommission, AgentOrder
+from agents.models import (
+    Agent,
+    AgentCommission,
+    AgentOrder,
+    AgentStatus,
+    CommissionStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +40,12 @@ logger = logging.getLogger(__name__)
 # ⚙️ ثوابت عامة
 # ============================================================
 
-COMMISSION_STATUS_PENDING = "PENDING"
-COMMISSION_STATUS_EARNED = "EARNED"
-COMMISSION_STATUS_APPROVED = "APPROVED"
-COMMISSION_STATUS_PAID = "PAID"
-COMMISSION_STATUS_CANCELLED = "CANCELLED"
-COMMISSION_STATUS_REVERSED = "REVERSED"
+COMMISSION_STATUS_PENDING = CommissionStatus.PENDING
+COMMISSION_STATUS_EARNED = CommissionStatus.EARNED
+COMMISSION_STATUS_APPROVED = CommissionStatus.APPROVED
+COMMISSION_STATUS_PAID = CommissionStatus.PAID
+COMMISSION_STATUS_CANCELLED = CommissionStatus.CANCELLED
+COMMISSION_STATUS_REVERSED = CommissionStatus.REVERSED
 
 FINAL_COMMISSION_STATUSES = {
     COMMISSION_STATUS_APPROVED,
@@ -93,6 +84,13 @@ class CommissionPostingError(AgentServiceError):
 # ============================================================
 # 📦 نتائج الخدمات
 # ============================================================
+
+@dataclass(slots=True)
+class AgentOrderCreationResult:
+    agent_order: AgentOrder
+    commission: AgentCommission | None
+    commission_created: bool
+
 
 @dataclass(slots=True)
 class CommissionApprovalResult:
@@ -308,6 +306,119 @@ def _sort_datetime_fallback() -> datetime:
 
 
 # ============================================================
+# 🔗 إنشاء ربط الطلب بالمندوب
+# ============================================================
+
+@transaction.atomic
+def create_agent_order(
+    *,
+    order: Any,
+    agent: Agent,
+    customer: Any | None = None,
+    sales_amount: Decimal | int | float | str | None = None,
+    commission_type: str | None = None,
+    commission_value: Decimal | int | float | str | None = None,
+    referral_code_used: str = "",
+    notes: str = "",
+    create_commission: bool = True,
+) -> AgentOrderCreationResult:
+    """
+    إنشاء ربط رسمي بين الطلب والمندوب.
+
+    - يأخذ العميل من الطلب إذا لم يُمرر.
+    - يأخذ إعدادات العمولة الافتراضية من المندوب إذا لم تُمرر.
+    - ينشئ AgentCommission تلقائيًا عند الحاجة.
+    """
+    if not order:
+        raise CommissionValidationError("order is required.")
+
+    if not agent:
+        raise CommissionValidationError("agent is required.")
+
+    if agent.status != AgentStatus.ACTIVE:
+        raise CommissionValidationError("لا يمكن ربط الطلب بمندوب غير نشط.")
+
+    resolved_customer = customer or getattr(order, "customer", None)
+    if not resolved_customer:
+        raise CommissionValidationError("لا يمكن تحديد العميل المرتبط بالطلب.")
+
+    resolved_sales_amount = _money(
+        _first_non_empty(
+            sales_amount,
+            getattr(order, "total_amount", None),
+            getattr(order, "grand_total", None),
+            getattr(order, "net_amount", None),
+            getattr(order, "amount", None),
+            "0.00",
+        )
+    )
+
+    agent_order, _created = AgentOrder.objects.update_or_create(
+        order=order,
+        defaults={
+            "agent": agent,
+            "customer": resolved_customer,
+            "commission_type": commission_type or agent.default_commission_type,
+            "commission_value": _money(
+                commission_value
+                if commission_value is not None
+                else agent.default_commission_value
+            ),
+            "sales_amount": resolved_sales_amount,
+            "referral_code_used": referral_code_used or agent.referral_code,
+            "notes": notes,
+        },
+    )
+
+    commission = None
+    commission_created = False
+
+    if create_commission:
+        commission, commission_created = create_commission_from_agent_order(
+            agent_order=agent_order,
+        )
+
+    return AgentOrderCreationResult(
+        agent_order=agent_order,
+        commission=commission,
+        commission_created=commission_created,
+    )
+
+
+@transaction.atomic
+def create_commission_from_agent_order(
+    *,
+    agent_order: AgentOrder,
+    payment: Any | None = None,
+    status: str = COMMISSION_STATUS_PENDING,
+    notes: str = "",
+) -> tuple[AgentCommission, bool]:
+    """
+    إنشاء أو تحديث عمولة مرتبطة بطلب المندوب.
+    """
+    if not agent_order:
+        raise CommissionValidationError("agent_order is required.")
+
+    agent_order.recalculate_commission_amount()
+    agent_order.save()
+
+    commission, created = AgentCommission.objects.update_or_create(
+        agent_order=agent_order,
+        defaults={
+            "agent": agent_order.agent,
+            "order": agent_order.order,
+            "payment": payment,
+            "commission_status": status,
+            "base_amount": _money(agent_order.sales_amount),
+            "commission_amount": _money(agent_order.commission_amount),
+            "notes": notes,
+        },
+    )
+
+    return commission, created
+
+
+# ============================================================
 # ✅ التحقق قبل الاعتماد
 # ============================================================
 
@@ -324,6 +435,11 @@ def validate_commission_for_approval(commission: Any) -> None:
             f"لا يمكن اعتماد العمولة {commission_id} لأن حالتها الحالية هي {status}."
         )
 
+    if status == COMMISSION_STATUS_PAID:
+        raise CommissionValidationError(
+            f"لا يمكن إعادة اعتماد العمولة {commission_id} لأنها مدفوعة."
+        )
+
     if amount <= Decimal("0.00"):
         raise CommissionValidationError(
             f"لا يمكن اعتماد العمولة {commission_id} لأن مبلغها غير صالح: {amount}."
@@ -332,26 +448,9 @@ def validate_commission_for_approval(commission: Any) -> None:
     try:
         commission.full_clean()
     except ValidationError as exc:
-        field_errors = getattr(exc, "message_dict", {}) or {}
-        status_errors = field_errors.get("commission_status", [])
-        status_error_text = " ".join(str(item) for item in status_errors)
-
-        if "ليست خيارا صحيحاً" in status_error_text or "not a valid choice" in status_error_text:
-            logger.warning(
-                "تم تجاوز full_clean مؤقتًا لأن حالة العمولة ستُضبط لاحقًا بالقيمة الصحيحة داخل الخدمة. commission=%s",
-                commission_id,
-            )
-            return
-
         raise CommissionValidationError(
             f"فشل التحقق من العمولة قبل الاعتماد: {exc}"
         ) from exc
-    except Exception as exc:
-        logger.debug(
-            "تم تجاهل full_clean لعدم توافقه الكامل مع حالة العمولة %s: %s",
-            commission_id,
-            exc,
-        )
 
 
 # ============================================================
@@ -366,6 +465,10 @@ def _prepare_commission_approval_fields(commission: Any, status_before: str) -> 
         if _resolve_commission_status(commission) != COMMISSION_STATUS_APPROVED:
             commission.commission_status = COMMISSION_STATUS_APPROVED
             changed_fields.append("commission_status")
+
+    if hasattr(commission, "earned_at") and not getattr(commission, "earned_at"):
+        commission.earned_at = now
+        changed_fields.append("earned_at")
 
     if hasattr(commission, "approved_at") and not getattr(commission, "approved_at"):
         commission.approved_at = now
@@ -500,13 +603,10 @@ def approve_commission(
 
     if auto_post_accounting:
         def _post_accounting_after_commit() -> None:
-            nonlocal accounting_post_dispatched, accounting_post_message
-            success, message = dispatch_commission_accounting_post(
+            dispatch_commission_accounting_post(
                 commission=commission,
                 actor=actor,
             )
-            accounting_post_dispatched = success
-            accounting_post_message = message
 
         transaction.on_commit(_post_accounting_after_commit)
         accounting_post_message = "تمت جدولة قيد استحقاق العمولة بعد نجاح commit."
@@ -531,6 +631,57 @@ def approve_commission(
         accounting_post_dispatched=accounting_post_dispatched,
         accounting_post_message=accounting_post_message,
     )
+
+
+# ============================================================
+# 💵 صرف العمولة
+# ============================================================
+
+@transaction.atomic
+def mark_commission_paid(
+    commission: AgentCommission,
+    *,
+    paid_amount: Decimal | int | float | str | None = None,
+    payment: Any | None = None,
+    actor: Any = None,
+    paid_at: datetime | None = None,
+) -> AgentCommission:
+    if commission is None:
+        raise CommissionValidationError("commission is required.")
+
+    if commission.commission_status not in {
+        COMMISSION_STATUS_APPROVED,
+        COMMISSION_STATUS_EARNED,
+        COMMISSION_STATUS_PENDING,
+    }:
+        raise CommissionValidationError(
+            f"لا يمكن صرف العمولة بحالتها الحالية: {commission.commission_status}"
+        )
+
+    amount = _money(paid_amount if paid_amount is not None else commission.commission_amount)
+
+    if amount <= Decimal("0.00"):
+        raise CommissionValidationError("مبلغ الصرف يجب أن يكون أكبر من صفر.")
+
+    if amount > _money(commission.commission_amount):
+        raise CommissionValidationError("مبلغ الصرف لا يمكن أن يتجاوز قيمة العمولة.")
+
+    commission.paid_amount = amount
+    commission.commission_status = COMMISSION_STATUS_PAID
+    commission.paid_at = paid_at or timezone.now()
+
+    if payment is not None:
+        commission.payment = payment
+
+    commission.save()
+
+    logger.info(
+        "✅ تم تعليم العمولة %s كمدفوعة بواسطة %s",
+        _resolve_commission_identifier(commission),
+        actor,
+    )
+
+    return commission
 
 
 # ============================================================
@@ -602,9 +753,6 @@ def _collect_agent_order_lines(
     date_to: datetime | None,
     currency: str,
 ) -> list[dict[str, Any]]:
-    """
-    خطوط تشغيلية اختيارية فقط، لا تمثل قيدًا ماليًا مباشرًا.
-    """
     lines: list[dict[str, Any]] = []
 
     queryset = agent_orders_qs
@@ -734,14 +882,6 @@ def build_agent_statement(
     include_agent_orders: bool = False,
     include_commissions: bool = True,
 ) -> AgentStatementResult:
-    """
-    بناء كشف حساب المندوب.
-
-    الفكرة المالية في V1:
-    - العمولة المستحقة/المعتمدة = حركة مدينة تزيد المستحق للمندوب
-    - العمولة المصروفة = حركة دائنة تخفّض الرصيد المستحق
-    - AgentOrder اختياري وتشغيلي فقط، ومُستبعد افتراضيًا من الرصيد المالي
-    """
     if not agent:
         raise ValueError("agent is required")
 
@@ -751,6 +891,17 @@ def build_agent_statement(
     agent_orders_qs = AgentOrder.objects.filter(agent=agent)
     commissions_qs = AgentCommission.objects.filter(agent=agent)
 
+    filtered_agent_orders_qs = agent_orders_qs
+    filtered_commissions_qs = commissions_qs
+
+    if start_dt:
+        filtered_agent_orders_qs = filtered_agent_orders_qs.filter(created_at__gte=start_dt)
+        filtered_commissions_qs = filtered_commissions_qs.filter(created_at__gte=start_dt)
+
+    if end_dt:
+        filtered_agent_orders_qs = filtered_agent_orders_qs.filter(created_at__lte=end_dt)
+        filtered_commissions_qs = filtered_commissions_qs.filter(created_at__lte=end_dt)
+
     currency = _resolve_agent_currency(
         agent_orders_qs=agent_orders_qs,
         commissions_qs=commissions_qs,
@@ -758,8 +909,8 @@ def build_agent_statement(
 
     summary = _build_agent_statement_summary(
         agent=agent,
-        agent_orders_qs=agent_orders_qs,
-        commissions_qs=commissions_qs,
+        agent_orders_qs=filtered_agent_orders_qs,
+        commissions_qs=filtered_commissions_qs,
         currency=currency,
     )
 

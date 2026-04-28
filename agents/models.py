@@ -2,27 +2,34 @@
 # 📂 agents/models.py
 # 🧠 Primey Care | Agents & Commissions Module
 # ------------------------------------------------------------
-# ✅ هذا الموديول يمثل:
-#    - المندوبين
-#    - أكواد المندوبين
-#    - ربط الطلبات بالمندوبين
-#    - احتساب العمولات
-#    - تتبع الصرف والاستحقاق
-# ✅ جاهز لاحقًا للتوسع نحو:
-#    - محافظ المندوبين
-#    - كشف حساب المندوب
-#    - دفعات العمولات
-#    - نسب عمولة حسب المنتج أو التصنيف
+# ✅ المندوبين
+# ✅ أكواد الإحالة
+# ✅ ربط الطلبات بالمندوبين
+# ✅ احتساب العمولات
+# ✅ تتبع الاستحقاق / الاعتماد / الصرف
+# ✅ جاهز لربط API + Frontend + Accounting
 # ============================================================
 
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 from customers.models import Customer
 from orders.models import Order
 from payments.models import Payment
+
+
+MONEY_ZERO = Decimal("0.00")
+MONEY_QUANT = Decimal("0.01")
+
+
+def money(value) -> Decimal:
+    return Decimal(str(value or "0.00")).quantize(
+        MONEY_QUANT,
+        rounding=ROUND_HALF_UP,
+    )
 
 
 class AgentStatus(models.TextChoices):
@@ -107,7 +114,7 @@ class Agent(models.Model):
     default_commission_value = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="قيمة العمولة الافتراضية",
         help_text="نسبة مئوية أو مبلغ ثابت حسب النوع المحدد",
     )
@@ -169,6 +176,22 @@ class Agent(models.Model):
     def clean(self):
         super().clean()
 
+        self.agent_code = (self.agent_code or "").strip().upper()
+        self.referral_code = (self.referral_code or "").strip().upper()
+        self.phone = (self.phone or "").strip()
+        self.email = (self.email or "").strip().lower()
+        self.city = (self.city or "").strip()
+        self.iban = (self.iban or "").strip().replace(" ", "").upper()
+
+        if not self.full_name or not self.full_name.strip():
+            raise ValidationError({"full_name": "اسم المندوب مطلوب."})
+
+        if not self.agent_code:
+            raise ValidationError({"agent_code": "كود المندوب مطلوب."})
+
+        if not self.referral_code:
+            raise ValidationError({"referral_code": "كود الإحالة مطلوب."})
+
         if self.default_commission_value is not None and self.default_commission_value < 0:
             raise ValidationError(
                 {"default_commission_value": "قيمة العمولة لا يمكن أن تكون سالبة."}
@@ -181,6 +204,11 @@ class Agent(models.Model):
             raise ValidationError(
                 {"default_commission_value": "النسبة المئوية يجب أن تكون بين 0 و 100."}
             )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        self.default_commission_value = money(self.default_commission_value)
+        super().save(*args, **kwargs)
 
 
 class AgentOrder(models.Model):
@@ -222,13 +250,13 @@ class AgentOrder(models.Model):
     sales_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="قيمة البيع المحتسبة",
     )
     commission_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="قيمة العمولة المحتسبة",
     )
 
@@ -266,6 +294,7 @@ class AgentOrder(models.Model):
             models.Index(fields=["agent"]),
             models.Index(fields=["customer"]),
             models.Index(fields=["commission_type"]),
+            models.Index(fields=["created_at"]),
         ]
 
     def __str__(self):
@@ -273,6 +302,18 @@ class AgentOrder(models.Model):
 
     def clean(self):
         super().clean()
+
+        if not self.agent_id:
+            raise ValidationError({"agent": "المندوب مطلوب."})
+
+        if not self.order_id:
+            raise ValidationError({"order": "الطلب مطلوب."})
+
+        if not self.customer_id:
+            raise ValidationError({"customer": "العميل مطلوب."})
+
+        if self.agent_id and self.agent.status != AgentStatus.ACTIVE:
+            raise ValidationError({"agent": "لا يمكن ربط الطلب بمندوب غير نشط."})
 
         order_customer_id = getattr(self.order, "customer_id", None)
         if self.customer_id and order_customer_id and self.customer_id != order_customer_id:
@@ -299,28 +340,34 @@ class AgentOrder(models.Model):
             )
 
     def save(self, *args, **kwargs):
-        if not self.commission_type:
-            self.commission_type = self.agent.default_commission_type
-        if self.commission_value in (None, Decimal("0.00")):
-            self.commission_value = self.agent.default_commission_value
+        if self.agent_id:
+            if not self.commission_type:
+                self.commission_type = self.agent.default_commission_type
+
+            if self.commission_value is None:
+                self.commission_value = self.agent.default_commission_value
+
+            if not self.referral_code_used:
+                self.referral_code_used = self.agent.referral_code
+
+        self.sales_amount = money(self.sales_amount)
+        self.commission_value = money(self.commission_value)
 
         self.full_clean()
-        self._recalculate_commission_amount()
+        self.recalculate_commission_amount()
+
         super().save(*args, **kwargs)
 
-    def _recalculate_commission_amount(self):
-        sales_amount = Decimal(self.sales_amount or Decimal("0.00"))
-        commission_value = Decimal(self.commission_value or Decimal("0.00"))
+    def recalculate_commission_amount(self):
+        sales_amount = money(self.sales_amount)
+        commission_value = money(self.commission_value)
 
         if self.commission_type == CommissionType.PERCENTAGE:
             amount = (sales_amount * commission_value) / Decimal("100")
         else:
             amount = commission_value
 
-        self.commission_amount = amount.quantize(
-            Decimal("0.01"),
-            rounding=ROUND_HALF_UP,
-        )
+        self.commission_amount = money(amount)
 
 
 class AgentCommission(models.Model):
@@ -363,19 +410,19 @@ class AgentCommission(models.Model):
     base_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="قيمة الأساس",
     )
     commission_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="قيمة العمولة",
     )
     paid_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="المبلغ المصروف",
     )
 
@@ -420,19 +467,37 @@ class AgentCommission(models.Model):
             models.Index(fields=["payment"]),
             models.Index(fields=["commission_status"]),
             models.Index(fields=["earned_at"]),
+            models.Index(fields=["approved_at"]),
             models.Index(fields=["paid_at"]),
+            models.Index(fields=["created_at"]),
         ]
 
     def __str__(self):
         return f"{self.agent.full_name} - {self.order_id} - {self.commission_amount}"
 
+    @property
+    def remaining_amount(self) -> Decimal:
+        remaining = money(self.commission_amount) - money(self.paid_amount)
+        return remaining if remaining > MONEY_ZERO else MONEY_ZERO
+
+    def sync_from_agent_order(self):
+        if not self.agent_order_id:
+            return
+
+        self.agent = self.agent_order.agent
+        self.order = self.agent_order.order
+
+        if not self.base_amount or self.base_amount == MONEY_ZERO:
+            self.base_amount = self.agent_order.sales_amount
+
+        if not self.commission_amount or self.commission_amount == MONEY_ZERO:
+            self.commission_amount = self.agent_order.commission_amount
+
     def clean(self):
         super().clean()
 
-        for field_name in ["base_amount", "commission_amount", "paid_amount"]:
-            value = getattr(self, field_name)
-            if value is not None and value < 0:
-                raise ValidationError({field_name: "القيمة لا يمكن أن تكون سالبة."})
+        if not self.agent_order_id:
+            raise ValidationError({"agent_order": "طلب المندوب مطلوب."})
 
         if self.agent_order_id:
             if self.agent_id and self.agent_order.agent_id != self.agent_id:
@@ -450,7 +515,51 @@ class AgentCommission(models.Model):
                 {"payment": "عملية الدفع المحددة لا تنتمي إلى نفس الطلب."}
             )
 
-        if self.paid_amount > self.commission_amount:
+        for field_name in ["base_amount", "commission_amount", "paid_amount"]:
+            value = getattr(self, field_name)
+            if value is not None and value < 0:
+                raise ValidationError({field_name: "القيمة لا يمكن أن تكون سالبة."})
+
+        if money(self.paid_amount) > money(self.commission_amount):
             raise ValidationError(
                 {"paid_amount": "المبلغ المصروف لا يمكن أن يكون أكبر من قيمة العمولة."}
             )
+
+        if self.commission_status == CommissionStatus.PAID:
+            if money(self.paid_amount) <= MONEY_ZERO:
+                raise ValidationError(
+                    {"paid_amount": "لا يمكن جعل العمولة مدفوعة بدون مبلغ مصروف."}
+                )
+
+            if not self.paid_at:
+                self.paid_at = timezone.now()
+
+        if self.commission_status == CommissionStatus.APPROVED and not self.approved_at:
+            self.approved_at = timezone.now()
+
+        if self.commission_status in {
+            CommissionStatus.EARNED,
+            CommissionStatus.APPROVED,
+            CommissionStatus.PAID,
+        } and not self.earned_at:
+            self.earned_at = timezone.now()
+
+    def save(self, *args, **kwargs):
+        self.sync_from_agent_order()
+
+        self.base_amount = money(self.base_amount)
+        self.commission_amount = money(self.commission_amount)
+        self.paid_amount = money(self.paid_amount)
+
+        if (
+            self.commission_status != CommissionStatus.CANCELLED
+            and self.commission_status != CommissionStatus.REVERSED
+            and self.commission_amount > MONEY_ZERO
+            and self.paid_amount == self.commission_amount
+        ):
+            self.commission_status = CommissionStatus.PAID
+            if not self.paid_at:
+                self.paid_at = timezone.now()
+
+        self.full_clean()
+        super().save(*args, **kwargs)

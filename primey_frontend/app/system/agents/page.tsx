@@ -1,27 +1,29 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BadgeCheck,
   BarChart3,
+  Calculator,
   Download,
   Eye,
-  FileText,
   Filter,
   HandCoins,
+  Landmark,
   ListChecks,
   Loader2,
   MapPin,
-  Phone,
   Plus,
   RefreshCcw,
   Search,
-  ShieldCheck,
   Star,
+  TrendingUp,
   UserRound,
   Users,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -48,12 +50,14 @@ import {
    📂 app/system/agents/page.tsx
    🧠 Primey Care | System Agents Dashboard
    ------------------------------------------------------------
-   ✅ نفس تصميم صفحة المراكز
-   ✅ بدون عرض روابط خام داخل البطاقات
-   ✅ استخدام UI الداخلي فقط
-   ✅ ربط مع /api/agents/
-   ✅ دعم عربي / إنجليزي من primey-locale
-   ✅ لا يوجد localhost hardcoded
+   ✅ Phase 6: Agents + Customers + Orders + Commissions
+   ✅ متوافق مع /api/agents/
+   ✅ متوافق مع /api/agents/commissions/
+   ✅ دعم عربي / إنجليزي عبر primey-locale
+   ✅ أرقام إنجليزية دائمًا
+   ✅ استخدام sonner
+   ✅ استخدام رمز SAR الرسمي
+   ✅ بدون localhost
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -78,7 +82,14 @@ type Agent = {
   city: string;
   address: string;
   defaultCommissionType: CommissionType;
-  defaultCommissionValue: string;
+  defaultCommissionValue: number;
+  totalCustomers: number;
+  totalOrders: number;
+  totalSales: number;
+  pendingCommission: number;
+  approvedCommission: number;
+  paidCommission: number;
+  accountingPostedCommission: number;
   bankName: string;
   bankAccountName: string;
   iban: string;
@@ -89,13 +100,31 @@ type Agent = {
   raw: Record<string, unknown>;
 };
 
+type AgentsApiStats = {
+  total_agents?: number | string;
+  active_agents?: number | string;
+  inactive_agents?: number | string;
+  suspended_agents?: number | string;
+  draft_agents?: number | string;
+  total_sales?: number | string;
+  total_commission?: number | string;
+  total_paid?: number | string;
+};
+
 type AgentsApiResponse = {
   ok?: boolean;
   message?: string;
+  count?: number;
+  page?: number;
+  page_size?: number;
+  num_pages?: number;
+  has_next?: boolean;
+  has_previous?: boolean;
   results?: unknown[];
   data?: unknown[];
   items?: unknown[];
   agents?: unknown[];
+  stats?: AgentsApiStats;
 };
 
 /* ============================================================
@@ -184,16 +213,65 @@ function extractNestedValue(
   const agent = obj.agent;
   if (agent && typeof agent === "object") {
     const agentObj = agent as Record<string, unknown>;
-    return agentObj[key];
+    const nested = agentObj[key];
+
+    if (nested !== undefined && nested !== null && nested !== "") {
+      return nested;
+    }
+  }
+
+  const stats = obj.stats;
+  if (stats && typeof stats === "object") {
+    const statsObj = stats as Record<string, unknown>;
+    const nested = statsObj[key];
+
+    if (nested !== undefined && nested !== null && nested !== "") {
+      return nested;
+    }
+  }
+
+  const summary = obj.summary;
+  if (summary && typeof summary === "object") {
+    const summaryObj = summary as Record<string, unknown>;
+    const nested = summaryObj[key];
+
+    if (nested !== undefined && nested !== null && nested !== "") {
+      return nested;
+    }
+  }
+
+  const commissions = obj.commissions;
+  if (commissions && typeof commissions === "object") {
+    const commissionObj = commissions as Record<string, unknown>;
+    const nested = commissionObj[key];
+
+    if (nested !== undefined && nested !== null && nested !== "") {
+      return nested;
+    }
   }
 
   return undefined;
 }
 
+function toNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  const clean = String(value ?? "")
+    .replace(/,/g, "")
+    .replace(/[^\d.-]/g, "");
+
+  const parsed = Number(clean);
+
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function normalizeAgent(item: unknown): Agent {
   const obj = (item || {}) as Record<string, unknown>;
 
-  const id = extractNestedValue(obj, "id") ?? extractNestedValue(obj, "agent_id") ?? "-";
+  const id =
+    extractNestedValue(obj, "id") ??
+    extractNestedValue(obj, "agent_id") ??
+    "-";
 
   const fullName =
     extractNestedValue(obj, "full_name") ??
@@ -209,7 +287,54 @@ function normalizeAgent(item: unknown): Agent {
   const referralCode =
     extractNestedValue(obj, "referral_code") ??
     extractNestedValue(obj, "reference") ??
+    extractNestedValue(obj, "ref_code") ??
     "-";
+
+  const totalCustomers =
+    extractNestedValue(obj, "total_customers") ??
+    extractNestedValue(obj, "customers_count") ??
+    extractNestedValue(obj, "customer_count") ??
+    extractNestedValue(obj, "linked_customers") ??
+    0;
+
+  const totalOrders =
+    extractNestedValue(obj, "total_orders") ??
+    extractNestedValue(obj, "orders_count") ??
+    extractNestedValue(obj, "order_count") ??
+    extractNestedValue(obj, "linked_orders") ??
+    0;
+
+  const totalSales =
+    extractNestedValue(obj, "total_sales") ??
+    extractNestedValue(obj, "sales_total") ??
+    extractNestedValue(obj, "orders_total") ??
+    extractNestedValue(obj, "revenue") ??
+    0;
+
+  const pendingCommission =
+    extractNestedValue(obj, "pending_commission") ??
+    extractNestedValue(obj, "pending_commissions") ??
+    extractNestedValue(obj, "commission_pending") ??
+    0;
+
+  const approvedCommission =
+    extractNestedValue(obj, "approved_commission") ??
+    extractNestedValue(obj, "approved_commissions") ??
+    extractNestedValue(obj, "commission_approved") ??
+    0;
+
+  const paidCommission =
+    extractNestedValue(obj, "paid_commission") ??
+    extractNestedValue(obj, "paid_commissions") ??
+    extractNestedValue(obj, "commission_paid") ??
+    0;
+
+  const accountingPostedCommission =
+    extractNestedValue(obj, "accounting_posted_commission") ??
+    extractNestedValue(obj, "posted_commission") ??
+    extractNestedValue(obj, "posted_commissions") ??
+    extractNestedValue(obj, "commission_posted") ??
+    0;
 
   return {
     id: id as number | string,
@@ -222,14 +347,22 @@ function normalizeAgent(item: unknown): Agent {
     city: String(extractNestedValue(obj, "city") ?? ""),
     address: String(extractNestedValue(obj, "address") ?? ""),
     defaultCommissionType: normalizeCommissionType(
-      extractNestedValue(obj, "default_commission_type"),
+      extractNestedValue(obj, "default_commission_type") ??
+        extractNestedValue(obj, "commission_type"),
     ),
-    defaultCommissionValue: String(
+    defaultCommissionValue: toNumber(
       extractNestedValue(obj, "default_commission_value") ??
         extractNestedValue(obj, "commission_value") ??
         extractNestedValue(obj, "amount") ??
-        "0.00",
+        0,
     ),
+    totalCustomers: toNumber(totalCustomers),
+    totalOrders: toNumber(totalOrders),
+    totalSales: toNumber(totalSales),
+    pendingCommission: toNumber(pendingCommission),
+    approvedCommission: toNumber(approvedCommission),
+    paidCommission: toNumber(paidCommission),
+    accountingPostedCommission: toNumber(accountingPostedCommission),
     bankName: String(extractNestedValue(obj, "bank_name") ?? ""),
     bankAccountName: String(extractNestedValue(obj, "bank_account_name") ?? ""),
     iban: String(extractNestedValue(obj, "iban") ?? ""),
@@ -255,57 +388,66 @@ function dictionary(locale: AppLocale) {
   return {
     pageTitle: isArabic ? "إدارة المندوبين" : "Agents Management",
     pageSubtitle: isArabic
-      ? "متابعة المندوبين، أكواد الإحالة، حالة التفعيل، المدن، والروابط التشغيلية من بيانات حقيقية."
-      : "Monitor agents, referral codes, activation status, cities, and operational links from live data.",
+      ? "لوحة تشغيلية لمتابعة المندوبين، العملاء المرتبطين، الطلبات، العمولات، وحالة الترحيل المحاسبي."
+      : "Operational dashboard for agents, linked customers, orders, commissions, and accounting posting status.",
 
     addAgent: isArabic ? "إنشاء مندوب" : "Create Agent",
-    agentsList: isArabic ? "قائمة المندوبين" : "Agents List",
     reports: isArabic ? "التقارير" : "Reports",
     export: isArabic ? "تصدير" : "Export",
     refresh: isArabic ? "تحديث" : "Refresh",
 
-    featuredAgents: isArabic ? "المندوبون المميزون" : "Featured Agents",
+    featuredAgents: isArabic ? "أفضل المندوبين" : "Top Agents",
     featuredSubtitle: isArabic
-      ? "عرض مختصر لأهم المندوبين حسب حالة التمييز أو أحدث السجلات."
-      : "A compact view of important agents based on featured status or latest records.",
+      ? "عرض مختصر لأعلى المندوبين حسب المبيعات أو السجلات التشغيلية."
+      : "Compact view of top agents based on sales or operational records.",
 
-    trackStatus: isArabic ? "حالة المندوبين" : "Track Agent Status",
+    trackStatus: isArabic
+      ? "تشغيل المندوبين والعمولات"
+      : "Agents Operations & Commissions",
     trackSubtitle: isArabic
-      ? "تحليل سريع لحالة المندوبين والعمولات."
-      : "Quick analysis of agents and commission status.",
+      ? "تحليل سريع لحالة المندوبين، العملاء، الطلبات، والعمولات."
+      : "Quick analysis of agents, customers, orders, and commissions.",
 
     filterPlaceholder: isArabic
-      ? "ابحث في المندوبين..."
-      : "Filter agents...",
-    columns: isArabic ? "الأعمدة" : "Columns",
+      ? "ابحث باسم المندوب، الكود، المدينة، الجوال، الحالة..."
+      : "Search by agent name, code, city, phone, status...",
+    filter: isArabic ? "تصفية" : "Filter",
     previous: isArabic ? "السابق" : "Previous",
-    next: isArabic ? "التالي" : "Next",
+    viewList: isArabic ? "عرض القائمة" : "View List",
 
-    total: isArabic ? "الإجمالي" : "Total",
+    total: isArabic ? "إجمالي المندوبين" : "Total Agents",
     active: isArabic ? "نشط" : "Active",
     draft: isArabic ? "مسودة" : "Draft",
     suspended: isArabic ? "موقوف" : "Suspended",
     inactive: isArabic ? "غير نشط" : "Inactive",
     unknown: isArabic ? "غير محدد" : "Unknown",
 
-    newAgents: isArabic ? "مندوبون جدد" : "New Agents",
-    operational: isArabic ? "تشغيلي" : "Operational",
-    needsReview: isArabic ? "يحتاج مراجعة" : "Needs Review",
-    stopped: isArabic ? "متوقف" : "Stopped",
+    linkedCustomers: isArabic ? "العملاء المرتبطون" : "Linked Customers",
+    linkedOrders: isArabic ? "الطلبات المرتبطة" : "Linked Orders",
+    totalSales: isArabic ? "مبيعات المندوبين" : "Agents Sales",
+    pendingCommissions: isArabic ? "عمولات معلقة" : "Pending Commissions",
+    approvedCommissions: isArabic ? "عمولات معتمدة" : "Approved Commissions",
+    paidCommissions: isArabic ? "عمولات مدفوعة" : "Paid Commissions",
+    accountingPosted: isArabic ? "مرحل محاسبيًا" : "Accounting Posted",
+
+    newAgents: isArabic ? "سجلات تشغيلية" : "Operational Records",
+    operational: isArabic ? "جاهز للتشغيل" : "Ready",
 
     table: {
-      id: isArabic ? "الرقم" : "ID",
+      id: isArabic ? "الكود" : "Code",
       name: isArabic ? "اسم المندوب" : "Agent Name",
       code: isArabic ? "كود الإحالة" : "Referral Code",
       city: isArabic ? "المدينة" : "City",
-      contact: isArabic ? "التواصل" : "Contact",
+      customers: isArabic ? "العملاء" : "Customers",
+      orders: isArabic ? "الطلبات" : "Orders",
+      commission: isArabic ? "العمولة" : "Commission",
       status: isArabic ? "الحالة" : "Status",
       action: isArabic ? "الإجراء" : "Action",
     },
 
     emptyTitle: isArabic ? "لا يوجد مندوبون بعد" : "No agents yet",
     emptyText: isArabic
-      ? "عند إضافة مندوبين من صفحة الإنشاء أو من لوحة Django ستظهر هنا مباشرة."
+      ? "عند إضافة مندوبين من صفحة الإنشاء أو من لوحة Django ستظهر البيانات هنا مباشرة."
       : "Agents created from the create page or Django admin will appear here.",
     loading: isArabic
       ? "جاري تحميل بيانات المندوبين..."
@@ -316,13 +458,19 @@ function dictionary(locale: AppLocale) {
     refreshSuccess: isArabic
       ? "تم تحديث بيانات المندوبين بنجاح"
       : "Agents data refreshed successfully",
+    exportSuccess: isArabic
+      ? "تم تصدير ملخص المندوبين بنجاح"
+      : "Agents summary exported successfully",
+    exportEmpty: isArabic
+      ? "لا توجد بيانات لتصديرها"
+      : "No data available to export",
 
     quickAccessTitle: isArabic
       ? "إجراءات وحدة المندوبين"
       : "Agents Module Actions",
     quickAccessSubtitle: isArabic
-      ? "اختصارات منظمة للوصول إلى أهم صفحات وحدة المندوبين بدون عرض روابط خام."
-      : "Organized shortcuts to the key agent module pages without raw route text.",
+      ? "اختصارات منظمة للوصول إلى صفحات المندوبين والعمولات والتقارير."
+      : "Organized shortcuts for agents, commissions, and reports pages.",
 
     open: isArabic ? "فتح" : "Open",
     manage: isArabic ? "إدارة" : "Manage",
@@ -335,13 +483,18 @@ function dictionary(locale: AppLocale) {
 
     actionCreateTitle: isArabic ? "إنشاء مندوب" : "Create Agent",
     actionCreateDesc: isArabic
-      ? "إضافة مندوب جديد وربطه لاحقًا بالطلبات والعمولات وكشف الحساب."
-      : "Add a new agent and later connect it with orders, commissions, and statements.",
+      ? "إضافة مندوب جديد وربطه لاحقًا بالعملاء والطلبات والعمولات."
+      : "Add a new agent and later connect it with customers, orders, and commissions.",
 
     actionReportsTitle: isArabic ? "تقارير المندوبين" : "Agents Reports",
     actionReportsDesc: isArabic
-      ? "عرض تقارير تشغيلية، فلاتر، جداول، تصدير وطباعة."
-      : "View operational reports, filters, tables, export and print.",
+      ? "عرض تقارير تشغيلية، أداء المندوبين، العمولات، والتصدير."
+      : "View operational reports, agent performance, commissions, and export.",
+
+    actionCommissionTitle: isArabic ? "العمولات والترحيل" : "Commissions & Posting",
+    actionCommissionDesc: isArabic
+      ? "متابعة العمولات المعلقة والمعتمدة والمدفوعة والمرحلة محاسبيًا."
+      : "Track pending, approved, paid, and accounting-posted commissions.",
 
     commissionTypeLabels: {
       PERCENTAGE: isArabic ? "نسبة" : "Percentage",
@@ -354,6 +507,24 @@ function dictionary(locale: AppLocale) {
 /* ============================================================
    🎨 UI Helpers
 ============================================================ */
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function percent(value: number, total: number) {
+  if (!total) return 0;
+  return Math.min(100, Math.max(0, Math.round((value / total) * 100)));
+}
 
 function statusLabel(status: AgentStatus, locale: AppLocale) {
   const t = dictionary(locale);
@@ -411,9 +582,19 @@ function statusBadge(status: AgentStatus, locale: AppLocale) {
   );
 }
 
-function percent(value: number, total: number) {
-  if (!total) return 0;
-  return Math.round((value / total) * 100);
+function SarAmount({ value }: { value: number }) {
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+      <Image
+        src="/currency/sar.svg"
+        alt="SAR"
+        width={14}
+        height={14}
+        className="h-3.5 w-3.5"
+      />
+      <span>{formatMoney(value)}</span>
+    </span>
+  );
 }
 
 /* ============================================================
@@ -423,6 +604,7 @@ function percent(value: number, total: number) {
 export default function SystemAgentsPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [apiStats, setApiStats] = useState<AgentsApiStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [query, setQuery] = useState("");
 
@@ -449,11 +631,42 @@ export default function SystemAgentsPage() {
   }, [agents, query]);
 
   const stats = useMemo(() => {
-    const total = agents.length;
-    const active = agents.filter((item) => item.status === "ACTIVE").length;
-    const draft = agents.filter((item) => item.status === "DRAFT").length;
-    const suspended = agents.filter((item) => item.status === "SUSPENDED").length;
-    const inactive = agents.filter((item) => item.status === "INACTIVE").length;
+    const total = toNumber(apiStats?.total_agents) || agents.length;
+    const active =
+      toNumber(apiStats?.active_agents) ||
+      agents.filter((item) => item.status === "ACTIVE").length;
+    const draft =
+      toNumber(apiStats?.draft_agents) ||
+      agents.filter((item) => item.status === "DRAFT").length;
+    const suspended =
+      toNumber(apiStats?.suspended_agents) ||
+      agents.filter((item) => item.status === "SUSPENDED").length;
+    const inactive =
+      toNumber(apiStats?.inactive_agents) ||
+      agents.filter((item) => item.status === "INACTIVE").length;
+
+    const totalCustomers = agents.reduce(
+      (sum, item) => sum + item.totalCustomers,
+      0,
+    );
+    const totalOrders = agents.reduce((sum, item) => sum + item.totalOrders, 0);
+    const totalSales =
+      toNumber(apiStats?.total_sales) ||
+      agents.reduce((sum, item) => sum + item.totalSales, 0);
+    const pendingCommission = agents.reduce(
+      (sum, item) => sum + item.pendingCommission,
+      0,
+    );
+    const approvedCommission =
+      toNumber(apiStats?.total_commission) ||
+      agents.reduce((sum, item) => sum + item.approvedCommission, 0);
+    const paidCommission =
+      toNumber(apiStats?.total_paid) ||
+      agents.reduce((sum, item) => sum + item.paidCommission, 0);
+    const accountingPostedCommission = agents.reduce(
+      (sum, item) => sum + item.accountingPostedCommission,
+      0,
+    );
 
     return {
       total,
@@ -462,8 +675,15 @@ export default function SystemAgentsPage() {
       suspended,
       inactive,
       stopped: suspended + inactive,
+      totalCustomers,
+      totalOrders,
+      totalSales,
+      pendingCommission,
+      approvedCommission,
+      paidCommission,
+      accountingPostedCommission,
     };
-  }, [agents]);
+  }, [agents, apiStats]);
 
   const featuredAgents = useMemo(() => {
     const featured = agents.filter((item) => item.isFeatured);
@@ -472,7 +692,9 @@ export default function SystemAgentsPage() {
       return featured.slice(0, 6);
     }
 
-    return agents.slice(0, 6);
+    return [...agents]
+      .sort((a, b) => b.totalSales - a.totalSales)
+      .slice(0, 6);
   }, [agents]);
 
   const tableRows = useMemo(() => filteredAgents.slice(0, 8), [filteredAgents]);
@@ -481,35 +703,65 @@ export default function SystemAgentsPage() {
     () => [
       {
         title: t.total,
-        value: stats.total,
+        value: formatNumber(stats.total),
         helper: t.newAgents,
-        helperValue: "+0.0%",
+        helperValue: "100%",
         icon: Users,
         percent: 100,
       },
       {
         title: t.active,
-        value: stats.active,
+        value: formatNumber(stats.active),
         helper: t.operational,
         helperValue: `${percent(stats.active, stats.total)}%`,
         icon: BadgeCheck,
         percent: percent(stats.active, stats.total),
       },
       {
-        title: t.draft,
-        value: stats.draft,
-        helper: t.needsReview,
-        helperValue: `${percent(stats.draft, stats.total)}%`,
-        icon: FileText,
-        percent: percent(stats.draft, stats.total),
+        title: t.linkedCustomers,
+        value: formatNumber(stats.totalCustomers),
+        helper: t.linkedOrders,
+        helperValue: formatNumber(stats.totalOrders),
+        icon: UserRound,
+        percent: percent(stats.totalCustomers, Math.max(stats.totalCustomers, 1)),
       },
       {
-        title: t.suspended,
-        value: stats.stopped,
-        helper: t.stopped,
-        helperValue: `${percent(stats.stopped, stats.total)}%`,
-        icon: ShieldCheck,
-        percent: percent(stats.stopped, stats.total),
+        title: t.pendingCommissions,
+        value: formatMoney(stats.pendingCommission),
+        helper: t.approvedCommissions,
+        helperValue: formatMoney(stats.approvedCommission),
+        icon: HandCoins,
+        percent: percent(
+          stats.approvedCommission,
+          stats.approvedCommission + stats.pendingCommission,
+        ),
+      },
+    ],
+    [stats, t],
+  );
+
+  const financialCards = useMemo(
+    () => [
+      {
+        title: t.totalSales,
+        value: stats.totalSales,
+        icon: TrendingUp,
+        helper: t.linkedOrders,
+        helperValue: formatNumber(stats.totalOrders),
+      },
+      {
+        title: t.approvedCommissions,
+        value: stats.approvedCommission,
+        icon: Calculator,
+        helper: t.pendingCommissions,
+        helperValue: formatMoney(stats.pendingCommission),
+      },
+      {
+        title: t.paidCommissions,
+        value: stats.paidCommission,
+        icon: Wallet,
+        helper: t.accountingPosted,
+        helperValue: formatMoney(stats.accountingPostedCommission),
       },
     ],
     [stats, t],
@@ -522,7 +774,7 @@ export default function SystemAgentsPage() {
         description: t.actionListDesc,
         href: "/system/agents/list",
         icon: Users,
-        badge: `${agents.length}`,
+        badge: `${formatNumber(stats.total)}`,
         cta: t.manage,
       },
       {
@@ -541,41 +793,120 @@ export default function SystemAgentsPage() {
         badge: isArabic ? "تحليل" : "Reports",
         cta: t.view,
       },
+      {
+        title: t.actionCommissionTitle,
+        description: t.actionCommissionDesc,
+        href: "/system/agents/reports?section=commissions",
+        icon: Landmark,
+        badge: formatMoney(stats.accountingPostedCommission),
+        cta: t.view,
+      },
     ],
-    [agents.length, isArabic, t],
+    [isArabic, stats.accountingPostedCommission, stats.total, t],
   );
 
-  async function loadAgents(showToast = false) {
-    try {
-      setIsLoading(true);
+  const loadAgents = useCallback(
+    async (showToast = false) => {
+      try {
+        setIsLoading(true);
 
-      const response = await fetch("/api/agents/?page_size=100", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
+        const response = await fetch("/api/agents/?page_size=100", {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
+        });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const payload = (await response.json().catch(() => null)) as
+          | AgentsApiResponse
+          | null;
+
+        if (!response.ok || !payload?.ok) {
+          throw new Error(payload?.message || `HTTP ${response.status}`);
+        }
+
+        const normalized = normalizeApiList(payload).map(normalizeAgent);
+
+        setAgents(normalized);
+        setApiStats(payload.stats || null);
+
+        if (showToast) {
+          toast.success(t.refreshSuccess);
+        }
+      } catch (error) {
+        console.error("Failed to load agents:", error);
+        setAgents([]);
+        setApiStats(null);
+        toast.error(t.apiError);
+      } finally {
+        setIsLoading(false);
       }
+    },
+    [t.apiError, t.refreshSuccess],
+  );
 
-      const payload = (await response.json()) as AgentsApiResponse;
-      const normalized = normalizeApiList(payload).map(normalizeAgent);
-
-      setAgents(normalized);
-
-      if (showToast) {
-        toast.success(t.refreshSuccess);
-      }
-    } catch (error) {
-      console.error("Failed to load agents:", error);
-      setAgents([]);
-      toast.error(t.apiError);
-    } finally {
-      setIsLoading(false);
+  function exportAgentsSummary() {
+    if (filteredAgents.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
     }
+
+    const headers = [
+      "agent_code",
+      "full_name",
+      "referral_code",
+      "status",
+      "city",
+      "phone",
+      "email",
+      "customers",
+      "orders",
+      "total_sales",
+      "pending_commission",
+      "approved_commission",
+      "paid_commission",
+      "accounting_posted_commission",
+    ];
+
+    const rows = filteredAgents.map((agent) => [
+      agent.agentCode,
+      agent.fullName,
+      agent.referralCode,
+      agent.status,
+      agent.city,
+      agent.phone,
+      agent.email,
+      String(agent.totalCustomers),
+      String(agent.totalOrders),
+      formatMoney(agent.totalSales),
+      formatMoney(agent.pendingCommission),
+      formatMoney(agent.approvedCommission),
+      formatMoney(agent.paidCommission),
+      formatMoney(agent.accountingPostedCommission),
+    ]);
+
+    const csv = [headers, ...rows]
+      .map((row) =>
+        row
+          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+          .join(","),
+      )
+      .join("\n");
+
+    const blob = new Blob([`\uFEFF${csv}`], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "primey-care-agents-summary.csv";
+    link.click();
+
+    URL.revokeObjectURL(url);
+    toast.success(t.exportSuccess);
   }
 
   useEffect(() => {
@@ -607,8 +938,7 @@ export default function SystemAgentsPage() {
 
   useEffect(() => {
     loadAgents(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
+  }, [loadAgents]);
 
   return (
     <div className="space-y-4">
@@ -620,7 +950,7 @@ export default function SystemAgentsPage() {
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
             {t.pageTitle}
           </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className="text-muted-foreground mt-1 max-w-3xl text-sm leading-6">
             {t.pageSubtitle}
           </p>
         </div>
@@ -641,7 +971,10 @@ export default function SystemAgentsPage() {
           </Button>
 
           <Link href="/system/agents/reports">
-            <Button variant="outline" className="h-10 w-full rounded-xl sm:w-auto">
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
               <BarChart3 className="h-4 w-4" />
               <span>{t.reports}</span>
             </Button>
@@ -657,23 +990,64 @@ export default function SystemAgentsPage() {
       </div>
 
       {/* =====================================================
+          Financial Summary
+      ====================================================== */}
+      <div className="grid gap-4 md:grid-cols-3">
+        {financialCards.map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <Card key={item.title} className="rounded-2xl border shadow-sm">
+              <CardContent className="flex items-start justify-between gap-4 p-5">
+                <div className="space-y-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-muted">
+                    <Icon className="h-5 w-5" />
+                  </div>
+
+                  <div>
+                    <p className="text-muted-foreground text-sm">
+                      {item.title}
+                    </p>
+                    <p className="mt-1 text-2xl font-bold">
+                      {isLoading ? "..." : <SarAmount value={item.value} />}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border bg-background px-3 py-2 text-end">
+                  <p className="text-muted-foreground text-xs">{item.helper}</p>
+                  <p className="mt-1 text-sm font-semibold">
+                    {item.helperValue}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* =====================================================
           Main Layout
       ====================================================== */}
       <div className="grid gap-4 xl:grid-cols-3">
-        {/* Featured Agents */}
+        {/* Top Agents */}
         <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
           <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
             <div>
               <CardTitle className="text-base font-bold">
                 {t.featuredAgents}
               </CardTitle>
-              <CardDescription className="mt-1 text-sm">
+              <CardDescription className="mt-1 text-sm leading-6">
                 {t.featuredSubtitle}
               </CardDescription>
             </div>
 
             <Link href="/system/agents/list">
-              <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 rounded-xl"
+              >
                 <ListChecks className="h-4 w-4" />
               </Button>
             </Link>
@@ -723,11 +1097,12 @@ export default function SystemAgentsPage() {
                     </div>
 
                     <div className="shrink-0 text-end">
-                      <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                      <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                         {agent.referralCode || "-"}
                       </p>
                       <p className="text-muted-foreground mt-1 text-xs">
-                        {agent.city || "-"}
+                        {formatNumber(agent.totalOrders)} /{" "}
+                        {formatNumber(agent.totalCustomers)}
                       </p>
                     </div>
                   </div>
@@ -744,12 +1119,17 @@ export default function SystemAgentsPage() {
               <CardTitle className="text-base font-bold">
                 {t.trackStatus}
               </CardTitle>
-              <CardDescription className="mt-1 text-sm">
+              <CardDescription className="mt-1 text-sm leading-6">
                 {t.trackSubtitle}
               </CardDescription>
             </div>
 
-            <Button variant="outline" className="h-9 rounded-xl">
+            <Button
+              variant="outline"
+              className="h-9 rounded-xl"
+              onClick={exportAgentsSummary}
+              disabled={isLoading}
+            >
               <Download className="h-4 w-4" />
               <span>{t.export}</span>
             </Button>
@@ -762,15 +1142,18 @@ export default function SystemAgentsPage() {
                 const Icon = card.icon;
 
                 return (
-                  <div key={card.title} className="space-y-2">
+                  <div
+                    key={card.title}
+                    className="rounded-2xl border bg-background p-4"
+                  >
                     <div className="flex items-center gap-2">
                       <Icon className="text-muted-foreground h-4 w-4" />
-                      <p className="text-2xl font-bold">
+                      <p className="text-xl font-bold">
                         {isLoading ? "..." : card.value}
                       </p>
                     </div>
 
-                    <div className="space-y-1">
+                    <div className="mt-3 space-y-1">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-muted-foreground text-sm">
                           {card.title}
@@ -786,6 +1169,10 @@ export default function SystemAgentsPage() {
                           style={{ width: `${card.percent}%` }}
                         />
                       </div>
+
+                      <p className="text-muted-foreground pt-1 text-xs">
+                        {card.helper}
+                      </p>
                     </div>
                   </div>
                 );
@@ -812,7 +1199,7 @@ export default function SystemAgentsPage() {
 
               <Button variant="outline" className="h-10 rounded-xl">
                 <Filter className="h-4 w-4" />
-                <span>{t.columns}</span>
+                <span>{t.filter}</span>
               </Button>
             </div>
 
@@ -825,7 +1212,9 @@ export default function SystemAgentsPage() {
                     <TableHead>{t.table.name}</TableHead>
                     <TableHead>{t.table.code}</TableHead>
                     <TableHead>{t.table.city}</TableHead>
-                    <TableHead>{t.table.contact}</TableHead>
+                    <TableHead>{t.table.customers}</TableHead>
+                    <TableHead>{t.table.orders}</TableHead>
+                    <TableHead>{t.table.commission}</TableHead>
                     <TableHead>{t.table.status}</TableHead>
                     <TableHead>{t.table.action}</TableHead>
                   </TableRow>
@@ -834,7 +1223,7 @@ export default function SystemAgentsPage() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={7}>
+                      <TableCell colSpan={9}>
                         <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
                           <Loader2 className="h-4 w-4 animate-spin" />
                           <span>{t.loading}</span>
@@ -843,7 +1232,7 @@ export default function SystemAgentsPage() {
                     </TableRow>
                   ) : tableRows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7}>
+                      <TableCell colSpan={9}>
                         <div className="py-12 text-center">
                           <p className="font-semibold">{t.emptyTitle}</p>
                           <p className="text-muted-foreground mt-2 text-sm">
@@ -869,7 +1258,7 @@ export default function SystemAgentsPage() {
                                 {agent.fullName}
                               </p>
                               <p className="text-muted-foreground truncate text-xs">
-                                {agent.email || agent.referralCode || "-"}
+                                {agent.email || agent.phone || "-"}
                               </p>
                             </div>
                           </div>
@@ -889,9 +1278,32 @@ export default function SystemAgentsPage() {
                         </TableCell>
 
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Phone className="text-muted-foreground h-3.5 w-3.5" />
-                            <span>{agent.phone || "-"}</span>
+                          {formatNumber(agent.totalCustomers)}
+                        </TableCell>
+
+                        <TableCell>{formatNumber(agent.totalOrders)}</TableCell>
+
+                        <TableCell>
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold">
+                              <SarAmount
+                                value={
+                                  agent.approvedCommission ||
+                                  agent.pendingCommission ||
+                                  agent.paidCommission
+                                }
+                              />
+                            </p>
+                            <p className="text-muted-foreground text-xs">
+                              {
+                                t.commissionTypeLabels[
+                                  agent.defaultCommissionType
+                                ]
+                              }{" "}
+                              {agent.defaultCommissionValue
+                                ? formatNumber(agent.defaultCommissionValue)
+                                : "-"}
+                            </p>
                           </div>
                         </TableCell>
 
@@ -918,18 +1330,24 @@ export default function SystemAgentsPage() {
             {/* Footer */}
             <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
               <p>
-                {filteredAgents.length} / {agents.length}
+                {formatNumber(filteredAgents.length)} /{" "}
+                {formatNumber(agents.length)}
               </p>
 
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="rounded-xl" disabled>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl"
+                  disabled
+                >
                   {t.previous}
                 </Button>
 
                 <Link href="/system/agents/list">
                   <Button variant="outline" size="sm" className="rounded-xl">
                     <ListChecks className="h-4 w-4" />
-                    {t.next}
+                    {t.viewList}
                   </Button>
                 </Link>
               </div>
@@ -946,11 +1364,13 @@ export default function SystemAgentsPage() {
           <CardTitle className="text-base font-bold">
             {t.quickAccessTitle}
           </CardTitle>
-          <CardDescription>{t.quickAccessSubtitle}</CardDescription>
+          <CardDescription className="leading-6">
+            {t.quickAccessSubtitle}
+          </CardDescription>
         </CardHeader>
 
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {moduleActions.map((item) => {
               const Icon = item.icon;
 

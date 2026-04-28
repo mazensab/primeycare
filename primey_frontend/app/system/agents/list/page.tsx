@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
@@ -21,6 +22,7 @@ import {
   Search,
   ShieldCheck,
   Star,
+  TrendingUp,
   UserRound,
   Users,
   Wallet,
@@ -60,13 +62,16 @@ import {
    📂 app/system/agents/list/page.tsx
    🧠 Primey Care | Agents List
    ------------------------------------------------------------
-   ✅ نفس صفحة قائمة المراكز
-   ✅ بدون @tanstack/react-table
-   ✅ استخدام UI الداخلي فقط
-   ✅ بحث + فلاتر + أعمدة + تحديد + فرز + صفحات
-   ✅ تصدير Excel منظم .xlsx بدل CSV
+   ✅ Phase 6: Agents + Commissions
    ✅ ربط حقيقي مع /api/agents/
-   ✅ بدون localhost hardcoded
+   ✅ نفس هوية Primey Care
+   ✅ بحث + فلاتر + أعمدة + تحديد + فرز + صفحات
+   ✅ تصدير Excel منظم .xlsx
+   ✅ دعم عربي / إنجليزي عبر primey-locale
+   ✅ الأرقام بالإنجليزية دائمًا
+   ✅ استخدام رمز SAR الرسمي
+   ✅ استخدام sonner
+   ✅ بدون localhost
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -89,7 +94,12 @@ type SortKey =
   | "referralCode"
   | "city"
   | "status"
-  | "defaultCommissionValue";
+  | "defaultCommissionValue"
+  | "totalCustomers"
+  | "totalOrders"
+  | "totalSales"
+  | "approvedCommission"
+  | "paidCommission";
 
 type SortDirection = "asc" | "desc";
 
@@ -104,7 +114,14 @@ type Agent = {
   city: string;
   address: string;
   defaultCommissionType: CommissionType;
-  defaultCommissionValue: string;
+  defaultCommissionValue: number;
+  totalCustomers: number;
+  totalOrders: number;
+  totalSales: number;
+  pendingCommission: number;
+  approvedCommission: number;
+  paidCommission: number;
+  accountingPostedCommission: number;
   bankName: string;
   bankAccountName: string;
   iban: string;
@@ -115,13 +132,31 @@ type Agent = {
   raw: Record<string, unknown>;
 };
 
+type AgentsApiStats = {
+  total_agents?: number | string;
+  active_agents?: number | string;
+  inactive_agents?: number | string;
+  suspended_agents?: number | string;
+  draft_agents?: number | string;
+  total_sales?: number | string;
+  total_commission?: number | string;
+  total_paid?: number | string;
+};
+
 type AgentsApiResponse = {
   ok?: boolean;
   message?: string;
+  count?: number;
+  page?: number;
+  page_size?: number;
+  num_pages?: number;
+  has_next?: boolean;
+  has_previous?: boolean;
   results?: unknown[];
   data?: unknown[];
   items?: unknown[];
   agents?: unknown[];
+  stats?: AgentsApiStats;
 };
 
 type VisibleColumns = {
@@ -131,6 +166,10 @@ type VisibleColumns = {
   commission: boolean;
   city: boolean;
   contact: boolean;
+  customers: boolean;
+  orders: boolean;
+  sales: boolean;
+  commissions: boolean;
   status: boolean;
   featured: boolean;
   actions: boolean;
@@ -222,10 +261,46 @@ function extractNestedValue(
   const agent = obj.agent;
   if (agent && typeof agent === "object") {
     const agentObj = agent as Record<string, unknown>;
-    return agentObj[key];
+    const nested = agentObj[key];
+
+    if (nested !== undefined && nested !== null && nested !== "") {
+      return nested;
+    }
+  }
+
+  const stats = obj.stats;
+  if (stats && typeof stats === "object") {
+    const statsObj = stats as Record<string, unknown>;
+    const nested = statsObj[key];
+
+    if (nested !== undefined && nested !== null && nested !== "") {
+      return nested;
+    }
+  }
+
+  const summary = obj.summary;
+  if (summary && typeof summary === "object") {
+    const summaryObj = summary as Record<string, unknown>;
+    const nested = summaryObj[key];
+
+    if (nested !== undefined && nested !== null && nested !== "") {
+      return nested;
+    }
   }
 
   return undefined;
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  const clean = String(value ?? "")
+    .replace(/,/g, "")
+    .replace(/[^\d.-]/g, "");
+
+  const parsed = Number(clean);
+
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function normalizeAgent(item: unknown): Agent {
@@ -250,6 +325,7 @@ function normalizeAgent(item: unknown): Agent {
   const referralCode =
     extractNestedValue(obj, "referral_code") ??
     extractNestedValue(obj, "reference") ??
+    extractNestedValue(obj, "ref_code") ??
     "-";
 
   return {
@@ -263,13 +339,42 @@ function normalizeAgent(item: unknown): Agent {
     city: String(extractNestedValue(obj, "city") ?? ""),
     address: String(extractNestedValue(obj, "address") ?? ""),
     defaultCommissionType: normalizeCommissionType(
-      extractNestedValue(obj, "default_commission_type"),
+      extractNestedValue(obj, "default_commission_type") ??
+        extractNestedValue(obj, "commission_type"),
     ),
-    defaultCommissionValue: String(
+    defaultCommissionValue: toNumber(
       extractNestedValue(obj, "default_commission_value") ??
         extractNestedValue(obj, "commission_value") ??
-        extractNestedValue(obj, "amount") ??
-        "0.00",
+        0,
+    ),
+    totalCustomers: toNumber(
+      extractNestedValue(obj, "total_customers") ??
+        extractNestedValue(obj, "customers_count") ??
+        0,
+    ),
+    totalOrders: toNumber(
+      extractNestedValue(obj, "total_orders") ??
+        extractNestedValue(obj, "orders_count") ??
+        0,
+    ),
+    totalSales: toNumber(
+      extractNestedValue(obj, "total_sales") ??
+        extractNestedValue(obj, "sales_total") ??
+        0,
+    ),
+    pendingCommission: toNumber(
+      extractNestedValue(obj, "pending_commission") ?? 0,
+    ),
+    approvedCommission: toNumber(
+      extractNestedValue(obj, "approved_commission") ??
+        extractNestedValue(obj, "total_commission") ??
+        0,
+    ),
+    paidCommission: toNumber(extractNestedValue(obj, "paid_commission") ?? 0),
+    accountingPostedCommission: toNumber(
+      extractNestedValue(obj, "accounting_posted_commission") ??
+        extractNestedValue(obj, "posted_commission") ??
+        0,
     ),
     bankName: String(extractNestedValue(obj, "bank_name") ?? ""),
     bankAccountName: String(extractNestedValue(obj, "bank_account_name") ?? ""),
@@ -296,8 +401,8 @@ function dictionary(locale: AppLocale) {
   return {
     title: isArabic ? "قائمة المندوبين" : "Agents List",
     subtitle: isArabic
-      ? "إدارة المندوبين من بيانات حقيقية مع جدول احترافي، فلاتر، أعمدة، فرز، وتصدير Excel منظم."
-      : "Manage agents from live data with a professional table, filters, columns, sorting, and organized Excel export.",
+      ? "إدارة المندوبين بجدول تشغيلي مرتبط ببيانات العملاء والطلبات والعمولات."
+      : "Manage agents in an operational table connected with customers, orders, and commissions.",
 
     back: isArabic ? "لوحة المندوبين" : "Agents Overview",
     createAgent: isArabic ? "إنشاء مندوب" : "Create Agent",
@@ -306,12 +411,12 @@ function dictionary(locale: AppLocale) {
 
     tableTitle: isArabic ? "بيانات المندوبين" : "Agents Data",
     tableSubtitle: isArabic
-      ? "جدول تشغيلي مرتبط مباشرة بواجهة agents API."
-      : "Operational table connected directly to agents API.",
+      ? "جدول متصل مباشرة مع /api/agents/ ويعرض بيانات المندوبين ومؤشرات الأداء."
+      : "Table connected directly with /api/agents/ showing agents and performance metrics.",
 
     searchPlaceholder: isArabic
-      ? "ابحث باسم المندوب أو الكود أو كود الإحالة أو المدينة..."
-      : "Search by agent name, code, referral code, or city...",
+      ? "ابحث باسم المندوب أو الكود أو كود الإحالة أو المدينة أو الجوال..."
+      : "Search by agent name, code, referral code, city, or phone...",
     status: isArabic ? "الحالة" : "Status",
     commissionType: isArabic ? "نوع العمولة" : "Commission Type",
     columns: isArabic ? "الأعمدة" : "Columns",
@@ -349,6 +454,9 @@ function dictionary(locale: AppLocale) {
     exportSuccess: isArabic
       ? "تم تجهيز ملف Excel بنجاح"
       : "Excel file prepared successfully",
+    exportEmpty: isArabic
+      ? "لا توجد بيانات لتصديرها"
+      : "No data available to export",
     copied: isArabic ? "تم النسخ بنجاح" : "Copied successfully",
 
     excelSummary: isArabic ? "ملخص القائمة" : "List Summary",
@@ -362,12 +470,18 @@ function dictionary(locale: AppLocale) {
     showing: isArabic ? "المعروض" : "Showing",
     filterSearch: isArabic ? "البحث" : "Search",
     filterStatus: isArabic ? "فلتر الحالة" : "Status Filter",
-    filterCommissionType: isArabic ? "فلتر نوع العمولة" : "Commission Type Filter",
+    filterCommissionType: isArabic
+      ? "فلتر نوع العمولة"
+      : "Commission Type Filter",
 
     stats: {
       total: isArabic ? "إجمالي المندوبين" : "Total Agents",
       active: isArabic ? "النشطون" : "Active",
-      draft: isArabic ? "المسودات" : "Draft",
+      customers: isArabic ? "العملاء" : "Customers",
+      orders: isArabic ? "الطلبات" : "Orders",
+      sales: isArabic ? "مبيعات المندوبين" : "Agents Sales",
+      commissions: isArabic ? "العمولات" : "Commissions",
+      paid: isArabic ? "المدفوع" : "Paid",
       stopped: isArabic ? "الموقوفون" : "Stopped",
     },
 
@@ -376,9 +490,13 @@ function dictionary(locale: AppLocale) {
       name: isArabic ? "اسم المندوب" : "Agent Name",
       code: isArabic ? "كود المندوب" : "Agent Code",
       referralCode: isArabic ? "كود الإحالة" : "Referral Code",
-      commission: isArabic ? "العمولة" : "Commission",
+      commission: isArabic ? "إعداد العمولة" : "Commission Setup",
       city: isArabic ? "المدينة" : "City",
       contact: isArabic ? "التواصل" : "Contact",
+      customers: isArabic ? "العملاء" : "Customers",
+      orders: isArabic ? "الطلبات" : "Orders",
+      sales: isArabic ? "المبيعات" : "Sales",
+      commissions: isArabic ? "العمولات" : "Commissions",
       status: isArabic ? "الحالة" : "Status",
       featured: isArabic ? "التمييز" : "Featured",
       createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
@@ -393,9 +511,13 @@ function dictionary(locale: AppLocale) {
       code: isArabic ? "الكود" : "Code",
       name: isArabic ? "اسم المندوب" : "Agent Name",
       referralCode: isArabic ? "كود الإحالة" : "Referral Code",
-      commission: isArabic ? "العمولة" : "Commission",
+      commission: isArabic ? "إعداد العمولة" : "Commission Setup",
       city: isArabic ? "المدينة" : "City",
       contact: isArabic ? "التواصل" : "Contact",
+      customers: isArabic ? "العملاء" : "Customers",
+      orders: isArabic ? "الطلبات" : "Orders",
+      sales: isArabic ? "المبيعات" : "Sales",
+      commissions: isArabic ? "العمولات" : "Commissions",
       status: isArabic ? "الحالة" : "Status",
       featured: isArabic ? "التمييز" : "Featured",
       actions: isArabic ? "الإجراءات" : "Actions",
@@ -420,6 +542,34 @@ function dictionary(locale: AppLocale) {
 /* ============================================================
    🎨 UI Helpers
 ============================================================ */
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function SarAmount({ value }: { value: number }) {
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+      <Image
+        src="/currency/sar.svg"
+        alt="SAR"
+        width={14}
+        height={14}
+        className="h-3.5 w-3.5"
+      />
+      <span>{formatMoney(value)}</span>
+    </span>
+  );
+}
 
 function statusBadge(status: AgentStatus, locale: AppLocale) {
   const t = dictionary(locale);
@@ -486,26 +636,13 @@ function commissionTypeBadge(type: CommissionType, locale: AppLocale) {
   );
 }
 
-function safeNumber(value: string) {
-  const numberValue = Number(String(value || "0").replace(",", "."));
-  return Number.isFinite(numberValue) ? numberValue : 0;
-}
-
-function formatCommission(agent: Agent, locale: AppLocale) {
-  const value = safeNumber(agent.defaultCommissionValue).toLocaleString(
-    locale === "ar" ? "ar-SA" : "en-US",
-    {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    },
-  );
-
+function formatCommission(agent: Agent): string {
   if (agent.defaultCommissionType === "PERCENTAGE") {
-    return `${value}%`;
+    return `${formatNumber(agent.defaultCommissionValue)}%`;
   }
 
   if (agent.defaultCommissionType === "FIXED") {
-    return `${value} SAR`;
+    return formatMoney(agent.defaultCommissionValue);
   }
 
   return "-";
@@ -515,19 +652,19 @@ function compareValues(a: string | number, b: string | number) {
   const valueA = String(a || "").toLowerCase();
   const valueB = String(b || "").toLowerCase();
 
-  return valueA.localeCompare(valueB, "ar", {
+  return valueA.localeCompare(valueB, "en", {
     numeric: true,
     sensitivity: "base",
   });
 }
 
-function formatDateTime(value: string, locale: AppLocale) {
+function formatDateTime(value: string) {
   if (!value) return "-";
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
 
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar-SA" : "en-US", {
+  return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -540,6 +677,7 @@ function formatDateTime(value: string, locale: AppLocale) {
 export default function SystemAgentsListPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [apiStats, setApiStats] = useState<AgentsApiStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const [query, setQuery] = useState("");
@@ -561,8 +699,12 @@ export default function SystemAgentsListPage() {
     commission: true,
     city: true,
     contact: true,
+    customers: true,
+    orders: true,
+    sales: true,
+    commissions: true,
     status: true,
-    featured: true,
+    featured: false,
     actions: true,
   });
 
@@ -570,15 +712,43 @@ export default function SystemAgentsListPage() {
   const isArabic = locale === "ar";
 
   const stats = useMemo(() => {
-    const total = agents.length;
-    const active = agents.filter((item) => item.status === "ACTIVE").length;
-    const draft = agents.filter((item) => item.status === "DRAFT").length;
-    const stopped = agents.filter(
-      (item) => item.status === "SUSPENDED" || item.status === "INACTIVE",
-    ).length;
+    const total = toNumber(apiStats?.total_agents) || agents.length;
+    const active =
+      toNumber(apiStats?.active_agents) ||
+      agents.filter((item) => item.status === "ACTIVE").length;
+    const stopped =
+      toNumber(apiStats?.suspended_agents) +
+        toNumber(apiStats?.inactive_agents) ||
+      agents.filter(
+        (item) => item.status === "SUSPENDED" || item.status === "INACTIVE",
+      ).length;
 
-    return { total, active, draft, stopped };
-  }, [agents]);
+    const totalCustomers = agents.reduce(
+      (sum, item) => sum + item.totalCustomers,
+      0,
+    );
+    const totalOrders = agents.reduce((sum, item) => sum + item.totalOrders, 0);
+    const totalSales =
+      toNumber(apiStats?.total_sales) ||
+      agents.reduce((sum, item) => sum + item.totalSales, 0);
+    const totalCommission =
+      toNumber(apiStats?.total_commission) ||
+      agents.reduce((sum, item) => sum + item.approvedCommission, 0);
+    const totalPaid =
+      toNumber(apiStats?.total_paid) ||
+      agents.reduce((sum, item) => sum + item.paidCommission, 0);
+
+    return {
+      total,
+      active,
+      stopped,
+      totalCustomers,
+      totalOrders,
+      totalSales,
+      totalCommission,
+      totalPaid,
+    };
+  }, [agents, apiStats]);
 
   const filteredAgents = useMemo(() => {
     const cleanQuery = query.trim().toLowerCase();
@@ -608,10 +778,15 @@ export default function SystemAgentsListPage() {
     filtered.sort((a, b) => {
       let result = 0;
 
-      if (sortKey === "defaultCommissionValue") {
-        result =
-          safeNumber(a.defaultCommissionValue) -
-          safeNumber(b.defaultCommissionValue);
+      if (
+        sortKey === "defaultCommissionValue" ||
+        sortKey === "totalCustomers" ||
+        sortKey === "totalOrders" ||
+        sortKey === "totalSales" ||
+        sortKey === "approvedCommission" ||
+        sortKey === "paidCommission"
+      ) {
+        result = Number(a[sortKey] || 0) - Number(b[sortKey] || 0);
       } else {
         result = compareValues(a[sortKey], b[sortKey]);
       }
@@ -682,14 +857,18 @@ export default function SystemAgentsListPage() {
         },
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      const payload = (await response.json().catch(() => null)) as
+        | AgentsApiResponse
+        | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.message || `HTTP ${response.status}`);
       }
 
-      const payload = (await response.json()) as AgentsApiResponse;
       const normalized = normalizeApiList(payload).map(normalizeAgent);
 
       setAgents(normalized);
+      setApiStats(payload.stats || null);
       setSelectedIds([]);
       setPageIndex(0);
 
@@ -699,6 +878,7 @@ export default function SystemAgentsListPage() {
     } catch (error) {
       console.error("Failed to load agents:", error);
       setAgents([]);
+      setApiStats(null);
       toast.error(t.apiError);
     } finally {
       setIsLoading(false);
@@ -706,8 +886,13 @@ export default function SystemAgentsListPage() {
   }
 
   function exportExcel() {
+    if (filteredAgents.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
     const now = new Date();
-    const generatedAt = formatDateTime(now.toISOString(), locale);
+    const generatedAt = formatDateTime(now.toISOString());
 
     const rows = filteredAgents.map((agent, index) => ({
       [t.table.id]: index + 1,
@@ -715,15 +900,20 @@ export default function SystemAgentsListPage() {
       [t.table.name]: agent.fullName,
       [t.table.referralCode]: agent.referralCode,
       [t.commissionType]: t.commissionTypeLabels[agent.defaultCommissionType],
-      [t.table.commission]: formatCommission(agent, locale),
+      [t.table.commission]: formatCommission(agent),
       [t.table.city]: agent.city || "-",
       [t.table.phone]: agent.phone || "-",
       [t.table.email]: agent.email || "-",
+      [t.table.customers]: agent.totalCustomers,
+      [t.table.orders]: agent.totalOrders,
+      [t.table.sales]: formatMoney(agent.totalSales),
+      [t.table.commissions]: formatMoney(agent.approvedCommission),
+      [t.stats.paid]: formatMoney(agent.paidCommission),
       [t.table.status]: t.statusLabels[agent.status],
       [t.table.bankName]: agent.bankName || "-",
       [t.table.iban]: agent.iban || "-",
-      [t.table.createdAt]: formatDateTime(agent.createdAt, locale),
-      [t.table.updatedAt]: formatDateTime(agent.updatedAt, locale),
+      [t.table.createdAt]: formatDateTime(agent.createdAt),
+      [t.table.updatedAt]: formatDateTime(agent.updatedAt),
     }));
 
     const summaryRows = [
@@ -734,8 +924,11 @@ export default function SystemAgentsListPage() {
       ["", ""],
       [t.stats.total, stats.total],
       [t.stats.active, stats.active],
-      [t.stats.draft, stats.draft],
-      [t.stats.stopped, stats.stopped],
+      [t.stats.customers, stats.totalCustomers],
+      [t.stats.orders, stats.totalOrders],
+      [t.stats.sales, formatMoney(stats.totalSales)],
+      [t.stats.commissions, formatMoney(stats.totalCommission)],
+      [t.stats.paid, formatMoney(stats.totalPaid)],
       ["", ""],
       [t.excelFilters, ""],
       [t.filterSearch, query || t.all],
@@ -751,6 +944,7 @@ export default function SystemAgentsListPage() {
     ];
 
     const worksheet = XLSX.utils.aoa_to_sheet(summaryRows);
+
     XLSX.utils.sheet_add_json(worksheet, rows, {
       origin: summaryRows.length,
       skipHeader: false,
@@ -766,6 +960,11 @@ export default function SystemAgentsListPage() {
       { wch: 18 },
       { wch: 18 },
       { wch: 30 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
       { wch: 16 },
       { wch: 22 },
       { wch: 28 },
@@ -861,7 +1060,12 @@ export default function SystemAgentsListPage() {
             <span>{t.refresh}</span>
           </Button>
 
-          <Button variant="outline" className="h-10 rounded-xl" onClick={exportExcel}>
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={exportExcel}
+            disabled={isLoading}
+          >
             <Download className="h-4 w-4" />
             <span>{t.export}</span>
           </Button>
@@ -876,13 +1080,13 @@ export default function SystemAgentsListPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-6">
         <Card className="rounded-2xl border bg-card shadow-sm">
           <CardContent className="flex items-center justify-between gap-3 p-5">
             <div>
               <p className="text-muted-foreground text-sm">{t.stats.total}</p>
               <p className="mt-2 text-2xl font-bold">
-                {isLoading ? "..." : stats.total}
+                {isLoading ? "..." : formatNumber(stats.total)}
               </p>
             </div>
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
@@ -896,7 +1100,7 @@ export default function SystemAgentsListPage() {
             <div>
               <p className="text-muted-foreground text-sm">{t.stats.active}</p>
               <p className="mt-2 text-2xl font-bold">
-                {isLoading ? "..." : stats.active}
+                {isLoading ? "..." : formatNumber(stats.active)}
               </p>
             </div>
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
@@ -908,9 +1112,23 @@ export default function SystemAgentsListPage() {
         <Card className="rounded-2xl border bg-card shadow-sm">
           <CardContent className="flex items-center justify-between gap-3 p-5">
             <div>
-              <p className="text-muted-foreground text-sm">{t.stats.draft}</p>
+              <p className="text-muted-foreground text-sm">{t.stats.customers}</p>
               <p className="mt-2 text-2xl font-bold">
-                {isLoading ? "..." : stats.draft}
+                {isLoading ? "..." : formatNumber(stats.totalCustomers)}
+              </p>
+            </div>
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
+              <UserRound className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="flex items-center justify-between gap-3 p-5">
+            <div>
+              <p className="text-muted-foreground text-sm">{t.stats.orders}</p>
+              <p className="mt-2 text-2xl font-bold">
+                {isLoading ? "..." : formatNumber(stats.totalOrders)}
               </p>
             </div>
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
@@ -922,13 +1140,27 @@ export default function SystemAgentsListPage() {
         <Card className="rounded-2xl border bg-card shadow-sm">
           <CardContent className="flex items-center justify-between gap-3 p-5">
             <div>
-              <p className="text-muted-foreground text-sm">{t.stats.stopped}</p>
-              <p className="mt-2 text-2xl font-bold">
-                {isLoading ? "..." : stats.stopped}
+              <p className="text-muted-foreground text-sm">{t.stats.sales}</p>
+              <p className="mt-2 text-lg font-bold">
+                {isLoading ? "..." : <SarAmount value={stats.totalSales} />}
               </p>
             </div>
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
-              <ShieldCheck className="h-5 w-5" />
+              <TrendingUp className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="flex items-center justify-between gap-3 p-5">
+            <div>
+              <p className="text-muted-foreground text-sm">{t.stats.commissions}</p>
+              <p className="mt-2 text-lg font-bold">
+                {isLoading ? "..." : <SarAmount value={stats.totalCommission} />}
+              </p>
+            </div>
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
+              <HandCoins className="h-5 w-5" />
             </div>
           </CardContent>
         </Card>
@@ -968,7 +1200,9 @@ export default function SystemAgentsListPage() {
                 }
                 className="border-input bg-background h-10 rounded-xl border px-3 text-sm"
               >
-                <option value="ALL">{t.status}: {t.all}</option>
+                <option value="ALL">
+                  {t.status}: {t.all}
+                </option>
                 <option value="ACTIVE">{t.active}</option>
                 <option value="DRAFT">{t.draft}</option>
                 <option value="SUSPENDED">{t.suspended}</option>
@@ -985,7 +1219,9 @@ export default function SystemAgentsListPage() {
                 }
                 className="border-input bg-background h-10 rounded-xl border px-3 text-sm"
               >
-                <option value="ALL">{t.commissionType}: {t.all}</option>
+                <option value="ALL">
+                  {t.commissionType}: {t.all}
+                </option>
                 <option value="PERCENTAGE">{t.percentage}</option>
                 <option value="FIXED">{t.fixed}</option>
                 <option value="UNKNOWN">{t.unknown}</option>
@@ -1103,6 +1339,58 @@ export default function SystemAgentsListPage() {
                       <TableHead>{t.table.contact}</TableHead>
                     ) : null}
 
+                    {visibleColumns.customers ? (
+                      <TableHead>
+                        <Button
+                          className="-ms-3"
+                          variant="ghost"
+                          onClick={() => toggleSort("totalCustomers")}
+                        >
+                          {t.table.customers}
+                          <ArrowDownUp className="h-3 w-3" />
+                        </Button>
+                      </TableHead>
+                    ) : null}
+
+                    {visibleColumns.orders ? (
+                      <TableHead>
+                        <Button
+                          className="-ms-3"
+                          variant="ghost"
+                          onClick={() => toggleSort("totalOrders")}
+                        >
+                          {t.table.orders}
+                          <ArrowDownUp className="h-3 w-3" />
+                        </Button>
+                      </TableHead>
+                    ) : null}
+
+                    {visibleColumns.sales ? (
+                      <TableHead>
+                        <Button
+                          className="-ms-3"
+                          variant="ghost"
+                          onClick={() => toggleSort("totalSales")}
+                        >
+                          {t.table.sales}
+                          <ArrowDownUp className="h-3 w-3" />
+                        </Button>
+                      </TableHead>
+                    ) : null}
+
+                    {visibleColumns.commissions ? (
+                      <TableHead>
+                        <Button
+                          className="-ms-3"
+                          variant="ghost"
+                          onClick={() => toggleSort("approvedCommission")}
+                        >
+                          {t.table.commissions}
+                          <ArrowDownUp className="h-3 w-3" />
+                        </Button>
+                      </TableHead>
+                    ) : null}
+
                     {visibleColumns.status ? (
                       <TableHead>
                         <Button
@@ -1129,7 +1417,7 @@ export default function SystemAgentsListPage() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="h-28">
+                      <TableCell colSpan={14} className="h-28">
                         <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                           <Loader2 className="h-4 w-4 animate-spin" />
                           {t.loading}
@@ -1194,11 +1482,15 @@ export default function SystemAgentsListPage() {
 
                         {visibleColumns.commission ? (
                           <TableCell>
-                            <div className="flex min-w-[140px] items-center gap-2">
+                            <div className="flex min-w-[150px] items-center gap-2">
                               <HandCoins className="text-muted-foreground h-3.5 w-3.5" />
-                              <span className="font-medium">
-                                {formatCommission(agent, locale)}
-                              </span>
+                              {agent.defaultCommissionType === "FIXED" ? (
+                                <SarAmount value={agent.defaultCommissionValue} />
+                              ) : (
+                                <span className="font-medium">
+                                  {formatCommission(agent)}
+                                </span>
+                              )}
                             </div>
                             <div className="mt-1">
                               {commissionTypeBadge(
@@ -1223,6 +1515,33 @@ export default function SystemAgentsListPage() {
                             <div className="flex min-w-[130px] items-center gap-2">
                               <Phone className="text-muted-foreground h-3.5 w-3.5" />
                               <span>{agent.phone || "-"}</span>
+                            </div>
+                          </TableCell>
+                        ) : null}
+
+                        {visibleColumns.customers ? (
+                          <TableCell>{formatNumber(agent.totalCustomers)}</TableCell>
+                        ) : null}
+
+                        {visibleColumns.orders ? (
+                          <TableCell>{formatNumber(agent.totalOrders)}</TableCell>
+                        ) : null}
+
+                        {visibleColumns.sales ? (
+                          <TableCell>
+                            <SarAmount value={agent.totalSales} />
+                          </TableCell>
+                        ) : null}
+
+                        {visibleColumns.commissions ? (
+                          <TableCell>
+                            <div className="space-y-1">
+                              <div className="font-medium">
+                                <SarAmount value={agent.approvedCommission} />
+                              </div>
+                              <div className="text-muted-foreground text-xs">
+                                {t.stats.paid}: {formatMoney(agent.paidCommission)}
+                              </div>
                             </div>
                           </TableCell>
                         ) : null}
@@ -1304,7 +1623,7 @@ export default function SystemAgentsListPage() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={10} className="h-28 text-center">
+                      <TableCell colSpan={14} className="h-28 text-center">
                         {t.noResults}
                       </TableCell>
                     </TableRow>
@@ -1315,11 +1634,12 @@ export default function SystemAgentsListPage() {
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
               <div className="text-muted-foreground flex-1 text-sm">
-                {selectedIds.length} / {filteredAgents.length} {t.selectedRows}
+                {formatNumber(selectedIds.length)} /{" "}
+                {formatNumber(filteredAgents.length)} {t.selectedRows}
               </div>
 
               <div className="text-muted-foreground text-sm">
-                {pageIndex + 1} / {pageCount}
+                {formatNumber(pageIndex + 1)} / {formatNumber(pageCount)}
               </div>
 
               <div className="flex items-center gap-2">
@@ -1352,7 +1672,7 @@ export default function SystemAgentsListPage() {
         </CardContent>
       </Card>
 
-      {/* Small readiness cards same clean module style */}
+      {/* Readiness Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="rounded-2xl border bg-card shadow-sm">
           <CardContent className="flex items-center gap-4 p-5">
@@ -1389,14 +1709,16 @@ export default function SystemAgentsListPage() {
         <Card className="rounded-2xl border bg-card shadow-sm">
           <CardContent className="flex items-center gap-4 p-5">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
-              <FileText className="h-5 w-5" />
+              <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
               <p className="font-semibold">
-                {isArabic ? "كشف الحساب" : "Statement"}
+                {isArabic ? "جاهزية كشف الحساب" : "Statement Ready"}
               </p>
               <p className="text-muted-foreground mt-1 text-sm">
-                {isArabic ? "جاهز لصفحة التفاصيل" : "Ready for detail page"}
+                {isArabic
+                  ? "مرتبط لاحقًا بصفحة التفاصيل"
+                  : "Connected later with detail page"}
               </p>
             </div>
           </CardContent>

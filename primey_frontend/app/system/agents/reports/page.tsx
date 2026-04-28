@@ -9,19 +9,18 @@ import {
   ArrowLeft,
   BadgeCheck,
   BarChart3,
+  CalendarDays,
   ColumnsIcon,
   Download,
   FileText,
-  FilterIcon,
   HandCoins,
   Loader2,
   MapPin,
-  Phone,
   Printer,
   RefreshCcw,
   Search,
   ShieldCheck,
-  Star,
+  TrendingUp,
   UserRound,
   Users,
   Wallet,
@@ -35,6 +34,8 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -58,13 +59,16 @@ import {
    📂 app/system/agents/reports/page.tsx
    🧠 Primey Care | Agents Reports
    ------------------------------------------------------------
-   ✅ نفس تصميم صفحة تقارير المراكز
-   ✅ استخدام UI الداخلي فقط
-   ✅ بطاقات + جداول + فلاتر
-   ✅ تصدير Excel منظم .xlsx بدل CSV
-   ✅ طباعة / Web PDF للتقرير فقط وليس كامل الصفحة
-   ✅ ربط حقيقي مع /api/agents/
-   ✅ بدون localhost hardcoded
+   ✅ Phase 6: Agents + Orders + Commissions + Accounting
+   ✅ GET /api/agents/
+   ✅ GET /api/agents/commissions/
+   ✅ Excel export .xlsx
+   ✅ Web PDF print للتقرير فقط
+   ✅ عربي / إنجليزي عبر primey-locale
+   ✅ أرقام إنجليزية دائمًا
+   ✅ رمز SAR الرسمي
+   ✅ sonner
+   ✅ بدون localhost
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -78,18 +82,30 @@ type AgentStatus =
 
 type CommissionType = "PERCENTAGE" | "FIXED" | "UNKNOWN";
 
+type CommissionStatus =
+  | "PENDING"
+  | "EARNED"
+  | "APPROVED"
+  | "PAID"
+  | "CANCELLED"
+  | "REVERSED"
+  | "UNKNOWN";
+
 type StatusFilter = "ALL" | AgentStatus;
+type CommissionStatusFilter = "ALL" | CommissionStatus;
 type CommissionTypeFilter = "ALL" | CommissionType;
-type FeaturedFilter = "ALL" | "FEATURED" | "NORMAL";
 
 type SortKey =
   | "fullName"
   | "agentCode"
   | "referralCode"
-  | "defaultCommissionType"
-  | "defaultCommissionValue"
   | "city"
-  | "status";
+  | "status"
+  | "totalCustomers"
+  | "totalOrders"
+  | "totalSales"
+  | "approvedCommission"
+  | "paidCommission";
 
 type SortDirection = "asc" | "desc";
 
@@ -97,11 +113,13 @@ type VisibleColumns = {
   name: boolean;
   code: boolean;
   referralCode: boolean;
-  commission: boolean;
   city: boolean;
-  contact: boolean;
+  customers: boolean;
+  orders: boolean;
+  sales: boolean;
+  commissions: boolean;
+  paid: boolean;
   status: boolean;
-  featured: boolean;
 };
 
 type Agent = {
@@ -113,32 +131,66 @@ type Agent = {
   phone: string;
   email: string;
   city: string;
-  address: string;
   defaultCommissionType: CommissionType;
-  defaultCommissionValue: string;
-  bankName: string;
-  bankAccountName: string;
-  iban: string;
-  notes: string;
-  isFeatured: boolean;
+  defaultCommissionValue: number;
+  totalCustomers: number;
+  totalOrders: number;
+  totalSales: number;
+  pendingCommission: number;
+  approvedCommission: number;
+  paidCommission: number;
+  accountingPostedCommission: number;
   createdAt: string;
-  updatedAt: string;
-  raw: Record<string, unknown>;
 };
 
-type AgentsApiResponse = {
+type AgentCommission = {
+  id: number | string;
+  reference: string;
+  status: CommissionStatus;
+  agentId: number | string | null;
+  agentName: string;
+  agentCode: string;
+  referralCode: string;
+  orderId: number | string | null;
+  orderNumber: string;
+  customerName: string;
+  baseAmount: number;
+  commissionAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  earnedAt: string | null;
+  approvedAt: string | null;
+  paidAt: string | null;
+  createdAt: string;
+};
+
+type AgentsApiStats = {
+  total_agents?: number | string;
+  active_agents?: number | string;
+  inactive_agents?: number | string;
+  suspended_agents?: number | string;
+  draft_agents?: number | string;
+  total_sales?: number | string;
+  total_commission?: number | string;
+  total_paid?: number | string;
+};
+
+type ApiResponse = {
   ok?: boolean;
   message?: string;
+  count?: number;
   results?: unknown[];
   data?: unknown[];
   items?: unknown[];
   agents?: unknown[];
+  commissions?: unknown[];
+  stats?: AgentsApiStats | Record<string, unknown>;
 };
 
 const SAR_ICON = "/currency/sar.svg";
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -150,8 +202,7 @@ function readLocale(): AppLocale {
     if (savedLocale === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
@@ -169,22 +220,55 @@ function applyDocumentLocale(locale: AppLocale) {
 }
 
 /* ============================================================
-   🔁 API Normalizers
+   Helpers
 ============================================================ */
 
 function normalizeApiList(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
 
   if (payload && typeof payload === "object") {
-    const data = payload as AgentsApiResponse;
+    const data = payload as ApiResponse;
 
     if (Array.isArray(data.results)) return data.results;
     if (Array.isArray(data.data)) return data.data;
     if (Array.isArray(data.items)) return data.items;
     if (Array.isArray(data.agents)) return data.agents;
+    if (Array.isArray(data.commissions)) return data.commissions;
   }
 
   return [];
+}
+
+function valueOf(obj: Record<string, unknown>, key: string): unknown {
+  const direct = obj[key];
+
+  if (direct !== undefined && direct !== null && direct !== "") return direct;
+
+  const stats = obj.stats;
+  if (stats && typeof stats === "object") {
+    const nested = (stats as Record<string, unknown>)[key];
+    if (nested !== undefined && nested !== null && nested !== "") return nested;
+  }
+
+  const agent = obj.agent;
+  if (agent && typeof agent === "object") {
+    const nested = (agent as Record<string, unknown>)[key];
+    if (nested !== undefined && nested !== null && nested !== "") return nested;
+  }
+
+  return undefined;
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  const parsed = Number(
+    String(value ?? "")
+      .replace(/,/g, "")
+      .replace(/[^\d.-]/g, ""),
+  );
+
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function normalizeStatus(value: unknown): AgentStatus {
@@ -202,93 +286,149 @@ function normalizeStatus(value: unknown): AgentStatus {
 }
 
 function normalizeCommissionType(value: unknown): CommissionType {
-  const commissionType = String(value || "").toUpperCase();
+  const type = String(value || "").toUpperCase();
 
-  if (commissionType === "PERCENTAGE") return "PERCENTAGE";
-  if (commissionType === "FIXED") return "FIXED";
+  if (type === "PERCENTAGE") return "PERCENTAGE";
+  if (type === "FIXED") return "FIXED";
 
   return "UNKNOWN";
 }
 
-function extractNestedValue(
-  obj: Record<string, unknown>,
-  key: string,
-): unknown {
-  const direct = obj[key];
+function normalizeCommissionStatus(value: unknown): CommissionStatus {
+  const status = String(value || "").toUpperCase();
 
-  if (direct !== undefined && direct !== null && direct !== "") {
-    return direct;
-  }
+  if (status === "PENDING") return "PENDING";
+  if (status === "EARNED") return "EARNED";
+  if (status === "APPROVED") return "APPROVED";
+  if (status === "PAID") return "PAID";
+  if (status === "CANCELLED") return "CANCELLED";
+  if (status === "REVERSED") return "REVERSED";
 
-  const agent = obj.agent;
-  if (agent && typeof agent === "object") {
-    const agentObj = agent as Record<string, unknown>;
-    return agentObj[key];
-  }
-
-  return undefined;
+  return "UNKNOWN";
 }
 
 function normalizeAgent(item: unknown): Agent {
   const obj = (item || {}) as Record<string, unknown>;
-
-  const id =
-    extractNestedValue(obj, "id") ??
-    extractNestedValue(obj, "agent_id") ??
-    "-";
-
-  const fullName =
-    extractNestedValue(obj, "full_name") ??
-    extractNestedValue(obj, "name") ??
-    extractNestedValue(obj, "agent_name") ??
-    "-";
-
-  const agentCode =
-    extractNestedValue(obj, "agent_code") ??
-    extractNestedValue(obj, "code") ??
-    (id !== "-" ? `AGT-${id}` : "-");
-
-  const referralCode =
-    extractNestedValue(obj, "referral_code") ??
-    extractNestedValue(obj, "reference") ??
-    "-";
+  const id = valueOf(obj, "id") ?? valueOf(obj, "agent_id") ?? "-";
 
   return {
     id: id as number | string,
-    fullName: String(fullName || "-"),
-    agentCode: String(agentCode || "-"),
-    referralCode: String(referralCode || "-"),
-    status: normalizeStatus(extractNestedValue(obj, "status")),
-    phone: String(extractNestedValue(obj, "phone") ?? ""),
-    email: String(extractNestedValue(obj, "email") ?? ""),
-    city: String(extractNestedValue(obj, "city") ?? ""),
-    address: String(extractNestedValue(obj, "address") ?? ""),
+    fullName: String(
+      valueOf(obj, "full_name") ??
+        valueOf(obj, "name") ??
+        valueOf(obj, "agent_name") ??
+        "-",
+    ),
+    agentCode: String(
+      valueOf(obj, "agent_code") ?? valueOf(obj, "code") ?? `AGT-${id}`,
+    ),
+    referralCode: String(valueOf(obj, "referral_code") ?? "-"),
+    status: normalizeStatus(valueOf(obj, "status")),
+    phone: String(valueOf(obj, "phone") ?? ""),
+    email: String(valueOf(obj, "email") ?? ""),
+    city: String(valueOf(obj, "city") ?? ""),
     defaultCommissionType: normalizeCommissionType(
-      extractNestedValue(obj, "default_commission_type"),
+      valueOf(obj, "default_commission_type") ?? valueOf(obj, "commission_type"),
     ),
-    defaultCommissionValue: String(
-      extractNestedValue(obj, "default_commission_value") ??
-        extractNestedValue(obj, "commission_value") ??
-        extractNestedValue(obj, "amount") ??
-        "0.00",
+    defaultCommissionValue: toNumber(
+      valueOf(obj, "default_commission_value") ??
+        valueOf(obj, "commission_value"),
     ),
-    bankName: String(extractNestedValue(obj, "bank_name") ?? ""),
-    bankAccountName: String(extractNestedValue(obj, "bank_account_name") ?? ""),
-    iban: String(extractNestedValue(obj, "iban") ?? ""),
-    notes: String(extractNestedValue(obj, "notes") ?? ""),
-    isFeatured: Boolean(
-      extractNestedValue(obj, "is_featured") ??
-        extractNestedValue(obj, "featured") ??
-        false,
+    totalCustomers: toNumber(
+      valueOf(obj, "total_customers") ?? valueOf(obj, "customers_count"),
     ),
-    createdAt: String(extractNestedValue(obj, "created_at") ?? ""),
-    updatedAt: String(extractNestedValue(obj, "updated_at") ?? ""),
-    raw: obj,
+    totalOrders: toNumber(
+      valueOf(obj, "total_orders") ?? valueOf(obj, "orders_count"),
+    ),
+    totalSales: toNumber(
+      valueOf(obj, "total_sales") ?? valueOf(obj, "sales_total"),
+    ),
+    pendingCommission: toNumber(valueOf(obj, "pending_commission")),
+    approvedCommission: toNumber(
+      valueOf(obj, "approved_commission") ?? valueOf(obj, "total_commission"),
+    ),
+    paidCommission: toNumber(valueOf(obj, "paid_commission")),
+    accountingPostedCommission: toNumber(
+      valueOf(obj, "accounting_posted_commission"),
+    ),
+    createdAt: String(valueOf(obj, "created_at") ?? ""),
   };
 }
 
+function normalizeCommission(item: unknown): AgentCommission {
+  const obj = (item || {}) as Record<string, unknown>;
+
+  return {
+    id: (obj.id ?? "-") as number | string,
+    reference: String(obj.reference ?? `COM-${obj.id ?? "-"}`),
+    status: normalizeCommissionStatus(obj.commission_status ?? obj.status),
+    agentId: (obj.agent_id ?? null) as number | string | null,
+    agentName: String(obj.agent_name ?? "-"),
+    agentCode: String(obj.agent_code ?? "-"),
+    referralCode: String(obj.referral_code ?? "-"),
+    orderId: (obj.order_id ?? null) as number | string | null,
+    orderNumber: String(obj.order_number ?? `ORD-${obj.order_id ?? "-"}`),
+    customerName: String(obj.customer_name ?? "-"),
+    baseAmount: toNumber(obj.base_amount),
+    commissionAmount: toNumber(obj.commission_amount ?? obj.amount),
+    paidAmount: toNumber(obj.paid_amount),
+    remainingAmount: toNumber(obj.remaining_amount),
+    earnedAt: obj.earned_at ? String(obj.earned_at) : null,
+    approvedAt: obj.approved_at ? String(obj.approved_at) : null,
+    paidAt: obj.paid_at ? String(obj.paid_at) : null,
+    createdAt: String(obj.created_at ?? ""),
+  };
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function SarAmount({ value }: { value: number }) {
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap font-semibold">
+      <Image
+        src={SAR_ICON}
+        alt="SAR"
+        width={14}
+        height={14}
+        className="h-3.5 w-3.5"
+      />
+      <span>{formatMoney(value)}</span>
+    </span>
+  );
+}
+
+function compareValues(a: string | number, b: string | number) {
+  return String(a || "").localeCompare(String(b || ""), "en", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
@@ -297,123 +437,85 @@ function dictionary(locale: AppLocale) {
   return {
     title: isArabic ? "تقارير المندوبين" : "Agents Reports",
     subtitle: isArabic
-      ? "تحليل تشغيلي للمندوبين حسب الحالة، نوع العمولة، المدينة، التمييز، وكود الإحالة من بيانات حقيقية."
-      : "Operational analysis for agents by status, commission type, city, featured flag, and referral code from live data.",
+      ? "تحليل أداء المندوبين والعمولات والمبيعات والرصيد المستحق."
+      : "Analyze agents performance, commissions, sales, and due balances.",
 
     back: isArabic ? "لوحة المندوبين" : "Agents Overview",
     list: isArabic ? "قائمة المندوبين" : "Agents List",
     refresh: isArabic ? "تحديث" : "Refresh",
-    export: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة / PDF" : "Print / PDF",
+    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
+    printPdf: isArabic ? "طباعة Web PDF" : "Print Web PDF",
 
-    summaryTitle: isArabic ? "ملخص المندوبين" : "Agents Summary",
-    summarySubtitle: isArabic
-      ? "مؤشرات سريعة حسب بيانات المندوبين الحالية."
-      : "Quick indicators based on current agents data.",
-
-    tableTitle: isArabic ? "جدول تقرير المندوبين" : "Agents Report Table",
-    tableSubtitle: isArabic
-      ? "هذا هو الجزء الذي يتم تصديره وطباعته فقط."
-      : "This is the section exported and printed only.",
-
-    byStatus: isArabic ? "التوزيع حسب الحالة" : "Distribution by Status",
-    byCity: isArabic ? "التوزيع حسب المدينة" : "Distribution by City",
-    byCommissionType: isArabic
-      ? "التوزيع حسب نوع العمولة"
-      : "Distribution by Commission Type",
-
+    filters: isArabic ? "الفلاتر" : "Filters",
+    search: isArabic ? "بحث" : "Search",
     searchPlaceholder: isArabic
-      ? "ابحث باسم المندوب أو كود الإحالة أو المدينة..."
-      : "Search by agent name, referral code, or city...",
+      ? "ابحث باسم المندوب، الكود، كود الإحالة، المدينة..."
+      : "Search by agent name, code, referral code, city...",
     status: isArabic ? "الحالة" : "Status",
+    commissionStatus: isArabic ? "حالة العمولة" : "Commission Status",
     commissionType: isArabic ? "نوع العمولة" : "Commission Type",
-    featured: isArabic ? "التمييز" : "Featured",
     columns: isArabic ? "الأعمدة" : "Columns",
-
     all: isArabic ? "الكل" : "All",
-    active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    suspended: isArabic ? "موقوف" : "Suspended",
-    draft: isArabic ? "مسودة" : "Draft",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-    percentage: isArabic ? "نسبة" : "Percentage",
-    fixed: isArabic ? "مبلغ ثابت" : "Fixed Amount",
-    featuredOnly: isArabic ? "المميزون فقط" : "Featured Only",
-    normalOnly: isArabic ? "العاديون فقط" : "Normal Only",
 
-    noResults: isArabic ? "لا توجد نتائج." : "No results.",
-    loading: isArabic
-      ? "جاري تحميل بيانات المندوبين..."
-      : "Loading agents data...",
-    selectedRows: isArabic ? "صفوف محددة" : "row(s) selected",
-    previous: isArabic ? "السابق" : "Previous",
-    next: isArabic ? "التالي" : "Next",
+    reportSummary: isArabic ? "ملخص التقرير" : "Report Summary",
+    performanceTable: isArabic ? "جدول أداء المندوبين" : "Agents Performance Table",
+    performanceDesc: isArabic
+      ? "يعرض المندوبين حسب الفلاتر الحالية مع المبيعات والعمولات."
+      : "Shows agents based on current filters with sales and commissions.",
+    commissionsTable: isArabic ? "جدول العمولات" : "Commissions Table",
+    commissionsDesc: isArabic
+      ? "يعرض العمولات المعلقة والمعتمدة والمدفوعة."
+      : "Shows pending, approved, and paid commissions.",
 
+    totalAgents: isArabic ? "إجمالي المندوبين" : "Total Agents",
+    activeAgents: isArabic ? "النشطون" : "Active Agents",
+    totalCustomers: isArabic ? "العملاء المرتبطون" : "Linked Customers",
+    totalOrders: isArabic ? "الطلبات المرتبطة" : "Linked Orders",
+    totalSales: isArabic ? "إجمالي المبيعات" : "Total Sales",
+    totalCommission: isArabic ? "إجمالي العمولات" : "Total Commissions",
+    totalPaid: isArabic ? "المدفوع" : "Paid",
+    totalDue: isArabic ? "المستحق" : "Due",
+
+    agent: isArabic ? "المندوب" : "Agent",
+    code: isArabic ? "الكود" : "Code",
+    referral: isArabic ? "كود الإحالة" : "Referral",
+    city: isArabic ? "المدينة" : "City",
+    customers: isArabic ? "العملاء" : "Customers",
+    orders: isArabic ? "الطلبات" : "Orders",
+    sales: isArabic ? "المبيعات" : "Sales",
+    commissions: isArabic ? "العمولات" : "Commissions",
+    paid: isArabic ? "مدفوع" : "Paid",
+    due: isArabic ? "مستحق" : "Due",
+
+    reference: isArabic ? "المرجع" : "Reference",
+    order: isArabic ? "الطلب" : "Order",
+    customer: isArabic ? "العميل" : "Customer",
+    amount: isArabic ? "المبلغ" : "Amount",
+    remaining: isArabic ? "المتبقي" : "Remaining",
+    date: isArabic ? "التاريخ" : "Date",
+
+    loading: isArabic ? "جاري تحميل تقارير المندوبين..." : "Loading agents reports...",
+    noAgents: isArabic ? "لا توجد بيانات مندوبين." : "No agents data.",
+    noCommissions: isArabic ? "لا توجد بيانات عمولات." : "No commissions data.",
     apiError: isArabic
-      ? "تعذر تحميل تقرير المندوبين."
-      : "Unable to load agents report.",
+      ? "تعذر تحميل تقارير المندوبين."
+      : "Unable to load agents reports.",
     refreshSuccess: isArabic
-      ? "تم تحديث تقرير المندوبين بنجاح"
-      : "Agents report refreshed successfully",
+      ? "تم تحديث تقارير المندوبين"
+      : "Agents reports refreshed",
     exportSuccess: isArabic
       ? "تم تجهيز ملف Excel بنجاح"
       : "Excel file prepared successfully",
+    exportEmpty: isArabic
+      ? "لا توجد بيانات لتصديرها"
+      : "No data available to export",
 
-    excelSummary: isArabic ? "ملخص التقرير" : "Report Summary",
-    excelFilters: isArabic ? "الفلاتر المستخدمة" : "Applied Filters",
-    excelTable: isArabic ? "بيانات التقرير" : "Report Data",
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
+    previous: isArabic ? "السابق" : "Previous",
+    next: isArabic ? "التالي" : "Next",
+    selected: isArabic ? "صفوف محددة" : "selected rows",
+    generatedAt: isArabic ? "تاريخ التقرير" : "Generated At",
     reportScope: isArabic ? "نطاق التقرير" : "Report Scope",
-    currentFilteredData: isArabic
-      ? "حسب الفلاتر الحالية"
-      : "Current filtered data",
-    showing: isArabic ? "المعروض" : "Showing",
-    filterSearch: isArabic ? "البحث" : "Search",
-    filterStatus: isArabic ? "فلتر الحالة" : "Status Filter",
-    filterCommissionType: isArabic ? "فلتر نوع العمولة" : "Commission Type Filter",
-    filterFeatured: isArabic ? "فلتر التمييز" : "Featured Filter",
-
-    stats: {
-      total: isArabic ? "إجمالي المندوبين" : "Total Agents",
-      active: isArabic ? "النشطون" : "Active",
-      draft: isArabic ? "المسودات" : "Draft",
-      stopped: isArabic ? "الموقوفون/غير النشطين" : "Stopped/Inactive",
-      featured: isArabic ? "المميزون" : "Featured",
-      percentage: isArabic ? "عمولة نسبة" : "Percentage Commission",
-      fixed: isArabic ? "عمولة ثابتة" : "Fixed Commission",
-      avgCommission: isArabic ? "متوسط العمولة" : "Avg. Commission",
-    },
-
-    table: {
-      id: isArabic ? "المعرف" : "ID",
-      name: isArabic ? "اسم المندوب" : "Agent Name",
-      code: isArabic ? "كود المندوب" : "Agent Code",
-      referralCode: isArabic ? "كود الإحالة" : "Referral Code",
-      commission: isArabic ? "العمولة" : "Commission",
-      commissionType: isArabic ? "نوع العمولة" : "Commission Type",
-      commissionValue: isArabic ? "قيمة العمولة" : "Commission Value",
-      city: isArabic ? "المدينة" : "City",
-      contact: isArabic ? "التواصل" : "Contact",
-      status: isArabic ? "الحالة" : "Status",
-      featured: isArabic ? "التمييز" : "Featured",
-      email: isArabic ? "البريد" : "Email",
-      phone: isArabic ? "الجوال" : "Phone",
-      bankName: isArabic ? "البنك" : "Bank",
-      iban: isArabic ? "الآيبان" : "IBAN",
-      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-      updatedAt: isArabic ? "آخر تحديث" : "Updated At",
-    },
-
-    columnLabels: {
-      name: isArabic ? "اسم المندوب" : "Agent Name",
-      code: isArabic ? "كود المندوب" : "Agent Code",
-      referralCode: isArabic ? "كود الإحالة" : "Referral Code",
-      commission: isArabic ? "العمولة" : "Commission",
-      city: isArabic ? "المدينة" : "City",
-      contact: isArabic ? "التواصل" : "Contact",
-      status: isArabic ? "الحالة" : "Status",
-      featured: isArabic ? "التمييز" : "Featured",
-    } satisfies Record<keyof VisibleColumns, string>,
+    currentFilters: isArabic ? "حسب الفلاتر الحالية" : "Current filters",
 
     statusLabels: {
       ACTIVE: isArabic ? "نشط" : "Active",
@@ -423,17 +525,36 @@ function dictionary(locale: AppLocale) {
       UNKNOWN: isArabic ? "غير محدد" : "Unknown",
     } satisfies Record<AgentStatus, string>,
 
+    commissionStatusLabels: {
+      PENDING: isArabic ? "معلقة" : "Pending",
+      EARNED: isArabic ? "مستحقة" : "Earned",
+      APPROVED: isArabic ? "معتمدة" : "Approved",
+      PAID: isArabic ? "مدفوعة" : "Paid",
+      CANCELLED: isArabic ? "ملغاة" : "Cancelled",
+      REVERSED: isArabic ? "معكوسة" : "Reversed",
+      UNKNOWN: isArabic ? "غير محددة" : "Unknown",
+    } satisfies Record<CommissionStatus, string>,
+
     commissionTypeLabels: {
       PERCENTAGE: isArabic ? "نسبة" : "Percentage",
-      FIXED: isArabic ? "مبلغ ثابت" : "Fixed Amount",
+      FIXED: isArabic ? "مبلغ ثابت" : "Fixed",
       UNKNOWN: isArabic ? "غير محدد" : "Unknown",
     } satisfies Record<CommissionType, string>,
+
+    columnLabels: {
+      name: isArabic ? "المندوب" : "Agent",
+      code: isArabic ? "الكود" : "Code",
+      referralCode: isArabic ? "كود الإحالة" : "Referral",
+      city: isArabic ? "المدينة" : "City",
+      customers: isArabic ? "العملاء" : "Customers",
+      orders: isArabic ? "الطلبات" : "Orders",
+      sales: isArabic ? "المبيعات" : "Sales",
+      commissions: isArabic ? "العمولات" : "Commissions",
+      paid: isArabic ? "المدفوع" : "Paid",
+      status: isArabic ? "الحالة" : "Status",
+    } satisfies Record<keyof VisibleColumns, string>,
   };
 }
-
-/* ============================================================
-   🎨 UI Helpers
-============================================================ */
 
 function statusBadge(status: AgentStatus, locale: AppLocale) {
   const t = dictionary(locale);
@@ -441,15 +562,7 @@ function statusBadge(status: AgentStatus, locale: AppLocale) {
 
   if (status === "ACTIVE") {
     return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "DRAFT") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50">
         {label}
       </Badge>
     );
@@ -457,135 +570,81 @@ function statusBadge(status: AgentStatus, locale: AppLocale) {
 
   if (status === "SUSPENDED") {
     return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
+      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50">
         {label}
       </Badge>
     );
   }
 
-  if (status === "INACTIVE") {
+  if (status === "DRAFT") {
     return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
+      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50">
         {label}
       </Badge>
     );
   }
 
   return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
+    <Badge variant="outline" className="rounded-full px-3 py-1">
       {label}
     </Badge>
   );
 }
 
-function commissionTypeBadge(type: CommissionType, locale: AppLocale) {
+function commissionStatusBadge(status: CommissionStatus, locale: AppLocale) {
   const t = dictionary(locale);
+  const label = t.commissionStatusLabels[status];
 
-  if (type === "PERCENTAGE") {
+  if (status === "APPROVED" || status === "PAID") {
     return (
-      <Badge variant="secondary" className="rounded-full">
-        {t.commissionTypeLabels[type]}
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50">
+        {label}
       </Badge>
     );
   }
 
-  if (type === "FIXED") {
-    return <Badge className="rounded-full">{t.commissionTypeLabels[type]}</Badge>;
+  if (status === "PENDING" || status === "EARNED") {
+    return (
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "CANCELLED" || status === "REVERSED") {
+    return (
+      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50">
+        {label}
+      </Badge>
+    );
   }
 
   return (
-    <Badge variant="outline" className="rounded-full">
-      {t.commissionTypeLabels[type]}
+    <Badge variant="outline" className="rounded-full px-3 py-1">
+      {label}
     </Badge>
   );
 }
 
-function safeNumber(value: string) {
-  const numberValue = Number(String(value || "0").replace(",", "."));
-  return Number.isFinite(numberValue) ? numberValue : 0;
-}
-
-function formatCommission(agent: Agent, locale: AppLocale) {
-  const value = safeNumber(agent.defaultCommissionValue).toLocaleString(
-    locale === "ar" ? "ar-SA" : "en-US",
-    {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    },
-  );
-
-  if (agent.defaultCommissionType === "PERCENTAGE") {
-    return `${value}%`;
-  }
-
-  if (agent.defaultCommissionType === "FIXED") {
-    return `${value} SAR`;
-  }
-
-  return "-";
-}
-
-function compareValues(a: string | number, b: string | number) {
-  const valueA = String(a || "").toLowerCase();
-  const valueB = String(b || "").toLowerCase();
-
-  return valueA.localeCompare(valueB, "ar", {
-    numeric: true,
-    sensitivity: "base",
-  });
-}
-
-function formatDateTime(value: string, locale: AppLocale) {
-  if (!value) return "-";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar-SA" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
-
-function percent(value: number, total: number) {
-  if (!total) return 0;
-  return Math.round((value / total) * 100);
-}
-
-function groupByCount<T extends string>(
-  items: Agent[],
-  resolver: (agent: Agent) => T,
-) {
-  const map = new Map<T, number>();
-
-  items.forEach((item) => {
-    const key = resolver(item);
-    map.set(key, (map.get(key) || 0) + 1);
-  });
-
-  return Array.from(map.entries())
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value);
-}
-
 /* ============================================================
-   ✅ Page
+   Page
 ============================================================ */
 
 export default function SystemAgentsReportsPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [commissions, setCommissions] = useState<AgentCommission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [commissionTypeFilter, setCommissionTypeFilter] =
     useState<CommissionTypeFilter>("ALL");
-  const [featuredFilter, setFeaturedFilter] = useState<FeaturedFilter>("ALL");
+  const [commissionStatusFilter, setCommissionStatusFilter] =
+    useState<CommissionStatusFilter>("ALL");
 
-  const [sortKey, setSortKey] = useState<SortKey>("fullName");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-
+  const [sortKey, setSortKey] = useState<SortKey>("totalSales");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize] = useState(10);
   const [selectedIds, setSelectedIds] = useState<Array<number | string>>([]);
@@ -594,11 +653,13 @@ export default function SystemAgentsReportsPage() {
     name: true,
     code: true,
     referralCode: true,
-    commission: true,
     city: true,
-    contact: true,
+    customers: true,
+    orders: true,
+    sales: true,
+    commissions: true,
+    paid: true,
     status: true,
-    featured: true,
   });
 
   const t = useMemo(() => dictionary(locale), [locale]);
@@ -607,7 +668,7 @@ export default function SystemAgentsReportsPage() {
   const filteredAgents = useMemo(() => {
     const cleanQuery = query.trim().toLowerCase();
 
-    const filtered = agents.filter((agent) => {
+    const rows = agents.filter((agent) => {
       const matchesSearch =
         !cleanQuery ||
         agent.fullName.toLowerCase().includes(cleanQuery) ||
@@ -615,9 +676,7 @@ export default function SystemAgentsReportsPage() {
         agent.referralCode.toLowerCase().includes(cleanQuery) ||
         agent.city.toLowerCase().includes(cleanQuery) ||
         agent.phone.toLowerCase().includes(cleanQuery) ||
-        agent.email.toLowerCase().includes(cleanQuery) ||
-        agent.bankName.toLowerCase().includes(cleanQuery) ||
-        agent.iban.toLowerCase().includes(cleanQuery);
+        agent.email.toLowerCase().includes(cleanQuery);
 
       const matchesStatus =
         statusFilter === "ALL" || agent.status === statusFilter;
@@ -626,26 +685,20 @@ export default function SystemAgentsReportsPage() {
         commissionTypeFilter === "ALL" ||
         agent.defaultCommissionType === commissionTypeFilter;
 
-      const matchesFeatured =
-        featuredFilter === "ALL" ||
-        (featuredFilter === "FEATURED" && agent.isFeatured) ||
-        (featuredFilter === "NORMAL" && !agent.isFeatured);
-
-      return (
-        matchesSearch &&
-        matchesStatus &&
-        matchesCommissionType &&
-        matchesFeatured
-      );
+      return matchesSearch && matchesStatus && matchesCommissionType;
     });
 
-    filtered.sort((a, b) => {
+    rows.sort((a, b) => {
       let result = 0;
 
-      if (sortKey === "defaultCommissionValue") {
-        result =
-          safeNumber(a.defaultCommissionValue) -
-          safeNumber(b.defaultCommissionValue);
+      if (
+        sortKey === "totalCustomers" ||
+        sortKey === "totalOrders" ||
+        sortKey === "totalSales" ||
+        sortKey === "approvedCommission" ||
+        sortKey === "paidCommission"
+      ) {
+        result = Number(a[sortKey] || 0) - Number(b[sortKey] || 0);
       } else {
         result = compareValues(a[sortKey], b[sortKey]);
       }
@@ -653,75 +706,74 @@ export default function SystemAgentsReportsPage() {
       return sortDirection === "asc" ? result : result * -1;
     });
 
-    return filtered;
-  }, [agents, query, statusFilter, commissionTypeFilter, featuredFilter, sortKey, sortDirection]);
+    return rows;
+  }, [agents, query, statusFilter, commissionTypeFilter, sortKey, sortDirection]);
+
+  const filteredCommissions = useMemo(() => {
+    const cleanQuery = query.trim().toLowerCase();
+
+    return commissions.filter((commission) => {
+      const matchesSearch =
+        !cleanQuery ||
+        commission.agentName.toLowerCase().includes(cleanQuery) ||
+        commission.agentCode.toLowerCase().includes(cleanQuery) ||
+        commission.referralCode.toLowerCase().includes(cleanQuery) ||
+        commission.reference.toLowerCase().includes(cleanQuery) ||
+        commission.orderNumber.toLowerCase().includes(cleanQuery) ||
+        commission.customerName.toLowerCase().includes(cleanQuery);
+
+      const matchesCommissionStatus =
+        commissionStatusFilter === "ALL" ||
+        commission.status === commissionStatusFilter;
+
+      return matchesSearch && matchesCommissionStatus;
+    });
+  }, [commissions, query, commissionStatusFilter]);
 
   const stats = useMemo(() => {
-    const total = filteredAgents.length;
-    const active = filteredAgents.filter((item) => item.status === "ACTIVE").length;
-    const draft = filteredAgents.filter((item) => item.status === "DRAFT").length;
-    const stopped = filteredAgents.filter(
-      (item) => item.status === "SUSPENDED" || item.status === "INACTIVE",
-    ).length;
-    const featured = filteredAgents.filter((item) => item.isFeatured).length;
-    const percentage = filteredAgents.filter(
-      (item) => item.defaultCommissionType === "PERCENTAGE",
-    ).length;
-    const fixed = filteredAgents.filter(
-      (item) => item.defaultCommissionType === "FIXED",
+    const totalAgents = filteredAgents.length;
+    const activeAgents = filteredAgents.filter(
+      (agent) => agent.status === "ACTIVE",
     ).length;
 
-    const values = filteredAgents
-      .map((item) => safeNumber(item.defaultCommissionValue))
-      .filter((value) => value > 0);
-
-    const avgCommission =
-      values.length > 0
-        ? values.reduce((sum, value) => sum + value, 0) / values.length
-        : 0;
-
-    return {
-      total,
-      active,
-      draft,
-      stopped,
-      featured,
-      percentage,
-      fixed,
-      avgCommission,
-    };
-  }, [filteredAgents]);
-
-  const statusRows = useMemo(() => {
-    const rows = groupByCount(filteredAgents, (agent) => t.statusLabels[agent.status]);
-    return rows.map((row) => ({
-      ...row,
-      percent: percent(row.value, filteredAgents.length),
-    }));
-  }, [filteredAgents, t.statusLabels]);
-
-  const cityRows = useMemo(() => {
-    const rows = groupByCount(filteredAgents, (agent) => agent.city || "-");
-    return rows.slice(0, 8).map((row) => ({
-      ...row,
-      percent: percent(row.value, filteredAgents.length),
-    }));
-  }, [filteredAgents]);
-
-  const commissionTypeRows = useMemo(() => {
-    const rows = groupByCount(
-      filteredAgents,
-      (agent) => t.commissionTypeLabels[agent.defaultCommissionType],
+    const totalCustomers = filteredAgents.reduce(
+      (sum, item) => sum + item.totalCustomers,
+      0,
+    );
+    const totalOrders = filteredAgents.reduce(
+      (sum, item) => sum + item.totalOrders,
+      0,
+    );
+    const totalSales = filteredAgents.reduce(
+      (sum, item) => sum + item.totalSales,
+      0,
+    );
+    const totalCommission = filteredCommissions.reduce(
+      (sum, item) => sum + item.commissionAmount,
+      0,
+    );
+    const totalPaid = filteredCommissions.reduce(
+      (sum, item) => sum + item.paidAmount,
+      0,
+    );
+    const totalDue = filteredCommissions.reduce(
+      (sum, item) => sum + item.remainingAmount,
+      0,
     );
 
-    return rows.map((row) => ({
-      ...row,
-      percent: percent(row.value, filteredAgents.length),
-    }));
-  }, [filteredAgents, t.commissionTypeLabels]);
+    return {
+      totalAgents,
+      activeAgents,
+      totalCustomers,
+      totalOrders,
+      totalSales,
+      totalCommission,
+      totalPaid,
+      totalDue,
+    };
+  }, [filteredAgents, filteredCommissions]);
 
   const pageCount = Math.max(1, Math.ceil(filteredAgents.length / pageSize));
-
   const pageRows = useMemo(() => {
     const start = pageIndex * pageSize;
     return filteredAgents.slice(start, start + pageSize);
@@ -737,17 +789,15 @@ export default function SystemAgentsReportsPage() {
     }
 
     setSortKey(key);
-    setSortDirection("asc");
+    setSortDirection("desc");
   }
 
   function toggleRow(id: number | string) {
-    setSelectedIds((current) => {
-      if (current.includes(id)) {
-        return current.filter((item) => item !== id);
-      }
-
-      return [...current, id];
-    });
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id],
+    );
   }
 
   function toggleAllPageRows() {
@@ -757,46 +807,63 @@ export default function SystemAgentsReportsPage() {
       }
 
       const next = [...current];
-
       pageRows.forEach((row) => {
-        if (!next.includes(row.id)) {
-          next.push(row.id);
-        }
+        if (!next.includes(row.id)) next.push(row.id);
       });
 
       return next;
     });
   }
 
-  async function loadAgents(showToast = false) {
+  async function loadReports(showToast = false) {
     try {
       setIsLoading(true);
 
-      const response = await fetch("/api/agents/?page_size=500", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
+      const [agentsResponse, commissionsResponse] = await Promise.all([
+        fetch("/api/agents/?page_size=500", {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        }),
+        fetch("/api/agents/commissions/?page_size=500", {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        }),
+      ]);
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      const agentsPayload = (await agentsResponse.json().catch(() => null)) as
+        | ApiResponse
+        | null;
+
+      const commissionsPayload = (await commissionsResponse
+        .json()
+        .catch(() => null)) as ApiResponse | null;
+
+      if (!agentsResponse.ok || !agentsPayload?.ok) {
+        throw new Error(agentsPayload?.message || `HTTP ${agentsResponse.status}`);
       }
 
-      const payload = (await response.json()) as AgentsApiResponse;
-      const normalized = normalizeApiList(payload).map(normalizeAgent);
+      if (!commissionsResponse.ok || !commissionsPayload?.ok) {
+        throw new Error(
+          commissionsPayload?.message || `HTTP ${commissionsResponse.status}`,
+        );
+      }
 
-      setAgents(normalized);
-      setSelectedIds([]);
+      setAgents(normalizeApiList(agentsPayload).map(normalizeAgent));
+      setCommissions(
+        normalizeApiList(commissionsPayload).map(normalizeCommission),
+      );
       setPageIndex(0);
+      setSelectedIds([]);
 
       if (showToast) {
         toast.success(t.refreshSuccess);
       }
     } catch (error) {
-      console.error("Failed to load agents report:", error);
+      console.error("Load agents reports error:", error);
       setAgents([]);
+      setCommissions([]);
       toast.error(t.apiError);
     } finally {
       setIsLoading(false);
@@ -804,102 +871,106 @@ export default function SystemAgentsReportsPage() {
   }
 
   function exportExcel() {
-    const now = new Date();
-    const generatedAt = formatDateTime(now.toISOString(), locale);
+    if (filteredAgents.length === 0 && filteredCommissions.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
 
-    const rows = filteredAgents.map((agent, index) => ({
-      [t.table.id]: index + 1,
-      [t.table.code]: agent.agentCode,
-      [t.table.name]: agent.fullName,
-      [t.table.referralCode]: agent.referralCode,
-      [t.table.commissionType]: t.commissionTypeLabels[agent.defaultCommissionType],
-      [t.table.commissionValue]: formatCommission(agent, locale),
-      [t.table.city]: agent.city || "-",
-      [t.table.phone]: agent.phone || "-",
-      [t.table.email]: agent.email || "-",
-      [t.table.status]: t.statusLabels[agent.status],
-      [t.table.featured]: agent.isFeatured
-        ? isArabic
-          ? "مميز"
-          : "Featured"
-        : isArabic
-          ? "عادي"
-          : "Normal",
-      [t.table.bankName]: agent.bankName || "-",
-      [t.table.iban]: agent.iban || "-",
-      [t.table.createdAt]: formatDateTime(agent.createdAt, locale),
-      [t.table.updatedAt]: formatDateTime(agent.updatedAt, locale),
-    }));
+    const now = new Date();
+    const generatedAt = formatDateTime(now.toISOString());
 
     const summaryRows = [
-      [t.excelSummary, ""],
+      [t.reportSummary, ""],
       [t.generatedAt, generatedAt],
-      [t.reportScope, t.currentFilteredData],
-      [t.showing, `${filteredAgents.length} / ${agents.length}`],
+      [t.reportScope, t.currentFilters],
       ["", ""],
-      [t.stats.total, stats.total],
-      [t.stats.active, stats.active],
-      [t.stats.draft, stats.draft],
-      [t.stats.stopped, stats.stopped],
-      [t.stats.featured, stats.featured],
-      [t.stats.percentage, stats.percentage],
-      [t.stats.fixed, stats.fixed],
-      [t.stats.avgCommission, stats.avgCommission.toFixed(2)],
-      ["", ""],
-      [t.excelFilters, ""],
-      [t.filterSearch, query || t.all],
-      [t.filterStatus, statusFilter === "ALL" ? t.all : t.statusLabels[statusFilter]],
-      [
-        t.filterCommissionType,
-        commissionTypeFilter === "ALL"
-          ? t.all
-          : t.commissionTypeLabels[commissionTypeFilter],
-      ],
-      [
-        t.filterFeatured,
-        featuredFilter === "ALL"
-          ? t.all
-          : featuredFilter === "FEATURED"
-            ? t.featuredOnly
-            : t.normalOnly,
-      ],
-      ["", ""],
-      [t.excelTable, ""],
+      [t.totalAgents, stats.totalAgents],
+      [t.activeAgents, stats.activeAgents],
+      [t.totalCustomers, stats.totalCustomers],
+      [t.totalOrders, stats.totalOrders],
+      [t.totalSales, formatMoney(stats.totalSales)],
+      [t.totalCommission, formatMoney(stats.totalCommission)],
+      [t.totalPaid, formatMoney(stats.totalPaid)],
+      [t.totalDue, formatMoney(stats.totalDue)],
     ];
 
-    const worksheet = XLSX.utils.aoa_to_sheet(summaryRows);
-    XLSX.utils.sheet_add_json(worksheet, rows, {
-      origin: summaryRows.length,
-      skipHeader: false,
-    });
+    const agentsRows = filteredAgents.map((agent) => ({
+      [t.agent]: agent.fullName,
+      [t.code]: agent.agentCode,
+      [t.referral]: agent.referralCode,
+      [t.city]: agent.city || "-",
+      [t.customers]: agent.totalCustomers,
+      [t.orders]: agent.totalOrders,
+      [t.sales]: formatMoney(agent.totalSales),
+      [t.commissions]: formatMoney(agent.approvedCommission),
+      [t.paid]: formatMoney(agent.paidCommission),
+      [t.status]: t.statusLabels[agent.status],
+    }));
 
-    worksheet["!cols"] = [
-      { wch: 10 },
-      { wch: 18 },
-      { wch: 28 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 30 },
-      { wch: 16 },
-      { wch: 16 },
-      { wch: 22 },
-      { wch: 28 },
-      { wch: 24 },
-      { wch: 24 },
-    ];
+    const commissionsRows = filteredCommissions.map((commission) => ({
+      [t.reference]: commission.reference,
+      [t.agent]: commission.agentName,
+      [t.code]: commission.agentCode,
+      [t.order]: commission.orderNumber,
+      [t.customer]: commission.customerName,
+      [t.amount]: formatMoney(commission.commissionAmount),
+      [t.paid]: formatMoney(commission.paidAmount),
+      [t.remaining]: formatMoney(commission.remainingAmount),
+      [t.status]: t.commissionStatusLabels[commission.status],
+      [t.date]: formatDateTime(commission.createdAt),
+    }));
 
     const workbook = XLSX.utils.book_new();
+
     workbook.Workbook = {
       Views: [{ RTL: isArabic }],
     };
 
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
+    summarySheet["!cols"] = [{ wch: 28 }, { wch: 28 }];
+
+    const agentsSheet = XLSX.utils.json_to_sheet(agentsRows);
+    agentsSheet["!cols"] = [
+      { wch: 28 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 14 },
+    ];
+
+    const commissionsSheet = XLSX.utils.json_to_sheet(commissionsRows);
+    commissionsSheet["!cols"] = [
+      { wch: 16 },
+      { wch: 28 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 24 },
+    ];
+
     XLSX.utils.book_append_sheet(
       workbook,
-      worksheet,
-      isArabic ? "تقرير المندوبين" : "Agents Report",
+      summarySheet,
+      isArabic ? "الملخص" : "Summary",
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
+      agentsSheet,
+      isArabic ? "المندوبون" : "Agents",
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
+      commissionsSheet,
+      isArabic ? "العمولات" : "Commissions",
     );
 
     XLSX.writeFile(
@@ -911,7 +982,179 @@ export default function SystemAgentsReportsPage() {
   }
 
   function printReport() {
-    window.print();
+    const now = new Date();
+    const direction = isArabic ? "rtl" : "ltr";
+    const title = t.title;
+
+    const html = `
+      <!doctype html>
+      <html lang="${locale}" dir="${direction}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${title}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              font-family: Arial, sans-serif;
+              margin: 24px;
+              color: #111827;
+              direction: ${direction};
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 20px;
+            }
+            h1 { margin: 0; font-size: 24px; }
+            p { margin: 4px 0; color: #4b5563; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 10px;
+              margin-bottom: 20px;
+            }
+            .card {
+              border: 1px solid #d1d5db;
+              border-radius: 12px;
+              padding: 12px;
+            }
+            .card .label { color: #6b7280; font-size: 12px; }
+            .card .value { font-size: 18px; font-weight: 700; margin-top: 6px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 12px;
+              font-size: 12px;
+            }
+            th, td {
+              border: 1px solid #d1d5db;
+              padding: 8px;
+              text-align: ${isArabic ? "right" : "left"};
+              vertical-align: top;
+            }
+            th { background: #f3f4f6; font-weight: 700; }
+            .section-title {
+              margin-top: 22px;
+              font-size: 17px;
+              font-weight: 700;
+            }
+            @media print {
+              body { margin: 12mm; }
+              .summary { grid-template-columns: repeat(4, 1fr); }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>${title}</h1>
+              <p>${t.subtitle}</p>
+            </div>
+            <div>
+              <p>${t.generatedAt}: ${formatDateTime(now.toISOString())}</p>
+              <p>${t.reportScope}: ${t.currentFilters}</p>
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="card"><div class="label">${t.totalAgents}</div><div class="value">${formatNumber(stats.totalAgents)}</div></div>
+            <div class="card"><div class="label">${t.totalOrders}</div><div class="value">${formatNumber(stats.totalOrders)}</div></div>
+            <div class="card"><div class="label">${t.totalSales}</div><div class="value">${formatMoney(stats.totalSales)} SAR</div></div>
+            <div class="card"><div class="label">${t.totalDue}</div><div class="value">${formatMoney(stats.totalDue)} SAR</div></div>
+          </div>
+
+          <div class="section-title">${t.performanceTable}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>${t.agent}</th>
+                <th>${t.code}</th>
+                <th>${t.referral}</th>
+                <th>${t.city}</th>
+                <th>${t.customers}</th>
+                <th>${t.orders}</th>
+                <th>${t.sales}</th>
+                <th>${t.commissions}</th>
+                <th>${t.status}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filteredAgents
+                .map(
+                  (agent) => `
+                    <tr>
+                      <td>${agent.fullName}</td>
+                      <td>${agent.agentCode}</td>
+                      <td>${agent.referralCode}</td>
+                      <td>${agent.city || "-"}</td>
+                      <td>${formatNumber(agent.totalCustomers)}</td>
+                      <td>${formatNumber(agent.totalOrders)}</td>
+                      <td>${formatMoney(agent.totalSales)} SAR</td>
+                      <td>${formatMoney(agent.approvedCommission)} SAR</td>
+                      <td>${t.statusLabels[agent.status]}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <div class="section-title">${t.commissionsTable}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>${t.reference}</th>
+                <th>${t.agent}</th>
+                <th>${t.order}</th>
+                <th>${t.customer}</th>
+                <th>${t.amount}</th>
+                <th>${t.paid}</th>
+                <th>${t.remaining}</th>
+                <th>${t.status}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filteredCommissions
+                .slice(0, 100)
+                .map(
+                  (commission) => `
+                    <tr>
+                      <td>${commission.reference}</td>
+                      <td>${commission.agentName}</td>
+                      <td>${commission.orderNumber}</td>
+                      <td>${commission.customerName}</td>
+                      <td>${formatMoney(commission.commissionAmount)} SAR</td>
+                      <td>${formatMoney(commission.paidAmount)} SAR</td>
+                      <td>${formatMoney(commission.remainingAmount)} SAR</td>
+                      <td>${t.commissionStatusLabels[commission.status]}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open("", "_blank", "width=1200,height=900");
+
+    if (!printWindow) {
+      toast.error(t.apiError);
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+
+    window.setTimeout(() => {
+      printWindow.print();
+    }, 400);
   }
 
   useEffect(() => {
@@ -924,10 +1167,7 @@ export default function SystemAgentsReportsPage() {
 
     const syncAfterPaint = () => {
       syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
+      window.setTimeout(syncLocale, 0);
     };
 
     syncAfterPaint();
@@ -942,18 +1182,18 @@ export default function SystemAgentsReportsPage() {
   }, []);
 
   useEffect(() => {
-    loadAgents(false);
+    loadReports(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locale]);
 
   useEffect(() => {
     setPageIndex(0);
-  }, [query, statusFilter, commissionTypeFilter, featuredFilter]);
+  }, [query, statusFilter, commissionTypeFilter, commissionStatusFilter]);
 
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col gap-3 print:hidden lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
             {t.title}
@@ -979,7 +1219,7 @@ export default function SystemAgentsReportsPage() {
           <Button
             variant="outline"
             className="h-10 rounded-xl"
-            onClick={() => loadAgents(true)}
+            onClick={() => loadReports(true)}
             disabled={isLoading}
           >
             {isLoading ? (
@@ -990,461 +1230,481 @@ export default function SystemAgentsReportsPage() {
             <span>{t.refresh}</span>
           </Button>
 
-          <Button variant="outline" className="h-10 rounded-xl" onClick={exportExcel}>
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={exportExcel}
+            disabled={isLoading}
+          >
             <Download className="h-4 w-4" />
-            <span>{t.export}</span>
+            <span>{t.exportExcel}</span>
           </Button>
 
-          <Button className="h-10 rounded-xl" onClick={printReport}>
+          <Button
+            className="h-10 rounded-xl"
+            onClick={printReport}
+            disabled={isLoading}
+          >
             <Printer className="h-4 w-4" />
-            <span>{t.print}</span>
+            <span>{t.printPdf}</span>
           </Button>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 print:hidden md:grid-cols-4">
+      {/* Summary */}
+      <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-8">
         <SummaryCard
-          title={t.stats.total}
-          value={isLoading ? "..." : String(stats.total)}
+          title={t.totalAgents}
+          value={isLoading ? "..." : formatNumber(stats.totalAgents)}
           icon={Users}
         />
         <SummaryCard
-          title={t.stats.active}
-          value={isLoading ? "..." : String(stats.active)}
+          title={t.activeAgents}
+          value={isLoading ? "..." : formatNumber(stats.activeAgents)}
           icon={BadgeCheck}
         />
         <SummaryCard
-          title={t.stats.featured}
-          value={isLoading ? "..." : String(stats.featured)}
-          icon={Star}
+          title={t.totalCustomers}
+          value={isLoading ? "..." : formatNumber(stats.totalCustomers)}
+          icon={UserRound}
         />
         <SummaryCard
-          title={t.stats.avgCommission}
-          value={isLoading ? "..." : stats.avgCommission.toFixed(2)}
-          icon={Wallet}
-          sar
+          title={t.totalOrders}
+          value={isLoading ? "..." : formatNumber(stats.totalOrders)}
+          icon={FileText}
         />
-      </div>
-
-      {/* Report Insights */}
-      <div className="grid gap-4 print:hidden lg:grid-cols-3">
-        <ReportMiniTable
-          title={t.byStatus}
-          icon={ShieldCheck}
-          rows={statusRows}
-          loading={isLoading}
-          loadingText={t.loading}
-          noResults={t.noResults}
+        <SummaryCard
+          title={t.totalSales}
+          value={isLoading ? "..." : <SarAmount value={stats.totalSales} />}
+          icon={TrendingUp}
         />
-
-        <ReportMiniTable
-          title={t.byCommissionType}
+        <SummaryCard
+          title={t.totalCommission}
+          value={isLoading ? "..." : <SarAmount value={stats.totalCommission} />}
           icon={HandCoins}
-          rows={commissionTypeRows}
-          loading={isLoading}
-          loadingText={t.loading}
-          noResults={t.noResults}
         />
-
-        <ReportMiniTable
-          title={t.byCity}
-          icon={MapPin}
-          rows={cityRows}
-          loading={isLoading}
-          loadingText={t.loading}
-          noResults={t.noResults}
+        <SummaryCard
+          title={t.totalPaid}
+          value={isLoading ? "..." : <SarAmount value={stats.totalPaid} />}
+          icon={Wallet}
+        />
+        <SummaryCard
+          title={t.totalDue}
+          value={isLoading ? "..." : <SarAmount value={stats.totalDue} />}
+          icon={ShieldCheck}
         />
       </div>
 
-      {/* Printable Report Section */}
-      <Card className="rounded-2xl border bg-card shadow-sm print:border-0 print:shadow-none">
+      {/* Filters */}
+      <Card className="rounded-2xl border bg-card shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base font-bold">{t.tableTitle}</CardTitle>
-          <CardDescription>{t.tableSubtitle}</CardDescription>
+          <CardTitle className="text-base font-bold">{t.filters}</CardTitle>
+          <CardDescription>{t.subtitle}</CardDescription>
         </CardHeader>
 
         <CardContent>
-          <div className="space-y-4">
-            {/* Filters */}
-            <div className="grid gap-3 print:hidden lg:grid-cols-[1fr_auto_auto_auto_auto]">
-              <div className="relative">
-                <Search
-                  className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-10 rounded-xl ${
-                    isArabic ? "pr-10" : "pl-10"
-                  }`}
-                />
-              </div>
-
-              <select
-                value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as StatusFilter)
-                }
-                className="border-input bg-background h-10 rounded-xl border px-3 text-sm"
-              >
-                <option value="ALL">
-                  {t.status}: {t.all}
-                </option>
-                <option value="ACTIVE">{t.active}</option>
-                <option value="DRAFT">{t.draft}</option>
-                <option value="SUSPENDED">{t.suspended}</option>
-                <option value="INACTIVE">{t.inactive}</option>
-                <option value="UNKNOWN">{t.unknown}</option>
-              </select>
-
-              <select
-                value={commissionTypeFilter}
-                onChange={(event) =>
-                  setCommissionTypeFilter(
-                    event.target.value as CommissionTypeFilter,
-                  )
-                }
-                className="border-input bg-background h-10 rounded-xl border px-3 text-sm"
-              >
-                <option value="ALL">
-                  {t.commissionType}: {t.all}
-                </option>
-                <option value="PERCENTAGE">{t.percentage}</option>
-                <option value="FIXED">{t.fixed}</option>
-                <option value="UNKNOWN">{t.unknown}</option>
-              </select>
-
-              <select
-                value={featuredFilter}
-                onChange={(event) =>
-                  setFeaturedFilter(event.target.value as FeaturedFilter)
-                }
-                className="border-input bg-background h-10 rounded-xl border px-3 text-sm"
-              >
-                <option value="ALL">
-                  {t.featured}: {t.all}
-                </option>
-                <option value="FEATURED">{t.featuredOnly}</option>
-                <option value="NORMAL">{t.normalOnly}</option>
-              </select>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-10 rounded-xl">
-                    <ColumnsIcon className="h-4 w-4" />
-                    <span>{t.columns}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent align={isArabic ? "start" : "end"}>
-                  {Object.entries(t.columnLabels).map(([key, label]) => (
-                    <DropdownMenuCheckboxItem
-                      key={key}
-                      checked={visibleColumns[key as keyof VisibleColumns]}
-                      onCheckedChange={(checked) =>
-                        setVisibleColumns((current) => ({
-                          ...current,
-                          [key]: Boolean(checked),
-                        }))
-                      }
-                    >
-                      {label}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+          <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto_auto_auto]">
+            <div className="relative">
+              <Search
+                className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
+                  isArabic ? "right-3" : "left-3"
+                }`}
+              />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={`h-10 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+              />
             </div>
 
-            {/* Print Header */}
-            <div className="hidden print:block">
-              <h2 className="text-xl font-bold">{t.title}</h2>
-              <p className="mt-2 text-sm">{t.subtitle}</p>
-              <p className="mt-2 text-sm">
-                {t.showing}: {filteredAgents.length} / {agents.length}
-              </p>
-            </div>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+              className="border-input bg-background h-10 rounded-xl border px-3 text-sm"
+            >
+              <option value="ALL">
+                {t.status}: {t.all}
+              </option>
+              <option value="ACTIVE">{t.statusLabels.ACTIVE}</option>
+              <option value="DRAFT">{t.statusLabels.DRAFT}</option>
+              <option value="SUSPENDED">{t.statusLabels.SUSPENDED}</option>
+              <option value="INACTIVE">{t.statusLabels.INACTIVE}</option>
+            </select>
 
-            {/* Data Table */}
-            <div className="overflow-hidden rounded-xl border print:rounded-none">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12 print:hidden">
-                      <Checkbox
-                        checked={allPageRowsSelected}
-                        onCheckedChange={toggleAllPageRows}
-                        aria-label="Select all"
+            <select
+              value={commissionTypeFilter}
+              onChange={(event) =>
+                setCommissionTypeFilter(
+                  event.target.value as CommissionTypeFilter,
+                )
+              }
+              className="border-input bg-background h-10 rounded-xl border px-3 text-sm"
+            >
+              <option value="ALL">
+                {t.commissionType}: {t.all}
+              </option>
+              <option value="PERCENTAGE">{t.commissionTypeLabels.PERCENTAGE}</option>
+              <option value="FIXED">{t.commissionTypeLabels.FIXED}</option>
+            </select>
+
+            <select
+              value={commissionStatusFilter}
+              onChange={(event) =>
+                setCommissionStatusFilter(
+                  event.target.value as CommissionStatusFilter,
+                )
+              }
+              className="border-input bg-background h-10 rounded-xl border px-3 text-sm"
+            >
+              <option value="ALL">
+                {t.commissionStatus}: {t.all}
+              </option>
+              <option value="PENDING">{t.commissionStatusLabels.PENDING}</option>
+              <option value="EARNED">{t.commissionStatusLabels.EARNED}</option>
+              <option value="APPROVED">{t.commissionStatusLabels.APPROVED}</option>
+              <option value="PAID">{t.commissionStatusLabels.PAID}</option>
+              <option value="CANCELLED">{t.commissionStatusLabels.CANCELLED}</option>
+              <option value="REVERSED">{t.commissionStatusLabels.REVERSED}</option>
+            </select>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="h-10 rounded-xl">
+                  <ColumnsIcon className="h-4 w-4" />
+                  <span>{t.columns}</span>
+                </Button>
+              </DropdownMenuTrigger>
+
+              <DropdownMenuContent align={isArabic ? "start" : "end"}>
+                <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {Object.entries(t.columnLabels).map(([key, label]) => (
+                  <DropdownMenuCheckboxItem
+                    key={key}
+                    checked={visibleColumns[key as keyof VisibleColumns]}
+                    onCheckedChange={(checked) =>
+                      setVisibleColumns((current) => ({
+                        ...current,
+                        [key]: Boolean(checked),
+                      }))
+                    }
+                  >
+                    {label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Agents Performance */}
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base font-bold">
+            <BarChart3 className="h-5 w-5" />
+            {t.performanceTable}
+          </CardTitle>
+          <CardDescription>{t.performanceDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent>
+          <div className="overflow-hidden rounded-xl border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">
+                    <Checkbox
+                      checked={allPageRowsSelected}
+                      onCheckedChange={toggleAllPageRows}
+                      aria-label="Select all"
+                    />
+                  </TableHead>
+
+                  {visibleColumns.name ? (
+                    <TableHead>
+                      <SortButton label={t.agent} onClick={() => toggleSort("fullName")} />
+                    </TableHead>
+                  ) : null}
+
+                  {visibleColumns.code ? (
+                    <TableHead>
+                      <SortButton label={t.code} onClick={() => toggleSort("agentCode")} />
+                    </TableHead>
+                  ) : null}
+
+                  {visibleColumns.referralCode ? (
+                    <TableHead>{t.referral}</TableHead>
+                  ) : null}
+
+                  {visibleColumns.city ? <TableHead>{t.city}</TableHead> : null}
+
+                  {visibleColumns.customers ? (
+                    <TableHead>
+                      <SortButton
+                        label={t.customers}
+                        onClick={() => toggleSort("totalCustomers")}
                       />
                     </TableHead>
+                  ) : null}
 
-                    {visibleColumns.name ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3 print:hidden"
-                          variant="ghost"
-                          onClick={() => toggleSort("fullName")}
-                        >
-                          {t.table.name}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                        <span className="hidden print:inline">{t.table.name}</span>
-                      </TableHead>
-                    ) : null}
+                  {visibleColumns.orders ? (
+                    <TableHead>
+                      <SortButton
+                        label={t.orders}
+                        onClick={() => toggleSort("totalOrders")}
+                      />
+                    </TableHead>
+                  ) : null}
 
-                    {visibleColumns.code ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3 print:hidden"
-                          variant="ghost"
-                          onClick={() => toggleSort("agentCode")}
-                        >
-                          {t.table.code}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                        <span className="hidden print:inline">{t.table.code}</span>
-                      </TableHead>
-                    ) : null}
+                  {visibleColumns.sales ? (
+                    <TableHead>
+                      <SortButton
+                        label={t.sales}
+                        onClick={() => toggleSort("totalSales")}
+                      />
+                    </TableHead>
+                  ) : null}
 
-                    {visibleColumns.referralCode ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3 print:hidden"
-                          variant="ghost"
-                          onClick={() => toggleSort("referralCode")}
-                        >
-                          {t.table.referralCode}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                        <span className="hidden print:inline">
-                          {t.table.referralCode}
-                        </span>
-                      </TableHead>
-                    ) : null}
+                  {visibleColumns.commissions ? (
+                    <TableHead>
+                      <SortButton
+                        label={t.commissions}
+                        onClick={() => toggleSort("approvedCommission")}
+                      />
+                    </TableHead>
+                  ) : null}
 
-                    {visibleColumns.commission ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3 print:hidden"
-                          variant="ghost"
-                          onClick={() => toggleSort("defaultCommissionValue")}
-                        >
-                          {t.table.commission}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                        <span className="hidden print:inline">
-                          {t.table.commission}
-                        </span>
-                      </TableHead>
-                    ) : null}
+                  {visibleColumns.paid ? <TableHead>{t.paid}</TableHead> : null}
 
-                    {visibleColumns.city ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3 print:hidden"
-                          variant="ghost"
-                          onClick={() => toggleSort("city")}
-                        >
-                          {t.table.city}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                        <span className="hidden print:inline">{t.table.city}</span>
-                      </TableHead>
-                    ) : null}
+                  {visibleColumns.status ? <TableHead>{t.status}</TableHead> : null}
+                </TableRow>
+              </TableHeader>
 
-                    {visibleColumns.contact ? (
-                      <TableHead>{t.table.contact}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.status ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3 print:hidden"
-                          variant="ghost"
-                          onClick={() => toggleSort("status")}
-                        >
-                          {t.table.status}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                        <span className="hidden print:inline">{t.table.status}</span>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.featured ? (
-                      <TableHead>{t.table.featured}</TableHead>
-                    ) : null}
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={11} className="h-28">
+                      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {t.loading}
+                      </div>
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
+                ) : pageRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={11} className="h-28 text-center">
+                      {t.noAgents}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  pageRows.map((agent) => (
+                    <TableRow key={agent.id}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedIds.includes(agent.id)}
+                          onCheckedChange={() => toggleRow(agent.id)}
+                          aria-label="Select row"
+                        />
+                      </TableCell>
 
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={9} className="h-28">
-                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {t.loading}
+                      {visibleColumns.name ? (
+                        <TableCell>
+                          <Link
+                            href={`/system/agents/${agent.id}`}
+                            className="flex min-w-[220px] items-center gap-3"
+                          >
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                              <UserRound className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <p className="font-semibold hover:text-primary">
+                                {agent.fullName}
+                              </p>
+                              <p className="text-muted-foreground text-xs">
+                                {agent.email || agent.phone || "-"}
+                              </p>
+                            </div>
+                          </Link>
+                        </TableCell>
+                      ) : null}
+
+                      {visibleColumns.code ? (
+                        <TableCell className="font-medium">
+                          {agent.agentCode}
+                        </TableCell>
+                      ) : null}
+
+                      {visibleColumns.referralCode ? (
+                        <TableCell>
+                          <Badge variant="secondary" className="rounded-full">
+                            {agent.referralCode}
+                          </Badge>
+                        </TableCell>
+                      ) : null}
+
+                      {visibleColumns.city ? (
+                        <TableCell>
+                          <span className="inline-flex items-center gap-2">
+                            <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                            {agent.city || "-"}
+                          </span>
+                        </TableCell>
+                      ) : null}
+
+                      {visibleColumns.customers ? (
+                        <TableCell>{formatNumber(agent.totalCustomers)}</TableCell>
+                      ) : null}
+
+                      {visibleColumns.orders ? (
+                        <TableCell>{formatNumber(agent.totalOrders)}</TableCell>
+                      ) : null}
+
+                      {visibleColumns.sales ? (
+                        <TableCell>
+                          <SarAmount value={agent.totalSales} />
+                        </TableCell>
+                      ) : null}
+
+                      {visibleColumns.commissions ? (
+                        <TableCell>
+                          <SarAmount value={agent.approvedCommission} />
+                        </TableCell>
+                      ) : null}
+
+                      {visibleColumns.paid ? (
+                        <TableCell>
+                          <SarAmount value={agent.paidCommission} />
+                        </TableCell>
+                      ) : null}
+
+                      {visibleColumns.status ? (
+                        <TableCell>{statusBadge(agent.status, locale)}</TableCell>
+                      ) : null}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+            <div className="text-muted-foreground flex-1 text-sm">
+              {formatNumber(selectedIds.length)} /{" "}
+              {formatNumber(filteredAgents.length)} {t.selected}
+            </div>
+
+            <div className="text-muted-foreground text-sm">
+              {formatNumber(pageIndex + 1)} / {formatNumber(pageCount)}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                onClick={() => setPageIndex((current) => Math.max(current - 1, 0))}
+                disabled={pageIndex === 0}
+              >
+                {t.previous}
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                onClick={() =>
+                  setPageIndex((current) => Math.min(current + 1, pageCount - 1))
+                }
+                disabled={pageIndex >= pageCount - 1}
+              >
+                {t.next}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Commissions */}
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base font-bold">
+            <HandCoins className="h-5 w-5" />
+            {t.commissionsTable}
+          </CardTitle>
+          <CardDescription>{t.commissionsDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent>
+          <div className="overflow-hidden rounded-xl border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t.reference}</TableHead>
+                  <TableHead>{t.agent}</TableHead>
+                  <TableHead>{t.order}</TableHead>
+                  <TableHead>{t.customer}</TableHead>
+                  <TableHead>{t.amount}</TableHead>
+                  <TableHead>{t.paid}</TableHead>
+                  <TableHead>{t.remaining}</TableHead>
+                  <TableHead>{t.status}</TableHead>
+                  <TableHead>{t.date}</TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="h-24">
+                      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {t.loading}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : filteredCommissions.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="h-24 text-center">
+                      {t.noCommissions}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredCommissions.slice(0, 20).map((commission) => (
+                    <TableRow key={commission.id}>
+                      <TableCell className="font-medium">
+                        {commission.reference}
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="font-semibold">{commission.agentName}</p>
+                          <p className="text-muted-foreground text-xs">
+                            {commission.agentCode}
+                          </p>
                         </div>
                       </TableCell>
-                    </TableRow>
-                  ) : pageRows.length ? (
-                    pageRows.map((agent) => (
-                      <TableRow
-                        key={agent.id}
-                        data-state={
-                          selectedIds.includes(agent.id) ? "selected" : undefined
-                        }
-                      >
-                        <TableCell className="print:hidden">
-                          <Checkbox
-                            checked={selectedIds.includes(agent.id)}
-                            onCheckedChange={() => toggleRow(agent.id)}
-                            aria-label="Select row"
-                          />
-                        </TableCell>
-
-                        {visibleColumns.name ? (
-                          <TableCell>
-                            <div className="flex min-w-[220px] items-center gap-3">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-muted print:hidden">
-                                <UserRound className="h-5 w-5" />
-                              </div>
-
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="truncate font-medium">
-                                    {agent.fullName}
-                                  </span>
-
-                                  {agent.isFeatured ? (
-                                    <Star className="size-4 fill-orange-400 text-orange-400 print:hidden" />
-                                  ) : null}
-                                </div>
-
-                                <div className="text-muted-foreground mt-1 truncate text-xs">
-                                  {agent.email || agent.phone || agent.agentCode}
-                                </div>
-                              </div>
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.code ? (
-                          <TableCell className="font-medium">
-                            {agent.agentCode || `#${agent.id}`}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.referralCode ? (
-                          <TableCell>
-                            <Badge variant="secondary" className="rounded-full">
-                              {agent.referralCode || "-"}
-                            </Badge>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.commission ? (
-                          <TableCell>
-                            <div className="flex min-w-[140px] items-center gap-2">
-                              <HandCoins className="text-muted-foreground h-3.5 w-3.5 print:hidden" />
-                              <span className="font-medium">
-                                {formatCommission(agent, locale)}
-                              </span>
-                            </div>
-                            <div className="mt-1 print:hidden">
-                              {commissionTypeBadge(
-                                agent.defaultCommissionType,
-                                locale,
-                              )}
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.city ? (
-                          <TableCell>
-                            <div className="flex min-w-[120px] items-center gap-2">
-                              <MapPin className="text-muted-foreground h-3.5 w-3.5 print:hidden" />
-                              <span>{agent.city || "-"}</span>
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.contact ? (
-                          <TableCell>
-                            <div className="flex min-w-[130px] items-center gap-2">
-                              <Phone className="text-muted-foreground h-3.5 w-3.5 print:hidden" />
-                              <span>{agent.phone || "-"}</span>
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.status ? (
-                          <TableCell>{statusBadge(agent.status, locale)}</TableCell>
-                        ) : null}
-
-                        {visibleColumns.featured ? (
-                          <TableCell>
-                            {agent.isFeatured ? (
-                              <Badge className="rounded-full">
-                                {isArabic ? "مميز" : "Featured"}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="rounded-full">
-                                {isArabic ? "عادي" : "Normal"}
-                              </Badge>
-                            )}
-                          </TableCell>
-                        ) : null}
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={9} className="h-28 text-center">
-                        {t.noResults}
+                      <TableCell>{commission.orderNumber}</TableCell>
+                      <TableCell>{commission.customerName}</TableCell>
+                      <TableCell>
+                        <SarAmount value={commission.commissionAmount} />
                       </TableCell>
+                      <TableCell>
+                        <SarAmount value={commission.paidAmount} />
+                      </TableCell>
+                      <TableCell>
+                        <SarAmount value={commission.remainingAmount} />
+                      </TableCell>
+                      <TableCell>
+                        {commissionStatusBadge(commission.status, locale)}
+                      </TableCell>
+                      <TableCell>{formatDateTime(commission.createdAt)}</TableCell>
                     </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            <div className="flex flex-col gap-3 print:hidden sm:flex-row sm:items-center sm:justify-end">
-              <div className="text-muted-foreground flex-1 text-sm">
-                {selectedIds.length} / {filteredAgents.length} {t.selectedRows}
-              </div>
-
-              <div className="text-muted-foreground text-sm">
-                {pageIndex + 1} / {pageCount}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() => setPageIndex((current) => Math.max(current - 1, 0))}
-                  disabled={pageIndex === 0}
-                >
-                  {t.previous}
-                </Button>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() =>
-                    setPageIndex((current) =>
-                      Math.min(current + 1, pageCount - 1),
-                    )
-                  }
-                  disabled={pageIndex >= pageCount - 1}
-                >
-                  {t.next}
-                </Button>
-              </div>
-            </div>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
       </Card>
@@ -1453,39 +1713,25 @@ export default function SystemAgentsReportsPage() {
 }
 
 /* ============================================================
-   🔹 Small Components
+   Small Components
 ============================================================ */
 
 function SummaryCard({
   title,
   value,
   icon: Icon,
-  sar = false,
 }: {
   title: string;
-  value: string;
-  icon: React.ComponentType<{ className?: string }>;
-  sar?: boolean;
+  value: React.ReactNode;
+  icon: React.ElementType;
 }) {
   return (
     <Card className="rounded-2xl border bg-card shadow-sm">
       <CardContent className="flex items-center justify-between gap-3 p-5">
         <div>
           <p className="text-muted-foreground text-sm">{title}</p>
-          <div className="mt-2 flex items-center gap-2">
-            {sar ? (
-              <Image
-                src={SAR_ICON}
-                alt="SAR"
-                width={20}
-                height={20}
-                className="opacity-90"
-              />
-            ) : null}
-            <p className="text-2xl font-bold">{value}</p>
-          </div>
+          <div className="mt-2 text-lg font-bold">{value}</div>
         </div>
-
         <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
           <Icon className="h-5 w-5" />
         </div>
@@ -1494,66 +1740,17 @@ function SummaryCard({
   );
 }
 
-function ReportMiniTable({
-  title,
-  icon: Icon,
-  rows,
-  loading,
-  loadingText,
-  noResults,
+function SortButton({
+  label,
+  onClick,
 }: {
-  title: string;
-  icon: React.ComponentType<{ className?: string }>;
-  rows: Array<{ label: string; value: number; percent: number }>;
-  loading: boolean;
-  loadingText: string;
-  noResults: string;
+  label: string;
+  onClick: () => void;
 }) {
   return (
-    <Card className="rounded-2xl border bg-card shadow-sm print:shadow-none">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base font-bold">
-          <Icon className="h-4 w-4" />
-          {title}
-        </CardTitle>
-      </CardHeader>
-
-      <CardContent className="space-y-3">
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            {loadingText}
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="py-10 text-center text-sm text-muted-foreground">
-            {noResults}
-          </div>
-        ) : (
-          rows.map((row) => (
-            <div key={row.label} className="rounded-xl border bg-background p-3">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-semibold">{row.label}</p>
-                  <p className="text-muted-foreground text-xs">
-                    {row.value} سجل
-                  </p>
-                </div>
-
-                <Badge variant="secondary" className="rounded-full">
-                  {row.percent}%
-                </Badge>
-              </div>
-
-              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary"
-                  style={{ width: `${row.percent}%` }}
-                />
-              </div>
-            </div>
-          ))
-        )}
-      </CardContent>
-    </Card>
+    <Button className="-ms-3" variant="ghost" onClick={onClick}>
+      {label}
+      <ArrowDownUp className="h-3 w-3" />
+    </Button>
   );
 }
