@@ -7,9 +7,12 @@
 # ✅ POST   /api/customers/<id>/  -> تعديل جزئي للتوافق
 # ✅ DELETE /api/customers/<id>/  -> حذف العميل
 # ------------------------------------------------------------
-# ملاحظات:
-# - الحذف هنا حذف فعلي.
-# - إذا أردت لاحقًا Soft Delete نضيف status=inactive بدل delete.
+# تحسينات هذا الإصدار:
+# - توحيد قيم الفورنت lowercase إلى قيم الموديل uppercase
+# - full_clean قبل save
+# - رسائل أخطاء أوضح
+# - منع تحديث الحقول غير المسموحة
+# - الحفاظ على نفس شكل Response السابق بدون كسر الفرونت
 # ============================================================
 
 from __future__ import annotations
@@ -82,6 +85,24 @@ def _clean_string(value: Any) -> str:
     return str(value).strip()
 
 
+def _normalize_choice(value: Any, allowed: set[str], current: str) -> str:
+    cleaned = _clean_string(value)
+
+    if not cleaned:
+        return current
+
+    normalized = cleaned.upper()
+
+    return normalized if normalized in allowed else current
+
+
+def _validation_errors(exc: ValidationError) -> dict[str, Any]:
+    if hasattr(exc, "message_dict"):
+        return exc.message_dict
+
+    return {"__all__": exc.messages}
+
+
 def _get_customer(customer_id: int) -> Customer | None:
     return (
         Customer.objects
@@ -89,6 +110,38 @@ def _get_customer(customer_id: int) -> Customer | None:
         .filter(pk=customer_id)
         .first()
     )
+
+
+# ============================================================
+# ✅ Choice Sets
+# ============================================================
+
+CUSTOMER_TYPE_VALUES = {
+    Customer.CustomerType.INDIVIDUAL,
+    Customer.CustomerType.CORPORATE,
+}
+
+STATUS_VALUES = {
+    Customer.Status.ACTIVE,
+    Customer.Status.INACTIVE,
+    Customer.Status.BLOCKED,
+    Customer.Status.LEAD,
+}
+
+SOURCE_VALUES = {
+    Customer.Source.WEBSITE,
+    Customer.Source.WHATSAPP,
+    Customer.Source.AGENT,
+    Customer.Source.ADMIN,
+    Customer.Source.IMPORT,
+    Customer.Source.OTHER,
+}
+
+GENDER_VALUES = {
+    Customer.Gender.MALE,
+    Customer.Gender.FEMALE,
+    Customer.Gender.NOT_SPECIFIED,
+}
 
 
 # ============================================================
@@ -121,10 +174,21 @@ UPDATABLE_FIELDS = {
     "tags",
 }
 
+CHOICE_FIELDS = {
+    "customer_type": CUSTOMER_TYPE_VALUES,
+    "status": STATUS_VALUES,
+    "source": SOURCE_VALUES,
+    "gender": GENDER_VALUES,
+}
+
 
 def _update_customer(request: HttpRequest, customer: Customer) -> JsonResponse:
     try:
         payload = _parse_json_body(request)
+
+        ignored_fields = sorted(
+            key for key in payload.keys() if key not in UPDATABLE_FIELDS
+        )
 
         for field in UPDATABLE_FIELDS:
             if field not in payload:
@@ -134,32 +198,43 @@ def _update_customer(request: HttpRequest, customer: Customer) -> JsonResponse:
 
             if field == "date_of_birth":
                 setattr(customer, field, value or None)
-            else:
-                setattr(customer, field, _clean_string(value))
+                continue
+
+            if field in CHOICE_FIELDS:
+                current_value = getattr(customer, field)
+                normalized_value = _normalize_choice(
+                    value,
+                    CHOICE_FIELDS[field],
+                    current_value,
+                )
+                setattr(customer, field, normalized_value)
+                continue
+
+            setattr(customer, field, _clean_string(value))
 
         customer.updated_by = request.user if request.user.is_authenticated else None
+
+        customer.full_clean()
         customer.save()
 
-        return _json_success(
-            {
-                "message": "تم تحديث بيانات العميل بنجاح.",
-                "customer": serialize_customer(customer),
-            }
-        )
+        response_data: dict[str, Any] = {
+            "message": "تم تحديث بيانات العميل بنجاح.",
+            "customer": serialize_customer(customer),
+        }
+
+        if ignored_fields:
+            response_data["ignored_fields"] = ignored_fields
+
+        return _json_success(response_data)
 
     except ValueError as exc:
         return _json_error(str(exc), status=400)
 
     except ValidationError as exc:
-        if hasattr(exc, "message_dict"):
-            errors = exc.message_dict
-        else:
-            errors = {"__all__": exc.messages}
-
         return _json_error(
             "بيانات العميل غير صحيحة.",
             status=400,
-            errors=errors,
+            errors=_validation_errors(exc),
         )
 
     except Exception as exc:

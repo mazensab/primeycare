@@ -1,15 +1,9 @@
 /* ============================================================
    📂 lib/api.ts
-   Primey Care - Frontend API Client
-   ------------------------------------------------------------
-   ✅ ملف موحد لكل طلبات API داخل الفرونت
-   ✅ بدون hardcoded localhost داخل الكود
-   ✅ متوافق مع اللوكل والإنتاج عبر NEXT_PUBLIC_API_URL
-   ✅ يدعم الكوكيز والجلسة
-   ✅ يدعم CSRF للطلبات غير GET
-   ✅ يعالج الأخطاء بشكل موحد
-   ✅ مناسب لكل صفحات النظام لاحقًا
+   Primey Care - Frontend API Client (Enhanced)
 ============================================================ */
+
+import { toast } from "sonner";
 
 export type ApiMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
@@ -30,6 +24,7 @@ export type ApiRequestOptions = {
   cache?: RequestCache;
   next?: NextFetchRequestConfig;
   credentials?: RequestCredentials;
+  showToast?: boolean;
 };
 
 export type ApiSuccess<T> = {
@@ -50,31 +45,6 @@ export type ApiFailure = {
 
 export type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
-export type PaginatedApiResponse<T> = {
-  ok?: boolean;
-  message?: string;
-  results?: T[];
-  data?: T[] | Record<string, unknown>;
-  count?: number;
-  pagination?: {
-    page?: number;
-    page_size?: number;
-    total_pages?: number;
-    total_items?: number;
-    has_next?: boolean;
-    has_previous?: boolean;
-  };
-  meta?: {
-    page?: number;
-    page_size?: number;
-    total_pages?: number;
-    total_items?: number;
-    has_next?: boolean;
-    has_previous?: boolean;
-    [key: string]: unknown;
-  };
-};
-
 const DEFAULT_ERROR_MESSAGE = "تعذر الاتصال بالخادم. حاول مرة أخرى.";
 
 function isBrowser() {
@@ -88,11 +58,7 @@ function normalizeBaseUrl(value?: string | null) {
 
 function normalizePath(path: string) {
   if (!path) return "/";
-
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    return path;
-  }
-
+  if (path.startsWith("http")) return path;
   return path.startsWith("/") ? path : `/${path}`;
 }
 
@@ -101,19 +67,13 @@ export function getApiBaseUrl() {
     process.env.NEXT_PUBLIC_API_URL ||
       process.env.API_URL ||
       process.env.NEXT_PUBLIC_BACKEND_URL ||
-      ""
+      "",
   );
 }
 
 export function buildApiUrl(path: string, query?: ApiQuery) {
   const normalizedPath = normalizePath(path);
-
-  const baseUrl =
-    normalizedPath.startsWith("http://") ||
-    normalizedPath.startsWith("https://")
-      ? ""
-      : getApiBaseUrl();
-
+  const baseUrl = normalizedPath.startsWith("http") ? "" : getApiBaseUrl();
   const url = `${baseUrl}${normalizedPath}`;
 
   if (!query) return url;
@@ -126,10 +86,7 @@ export function buildApiUrl(path: string, query?: ApiQuery) {
   });
 
   const queryString = searchParams.toString();
-
-  if (!queryString) return url;
-
-  return `${url}${url.includes("?") ? "&" : "?"}${queryString}`;
+  return queryString ? `${url}?${queryString}` : url;
 }
 
 function getCookie(name: string) {
@@ -138,11 +95,7 @@ function getCookie(name: string) {
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
 
-  if (parts.length === 2) {
-    return parts.pop()?.split(";").shift() || "";
-  }
-
-  return "";
+  return parts.length === 2 ? parts.pop()?.split(";").shift() || "" : "";
 }
 
 function getCsrfToken() {
@@ -150,48 +103,23 @@ function getCsrfToken() {
 }
 
 function shouldAttachCsrf(method: ApiMethod) {
-  return !["GET"].includes(method);
+  return method !== "GET";
 }
 
-function extractErrorMessage(payload: unknown, fallback = DEFAULT_ERROR_MESSAGE) {
-  if (!payload || typeof payload !== "object") return fallback;
+function extractErrorMessage(payload: unknown) {
+  if (!payload || typeof payload !== "object") return DEFAULT_ERROR_MESSAGE;
 
   const record = payload as Record<string, unknown>;
 
-  if (typeof record.message === "string" && record.message.trim()) {
-    return record.message;
-  }
-
-  if (typeof record.error === "string" && record.error.trim()) {
-    return record.error;
-  }
-
-  if (typeof record.detail === "string" && record.detail.trim()) {
-    return record.detail;
-  }
-
-  if (Array.isArray(record.errors)) {
-    return record.errors.filter(Boolean).join("، ") || fallback;
-  }
-
-  if (record.errors && typeof record.errors === "object") {
-    try {
-      return JSON.stringify(record.errors);
-    } catch {
-      return fallback;
-    }
-  }
-
-  return fallback;
+  return (
+    (record.message as string) ||
+    (record.error as string) ||
+    (record.detail as string) ||
+    DEFAULT_ERROR_MESSAGE
+  );
 }
 
 async function readJsonSafely(response: Response) {
-  const contentType = response.headers.get("content-type") || "";
-
-  if (!contentType.includes("application/json")) {
-    return null;
-  }
-
   try {
     return await response.json();
   } catch {
@@ -199,28 +127,29 @@ async function readJsonSafely(response: Response) {
   }
 }
 
+/* ============================================================
+   🚀 Core API Request
+============================================================ */
+
 export async function apiRequest<T = unknown>(
   path: string,
-  options: ApiRequestOptions = {}
+  options: ApiRequestOptions = {},
 ): Promise<ApiResult<T>> {
   const method = options.method || "GET";
   const url = buildApiUrl(path, options.query);
 
   const headers = new Headers(options.headers);
-
   headers.set("Accept", "application/json");
 
-  const hasBody = options.body !== undefined && options.body !== null;
+  const hasBody = options.body !== undefined;
 
   if (hasBody && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
   if (shouldAttachCsrf(method)) {
-    const csrfToken = getCsrfToken();
-    if (csrfToken) {
-      headers.set("X-CSRFToken", csrfToken);
-    }
+    const csrf = getCsrfToken();
+    if (csrf) headers.set("X-CSRFToken", csrf);
   }
 
   try {
@@ -236,15 +165,25 @@ export async function apiRequest<T = unknown>(
     const payload = await readJsonSafely(response);
 
     if (!response.ok) {
+      const message = extractErrorMessage(payload);
+
+      console.error("❌ API Error:", {
+        path,
+        method,
+        status: response.status,
+        message,
+        payload,
+      });
+
+      if (options.showToast !== false) {
+        toast.error(message);
+      }
+
       return {
         ok: false,
         data: null,
         status: response.status,
-        message: extractErrorMessage(payload),
-        error:
-          payload && typeof payload === "object"
-            ? String((payload as Record<string, unknown>).error || "")
-            : undefined,
+        message,
         raw: payload,
       };
     }
@@ -256,137 +195,108 @@ export async function apiRequest<T = unknown>(
       raw: payload,
     };
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : DEFAULT_ERROR_MESSAGE;
+
+    console.error("🔥 Network Error:", { path, method, error });
+
+    if (options.showToast !== false) {
+      toast.error(message);
+    }
+
     return {
       ok: false,
       data: null,
       status: 0,
-      message:
-        error instanceof Error && error.message
-          ? error.message
-          : DEFAULT_ERROR_MESSAGE,
+      message,
       raw: error,
     };
   }
 }
 
-export function apiGet<T = unknown>(
-  path: string,
-  query?: ApiQuery,
-  options?: Omit<ApiRequestOptions, "method" | "query">
-) {
-  return apiRequest<T>(path, {
-    ...options,
-    method: "GET",
-    query,
-  });
-}
+/* ============================================================
+   🚀 Shortcuts
+============================================================ */
 
-export function apiPost<T = unknown>(
-  path: string,
-  body?: unknown,
-  options?: Omit<ApiRequestOptions, "method" | "body">
-) {
-  return apiRequest<T>(path, {
-    ...options,
-    method: "POST",
-    body,
-  });
-}
+export const apiGet = <T>(path: string, query?: ApiQuery) =>
+  apiRequest<T>(path, { method: "GET", query });
 
-export function apiPatch<T = unknown>(
-  path: string,
-  body?: unknown,
-  options?: Omit<ApiRequestOptions, "method" | "body">
-) {
-  return apiRequest<T>(path, {
-    ...options,
-    method: "PATCH",
-    body,
-  });
-}
+export const apiPost = <T>(path: string, body?: unknown) =>
+  apiRequest<T>(path, { method: "POST", body });
 
-export function apiPut<T = unknown>(
-  path: string,
-  body?: unknown,
-  options?: Omit<ApiRequestOptions, "method" | "body">
-) {
-  return apiRequest<T>(path, {
-    ...options,
-    method: "PUT",
-    body,
-  });
-}
+export const apiPatch = <T>(path: string, body?: unknown) =>
+  apiRequest<T>(path, { method: "PATCH", body });
 
-export function apiDelete<T = unknown>(
-  path: string,
-  body?: unknown,
-  options?: Omit<ApiRequestOptions, "method" | "body">
-) {
-  return apiRequest<T>(path, {
-    ...options,
-    method: "DELETE",
-    body,
-  });
-}
+export const apiPut = <T>(path: string, body?: unknown) =>
+  apiRequest<T>(path, { method: "PUT", body });
 
-export async function safeApiGet<T = unknown>(
-  path: string,
-  query?: ApiQuery,
-  fallback: T | null = null
-): Promise<T | null> {
-  const result = await apiGet<T>(path, query);
+export const apiDelete = <T>(path: string) =>
+  apiRequest<T>(path, { method: "DELETE" });
 
-  if (!result.ok) {
-    console.error("[Primey Care API Error]", {
-      path,
-      status: result.status,
-      message: result.message,
-    });
+/* ============================================================
+   🧠 Helpers
+============================================================ */
 
-    return fallback;
-  }
-
-  return result.data;
-}
-
-export function getResults<T>(payload: unknown): T[] {
-  if (!payload || typeof payload !== "object") return [];
-
-  const record = payload as Record<string, unknown>;
-
-  if (Array.isArray(record.results)) {
-    return record.results as T[];
-  }
-
-  if (Array.isArray(record.data)) {
-    return record.data as T[];
-  }
+export function getResults<T>(payload: any): T[] {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.results)) return payload.results;
+  if (Array.isArray(payload?.customers)) return payload.customers;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.data?.results)) return payload.data.results;
+  if (Array.isArray(payload?.data?.customers)) return payload.data.customers;
+  if (Array.isArray(payload?.data?.items)) return payload.data.items;
 
   return [];
 }
 
-export function getDataObject<T extends Record<string, unknown>>(
-  payload: unknown
-): T | null {
-  if (!payload || typeof payload !== "object") return null;
-
-  const record = payload as Record<string, unknown>;
-
-  if (record.data && typeof record.data === "object" && !Array.isArray(record.data)) {
-    return record.data as T;
-  }
-
-  return record as T;
+export function getDataObject<T>(payload: any): T | null {
+  if (!payload) return null;
+  return payload.data || payload.customer || payload.item || payload;
 }
 
+/* ============================================================
+   📌 API Paths
+============================================================ */
+
 export const API_PATHS = {
-  auth: {
-    csrf: "/api/auth/csrf/",
-    login: "/api/auth/login/",
-    logout: "/api/auth/logout/",
-    whoami: "/api/auth/whoami/",
-    profile: "/api/auth/profile/",
-    changePassword: "/api/auth/change-password/",
+  customers: {
+    list: "/api/customers/",
+    detail: (id: number | string) => `/api/customers/${id}/`,
+    statement: (id: number | string) => `/api/customers/${id}/statement/`,
+  },
+
+  providers: {
+    list: "/api/providers/",
+    detail: (id: number | string) => `/api/providers/${id}/`,
+  },
+
+  centers: {
+    list: "/api/providers/",
+    detail: (id: number | string) => `/api/providers/${id}/`,
+  },
+
+  agents: {
+    list: "/api/agents/",
+    detail: (id: number | string) => `/api/agents/${id}/`,
+  },
+
+  products: {
+    list: "/api/products/",
+    active: "/api/products/active/",
+    detail: (id: number | string) => `/api/products/${id}/`,
+  },
+
+  serviceItems: {
+    list: "/api/service-items/",
+    active: "/api/service-items/active/",
+    detail: (id: number | string) => `/api/service-items/${id}/`,
+  },
+
+  contracts: {
+    list: "/api/contracts/",
+    active: "/api/contracts/active/",
+    detail: (id: number | string) => `/api/contracts/${id}/`,
   },
 
   orders: {
@@ -401,93 +311,82 @@ export const API_PATHS = {
     detail: (id: number | string) => `/api/order-items/${id}/`,
   },
 
-  products: {
-    list: "/api/products/",
-    public: "/api/products/public/",
-    categories: "/api/products/categories/",
-    detail: (id: number | string) => `/api/products/${id}/`,
-    categoryDetail: (id: number | string) => `/api/products/categories/${id}/`,
-  },
-
-  customers: {
-    list: "/api/customers/",
-    detail: (id: number | string) => `/api/customers/${id}/`,
-    statement: (id: number | string) => `/api/customers/${id}/statement/`,
-  },
-
   invoices: {
     list: "/api/invoices/",
+    create: "/api/invoices/create/",
+    open: "/api/invoices/open/",
     detail: (id: number | string) => `/api/invoices/${id}/`,
-    issue: (id: number | string) => `/api/invoices/${id}/issue/`,
   },
 
   payments: {
     list: "/api/payments/",
+    create: "/api/payments/create/",
+    pending: "/api/payments/pending/",
     detail: (id: number | string) => `/api/payments/${id}/`,
-    confirm: (id: number | string) => `/api/payments/${id}/confirm/`,
-  },
-
-  agents: {
-    list: "/api/agents/",
-    detail: (id: number | string) => `/api/agents/${id}/`,
-    approve: (id: number | string) => `/api/agents/${id}/approve/`,
-  },
-
-  providers: {
-    list: "/api/providers/",
-    detail: (id: number | string) => `/api/providers/${id}/`,
-  },
-
-  contracts: {
-    list: "/api/contracts/",
-    detail: (id: number | string) => `/api/contracts/${id}/`,
-  },
-
-  serviceItems: {
-    list: "/api/service-items/",
-    active: "/api/service-items/active/",
-    detail: (id: number | string) => `/api/service-items/${id}/`,
   },
 
   accounting: {
-    trialBalance: "/api/accounting/reports/trial-balance/",
-    profitLoss: "/api/accounting/reports/profit-loss/",
-    balanceSheet: "/api/accounting/reports/balance-sheet/",
-    ledger: "/api/accounting/ledger/",
-    journals: "/api/accounting/journals/",
+    accounts: "/api/accounting/accounts/",
     accountDetail: (id: number | string) => `/api/accounting/accounts/${id}/`,
+    journals: "/api/accounting/journals/",
     journalDetail: (id: number | string) => `/api/accounting/journals/${id}/`,
-  },
-
-  notificationCenter: {
-    overview: "/api/notification-center/",
-    list: "/api/notification-center/list/",
-    logs: "/api/notification-center/logs/",
-    settings: "/api/notification-center/settings/",
-    preferences: "/api/notification-center/preferences/",
-  },
-
-  systemLog: {
-    list: "/api/system-log/list/",
-    summary: "/api/system-log/summary/",
-    detail: (id: number | string) => `/api/system-log/${id}/`,
-  },
-
-  performanceCenter: {
-    overview: "/api/performance-center/",
-    list: "/api/performance-center/list/",
-    detail: "/api/performance-center/detail/",
-  },
-
-  paymentGateways: {
-    list: "/api/payment-gateways/",
+    ledger: "/api/accounting/ledger/",
+    trialBalance: "/api/accounting/trial-balance/",
+    profitLoss: "/api/accounting/profit-loss/",
+    balanceSheet: "/api/accounting/balance-sheet/",
   },
 
   treasury: {
     list: "/api/treasury/",
+    accounts: "/api/treasury/accounts/",
+    accountDetail: (id: number | string) => `/api/treasury/accounts/${id}/`,
+    cashboxes: "/api/treasury/cashboxes/",
+    banks: "/api/treasury/banks/",
+    transactions: "/api/treasury/transactions/",
+    transactionDetail: (id: number | string) =>
+      `/api/treasury/transactions/${id}/`,
+    transfers: "/api/treasury/transfers/",
+    reports: "/api/treasury/reports/",
+    settings: "/api/treasury/settings/",
+  },
+
+  users: {
+    list: "/api/users/",
+    detail: (id: number | string) => `/api/users/${id}/`,
+    activate: (id: number | string) => `/api/users/${id}/activate/`,
+    deactivate: (id: number | string) => `/api/users/${id}/deactivate/`,
+    sendPasswordLink: (id: number | string) =>
+      `/api/users/${id}/send-password-link/`,
+  },
+
+  auth: {
+    csrf: "/api/auth/csrf/",
+    whoami: "/api/auth/whoami/",
+    login: "/api/auth/login/",
+    logout: "/api/auth/logout/",
+    profile: "/api/auth/profile/",
+    changePassword: "/api/auth/change-password/",
   },
 
   whatsapp: {
-    base: "/api/whatsapp/",
+    list: "/api/whatsapp/",
+    settings: "/api/whatsapp/settings/",
+    logs: "/api/whatsapp/logs/",
+    templates: "/api/whatsapp/templates/",
+    broadcasts: "/api/whatsapp/broadcasts/",
+  },
+
+  notificationCenter: {
+    overview: "/api/notification-center/",
+    list: "/api/notification-center/",
+  },
+
+  notifications: {
+    list: "/api/notification-center/",
+  },
+
+  systemLog: {
+    summary: "/api/system-log/summary/",
+    list: "/api/system-log/",
   },
 } as const;

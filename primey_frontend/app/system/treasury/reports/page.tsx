@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Can } from "@/components/guards/Can";
+import { PermissionGuard } from "@/components/guards/PermissionGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,6 +44,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PERMISSIONS } from "@/lib/permissions";
 
 type AppLocale = "ar" | "en";
 
@@ -83,12 +86,14 @@ type TreasuryTransaction = {
     name?: string;
     code?: string;
     account_type?: string;
-  };
+  } | null;
+  treasury_account_id?: number | string | null;
   destination_account?: {
     id?: number | string;
     name?: string;
     code?: string;
   } | null;
+  destination_account_id?: number | string | null;
   reference?: string;
   external_reference?: string;
   description?: string;
@@ -114,29 +119,139 @@ type ReportLine = {
 
 type DateRangePreset = "THIS_MONTH" | "TODAY" | "LAST_30" | "ALL";
 
+type AccountTypeFilter = "ALL" | "CASHBOX" | "BANK";
+type TransactionStatusFilter = "ALL" | "DRAFT" | "CONFIRMED" | "CANCELLED";
+
+const CURRENCY_ICON_PATH = "/currency/sar.svg";
+
 function readLocale(): AppLocale {
-  if (typeof window === "undefined") return "ar";
+  try {
+    if (typeof window === "undefined") return "ar";
 
-  const saved = window.localStorage.getItem("primey-locale");
-  if (saved === "ar" || saved === "en") return saved;
+    const saved = window.localStorage.getItem("primey-locale");
+    if (saved === "ar" || saved === "en") return saved;
 
-  return document.documentElement.lang === "en" ? "en" : "ar";
+    return document.documentElement.lang === "en" ? "en" : "ar";
+  } catch (error) {
+    console.error("Read locale error:", error);
+    return "ar";
+  }
 }
 
-function toArray(payload: any): any[] {
+function applyDocumentLocale(locale: AppLocale) {
+  try {
+    if (typeof document === "undefined") return;
+
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch (error) {
+    console.error("Apply locale error:", error);
+  }
+}
+
+function toArray(payload: unknown): unknown[] {
+  const data = payload as {
+    data?: unknown[] | { items?: unknown[] };
+    items?: unknown[];
+    results?: unknown[];
+  };
+
   if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.data?.items)) return payload.data.items;
-  if (Array.isArray(payload?.items)) return payload.items;
-  if (Array.isArray(payload?.results)) return payload.results;
-  if (Array.isArray(payload?.data)) return payload.data;
+
+  if (
+    data?.data &&
+    typeof data.data === "object" &&
+    !Array.isArray(data.data) &&
+    Array.isArray(data.data.items)
+  ) {
+    return data.data.items;
+  }
+
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.results)) return data.results;
+  if (Array.isArray(data?.data)) return data.data;
+
   return [];
 }
 
+function normalizeAccount(item: unknown): TreasuryAccount {
+  const row = (item || {}) as Record<string, unknown>;
+
+  return {
+    id: (row.id as number | string | undefined) || "",
+    name: String(row.name || ""),
+    code: String(row.code || ""),
+    account_type: String(row.account_type || ""),
+    account_type_label: row.account_type_label
+      ? String(row.account_type_label)
+      : undefined,
+    status: String(row.status || ""),
+    status_label: row.status_label ? String(row.status_label) : undefined,
+    opening_balance: String(row.opening_balance || "0.00"),
+    current_balance: String(row.current_balance || "0.00"),
+    currency: String(row.currency || "SAR"),
+    bank_name: row.bank_name ? String(row.bank_name) : undefined,
+    is_default: Boolean(row.is_default),
+  };
+}
+
+function normalizeTransaction(item: unknown): TreasuryTransaction {
+  const row = (item || {}) as Record<string, unknown>;
+
+  return {
+    id: (row.id as number | string | undefined) || "",
+    transaction_number: String(row.transaction_number || ""),
+    transaction_type: String(row.transaction_type || ""),
+    transaction_type_label: row.transaction_type_label
+      ? String(row.transaction_type_label)
+      : undefined,
+    status: String(row.status || ""),
+    status_label: row.status_label ? String(row.status_label) : undefined,
+    transaction_date: String(row.transaction_date || ""),
+    amount: String(row.amount || "0.00"),
+    currency: String(row.currency || "SAR"),
+    treasury_account:
+      row.treasury_account && typeof row.treasury_account === "object"
+        ? (row.treasury_account as TreasuryTransaction["treasury_account"])
+        : null,
+    treasury_account_id: row.treasury_account_id as
+      | number
+      | string
+      | null
+      | undefined,
+    destination_account:
+      row.destination_account && typeof row.destination_account === "object"
+        ? (row.destination_account as TreasuryTransaction["destination_account"])
+        : null,
+    destination_account_id: row.destination_account_id as
+      | number
+      | string
+      | null
+      | undefined,
+    reference: row.reference ? String(row.reference) : undefined,
+    external_reference: row.external_reference
+      ? String(row.external_reference)
+      : undefined,
+    description: row.description ? String(row.description) : undefined,
+  };
+}
+
 function money(value: string | number | null | undefined) {
+  const number = Number(value || 0);
+
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(Number(value || 0));
+  }).format(Number.isFinite(number) ? number : 0);
+}
+
+function formatNumber(value: string | number | null | undefined) {
+  const number = Number(value || 0);
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(number) ? number : 0);
 }
 
 function today() {
@@ -145,12 +260,16 @@ function today() {
 
 function firstDayOfMonth() {
   const date = new Date();
-  return new Date(date.getFullYear(), date.getMonth(), 1).toISOString().slice(0, 10);
+
+  return new Date(date.getFullYear(), date.getMonth(), 1)
+    .toISOString()
+    .slice(0, 10);
 }
 
 function last30Days() {
   const date = new Date();
   date.setDate(date.getDate() - 30);
+
   return date.toISOString().slice(0, 10);
 }
 
@@ -158,11 +277,13 @@ function isWithinDateRange(value: string, dateFrom: string, dateTo: string) {
   if (!value) return false;
   if (dateFrom && value < dateFrom) return false;
   if (dateTo && value > dateTo) return false;
+
   return true;
 }
 
 function numeric(value: string | number | null | undefined) {
   const number = Number(value || 0);
+
   return Number.isFinite(number) ? number : 0;
 }
 
@@ -186,17 +307,25 @@ function dictionary(locale: AppLocale) {
     accountType: ar ? "نوع الحساب" : "Account Type",
     transactionStatus: ar ? "حالة الحركات" : "Transaction Status",
     includeCancelled: ar ? "إظهار الملغاة" : "Include Cancelled",
-    search: ar ? "ابحث باسم الحساب أو الكود أو نوع الحساب..." : "Search by account name, code, or type...",
+    search: ar
+      ? "ابحث باسم الحساب أو الكود أو نوع الحساب..."
+      : "Search by account name, code, or type...",
     apply: ar ? "تطبيق" : "Apply",
     loading: ar ? "جاري تحميل تقرير الخزينة..." : "Loading treasury report...",
     apiError: ar ? "تعذر تحميل تقرير الخزينة." : "Unable to load treasury report.",
     refreshed: ar ? "تم تحديث تقرير الخزينة" : "Treasury report refreshed",
-    exported: ar ? "تم تصدير تقرير الخزينة Excel" : "Treasury report exported to Excel",
+    exported: ar
+      ? "تم تصدير تقرير الخزينة Excel"
+      : "Treasury report exported to Excel",
     noData: ar ? "لا توجد بيانات مطابقة للتقرير." : "No matching report data.",
     reportTable: ar ? "تفصيل التقرير حسب الحساب" : "Report Breakdown by Account",
-    latestTransactions: ar ? "آخر الحركات ضمن التقرير" : "Latest Transactions in Report",
+    latestTransactions: ar
+      ? "آخر الحركات ضمن التقرير"
+      : "Latest Transactions in Report",
     totalBalance: ar ? "إجمالي الأرصدة" : "Total Balance",
-    openingBalance: ar ? "إجمالي الأرصدة الافتتاحية" : "Total Opening Balance",
+    openingBalance: ar
+      ? "إجمالي الأرصدة الافتتاحية"
+      : "Total Opening Balance",
     totalInflow: ar ? "إجمالي الداخل" : "Total Inflow",
     totalOutflow: ar ? "إجمالي الخارج" : "Total Outflow",
     netMovement: ar ? "صافي الحركة" : "Net Movement",
@@ -321,6 +450,15 @@ function statusBadge(status: string, t: ReturnType<typeof dictionary>) {
   );
 }
 
+function MoneyValue({ value }: { value: string | number | null | undefined }) {
+  return (
+    <span className="inline-flex items-center gap-2 font-semibold" dir="ltr">
+      <Image src={CURRENCY_ICON_PATH} alt="SAR" width={15} height={15} />
+      {money(value)}
+    </span>
+  );
+}
+
 export default function TreasuryReportsPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
 
@@ -331,12 +469,13 @@ export default function TreasuryReportsPage() {
   const [query, setQuery] = useState("");
   const [dateFrom, setDateFrom] = useState(firstDayOfMonth());
   const [dateTo, setDateTo] = useState(today());
-  const [accountType, setAccountType] = useState<"ALL" | "CASHBOX" | "BANK">("ALL");
-  const [status, setStatus] = useState<"ALL" | "DRAFT" | "CONFIRMED" | "CANCELLED">("ALL");
+  const [accountType, setAccountType] = useState<AccountTypeFilter>("ALL");
+  const [status, setStatus] = useState<TransactionStatusFilter>("ALL");
   const [includeCancelled, setIncludeCancelled] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Array<string | number>>([]);
 
   const t = useMemo(() => dictionary(locale), [locale]);
+  const isArabic = locale === "ar";
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((transaction) => {
@@ -346,7 +485,6 @@ export default function TreasuryReportsPage() {
           : isWithinDateRange(transaction.transaction_date, dateFrom, dateTo);
 
       const matchesStatus = status === "ALL" || transaction.status === status;
-
       const matchesCancelled =
         includeCancelled || transaction.status !== "CANCELLED";
 
@@ -358,12 +496,16 @@ export default function TreasuryReportsPage() {
     const clean = query.trim().toLowerCase();
 
     return accounts
-      .filter((account) => accountType === "ALL" || account.account_type === accountType)
+      .filter(
+        (account) =>
+          accountType === "ALL" || account.account_type === accountType,
+      )
       .map((account) => {
         const accountTransactions = filteredTransactions.filter(
           (transaction) =>
-            String(transaction.treasury_account?.id || "") === String(account.id) ||
-            String((transaction as any).treasury_account_id || "") === String(account.id),
+            String(transaction.treasury_account?.id || "") ===
+              String(account.id) ||
+            String(transaction.treasury_account_id || "") === String(account.id),
         );
 
         const totals = accountTransactions.reduce(
@@ -383,8 +525,7 @@ export default function TreasuryReportsPage() {
                 sum.confirmed_count +
                 (transaction.status === "CONFIRMED" ? 1 : 0),
               draft_count:
-                sum.draft_count +
-                (transaction.status === "DRAFT" ? 1 : 0),
+                sum.draft_count + (transaction.status === "DRAFT" ? 1 : 0),
               cancelled_count:
                 sum.cancelled_count +
                 (transaction.status === "CANCELLED" ? 1 : 0),
@@ -433,10 +574,22 @@ export default function TreasuryReportsPage() {
   }, [accounts, filteredTransactions, accountType, query, t]);
 
   const summary = useMemo(() => {
-    const totalBalance = reportLines.reduce((sum, line) => sum + line.current_balance, 0);
-    const openingBalance = reportLines.reduce((sum, line) => sum + line.opening_balance, 0);
-    const totalInflow = reportLines.reduce((sum, line) => sum + line.inflow, 0);
-    const totalOutflow = reportLines.reduce((sum, line) => sum + line.outflow, 0);
+    const totalBalance = reportLines.reduce(
+      (sum, line) => sum + line.current_balance,
+      0,
+    );
+    const openingBalance = reportLines.reduce(
+      (sum, line) => sum + line.opening_balance,
+      0,
+    );
+    const totalInflow = reportLines.reduce(
+      (sum, line) => sum + line.inflow,
+      0,
+    );
+    const totalOutflow = reportLines.reduce(
+      (sum, line) => sum + line.outflow,
+      0,
+    );
 
     const activeAccounts = accounts.filter(
       (account) =>
@@ -444,8 +597,12 @@ export default function TreasuryReportsPage() {
         (accountType === "ALL" || account.account_type === accountType),
     ).length;
 
-    const cashboxes = accounts.filter((account) => account.account_type === "CASHBOX").length;
-    const banks = accounts.filter((account) => account.account_type === "BANK").length;
+    const cashboxes = accounts.filter(
+      (account) => account.account_type === "CASHBOX",
+    ).length;
+    const banks = accounts.filter(
+      (account) => account.account_type === "BANK",
+    ).length;
 
     const confirmedTransactions = filteredTransactions.filter(
       (transaction) => transaction.status === "CONFIRMED",
@@ -474,6 +631,7 @@ export default function TreasuryReportsPage() {
       .sort((a, b) => {
         const dateA = `${a.transaction_date || ""}-${String(a.id)}`;
         const dateB = `${b.transaction_date || ""}-${String(b.id)}`;
+
         return dateB.localeCompare(dateA);
       })
       .slice(0, 10);
@@ -489,33 +647,49 @@ export default function TreasuryReportsPage() {
           headers: {
             Accept: "application/json",
           },
+          cache: "no-store",
         }),
         fetch("/api/treasury/transactions/?page_size=500", {
           credentials: "include",
           headers: {
             Accept: "application/json",
           },
+          cache: "no-store",
         }),
       ]);
 
       const accountsPayload = await accountsResponse.json().catch(() => null);
-      const transactionsPayload = await transactionsResponse.json().catch(() => null);
+      const transactionsPayload = await transactionsResponse
+        .json()
+        .catch(() => null);
 
-      if (!accountsResponse.ok || accountsPayload?.success === false) {
-        throw new Error(accountsPayload?.message || `HTTP ${accountsResponse.status}`);
+      if (
+        !accountsResponse.ok ||
+        accountsPayload?.success === false ||
+        accountsPayload?.ok === false
+      ) {
+        throw new Error(
+          accountsPayload?.message || `HTTP ${accountsResponse.status}`,
+        );
       }
 
-      if (!transactionsResponse.ok || transactionsPayload?.success === false) {
-        throw new Error(transactionsPayload?.message || `HTTP ${transactionsResponse.status}`);
+      if (
+        !transactionsResponse.ok ||
+        transactionsPayload?.success === false ||
+        transactionsPayload?.ok === false
+      ) {
+        throw new Error(
+          transactionsPayload?.message || `HTTP ${transactionsResponse.status}`,
+        );
       }
 
-      setAccounts(toArray(accountsPayload) as TreasuryAccount[]);
-      setTransactions(toArray(transactionsPayload) as TreasuryTransaction[]);
+      setAccounts(toArray(accountsPayload).map(normalizeAccount));
+      setTransactions(toArray(transactionsPayload).map(normalizeTransaction));
       setSelectedIds([]);
 
       if (showToast) toast.success(t.refreshed);
     } catch (error) {
-      console.error(error);
+      console.error("Treasury report load error:", error);
       setAccounts([]);
       setTransactions([]);
       toast.error(t.apiError);
@@ -561,7 +735,8 @@ export default function TreasuryReportsPage() {
 
     const linesRows = reportLines.map((line) => ({
       [t.table.account]: `${line.account_code} - ${line.account_name}`,
-      [t.table.type]: t.types[line.account_type as keyof typeof t.types] || line.account_type,
+      [t.table.type]:
+        t.types[line.account_type as keyof typeof t.types] || line.account_type,
       [t.table.opening]: money(line.opening_balance),
       [t.table.balance]: money(line.current_balance),
       [t.table.inflow]: money(line.inflow),
@@ -581,7 +756,8 @@ export default function TreasuryReportsPage() {
       [t.table.account]: transaction.treasury_account?.name || "-",
       [t.table.amount]: money(transaction.amount),
       [t.table.status]:
-        t.statuses[transaction.status as keyof typeof t.statuses] || transaction.status,
+        t.statuses[transaction.status as keyof typeof t.statuses] ||
+        transaction.status,
     }));
 
     const workbook = XLSX.utils.book_new();
@@ -637,10 +813,14 @@ export default function TreasuryReportsPage() {
     toast.success(t.exported);
   }
 
+  function handlePrint() {
+    if (typeof window === "undefined") return;
+    window.print();
+  }
+
   useEffect(() => {
     const next = readLocale();
-    document.documentElement.lang = next;
-    document.documentElement.dir = next === "ar" ? "rtl" : "ltr";
+    applyDocumentLocale(next);
     setLocale(next);
   }, []);
 
@@ -650,294 +830,61 @@ export default function TreasuryReportsPage() {
   }, [locale]);
 
   const allSelected =
-    reportLines.length > 0 && reportLines.every((line) => selectedIds.includes(line.id));
+    reportLines.length > 0 &&
+    reportLines.every((line) => selectedIds.includes(line.id));
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="rounded-full">
-              /system/treasury/reports
-            </Badge>
-            <Badge className="rounded-full">
-              {reportLines.length} / {accounts.length}
-            </Badge>
+    <PermissionGuard
+      permission={PERMISSIONS.TREASURY_VIEW}
+      workspace="system"
+      mode="fallback"
+    >
+      <div className="space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="rounded-full">
+                /system/treasury/reports
+              </Badge>
+              <Badge className="rounded-full">
+                {formatNumber(reportLines.length)} / {formatNumber(accounts.length)}
+              </Badge>
+            </div>
+
+            <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+              {t.title}
+            </h1>
+
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+              {t.subtitle}
+            </p>
           </div>
 
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.title}
-          </h1>
-
-          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            {t.subtitle}
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Link href="/system/treasury">
-            <Button variant="outline" className="h-10 rounded-xl">
-              <ArrowLeft className="h-4 w-4" />
-              {t.back}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button asChild variant="outline" className="h-10 rounded-xl">
+              <Link href="/system/treasury">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Link>
             </Button>
-          </Link>
 
-          <Link href="/system/treasury/accounts">
-            <Button variant="outline" className="h-10 rounded-xl">
-              <Wallet className="h-4 w-4" />
-              {t.accounts}
+            <Button asChild variant="outline" className="h-10 rounded-xl">
+              <Link href="/system/treasury/accounts">
+                <Wallet className="h-4 w-4" />
+                {t.accounts}
+              </Link>
             </Button>
-          </Link>
 
-          <Link href="/system/treasury/transactions">
-            <Button variant="outline" className="h-10 rounded-xl">
-              <CreditCard className="h-4 w-4" />
-              {t.transactions}
+            <Button asChild variant="outline" className="h-10 rounded-xl">
+              <Link href="/system/treasury/transactions">
+                <CreditCard className="h-4 w-4" />
+                {t.transactions}
+              </Link>
             </Button>
-          </Link>
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            disabled={isLoading}
-            onClick={() => loadReport(true)}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            {t.refresh}
-          </Button>
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            disabled={!reportLines.length}
-            onClick={exportExcel}
-          >
-            <Download className="h-4 w-4" />
-            {t.export}
-          </Button>
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => window.print()}
-          >
-            <Printer className="h-4 w-4" />
-            {t.print}
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm text-muted-foreground">{t.totalBalance}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <Image src="/currency/sar.svg" alt="SAR" width={18} height={18} />
-                  <p className="text-2xl font-bold">
-                    {isLoading ? "..." : money(summary.totalBalance)}
-                  </p>
-                </div>
-              </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                <Wallet className="h-5 w-5" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm text-muted-foreground">{t.totalInflow}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <Image src="/currency/sar.svg" alt="SAR" width={18} height={18} />
-                  <p className="text-2xl font-bold">
-                    {isLoading ? "..." : money(summary.totalInflow)}
-                  </p>
-                </div>
-              </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                <TrendingUp className="h-5 w-5" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm text-muted-foreground">{t.totalOutflow}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <Image src="/currency/sar.svg" alt="SAR" width={18} height={18} />
-                  <p className="text-2xl font-bold">
-                    {isLoading ? "..." : money(summary.totalOutflow)}
-                  </p>
-                </div>
-              </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                <TrendingDown className="h-5 w-5" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm text-muted-foreground">{t.netMovement}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <Image src="/currency/sar.svg" alt="SAR" width={18} height={18} />
-                  <p className="text-2xl font-bold">
-                    {isLoading ? "..." : money(summary.netMovement)}
-                  </p>
-                </div>
-              </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                <FileBarChart className="h-5 w-5" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">{t.activeAccounts}</p>
-            <p className="mt-2 text-2xl font-bold">
-              {isLoading ? "..." : summary.activeAccounts}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">{t.cashboxes}</p>
-            <div className="mt-2 flex items-center gap-2">
-              <Banknote className="h-5 w-5" />
-              <p className="text-2xl font-bold">{isLoading ? "..." : summary.cashboxes}</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">{t.banks}</p>
-            <div className="mt-2 flex items-center gap-2">
-              <Building2 className="h-5 w-5" />
-              <p className="text-2xl font-bold">{isLoading ? "..." : summary.banks}</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">{t.confirmedTransactions}</p>
-            <p className="mt-2 text-2xl font-bold">
-              {isLoading ? "..." : summary.confirmedTransactions}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <CalendarDays className="h-4 w-4" />
-            {t.filters}
-          </CardTitle>
-          <CardDescription>{t.subtitle}</CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {(["THIS_MONTH", "TODAY", "LAST_30", "ALL"] as DateRangePreset[]).map(
-              (preset) => (
-                <Button
-                  key={preset}
-                  variant="outline"
-                  className="h-10 rounded-xl"
-                  onClick={() => applyPreset(preset)}
-                >
-                  {t.presets[preset]}
-                </Button>
-              ),
-            )}
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-6">
-            <div className="space-y-2">
-              <Label>{t.dateFrom}</Label>
-              <Input
-                type="date"
-                className="h-10 rounded-xl"
-                value={dateFrom}
-                onChange={(event) => setDateFrom(event.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>{t.dateTo}</Label>
-              <Input
-                type="date"
-                className="h-10 rounded-xl"
-                value={dateTo}
-                onChange={(event) => setDateTo(event.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>{t.accountType}</Label>
-              <select
-                className="h-10 w-full rounded-xl border bg-background px-3 text-sm"
-                value={accountType}
-                onChange={(event) =>
-                  setAccountType(event.target.value as "ALL" | "CASHBOX" | "BANK")
-                }
-              >
-                <option value="ALL">{t.types.ALL}</option>
-                <option value="CASHBOX">{t.types.CASHBOX}</option>
-                <option value="BANK">{t.types.BANK}</option>
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>{t.transactionStatus}</Label>
-              <select
-                className="h-10 w-full rounded-xl border bg-background px-3 text-sm"
-                value={status}
-                onChange={(event) =>
-                  setStatus(
-                    event.target.value as "ALL" | "DRAFT" | "CONFIRMED" | "CANCELLED",
-                  )
-                }
-              >
-                <option value="ALL">{t.statuses.ALL}</option>
-                <option value="CONFIRMED">{t.statuses.CONFIRMED}</option>
-                <option value="DRAFT">{t.statuses.DRAFT}</option>
-                <option value="CANCELLED">{t.statuses.CANCELLED}</option>
-              </select>
-            </div>
-
-            <label className="flex h-10 items-center gap-2 self-end rounded-xl border px-3 text-sm">
-              <Checkbox
-                checked={includeCancelled}
-                onCheckedChange={(checked) => setIncludeCancelled(Boolean(checked))}
-              />
-              {t.includeCancelled}
-            </label>
 
             <Button
-              className="h-10 self-end rounded-xl"
+              variant="outline"
+              className="h-10 rounded-xl"
               disabled={isLoading}
               onClick={() => loadReport(true)}
             >
@@ -946,213 +893,515 @@ export default function TreasuryReportsPage() {
               ) : (
                 <RefreshCcw className="h-4 w-4" />
               )}
-              {t.apply}
+              {t.refresh}
             </Button>
-          </div>
-        </CardContent>
-      </Card>
 
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardHeader>
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <FileBarChart className="h-4 w-4" />
-                {t.reportTable}
-              </CardTitle>
-              <CardDescription>{t.subtitle}</CardDescription>
-            </div>
-
-            <div className="relative w-full xl:max-w-sm">
-              <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t.search}
-                className="h-10 rounded-xl pr-10"
-              />
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          <div id="treasury-report-print-area" className="overflow-hidden rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">
-                    <Checkbox
-                      checked={allSelected}
-                      onCheckedChange={() => {
-                        const ids = reportLines.map((line) => line.id);
-                        setSelectedIds((current) =>
-                          allSelected
-                            ? current.filter((id) => !ids.includes(String(id)))
-                            : Array.from(new Set([...current, ...ids])),
-                        );
-                      }}
-                    />
-                  </TableHead>
-                  <TableHead>{t.table.account}</TableHead>
-                  <TableHead>{t.table.type}</TableHead>
-                  <TableHead>{t.table.opening}</TableHead>
-                  <TableHead>{t.table.balance}</TableHead>
-                  <TableHead>{t.table.inflow}</TableHead>
-                  <TableHead>{t.table.outflow}</TableHead>
-                  <TableHead>{t.table.net}</TableHead>
-                  <TableHead>{t.table.count}</TableHead>
-                  <TableHead>{t.table.confirmed}</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={10} className="h-32 text-center">
-                      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        {t.loading}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : reportLines.length ? (
-                  reportLines.map((line) => (
-                    <TableRow key={line.id}>
-                      <TableCell>
-                        <Checkbox
-                          checked={selectedIds.includes(line.id)}
-                          onCheckedChange={() =>
-                            setSelectedIds((current) =>
-                              current.includes(line.id)
-                                ? current.filter((id) => id !== line.id)
-                                : [...current, line.id],
-                            )
-                          }
-                        />
-                      </TableCell>
-
-                      <TableCell>
-                        <Link
-                          href={`/system/treasury/accounts/${line.account_id}`}
-                          className="font-medium hover:underline"
-                        >
-                          {line.account_code} - {line.account_name}
-                        </Link>
-                      </TableCell>
-
-                      <TableCell>
-                        <Badge variant="secondary" className="rounded-full">
-                          {t.types[line.account_type as keyof typeof t.types] ||
-                            line.account_type}
-                        </Badge>
-                      </TableCell>
-
-                      <TableCell>
-                        <span className="flex items-center gap-2 font-semibold">
-                          <Image src="/currency/sar.svg" alt="SAR" width={15} height={15} />
-                          {money(line.opening_balance)}
-                        </span>
-                      </TableCell>
-
-                      <TableCell>
-                        <span className="flex items-center gap-2 font-semibold">
-                          <Image src="/currency/sar.svg" alt="SAR" width={15} height={15} />
-                          {money(line.current_balance)}
-                        </span>
-                      </TableCell>
-
-                      <TableCell>
-                        <span className="flex items-center gap-2 font-semibold">
-                          <Image src="/currency/sar.svg" alt="SAR" width={15} height={15} />
-                          {money(line.inflow)}
-                        </span>
-                      </TableCell>
-
-                      <TableCell>
-                        <span className="flex items-center gap-2 font-semibold">
-                          <Image src="/currency/sar.svg" alt="SAR" width={15} height={15} />
-                          {money(line.outflow)}
-                        </span>
-                      </TableCell>
-
-                      <TableCell>
-                        <span className="flex items-center gap-2 font-bold">
-                          <Image src="/currency/sar.svg" alt="SAR" width={15} height={15} />
-                          {money(line.inflow - line.outflow)}
-                        </span>
-                      </TableCell>
-
-                      <TableCell>{line.transactions_count}</TableCell>
-                      <TableCell>{line.confirmed_count}</TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
-                      {t.noData}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="text-sm text-muted-foreground">
-            {selectedIds.length} / {reportLines.length} {t.selected}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <CreditCard className="h-4 w-4" />
-            {t.latestTransactions}
-          </CardTitle>
-          <CardDescription>{t.transactions}</CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-3">
-          {isLoading ? (
-            <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {t.loading}
-            </div>
-          ) : latestTransactions.length ? (
-            latestTransactions.map((transaction) => (
-              <Link
-                key={transaction.id}
-                href={`/system/treasury/transactions/${transaction.id}`}
+            <Can
+              anyPermissions={[
+                PERMISSIONS.TREASURY_EXPORT,
+                PERMISSIONS.REPORTS_EXPORT,
+              ]}
+            >
+              <Button
+                variant="outline"
+                className="h-10 rounded-xl"
+                disabled={!reportLines.length}
+                onClick={exportExcel}
               >
-                <div className="flex flex-col gap-3 rounded-xl border p-3 transition hover:bg-muted/40 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="font-medium">{transaction.transaction_number}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {transaction.transaction_date || "-"} ·{" "}
-                      {t.txTypes[
-                        transaction.transaction_type as keyof typeof t.txTypes
-                      ] || transaction.transaction_type}{" "}
-                      · {transaction.treasury_account?.name || "-"}
+                <Download className="h-4 w-4" />
+                {t.export}
+              </Button>
+            </Can>
+
+            <Can
+              anyPermissions={[
+                PERMISSIONS.TREASURY_EXPORT,
+                PERMISSIONS.REPORTS_EXPORT,
+              ]}
+            >
+              <Button
+                variant="outline"
+                className="h-10 rounded-xl"
+                onClick={handlePrint}
+              >
+                <Printer className="h-4 w-4" />
+                {t.print}
+              </Button>
+            </Can>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {t.totalBalance}
+                  </p>
+                  <div className="mt-2 flex items-center gap-2" dir="ltr">
+                    <Image
+                      src={CURRENCY_ICON_PATH}
+                      alt="SAR"
+                      width={18}
+                      height={18}
+                    />
+                    <p className="text-2xl font-bold">
+                      {isLoading ? "..." : money(summary.totalBalance)}
                     </p>
                   </div>
+                </div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                  <Wallet className="h-5 w-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-                  <div className="flex flex-wrap items-center gap-3">
-                    {statusBadge(transaction.status, t)}
-                    <span className="flex items-center gap-2 font-bold">
-                      <Image src="/currency/sar.svg" alt="SAR" width={16} height={16} />
-                      {money(transaction.amount)}
-                    </span>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {t.totalInflow}
+                  </p>
+                  <div className="mt-2 flex items-center gap-2" dir="ltr">
+                    <Image
+                      src={CURRENCY_ICON_PATH}
+                      alt="SAR"
+                      width={18}
+                      height={18}
+                    />
+                    <p className="text-2xl font-bold">
+                      {isLoading ? "..." : money(summary.totalInflow)}
+                    </p>
                   </div>
                 </div>
-              </Link>
-            ))
-          ) : (
-            <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-              {t.noData}
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                  <TrendingUp className="h-5 w-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {t.totalOutflow}
+                  </p>
+                  <div className="mt-2 flex items-center gap-2" dir="ltr">
+                    <Image
+                      src={CURRENCY_ICON_PATH}
+                      alt="SAR"
+                      width={18}
+                      height={18}
+                    />
+                    <p className="text-2xl font-bold">
+                      {isLoading ? "..." : money(summary.totalOutflow)}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                  <TrendingDown className="h-5 w-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {t.netMovement}
+                  </p>
+                  <div className="mt-2 flex items-center gap-2" dir="ltr">
+                    <Image
+                      src={CURRENCY_ICON_PATH}
+                      alt="SAR"
+                      width={18}
+                      height={18}
+                    />
+                    <p className="text-2xl font-bold">
+                      {isLoading ? "..." : money(summary.netMovement)}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                  <FileBarChart className="h-5 w-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">
+                {t.activeAccounts}
+              </p>
+              <p className="mt-2 text-2xl font-bold">
+                {isLoading ? "..." : formatNumber(summary.activeAccounts)}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">{t.cashboxes}</p>
+              <div className="mt-2 flex items-center gap-2">
+                <Banknote className="h-5 w-5" />
+                <p className="text-2xl font-bold">
+                  {isLoading ? "..." : formatNumber(summary.cashboxes)}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">{t.banks}</p>
+              <div className="mt-2 flex items-center gap-2">
+                <Building2 className="h-5 w-5" />
+                <p className="text-2xl font-bold">
+                  {isLoading ? "..." : formatNumber(summary.banks)}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">
+                {t.confirmedTransactions}
+              </p>
+              <p className="mt-2 text-2xl font-bold">
+                {isLoading
+                  ? "..."
+                  : formatNumber(summary.confirmedTransactions)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CalendarDays className="h-4 w-4" />
+              {t.filters}
+            </CardTitle>
+            <CardDescription>{t.subtitle}</CardDescription>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {(["THIS_MONTH", "TODAY", "LAST_30", "ALL"] as DateRangePreset[]).map(
+                (preset) => (
+                  <Button
+                    key={preset}
+                    variant="outline"
+                    className="h-10 rounded-xl"
+                    onClick={() => applyPreset(preset)}
+                  >
+                    {t.presets[preset]}
+                  </Button>
+                ),
+              )}
             </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+
+            <div className="grid gap-4 lg:grid-cols-6">
+              <div className="space-y-2">
+                <Label>{t.dateFrom}</Label>
+                <Input
+                  type="date"
+                  className="h-10 rounded-xl"
+                  value={dateFrom}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>{t.dateTo}</Label>
+                <Input
+                  type="date"
+                  className="h-10 rounded-xl"
+                  value={dateTo}
+                  onChange={(event) => setDateTo(event.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>{t.accountType}</Label>
+                <select
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm"
+                  value={accountType}
+                  onChange={(event) =>
+                    setAccountType(event.target.value as AccountTypeFilter)
+                  }
+                >
+                  <option value="ALL">{t.types.ALL}</option>
+                  <option value="CASHBOX">{t.types.CASHBOX}</option>
+                  <option value="BANK">{t.types.BANK}</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>{t.transactionStatus}</Label>
+                <select
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm"
+                  value={status}
+                  onChange={(event) =>
+                    setStatus(event.target.value as TransactionStatusFilter)
+                  }
+                >
+                  <option value="ALL">{t.statuses.ALL}</option>
+                  <option value="CONFIRMED">{t.statuses.CONFIRMED}</option>
+                  <option value="DRAFT">{t.statuses.DRAFT}</option>
+                  <option value="CANCELLED">{t.statuses.CANCELLED}</option>
+                </select>
+              </div>
+
+              <label className="flex h-10 items-center gap-2 self-end rounded-xl border px-3 text-sm">
+                <Checkbox
+                  checked={includeCancelled}
+                  onCheckedChange={(checked) =>
+                    setIncludeCancelled(Boolean(checked))
+                  }
+                />
+                {t.includeCancelled}
+              </label>
+
+              <Button
+                className="h-10 self-end rounded-xl"
+                disabled={isLoading}
+                onClick={() => loadReport(true)}
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-4 w-4" />
+                )}
+                {t.apply}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardHeader>
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <FileBarChart className="h-4 w-4" />
+                  {t.reportTable}
+                </CardTitle>
+                <CardDescription>{t.subtitle}</CardDescription>
+              </div>
+
+              <div className="relative w-full xl:max-w-sm">
+                <Search
+                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+                    isArabic ? "right-3" : "left-3"
+                  }`}
+                />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t.search}
+                  className={`h-10 rounded-xl ${
+                    isArabic ? "pr-10" : "pl-10"
+                  }`}
+                />
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            <div
+              id="treasury-report-print-area"
+              className="overflow-hidden rounded-lg border"
+            >
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">
+                      <Checkbox
+                        checked={allSelected}
+                        onCheckedChange={() => {
+                          const ids = reportLines.map((line) => line.id);
+                          setSelectedIds((current) =>
+                            allSelected
+                              ? current.filter((id) => !ids.includes(String(id)))
+                              : Array.from(new Set([...current, ...ids])),
+                          );
+                        }}
+                      />
+                    </TableHead>
+                    <TableHead>{t.table.account}</TableHead>
+                    <TableHead>{t.table.type}</TableHead>
+                    <TableHead>{t.table.opening}</TableHead>
+                    <TableHead>{t.table.balance}</TableHead>
+                    <TableHead>{t.table.inflow}</TableHead>
+                    <TableHead>{t.table.outflow}</TableHead>
+                    <TableHead>{t.table.net}</TableHead>
+                    <TableHead>{t.table.count}</TableHead>
+                    <TableHead>{t.table.confirmed}</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={10} className="h-32 text-center">
+                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          {t.loading}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : reportLines.length ? (
+                    reportLines.map((line) => (
+                      <TableRow key={line.id}>
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedIds.includes(line.id)}
+                            onCheckedChange={() =>
+                              setSelectedIds((current) =>
+                                current.includes(line.id)
+                                  ? current.filter((id) => id !== line.id)
+                                  : [...current, line.id],
+                              )
+                            }
+                          />
+                        </TableCell>
+
+                        <TableCell>
+                          <Link
+                            href={`/system/treasury/accounts/${line.account_id}`}
+                            className="font-medium hover:underline"
+                          >
+                            {line.account_code} - {line.account_name}
+                          </Link>
+                        </TableCell>
+
+                        <TableCell>
+                          <Badge variant="secondary" className="rounded-full">
+                            {t.types[line.account_type as keyof typeof t.types] ||
+                              line.account_type}
+                          </Badge>
+                        </TableCell>
+
+                        <TableCell>
+                          <MoneyValue value={line.opening_balance} />
+                        </TableCell>
+
+                        <TableCell>
+                          <MoneyValue value={line.current_balance} />
+                        </TableCell>
+
+                        <TableCell>
+                          <MoneyValue value={line.inflow} />
+                        </TableCell>
+
+                        <TableCell>
+                          <MoneyValue value={line.outflow} />
+                        </TableCell>
+
+                        <TableCell>
+                          <span className="font-bold">
+                            <MoneyValue value={line.inflow - line.outflow} />
+                          </span>
+                        </TableCell>
+
+                        <TableCell>{formatNumber(line.transactions_count)}</TableCell>
+                        <TableCell>{formatNumber(line.confirmed_count)}</TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell
+                        colSpan={10}
+                        className="h-32 text-center text-muted-foreground"
+                      >
+                        {t.noData}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="text-sm text-muted-foreground">
+              {formatNumber(selectedIds.length)} /{" "}
+              {formatNumber(reportLines.length)} {t.selected}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CreditCard className="h-4 w-4" />
+              {t.latestTransactions}
+            </CardTitle>
+            <CardDescription>{t.transactions}</CardDescription>
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            {isLoading ? (
+              <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t.loading}
+              </div>
+            ) : latestTransactions.length ? (
+              latestTransactions.map((transaction) => (
+                <Link
+                  key={transaction.id}
+                  href={`/system/treasury/transactions/${transaction.id}`}
+                >
+                  <div className="flex flex-col gap-3 rounded-xl border p-3 transition hover:bg-muted/40 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-medium">
+                        {transaction.transaction_number}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {transaction.transaction_date || "-"} ·{" "}
+                        {t.txTypes[
+                          transaction.transaction_type as keyof typeof t.txTypes
+                        ] || transaction.transaction_type}{" "}
+                        · {transaction.treasury_account?.name || "-"}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      {statusBadge(transaction.status, t)}
+                      <span
+                        className="flex items-center gap-2 font-bold"
+                        dir="ltr"
+                      >
+                        <Image
+                          src={CURRENCY_ICON_PATH}
+                          alt="SAR"
+                          width={16}
+                          height={16}
+                        />
+                        {money(transaction.amount)}
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              ))
+            ) : (
+              <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+                {t.noData}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </PermissionGuard>
   );
 }

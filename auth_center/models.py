@@ -1,12 +1,13 @@
 # ===============================================================
 # 📂 الملف: auth_center/models.py
 # 🧭 Primey Care — Auth Center Models
-# 🚀 الإصدار: Primey Care Auth Core V1.1
+# 🚀 الإصدار: Primey Care Auth Core V1.2
 # ---------------------------------------------------------------
 # ✅ نواة هوية عامة تخدم:
 #    - سوبر أدمن النظام
 #    - المحاسبين
-#    - موظفي النظام
+#    - موظفي الدعم
+#    - مستخدمي القراءة فقط
 #    - العملاء
 #    - المندوبين
 #    - الوكلاء
@@ -22,6 +23,11 @@
 #    /provider
 #    /customer
 #    /agent
+# ---------------------------------------------------------------
+# ✅ V1.2:
+#    - إضافة RoleChoices كطبقة صلاحيات رسمية
+#    - الإبقاء على UserType كتوافق تشغيلي قديم
+#    - إضافة UserProfile.role
 # ===============================================================
 
 from __future__ import annotations
@@ -43,8 +49,8 @@ class UserType(models.TextChoices):
     """
     نوع المستخدم العام داخل Primey Care.
 
-    موديول auth_center لا يربط نفسه بأي app تشغيلي مباشرة،
-    بل يوفّر تصنيفًا عامًا يمكن لباقي الموديولات الاعتماد عليه.
+    هذا الحقل يصف نوع الـ Actor التشغيلي داخل المنصة.
+    أما الصلاحيات الفعلية فيتم التحكم بها عبر UserProfile.role.
 
     ملاحظة مهمة:
     - COMPANY أبقيناه كتوافق خلفي فقط حتى لا نكسر أي بيانات أو اختبارات قديمة.
@@ -77,6 +83,54 @@ class UserType(models.TextChoices):
 
 
 # ===============================================================
+# 🛡️ Role Choices
+# ===============================================================
+
+class RoleChoices(models.TextChoices):
+    """
+    الدور الرسمي المعتمد للصلاحيات داخل Primey Care.
+
+    هذا هو الحقل الذي ستعتمد عليه:
+    - Backend permission checks
+    - Frontend guards
+    - Sidebar permissions
+    - Action permissions
+    """
+
+    SYSTEM_ADMIN = "system_admin", "System Admin"
+    PROVIDER_ADMIN = "provider_admin", "Provider Admin"
+    CUSTOMER_USER = "customer_user", "Customer User"
+    AGENT_USER = "agent_user", "Agent User"
+    ACCOUNTANT = "accountant", "Accountant"
+    SUPPORT = "support", "Support"
+    VIEWER = "viewer", "Viewer"
+
+
+DEFAULT_ROLE_BY_USER_TYPE = {
+    UserType.SUPER_ADMIN: RoleChoices.SYSTEM_ADMIN,
+    UserType.SYSTEM: RoleChoices.SUPPORT,
+    UserType.STAFF: RoleChoices.SUPPORT,
+    UserType.ACCOUNTANT: RoleChoices.ACCOUNTANT,
+    UserType.CUSTOMER: RoleChoices.CUSTOMER_USER,
+    UserType.AGENT: RoleChoices.AGENT_USER,
+    UserType.BROKER: RoleChoices.AGENT_USER,
+    UserType.PROVIDER: RoleChoices.PROVIDER_ADMIN,
+    UserType.CENTER: RoleChoices.PROVIDER_ADMIN,
+    UserType.PARTNER: RoleChoices.VIEWER,
+    UserType.COMPANY: RoleChoices.VIEWER,
+    UserType.OTHER: RoleChoices.VIEWER,
+}
+
+
+def resolve_default_role_for_user_type(user_type: str | None) -> str:
+    """
+    إرجاع الدور الافتراضي المناسب بناءً على user_type القديم.
+    """
+    normalized_user_type = str(user_type or UserType.OTHER).upper()
+    return str(DEFAULT_ROLE_BY_USER_TYPE.get(normalized_user_type, RoleChoices.VIEWER))
+
+
+# ===============================================================
 # 👤 Universal User Profile
 # ===============================================================
 
@@ -87,27 +141,6 @@ class UserProfile(models.Model):
     هذا الملف هو الطبقة الموحدة للبيانات العامة المشتركة بين جميع أنواع المستخدمين.
     لا يحتوي على ربط مباشر مع company / employee / customer / agent / center / provider
     لأن هذا الربط يجب أن يبقى داخل الموديولات المتخصصة أو داخل extra_data بشكل مرن.
-
-    أمثلة extra_data:
-    {
-        "customer_id": 10
-    }
-
-    {
-        "provider_id": 5
-    }
-
-    {
-        "center_id": 3
-    }
-
-    {
-        "agent_id": 8
-    }
-
-    {
-        "broker_id": 2
-    }
     """
 
     user = models.OneToOneField(
@@ -126,6 +159,18 @@ class UserProfile(models.Model):
         default=UserType.OTHER,
         db_index=True,
         verbose_name="نوع المستخدم",
+    )
+
+    # -----------------------------------------------------------
+    # 🛡️ الدور الرسمي للصلاحيات
+    # -----------------------------------------------------------
+    role = models.CharField(
+        max_length=50,
+        choices=RoleChoices.choices,
+        default=RoleChoices.VIEWER,
+        db_index=True,
+        verbose_name="الدور",
+        help_text="الدور الرسمي المستخدم للصلاحيات والسايدر والحماية في الواجهة والباك إند.",
     )
 
     # -----------------------------------------------------------
@@ -270,6 +315,34 @@ class UserProfile(models.Model):
 
         return self.user.get_username()
 
+    @property
+    def workspace(self) -> str:
+        """
+        المساحة الافتراضية حسب الدور.
+        """
+        if self.role in {RoleChoices.SYSTEM_ADMIN, RoleChoices.ACCOUNTANT, RoleChoices.SUPPORT, RoleChoices.VIEWER}:
+            return "system"
+
+        if self.role == RoleChoices.PROVIDER_ADMIN:
+            return "provider"
+
+        if self.role == RoleChoices.CUSTOMER_USER:
+            return "customer"
+
+        if self.role == RoleChoices.AGENT_USER:
+            return "agent"
+
+        return "system"
+
+    def sync_role_from_user_type(self, commit: bool = True) -> None:
+        """
+        ضبط الدور بناءً على user_type عند الحاجة.
+        لا تستخدم هذه الدالة لتغيير صلاحية مخصصة يدويًا إلا عند إنشاء المستخدم أو التصحيح.
+        """
+        self.role = resolve_default_role_for_user_type(self.user_type)
+        if commit:
+            self.save(update_fields=["role", "updated_at"])
+
     def mark_profile_updated(self, commit: bool = True) -> None:
         """
         تحديث تاريخ آخر تعديل على الملف.
@@ -284,6 +357,7 @@ class UserProfile(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["user_type"]),
+            models.Index(fields=["role"]),
             models.Index(fields=["phone_number"]),
             models.Index(fields=["whatsapp_number"]),
             models.Index(fields=["created_at"]),
@@ -454,6 +528,8 @@ def ensure_user_profile(sender, instance, created, **kwargs):
             defaults={
                 "display_name": display_name,
                 "alternate_email": instance.email or None,
+                "user_type": UserType.OTHER,
+                "role": RoleChoices.VIEWER,
             },
         )
         return
@@ -466,6 +542,10 @@ def ensure_user_profile(sender, instance, created, **kwargs):
     if not profile.display_name and desired_display_name:
         profile.display_name = desired_display_name
         dirty_fields.append("display_name")
+
+    if not profile.role:
+        profile.role = resolve_default_role_for_user_type(profile.user_type)
+        dirty_fields.append("role")
 
     if instance.email and profile.alternate_email != instance.email:
         if not profile.alternate_email:

@@ -8,7 +8,6 @@ import {
   BookOpenCheck,
   Building2,
   Calculator,
-  CheckCircle2,
   Download,
   FileText,
   Filter,
@@ -22,12 +21,13 @@ import {
   RefreshCcw,
   Search,
   ShieldCheck,
-  TrendingDown,
   TrendingUp,
   WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Can } from "@/components/guards/Can";
+import { PermissionGuard } from "@/components/guards/PermissionGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +38,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PERMISSIONS } from "@/lib/permissions";
 
 /* ============================================================
    📂 app/system/accounting/page.tsx
@@ -46,6 +47,8 @@ import { Input } from "@/components/ui/input";
    ✅ نفس تنسيق صفحة المراكز
    ✅ نفس توزيع المساحات والكروت
    ✅ بيانات المحاسبة من API الحقيقي
+   ✅ حماية الصفحة بالصلاحيات
+   ✅ حماية أزرار الترحيل والتصدير
    ✅ دعم عربي / إنجليزي
    ✅ أرقام إنجليزية دائمًا
    ✅ رمز العملة الرسمي
@@ -439,10 +442,10 @@ function JournalStatusBadge({
     normalized === "POSTED"
       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
       : normalized === "DRAFT"
-      ? "border-amber-200 bg-amber-50 text-amber-700"
-      : normalized === "CANCELLED"
-      ? "border-red-200 bg-red-50 text-red-700"
-      : "border-slate-200 bg-slate-50 text-slate-600";
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : normalized === "CANCELLED"
+          ? "border-red-200 bg-red-50 text-red-700"
+          : "border-slate-200 bg-slate-50 text-slate-600";
 
   return (
     <Badge variant="outline" className={`rounded-full ${className}`}>
@@ -594,21 +597,21 @@ export default function SystemAccountingPage() {
       title: t.trialBalance,
       subtitle: t.accounts,
       value: formatNumber(summary.totalAccounts),
-      href: "/system/accounting/reports",
+      href: "/system/accounting/trial-balance",
       icon: ListChecks,
     },
     {
       title: t.profitLoss,
       subtitle: t.netProfit,
       value: formatMoney(summary.netProfit),
-      href: "/system/accounting/reports",
+      href: "/system/accounting/profit-loss",
       icon: PieChart,
     },
     {
       title: t.balanceSheet,
       subtitle: t.status,
       value: summary.isBalanced ? t.balancedStatus : t.unbalanced,
-      href: "/system/accounting/reports",
+      href: "/system/accounting/balance-sheet",
       icon: Landmark,
     },
   ];
@@ -669,7 +672,7 @@ export default function SystemAccountingPage() {
     {
       title: t.financialReports,
       description: t.financialReportsDesc,
-      href: "/system/accounting/reports",
+      href: "/system/accounting/trial-balance",
       icon: BarChart3,
       badge: t.reports,
       action: t.view,
@@ -677,440 +680,466 @@ export default function SystemAccountingPage() {
   ];
 
   return (
-    <div className="space-y-4 p-4 md:p-6" dir="ltr">
-      {/* Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            asChild
-            className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
-          >
-            <Link href="/system/accounting/journals">
-              <Plus className="h-4 w-4" />
-              {t.createEntry}
-            </Link>
-          </Button>
+    <PermissionGuard
+      permission={PERMISSIONS.ACCOUNTING_VIEW}
+      workspace="system"
+      mode="fallback"
+    >
+      <div className="space-y-4 p-4 md:p-6" dir="ltr">
+        {/* Header */}
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <Can permission={PERMISSIONS.ACCOUNTING_POST}>
+              <Button
+                asChild
+                className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
+              >
+                <Link href="/system/accounting/journals">
+                  <Plus className="h-4 w-4" />
+                  {t.createEntry}
+                </Link>
+              </Button>
+            </Can>
 
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-            onClick={() => openExport("/api/accounting/journals/excel/")}
-          >
-            <BarChart3 className="h-4 w-4" />
-            {t.reports}
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-            onClick={() => loadData(true)}
-            disabled={loading}
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            {t.refresh}
-          </Button>
-        </div>
-
-        <div
-          className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}
-          dir={isArabic ? "rtl" : "ltr"}
-        >
-          <h1 className="text-2xl font-bold tracking-tight text-slate-950">
-            {t.pageTitle}
-          </h1>
-          <p className="text-sm leading-6 text-slate-500">{t.pageSubtitle}</p>
-        </div>
-      </div>
-
-      {/* Main Row */}
-      <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
-        {/* Status Card */}
-        <Card
-          className="rounded-2xl border-slate-200 bg-white shadow-sm"
-          dir={isArabic ? "rtl" : "ltr"}
-        >
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
-            <div>
-              <CardTitle className="text-lg font-bold text-slate-950">
-                {t.accountingStatus}
-              </CardTitle>
-              <CardDescription className="mt-1">
-                {t.accountingStatusDesc}
-              </CardDescription>
-            </div>
+            <Can
+              anyPermissions={[
+                PERMISSIONS.ACCOUNTING_EXPORT,
+                PERMISSIONS.REPORTS_EXPORT,
+              ]}
+            >
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 gap-2 rounded-xl bg-white px-4"
+                onClick={() => openExport("/api/accounting/journals/excel/")}
+              >
+                <BarChart3 className="h-4 w-4" />
+                {t.reports}
+              </Button>
+            </Can>
 
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              className="h-9 gap-2 rounded-xl bg-white"
-              onClick={() =>
-                openExport("/api/accounting/reports/trial-balance/excel/")
-              }
+              className="h-10 gap-2 rounded-xl bg-white px-4"
+              onClick={() => loadData(true)}
+              disabled={loading}
             >
-              <Download className="h-4 w-4" />
-              {t.export}
-            </Button>
-          </CardHeader>
-
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm text-slate-500">
-                  <span>{t.total}</span>
-                  <Building2 className="h-4 w-4 text-slate-400" />
-                </div>
-                <p className="text-2xl font-bold text-slate-950">
-                  {formatNumber(summary.totalEntries)}
-                </p>
-                <div className="h-2 rounded-full bg-slate-100">
-                  <div className="h-2 w-full rounded-full bg-slate-950" />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm text-slate-500">
-                  <span>{t.posted}</span>
-                  <FileText className="h-4 w-4 text-slate-400" />
-                </div>
-                <p className="text-2xl font-bold text-slate-950">
-                  {formatNumber(summary.postedEntries)}
-                </p>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-emerald-600">
-                    {formatPercent(summary.postedPercent)}%
-                  </span>
-                  <div className="h-2 flex-1 rounded-full bg-slate-100">
-                    <div
-                      className="h-2 rounded-full bg-emerald-500"
-                      style={{
-                        width: `${Math.min(summary.postedPercent, 100)}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm text-slate-500">
-                  <span>{t.unbalanced}</span>
-                  <ShieldCheck className="h-4 w-4 text-slate-400" />
-                </div>
-                <p className="text-2xl font-bold text-slate-950">
-                  {formatNumber(summary.unbalancedEntries)}
-                </p>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-emerald-600">
-                    {formatPercent(summary.unbalancedPercent)}%
-                  </span>
-                  <div className="h-2 flex-1 rounded-full bg-slate-100">
-                    <div
-                      className="h-2 rounded-full bg-amber-500"
-                      style={{
-                        width: `${Math.min(summary.unbalancedPercent, 100)}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm text-slate-500">
-                  <span>{t.accounts}</span>
-                  <Layers3 className="h-4 w-4 text-slate-400" />
-                </div>
-                <p className="text-2xl font-bold text-slate-950">
-                  {formatNumber(summary.totalAccounts)}
-                </p>
-                <div className="h-2 rounded-full bg-slate-100">
-                  <div className="h-2 w-full rounded-full bg-slate-950" />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 md:flex-row">
-              <div className="relative flex-1">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl border-slate-200 bg-white ${
-                    isArabic ? "pr-10" : "pl-10"
-                  }`}
-                />
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 gap-2 rounded-xl bg-white"
-              >
-                <Filter className="h-4 w-4" />
-                {t.settings}
-              </Button>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <div className="grid grid-cols-[1.1fr_1.4fr_1fr_1fr_1fr_1fr_0.8fr] border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                <div>{t.entryNumber}</div>
-                <div>{t.description}</div>
-                <div>{t.source}</div>
-                <div>{t.date}</div>
-                <div>{t.amount}</div>
-                <div>{t.status}</div>
-                <div>{t.action}</div>
-              </div>
-
               {loading ? (
-                <div className="flex h-40 items-center justify-center gap-2 text-sm text-slate-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {t.loading}
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-4 w-4" />
+              )}
+              {t.refresh}
+            </Button>
+          </div>
+
+          <div
+            className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}
+            dir={isArabic ? "rtl" : "ltr"}
+          >
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+              {t.pageTitle}
+            </h1>
+            <p className="text-sm leading-6 text-slate-500">
+              {t.pageSubtitle}
+            </p>
+          </div>
+        </div>
+
+        {/* Main Row */}
+        <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
+          {/* Status Card */}
+          <Card
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
+            dir={isArabic ? "rtl" : "ltr"}
+          >
+            <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
+              <div>
+                <CardTitle className="text-lg font-bold text-slate-950">
+                  {t.accountingStatus}
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  {t.accountingStatusDesc}
+                </CardDescription>
+              </div>
+
+              <Can
+                anyPermissions={[
+                  PERMISSIONS.ACCOUNTING_EXPORT,
+                  PERMISSIONS.REPORTS_EXPORT,
+                ]}
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 gap-2 rounded-xl bg-white"
+                  onClick={() =>
+                    openExport("/api/accounting/reports/trial-balance/excel/")
+                  }
+                >
+                  <Download className="h-4 w-4" />
+                  {t.export}
+                </Button>
+              </Can>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm text-slate-500">
+                    <span>{t.total}</span>
+                    <Building2 className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-slate-950">
+                    {formatNumber(summary.totalEntries)}
+                  </p>
+                  <div className="h-2 rounded-full bg-slate-100">
+                    <div className="h-2 w-full rounded-full bg-slate-950" />
+                  </div>
                 </div>
-              ) : filteredJournals.length > 0 ? (
-                <div className="divide-y divide-slate-100">
-                  {filteredJournals.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="grid grid-cols-[1.1fr_1.4fr_1fr_1fr_1fr_1fr_0.8fr] items-center px-4 py-3 text-sm"
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm text-slate-500">
+                    <span>{t.posted}</span>
+                    <FileText className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-slate-950">
+                    {formatNumber(summary.postedEntries)}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-emerald-600">
+                      {formatPercent(summary.postedPercent)}%
+                    </span>
+                    <div className="h-2 flex-1 rounded-full bg-slate-100">
+                      <div
+                        className="h-2 rounded-full bg-emerald-500"
+                        style={{
+                          width: `${Math.min(summary.postedPercent, 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm text-slate-500">
+                    <span>{t.unbalanced}</span>
+                    <ShieldCheck className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-slate-950">
+                    {formatNumber(summary.unbalancedEntries)}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-emerald-600">
+                      {formatPercent(summary.unbalancedPercent)}%
+                    </span>
+                    <div className="h-2 flex-1 rounded-full bg-slate-100">
+                      <div
+                        className="h-2 rounded-full bg-amber-500"
+                        style={{
+                          width: `${Math.min(summary.unbalancedPercent, 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm text-slate-500">
+                    <span>{t.accounts}</span>
+                    <Layers3 className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-slate-950">
+                    {formatNumber(summary.totalAccounts)}
+                  </p>
+                  <div className="h-2 rounded-full bg-slate-100">
+                    <div className="h-2 w-full rounded-full bg-slate-950" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 md:flex-row">
+                <div className="relative flex-1">
+                  <Search
+                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${
+                      isArabic ? "right-3" : "left-3"
+                    }`}
+                  />
+                  <Input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder={t.searchPlaceholder}
+                    className={`h-11 rounded-xl border-slate-200 bg-white ${
+                      isArabic ? "pr-10" : "pl-10"
+                    }`}
+                  />
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 gap-2 rounded-xl bg-white"
+                >
+                  <Filter className="h-4 w-4" />
+                  {t.settings}
+                </Button>
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <div className="grid grid-cols-[1.1fr_1.4fr_1fr_1fr_1fr_1fr_0.8fr] border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
+                  <div>{t.entryNumber}</div>
+                  <div>{t.description}</div>
+                  <div>{t.source}</div>
+                  <div>{t.date}</div>
+                  <div>{t.amount}</div>
+                  <div>{t.status}</div>
+                  <div>{t.action}</div>
+                </div>
+
+                {loading ? (
+                  <div className="flex h-40 items-center justify-center gap-2 text-sm text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {t.loading}
+                  </div>
+                ) : filteredJournals.length > 0 ? (
+                  <div className="divide-y divide-slate-100">
+                    {filteredJournals.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="grid grid-cols-[1.1fr_1.4fr_1fr_1fr_1fr_1fr_0.8fr] items-center px-4 py-3 text-sm"
+                      >
+                        <div className="font-medium text-slate-950">
+                          {entry.entry_number}
+                        </div>
+                        <div className="truncate text-slate-600">
+                          {entry.description || entry.reference || "-"}
+                        </div>
+                        <div className="text-slate-600">
+                          {entry.posting_source || "-"}
+                        </div>
+                        <div className="text-slate-600">
+                          {formatDate(entry.entry_date, locale)}
+                        </div>
+                        <div className="font-semibold text-slate-950">
+                          <MoneyValue value={entry.total_debit} />
+                        </div>
+                        <div>
+                          <JournalStatusBadge
+                            status={entry.status}
+                            locale={locale}
+                          />
+                        </div>
+                        <div>
+                          <Button
+                            asChild
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 rounded-lg px-2"
+                          >
+                            <Link href={`/system/accounting/journals/${entry.id}`}>
+                              {t.view}
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex h-40 flex-col items-center justify-center text-center">
+                    <p className="font-semibold text-slate-950">
+                      {t.noJournals}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-500">
+                      {t.noJournalsDesc}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end text-sm text-slate-500">
+                <span>
+                  {formatNumber(filteredJournals.length)} /{" "}
+                  {formatNumber(state.journals?.pagination.total_items || 0)}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Featured Reports Card */}
+          <Card
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
+            dir={isArabic ? "rtl" : "ltr"}
+          >
+            <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
+              <div>
+                <CardTitle className="text-lg font-bold text-slate-950">
+                  {t.featuredReports}
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  {t.featuredReportsDesc}
+                </CardDescription>
+              </div>
+
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white">
+                <ListChecks className="h-5 w-5 text-slate-700" />
+              </div>
+            </CardHeader>
+
+            <CardContent>
+              <div className="space-y-3">
+                {featuredReports.map((item) => {
+                  const Icon = item.icon;
+
+                  return (
+                    <Link
+                      key={item.title}
+                      href={item.href}
+                      className="block rounded-2xl border border-slate-200 bg-white p-4 transition hover:bg-slate-50"
                     >
-                      <div className="font-medium text-slate-950">
-                        {entry.entry_number}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-950 text-white">
+                            <Icon className="h-5 w-5" />
+                          </div>
+
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-950">
+                              {item.title}
+                            </p>
+                            <p className="mt-1 text-sm text-slate-500">
+                              {item.subtitle}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="text-left">
+                          <p className="text-lg font-bold text-slate-950">
+                            {item.value}
+                          </p>
+                        </div>
                       </div>
-                      <div className="truncate text-slate-600">
-                        {entry.description || entry.reference || "-"}
-                      </div>
-                      <div className="text-slate-600">
-                        {entry.posting_source || "-"}
-                      </div>
-                      <div className="text-slate-600">
-                        {formatDate(entry.entry_date, locale)}
-                      </div>
-                      <div className="font-semibold text-slate-950">
-                        <MoneyValue value={entry.total_debit} />
-                      </div>
+                    </Link>
+                  );
+                })}
+
+                <div className="rounded-2xl border border-dashed border-slate-200 p-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">{t.debit}</p>
+                      <p className="mt-1 text-lg font-bold text-slate-950">
+                        <MoneyValue value={summary.totalDebit} />
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">{t.credit}</p>
+                      <p className="mt-1 text-lg font-bold text-slate-950">
+                        <MoneyValue value={summary.totalCredit} />
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {summaryCards.map((card) => {
+            const Icon = card.icon;
+
+            return (
+              <Card
+                key={card.title}
+                className="rounded-2xl border-slate-200 bg-white shadow-sm"
+                dir={isArabic ? "rtl" : "ltr"}
+              >
+                <CardContent className="p-5">
+                  <div className={`rounded-2xl ${card.bg} p-4`}>
+                    <div className="flex items-center justify-between gap-3">
                       <div>
-                        <JournalStatusBadge
-                          status={entry.status}
-                          locale={locale}
-                        />
+                        <p className="text-sm text-slate-500">{card.title}</p>
+                        <p className="mt-2 text-2xl font-bold text-slate-950">
+                          {card.isText ? (
+                            card.value
+                          ) : (
+                            <MoneyValue value={card.value} />
+                          )}
+                        </p>
                       </div>
-                      <div>
-                        <Button
-                          asChild
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 rounded-lg px-2"
-                        >
-                          <Link href={`/system/accounting/journals/${entry.id}`}>
-                            {t.view}
-                          </Link>
-                        </Button>
+
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-950 shadow-sm">
+                        <Icon className="h-5 w-5" />
                       </div>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex h-40 flex-col items-center justify-center text-center">
-                  <p className="font-semibold text-slate-950">{t.noJournals}</p>
-                  <p className="mt-2 text-sm text-slate-500">
-                    {t.noJournalsDesc}
-                  </p>
-                </div>
-              )}
-            </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
 
-            <div className="flex items-center justify-end text-sm text-slate-500">
-              <span>
-                {formatNumber(filteredJournals.length)} /{" "}
-                {formatNumber(state.journals?.pagination.total_items || 0)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Featured Reports Card */}
+        {/* Actions */}
         <Card
           className="rounded-2xl border-slate-200 bg-white shadow-sm"
           dir={isArabic ? "rtl" : "ltr"}
         >
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
-            <div>
-              <CardTitle className="text-lg font-bold text-slate-950">
-                {t.featuredReports}
-              </CardTitle>
-              <CardDescription className="mt-1">
-                {t.featuredReportsDesc}
-              </CardDescription>
-            </div>
-
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white">
-              <ListChecks className="h-5 w-5 text-slate-700" />
-            </div>
+          <CardHeader>
+            <CardTitle className="text-lg font-bold text-slate-950">
+              {t.actionsTitle}
+            </CardTitle>
+            <CardDescription>{t.actionsDesc}</CardDescription>
           </CardHeader>
 
           <CardContent>
-            <div className="space-y-3">
-              {featuredReports.map((item) => {
-                const Icon = item.icon;
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {actionCards.map((card) => {
+                const Icon = card.icon;
 
                 return (
                   <Link
-                    key={item.title}
-                    href={item.href}
-                    className="block rounded-2xl border border-slate-200 bg-white p-4 transition hover:bg-slate-50"
+                    key={card.href}
+                    href={card.href}
+                    className="group rounded-2xl border border-slate-200 bg-white p-5 transition hover:bg-slate-50 hover:shadow-sm"
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-950 text-white">
-                          <Icon className="h-5 w-5" />
-                        </div>
+                    <div className="mb-8 flex items-center justify-between">
+                      <Badge
+                        variant="secondary"
+                        className="rounded-full bg-slate-100 text-slate-700"
+                      >
+                        {card.badge}
+                      </Badge>
 
-                        <div className="min-w-0">
-                          <p className="font-bold text-slate-950">
-                            {item.title}
-                          </p>
-                          <p className="mt-1 text-sm text-slate-500">
-                            {item.subtitle}
-                          </p>
-                        </div>
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white transition group-hover:scale-105">
+                        <Icon className="h-5 w-5" />
                       </div>
+                    </div>
 
-                      <div className="text-left">
-                        <p className="text-lg font-bold text-slate-950">
-                          {item.value}
-                        </p>
-                      </div>
+                    <div>
+                      <h3 className="font-bold text-slate-950">{card.title}</h3>
+                      <p className="mt-2 text-sm leading-6 text-slate-500">
+                        {card.description}
+                      </p>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-5 h-9 rounded-xl bg-white"
+                      >
+                        {card.action}
+                      </Button>
                     </div>
                   </Link>
                 );
               })}
-
-              <div className="rounded-2xl border border-dashed border-slate-200 p-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">{t.debit}</p>
-                    <p className="mt-1 text-lg font-bold text-slate-950">
-                      <MoneyValue value={summary.totalDebit} />
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">{t.credit}</p>
-                    <p className="mt-1 text-lg font-bold text-slate-950">
-                      <MoneyValue value={summary.totalCredit} />
-                    </p>
-                  </div>
-                </div>
-              </div>
             </div>
           </CardContent>
         </Card>
       </div>
-
-      {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {summaryCards.map((card) => {
-          const Icon = card.icon;
-
-          return (
-            <Card
-              key={card.title}
-              className="rounded-2xl border-slate-200 bg-white shadow-sm"
-              dir={isArabic ? "rtl" : "ltr"}
-            >
-              <CardContent className="p-5">
-                <div className={`rounded-2xl ${card.bg} p-4`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-slate-500">{card.title}</p>
-                      <p className="mt-2 text-2xl font-bold text-slate-950">
-                        {card.isText ? (
-                          card.value
-                        ) : (
-                          <MoneyValue value={card.value} />
-                        )}
-                      </p>
-                    </div>
-
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-950 shadow-sm">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* Actions */}
-      <Card
-        className="rounded-2xl border-slate-200 bg-white shadow-sm"
-        dir={isArabic ? "rtl" : "ltr"}
-      >
-        <CardHeader>
-          <CardTitle className="text-lg font-bold text-slate-950">
-            {t.actionsTitle}
-          </CardTitle>
-          <CardDescription>{t.actionsDesc}</CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {actionCards.map((card) => {
-              const Icon = card.icon;
-
-              return (
-                <Link
-                  key={card.href}
-                  href={card.href}
-                  className="group rounded-2xl border border-slate-200 bg-white p-5 transition hover:bg-slate-50 hover:shadow-sm"
-                >
-                  <div className="mb-8 flex items-center justify-between">
-                    <Badge
-                      variant="secondary"
-                      className="rounded-full bg-slate-100 text-slate-700"
-                    >
-                      {card.badge}
-                    </Badge>
-
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white transition group-hover:scale-105">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 className="font-bold text-slate-950">{card.title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-500">
-                      {card.description}
-                    </p>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="mt-5 h-9 rounded-xl bg-white"
-                    >
-                      {card.action}
-                    </Button>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    </PermissionGuard>
   );
 }

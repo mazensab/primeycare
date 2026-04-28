@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Can } from "@/components/guards/Can";
+import { PermissionGuard } from "@/components/guards/PermissionGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +30,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PERMISSIONS } from "@/lib/permissions";
 
 type AppLocale = "ar" | "en";
 
@@ -49,6 +52,7 @@ type UserDetail = {
     avatar_url: string | null;
     bio: string;
     user_type: string;
+    role?: string | null;
     phone_number: string | null;
     whatsapp_number: string | null;
     alternate_email: string | null;
@@ -160,6 +164,23 @@ function userTypeLabel(value: string, locale: AppLocale) {
   return locale === "ar" ? option.ar : option.en;
 }
 
+function roleLabel(value: string | null | undefined, locale: AppLocale) {
+  const role = String(value || "").trim().toLowerCase();
+
+  const map: Record<string, { ar: string; en: string }> = {
+    system_admin: { ar: "مدير النظام", en: "System Admin" },
+    provider_admin: { ar: "مدير مقدم خدمة", en: "Provider Admin" },
+    customer_user: { ar: "مستخدم عميل", en: "Customer User" },
+    agent_user: { ar: "مستخدم مندوب", en: "Agent User" },
+    accountant: { ar: "محاسب", en: "Accountant" },
+    support: { ar: "دعم", en: "Support" },
+    viewer: { ar: "مشاهد", en: "Viewer" },
+  };
+
+  if (!role) return "—";
+  return locale === "ar" ? map[role]?.ar || role : map[role]?.en || role;
+}
+
 function formFromUser(user: UserDetail): FormState {
   return {
     username: user.username || "",
@@ -221,6 +242,7 @@ export default function SystemUserDetailPage() {
       lastName: isArabic ? "اسم العائلة" : "Last Name",
       displayName: isArabic ? "الاسم المعروض" : "Display Name",
       userType: isArabic ? "نوع المستخدم" : "User Type",
+      role: isArabic ? "الدور" : "Role",
       phone: isArabic ? "رقم الجوال" : "Phone",
       whatsapp: isArabic ? "واتساب" : "WhatsApp",
       alternateEmail: isArabic ? "بريد بديل" : "Alternate Email",
@@ -243,7 +265,7 @@ export default function SystemUserDetailPage() {
       active: isArabic ? "نشط" : "Active",
       inactive: isArabic ? "معطل" : "Inactive",
     }),
-    [isArabic]
+    [isArabic],
   );
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -333,7 +355,9 @@ export default function SystemUserDetailPage() {
         throw new Error(data.message || "Unable to update user.");
       }
 
-      toast.success(data.message || (isArabic ? "تم حفظ التعديلات." : "Changes saved."));
+      toast.success(
+        data.message || (isArabic ? "تم حفظ التعديلات." : "Changes saved."),
+      );
       setUser(data.user);
       setForm({ ...formFromUser(data.user), password: "" });
     } catch (error) {
@@ -419,362 +443,409 @@ export default function SystemUserDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  if (loading) {
-    return (
-      <main dir={dir} className="flex min-h-screen items-center justify-center bg-slate-50/60">
-        <div className="flex flex-col items-center gap-3 text-slate-500">
-          <Loader2 className="h-8 w-8 animate-spin" />
-          <span className="text-sm">{labels.loading}</span>
-        </div>
-      </main>
-    );
-  }
-
-  if (!user || !form) {
-    return (
-      <main dir={dir} className="flex min-h-screen items-center justify-center bg-slate-50/60 p-6">
-        <Card className="w-full max-w-md rounded-3xl border-0 shadow-sm">
-          <CardHeader className="text-center">
-            <CardTitle>{labels.notFound}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Button asChild className="w-full rounded-2xl">
-              <Link href="/system/users">{labels.back}</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </main>
-    );
-  }
-
   return (
-    <main dir={dir} className="min-h-screen bg-slate-50/60 p-4 sm:p-6 lg:p-8">
-      <form onSubmit={saveUser} className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <section className="flex flex-col gap-4 rounded-3xl border bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm">
-              <UserCog className="h-6 w-6" />
-            </div>
-
-            <div>
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                {user.is_active ? (
-                  <Badge className="rounded-full bg-emerald-600">{labels.active}</Badge>
-                ) : (
-                  <Badge variant="destructive" className="rounded-full">
-                    {labels.inactive}
-                  </Badge>
-                )}
-                <Badge variant="secondary" className="rounded-full">
-                  {userTypeLabel(user.profile.user_type, locale)}
-                </Badge>
-              </div>
-
-              <h1 className="text-2xl font-bold tracking-tight text-slate-950">
-                {user.profile.display_name || user.full_name || user.username}
-              </h1>
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-                {labels.subtitle}
-              </p>
-            </div>
+    <PermissionGuard
+      permission={PERMISSIONS.USERS_VIEW}
+      workspace="system"
+      mode="fallback"
+    >
+      {loading ? (
+        <main
+          dir={dir}
+          className="flex min-h-screen items-center justify-center bg-slate-50/60"
+        >
+          <div className="flex flex-col items-center gap-3 text-slate-500">
+            <Loader2 className="h-8 w-8 animate-spin" />
+            <span className="text-sm">{labels.loading}</span>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button asChild type="button" variant="outline" className="rounded-2xl">
-              <Link href="/system/users">
-                <BackIcon className="h-4 w-4" />
-                <span>{labels.back}</span>
-              </Link>
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              disabled={loading}
-              onClick={loadUser}
-              className="rounded-2xl"
-            >
-              <RefreshCcw className="h-4 w-4" />
-              <span>{labels.refresh}</span>
-            </Button>
-
-            {user.is_active ? (
-              <Button
-                type="button"
-                variant="destructive"
-                disabled={!!actionLoading}
-                onClick={() => runAction("deactivate")}
-                className="rounded-2xl"
-              >
-                {actionLoading === "deactivate" ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Ban className="h-4 w-4" />
-                )}
-                <span>{labels.deactivate}</span>
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                disabled={!!actionLoading}
-                onClick={() => runAction("activate")}
-                className="rounded-2xl bg-emerald-600 hover:bg-emerald-700"
-              >
-                {actionLoading === "activate" ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4" />
-                )}
-                <span>{labels.activate}</span>
-              </Button>
-            )}
-
-            <Button
-              type="submit"
-              disabled={saving}
-              className="rounded-2xl bg-slate-900 hover:bg-slate-800"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              <span>{saving ? labels.saving : labels.save}</span>
-            </Button>
-          </div>
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-3">
-          <InfoCard label={labels.createdAt} value={formatDate(user.date_joined, locale)} />
-          <InfoCard label={labels.lastLogin} value={formatDate(user.last_login, locale)} />
-          <InfoCard label={labels.groups} value={user.groups.length ? user.groups.join(", ") : "—"} />
-        </section>
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card className="rounded-3xl border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle>{labels.account}</CardTitle>
+        </main>
+      ) : !user || !form ? (
+        <main
+          dir={dir}
+          className="flex min-h-screen items-center justify-center bg-slate-50/60 p-6"
+        >
+          <Card className="w-full max-w-md rounded-3xl border-0 shadow-sm">
+            <CardHeader className="text-center">
+              <CardTitle>{labels.notFound}</CardTitle>
             </CardHeader>
-
-            <CardContent className="grid gap-4">
-              <Field label={labels.username}>
-                <Input
-                  value={form.username}
-                  onChange={(event) => updateField("username", event.target.value)}
-                  className="h-11 rounded-2xl"
-                />
-              </Field>
-
-              <Field label={labels.email}>
-                <Input
-                  value={form.email}
-                  onChange={(event) => updateField("email", event.target.value)}
-                  type="email"
-                  className="h-11 rounded-2xl"
-                />
-              </Field>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={labels.firstName}>
-                  <Input
-                    value={form.first_name}
-                    onChange={(event) => updateField("first_name", event.target.value)}
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-
-                <Field label={labels.lastName}>
-                  <Input
-                    value={form.last_name}
-                    onChange={(event) => updateField("last_name", event.target.value)}
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-              </div>
-
-              <Field label={labels.password}>
-                <Input
-                  value={form.password}
-                  onChange={(event) => updateField("password", event.target.value)}
-                  type="password"
-                  className="h-11 rounded-2xl"
-                  placeholder={isArabic ? "اتركها فارغة بدون تغيير" : "Leave empty to keep current"}
-                />
-              </Field>
+            <CardContent>
+              <Can permission={PERMISSIONS.USERS_VIEW}>
+                <Button asChild className="w-full rounded-2xl">
+                  <Link href="/system/users">{labels.back}</Link>
+                </Button>
+              </Can>
             </CardContent>
           </Card>
-
-          <Card className="rounded-3xl border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle>{labels.profile}</CardTitle>
-            </CardHeader>
-
-            <CardContent className="grid gap-4">
-              <Field label={labels.displayName}>
-                <Input
-                  value={form.display_name}
-                  onChange={(event) => updateField("display_name", event.target.value)}
-                  className="h-11 rounded-2xl"
-                />
-              </Field>
-
-              <Field label={labels.userType}>
-                <select
-                  value={form.user_type}
-                  onChange={(event) => updateField("user_type", event.target.value)}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400"
-                >
-                  {USER_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {isArabic ? option.ar : option.en}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={labels.phone}>
-                  <Input
-                    value={form.phone_number}
-                    onChange={(event) => updateField("phone_number", event.target.value)}
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-
-                <Field label={labels.whatsapp}>
-                  <Input
-                    value={form.whatsapp_number}
-                    onChange={(event) => updateField("whatsapp_number", event.target.value)}
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-              </div>
-
-              <Field label={labels.alternateEmail}>
-                <Input
-                  value={form.alternate_email}
-                  onChange={(event) => updateField("alternate_email", event.target.value)}
-                  type="email"
-                  className="h-11 rounded-2xl"
-                />
-              </Field>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle>{labels.permissions}</CardTitle>
-            </CardHeader>
-
-            <CardContent className="grid gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={labels.language}>
-                  <select
-                    value={form.preferred_language}
-                    onChange={(event) =>
-                      updateField("preferred_language", event.target.value as "ar" | "en")
-                    }
-                    className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400"
-                  >
-                    <option value="ar">العربية</option>
-                    <option value="en">English</option>
-                  </select>
-                </Field>
-
-                <Field label={labels.timezone}>
-                  <Input
-                    value={form.timezone}
-                    onChange={(event) => updateField("timezone", event.target.value)}
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-              </div>
-
-              <Field label={labels.bio}>
-                <textarea
-                  value={form.bio}
-                  onChange={(event) => updateField("bio", event.target.value)}
-                  rows={4}
-                  className="w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-slate-400"
-                />
-              </Field>
-
-              <Field label={labels.avatar}>
-                <Input
-                  value={form.avatar_url}
-                  onChange={(event) => updateField("avatar_url", event.target.value)}
-                  className="h-11 rounded-2xl"
-                />
-              </Field>
-
-              <div className="grid gap-3">
-                <CheckField
-                  label={labels.isActive}
-                  checked={form.is_active}
-                  onChange={(checked) => updateField("is_active", checked)}
-                />
-                <CheckField
-                  label={labels.isStaff}
-                  checked={form.is_staff}
-                  onChange={(checked) => updateField("is_staff", checked)}
-                />
-                <CheckField
-                  label={labels.isSuperuser}
-                  checked={form.is_superuser}
-                  onChange={(checked) => updateField("is_superuser", checked)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle>{labels.context}</CardTitle>
-              <CardDescription>{labels.extraData}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4">
-              <pre className="max-h-80 overflow-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-100">
-                {JSON.stringify(user.profile.extra_data || {}, null, 2)}
-              </pre>
-
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!!actionLoading}
-                onClick={() => runAction("send-password-link")}
-                className="rounded-2xl"
-              >
-                {actionLoading === "send-password-link" ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <KeyRound className="h-4 w-4" />
-                )}
-                <span>{labels.passwordLink}</span>
-              </Button>
-
-              {resetUrl ? (
-                <div className="rounded-2xl border bg-slate-50 p-4">
-                  <div className="mb-2 text-sm font-medium text-slate-700">
-                    {labels.resetUrl}
-                  </div>
-
-                  <div className="break-all rounded-xl bg-white p-3 text-xs text-slate-700">
-                    {resetUrl}
-                  </div>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={copyResetUrl}
-                    className="mt-3 rounded-2xl"
-                  >
-                    <Copy className="h-4 w-4" />
-                    <span>{labels.copy}</span>
-                  </Button>
+        </main>
+      ) : (
+        <main dir={dir} className="min-h-screen bg-slate-50/60 p-4 sm:p-6 lg:p-8">
+          <form onSubmit={saveUser} className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+            <section className="flex flex-col gap-4 rounded-3xl border bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm">
+                  <UserCog className="h-6 w-6" />
                 </div>
-              ) : null}
-            </CardContent>
-          </Card>
-        </div>
-      </form>
-    </main>
+
+                <div>
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    {user.is_active ? (
+                      <Badge className="rounded-full bg-emerald-600">
+                        {labels.active}
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="rounded-full">
+                        {labels.inactive}
+                      </Badge>
+                    )}
+
+                    <Badge variant="secondary" className="rounded-full">
+                      {userTypeLabel(user.profile.user_type, locale)}
+                    </Badge>
+
+                    {user.profile.role ? (
+                      <Badge variant="outline" className="rounded-full">
+                        {roleLabel(user.profile.role, locale)}
+                      </Badge>
+                    ) : null}
+                  </div>
+
+                  <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+                    {user.profile.display_name || user.full_name || user.username}
+                  </h1>
+                  <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                    {labels.subtitle}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Can permission={PERMISSIONS.USERS_VIEW}>
+                  <Button asChild type="button" variant="outline" className="rounded-2xl">
+                    <Link href="/system/users">
+                      <BackIcon className="h-4 w-4" />
+                      <span>{labels.back}</span>
+                    </Link>
+                  </Button>
+                </Can>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={loading}
+                  onClick={loadUser}
+                  className="rounded-2xl"
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  <span>{labels.refresh}</span>
+                </Button>
+
+                {user.is_active ? (
+                  <Can permission={PERMISSIONS.USERS_DISABLE}>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={!!actionLoading}
+                      onClick={() => runAction("deactivate")}
+                      className="rounded-2xl"
+                    >
+                      {actionLoading === "deactivate" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Ban className="h-4 w-4" />
+                      )}
+                      <span>{labels.deactivate}</span>
+                    </Button>
+                  </Can>
+                ) : (
+                  <Can permission={PERMISSIONS.USERS_DISABLE}>
+                    <Button
+                      type="button"
+                      disabled={!!actionLoading}
+                      onClick={() => runAction("activate")}
+                      className="rounded-2xl bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      {actionLoading === "activate" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-4 w-4" />
+                      )}
+                      <span>{labels.activate}</span>
+                    </Button>
+                  </Can>
+                )}
+
+                <Can permission={PERMISSIONS.USERS_EDIT}>
+                  <Button
+                    type="submit"
+                    disabled={saving}
+                    className="rounded-2xl bg-slate-900 hover:bg-slate-800"
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    <span>{saving ? labels.saving : labels.save}</span>
+                  </Button>
+                </Can>
+              </div>
+            </section>
+
+            <section className="grid gap-4 md:grid-cols-3">
+              <InfoCard label={labels.createdAt} value={formatDate(user.date_joined, locale)} />
+              <InfoCard label={labels.lastLogin} value={formatDate(user.last_login, locale)} />
+              <InfoCard label={labels.groups} value={user.groups.length ? user.groups.join(", ") : "—"} />
+            </section>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card className="rounded-3xl border-0 shadow-sm">
+                <CardHeader>
+                  <CardTitle>{labels.account}</CardTitle>
+                </CardHeader>
+
+                <CardContent className="grid gap-4">
+                  <Field label={labels.username}>
+                    <Input
+                      value={form.username}
+                      onChange={(event) => updateField("username", event.target.value)}
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+
+                  <Field label={labels.email}>
+                    <Input
+                      value={form.email}
+                      onChange={(event) => updateField("email", event.target.value)}
+                      type="email"
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label={labels.firstName}>
+                      <Input
+                        value={form.first_name}
+                        onChange={(event) => updateField("first_name", event.target.value)}
+                        className="h-11 rounded-2xl"
+                      />
+                    </Field>
+
+                    <Field label={labels.lastName}>
+                      <Input
+                        value={form.last_name}
+                        onChange={(event) => updateField("last_name", event.target.value)}
+                        className="h-11 rounded-2xl"
+                      />
+                    </Field>
+                  </div>
+
+                  <Can permission={PERMISSIONS.USERS_EDIT}>
+                    <Field label={labels.password}>
+                      <Input
+                        value={form.password}
+                        onChange={(event) => updateField("password", event.target.value)}
+                        type="password"
+                        className="h-11 rounded-2xl"
+                        placeholder={
+                          isArabic ? "اتركها فارغة بدون تغيير" : "Leave empty to keep current"
+                        }
+                      />
+                    </Field>
+                  </Can>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-0 shadow-sm">
+                <CardHeader>
+                  <CardTitle>{labels.profile}</CardTitle>
+                </CardHeader>
+
+                <CardContent className="grid gap-4">
+                  <Field label={labels.displayName}>
+                    <Input
+                      value={form.display_name}
+                      onChange={(event) => updateField("display_name", event.target.value)}
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+
+                  <Field label={labels.userType}>
+                    <select
+                      value={form.user_type}
+                      onChange={(event) => updateField("user_type", event.target.value)}
+                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400"
+                    >
+                      {USER_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {isArabic ? option.ar : option.en}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  {user.profile.role ? (
+                    <Field label={labels.role}>
+                      <Input
+                        value={roleLabel(user.profile.role, locale)}
+                        readOnly
+                        className="h-11 rounded-2xl bg-slate-50"
+                      />
+                    </Field>
+                  ) : null}
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label={labels.phone}>
+                      <Input
+                        value={form.phone_number}
+                        onChange={(event) => updateField("phone_number", event.target.value)}
+                        className="h-11 rounded-2xl"
+                      />
+                    </Field>
+
+                    <Field label={labels.whatsapp}>
+                      <Input
+                        value={form.whatsapp_number}
+                        onChange={(event) => updateField("whatsapp_number", event.target.value)}
+                        className="h-11 rounded-2xl"
+                      />
+                    </Field>
+                  </div>
+
+                  <Field label={labels.alternateEmail}>
+                    <Input
+                      value={form.alternate_email}
+                      onChange={(event) => updateField("alternate_email", event.target.value)}
+                      type="email"
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-0 shadow-sm">
+                <CardHeader>
+                  <CardTitle>{labels.permissions}</CardTitle>
+                </CardHeader>
+
+                <CardContent className="grid gap-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label={labels.language}>
+                      <select
+                        value={form.preferred_language}
+                        onChange={(event) =>
+                          updateField("preferred_language", event.target.value as "ar" | "en")
+                        }
+                        className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400"
+                      >
+                        <option value="ar">العربية</option>
+                        <option value="en">English</option>
+                      </select>
+                    </Field>
+
+                    <Field label={labels.timezone}>
+                      <Input
+                        value={form.timezone}
+                        onChange={(event) => updateField("timezone", event.target.value)}
+                        className="h-11 rounded-2xl"
+                      />
+                    </Field>
+                  </div>
+
+                  <Field label={labels.bio}>
+                    <textarea
+                      value={form.bio}
+                      onChange={(event) => updateField("bio", event.target.value)}
+                      rows={4}
+                      className="w-full rounded-2xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-slate-400"
+                    />
+                  </Field>
+
+                  <Field label={labels.avatar}>
+                    <Input
+                      value={form.avatar_url}
+                      onChange={(event) => updateField("avatar_url", event.target.value)}
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+
+                  <Can permission={PERMISSIONS.USERS_EDIT}>
+                    <div className="grid gap-3">
+                      <CheckField
+                        label={labels.isActive}
+                        checked={form.is_active}
+                        onChange={(checked) => updateField("is_active", checked)}
+                      />
+                      <CheckField
+                        label={labels.isStaff}
+                        checked={form.is_staff}
+                        onChange={(checked) => updateField("is_staff", checked)}
+                      />
+                      <CheckField
+                        label={labels.isSuperuser}
+                        checked={form.is_superuser}
+                        onChange={(checked) => updateField("is_superuser", checked)}
+                      />
+                    </div>
+                  </Can>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-0 shadow-sm">
+                <CardHeader>
+                  <CardTitle>{labels.context}</CardTitle>
+                  <CardDescription>{labels.extraData}</CardDescription>
+                </CardHeader>
+
+                <CardContent className="grid gap-4">
+                  <pre className="max-h-80 overflow-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-100">
+                    {JSON.stringify(user.profile.extra_data || {}, null, 2)}
+                  </pre>
+
+                  <Can permission={PERMISSIONS.USERS_EDIT}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!!actionLoading}
+                      onClick={() => runAction("send-password-link")}
+                      className="rounded-2xl"
+                    >
+                      {actionLoading === "send-password-link" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <KeyRound className="h-4 w-4" />
+                      )}
+                      <span>{labels.passwordLink}</span>
+                    </Button>
+                  </Can>
+
+                  {resetUrl ? (
+                    <div className="rounded-2xl border bg-slate-50 p-4">
+                      <div className="mb-2 text-sm font-medium text-slate-700">
+                        {labels.resetUrl}
+                      </div>
+
+                      <div className="break-all rounded-xl bg-white p-3 text-xs text-slate-700">
+                        {resetUrl}
+                      </div>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={copyResetUrl}
+                        className="mt-3 rounded-2xl"
+                      >
+                        <Copy className="h-4 w-4" />
+                        <span>{labels.copy}</span>
+                      </Button>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </div>
+          </form>
+        </main>
+      )}
+    </PermissionGuard>
   );
 }
 

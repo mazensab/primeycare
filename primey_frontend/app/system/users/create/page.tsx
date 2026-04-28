@@ -2,9 +2,18 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Loader2, Save, ShieldCheck, UserPlus } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Loader2,
+  Save,
+  ShieldCheck,
+  UserPlus,
+} from "lucide-react";
 import { toast } from "sonner";
 
+import { Can } from "@/components/guards/Can";
+import { PermissionGuard } from "@/components/guards/PermissionGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +24,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PERMISSIONS } from "@/lib/permissions";
 
 type AppLocale = "ar" | "en";
 
@@ -158,9 +168,13 @@ function cleanPayload(form: FormState) {
     timezone: form.timezone.trim() || "Asia/Riyadh",
     entity_type: form.entity_type.trim() || undefined,
     entity_id: form.entity_id.trim() ? Number(form.entity_id) : undefined,
-    customer_id: form.customer_id.trim() ? Number(form.customer_id) : undefined,
+    customer_id: form.customer_id.trim()
+      ? Number(form.customer_id)
+      : undefined,
     center_id: form.center_id.trim() ? Number(form.center_id) : undefined,
-    provider_id: form.provider_id.trim() ? Number(form.provider_id) : undefined,
+    provider_id: form.provider_id.trim()
+      ? Number(form.provider_id)
+      : undefined,
     agent_id: form.agent_id.trim() ? Number(form.agent_id) : undefined,
     broker_id: form.broker_id.trim() ? Number(form.broker_id) : undefined,
     is_active: form.is_active,
@@ -178,7 +192,9 @@ export default function SystemUsersCreatePage() {
   const [locale] = useState<AppLocale>(getLocale());
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [submitting, setSubmitting] = useState(false);
-  const [createdUser, setCreatedUser] = useState<CreatedUserResponse["user"] | null>(null);
+  const [createdUser, setCreatedUser] = useState<
+    CreatedUserResponse["user"] | null
+  >(null);
 
   const isArabic = locale === "ar";
   const dir = isArabic ? "rtl" : "ltr";
@@ -217,12 +233,16 @@ export default function SystemUsersCreatePage() {
       agentId: isArabic ? "معرف المندوب" : "Agent ID",
       brokerId: isArabic ? "معرف الوكيل" : "Broker ID",
       isActive: isArabic ? "الحساب نشط" : "Account active",
-      createGroup: isArabic ? "إنشاء/ربط المجموعة تلقائيًا" : "Create/assign group automatically",
+      createGroup: isArabic
+        ? "إنشاء/ربط المجموعة تلقائيًا"
+        : "Create/assign group automatically",
       created: isArabic ? "تم إنشاء المستخدم" : "User created",
-      temporaryPassword: isArabic ? "كلمة المرور المؤقتة" : "Temporary password",
+      temporaryPassword: isArabic
+        ? "كلمة المرور المؤقتة"
+        : "Temporary password",
       openDetails: isArabic ? "فتح التفاصيل" : "Open details",
     }),
-    [isArabic]
+    [isArabic],
   );
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -232,11 +252,15 @@ export default function SystemUsersCreatePage() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!form.email.trim() && !form.username.trim() && !form.phone_number.trim()) {
+    if (
+      !form.email.trim() &&
+      !form.username.trim() &&
+      !form.phone_number.trim()
+    ) {
       toast.error(
         isArabic
           ? "يجب إدخال البريد أو اسم المستخدم أو رقم الجوال."
-          : "Email, username, or phone is required."
+          : "Email, username, or phone is required.",
       );
       return;
     }
@@ -262,7 +286,9 @@ export default function SystemUsersCreatePage() {
         throw new Error(data.message || "Unable to create user.");
       }
 
-      toast.success(data.message || (isArabic ? "تم حفظ المستخدم." : "User saved."));
+      toast.success(
+        data.message || (isArabic ? "تم حفظ المستخدم." : "User saved."),
+      );
       setCreatedUser(data.user || null);
     } catch (error) {
       const message =
@@ -279,332 +305,411 @@ export default function SystemUsersCreatePage() {
   }
 
   return (
-    <main dir={dir} className="min-h-screen bg-slate-50/60 p-4 sm:p-6 lg:p-8">
-      <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <section className="flex flex-col gap-4 rounded-3xl border bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm">
-              <UserPlus className="h-6 w-6" />
-            </div>
-
-            <div>
-              <div className="mb-2">
-                <Badge variant="secondary" className="rounded-full">
-                  {userTypeLabel(form.user_type, locale)}
-                </Badge>
-              </div>
-              <h1 className="text-2xl font-bold tracking-tight text-slate-950">
-                {labels.title}
-              </h1>
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-                {labels.subtitle}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button asChild type="button" variant="outline" className="rounded-2xl">
-              <Link href="/system/users">
-                <BackIcon className="h-4 w-4" />
-                <span>{labels.back}</span>
-              </Link>
-            </Button>
-
-            <Button
-              type="submit"
-              disabled={submitting}
-              className="rounded-2xl bg-slate-900 hover:bg-slate-800"
-            >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              <span>{submitting ? labels.saving : labels.save}</span>
-            </Button>
-          </div>
-        </section>
-
-        {createdUser ? (
-          <Card className="rounded-3xl border-emerald-100 bg-emerald-50 shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-emerald-800">
-                <ShieldCheck className="h-5 w-5" />
-                {labels.created}
-              </CardTitle>
-              <CardDescription className="text-emerald-700">
-                {createdUser.profile.display_name || createdUser.email || createdUser.username}
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-2xl bg-white p-4">
-                <div className="text-xs text-slate-500">Username</div>
-                <div className="mt-1 font-semibold text-slate-950">{createdUser.username}</div>
+    <PermissionGuard
+      permission={PERMISSIONS.USERS_CREATE}
+      workspace="system"
+      mode="fallback"
+    >
+      <main dir={dir} className="min-h-screen bg-slate-50/60 p-4 sm:p-6 lg:p-8">
+        <form
+          onSubmit={handleSubmit}
+          className="mx-auto flex w-full max-w-6xl flex-col gap-6"
+        >
+          <section className="flex flex-col gap-4 rounded-3xl border bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm">
+                <UserPlus className="h-6 w-6" />
               </div>
 
-              <div className="rounded-2xl bg-white p-4">
-                <div className="text-xs text-slate-500">{labels.temporaryPassword}</div>
-                <div className="mt-1 break-all font-semibold text-slate-950">
-                  {createdUser.temporary_password || "—"}
+              <div>
+                <div className="mb-2">
+                  <Badge variant="secondary" className="rounded-full">
+                    {userTypeLabel(form.user_type, locale)}
+                  </Badge>
                 </div>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+                  {labels.title}
+                </h1>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                  {labels.subtitle}
+                </p>
               </div>
+            </div>
 
-              <div className="flex items-center rounded-2xl bg-white p-4">
-                <Button asChild className="w-full rounded-2xl">
-                  <Link href={`/system/users/${createdUser.id}`}>{labels.openDetails}</Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card className="rounded-3xl border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle>{labels.basic}</CardTitle>
-            </CardHeader>
-
-            <CardContent className="grid gap-4">
-              <Field label={labels.userType}>
-                <select
-                  value={form.user_type}
-                  onChange={(event) => updateField("user_type", event.target.value as UserType)}
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400"
+            <div className="flex flex-wrap items-center gap-2">
+              <Can permission={PERMISSIONS.USERS_VIEW}>
+                <Button
+                  asChild
+                  type="button"
+                  variant="outline"
+                  className="rounded-2xl"
                 >
-                  {USER_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {isArabic ? option.ar : option.en}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+                  <Link href="/system/users">
+                    <BackIcon className="h-4 w-4" />
+                    <span>{labels.back}</span>
+                  </Link>
+                </Button>
+              </Can>
 
-              <Field label={labels.email}>
-                <Input
-                  value={form.email}
-                  onChange={(event) => updateField("email", event.target.value)}
-                  type="email"
-                  className="h-11 rounded-2xl"
-                  placeholder="user@example.com"
-                />
-              </Field>
+              <Can permission={PERMISSIONS.USERS_CREATE}>
+                <Button
+                  type="submit"
+                  disabled={submitting}
+                  className="rounded-2xl bg-slate-900 hover:bg-slate-800"
+                >
+                  {submitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  <span>{submitting ? labels.saving : labels.save}</span>
+                </Button>
+              </Can>
+            </div>
+          </section>
 
-              <Field label={labels.username}>
-                <Input
-                  value={form.username}
-                  onChange={(event) => updateField("username", event.target.value)}
-                  className="h-11 rounded-2xl"
-                  placeholder="optional_username"
-                />
-              </Field>
+          {createdUser ? (
+            <Card className="rounded-3xl border-emerald-100 bg-emerald-50 shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-emerald-800">
+                  <ShieldCheck className="h-5 w-5" />
+                  {labels.created}
+                </CardTitle>
+                <CardDescription className="text-emerald-700">
+                  {createdUser.profile.display_name ||
+                    createdUser.email ||
+                    createdUser.username}
+                </CardDescription>
+              </CardHeader>
 
-              <Field label={labels.password}>
-                <Input
-                  value={form.password}
-                  onChange={(event) => updateField("password", event.target.value)}
-                  type="password"
-                  className="h-11 rounded-2xl"
-                  placeholder={isArabic ? "اتركها فارغة لتوليد كلمة مؤقتة" : "Leave empty to generate temporary password"}
-                />
-              </Field>
-            </CardContent>
-          </Card>
+              <CardContent className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl bg-white p-4">
+                  <div className="text-xs text-slate-500">Username</div>
+                  <div className="mt-1 font-semibold text-slate-950">
+                    {createdUser.username}
+                  </div>
+                </div>
 
-          <Card className="rounded-3xl border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle>{labels.profile}</CardTitle>
-            </CardHeader>
+                <div className="rounded-2xl bg-white p-4">
+                  <div className="text-xs text-slate-500">
+                    {labels.temporaryPassword}
+                  </div>
+                  <div className="mt-1 break-all font-semibold text-slate-950">
+                    {createdUser.temporary_password || "—"}
+                  </div>
+                </div>
 
-            <CardContent className="grid gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={labels.firstName}>
-                  <Input
-                    value={form.first_name}
-                    onChange={(event) => updateField("first_name", event.target.value)}
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
+                <div className="flex items-center rounded-2xl bg-white p-4">
+                  <Can permission={PERMISSIONS.USERS_VIEW}>
+                    <Button asChild className="w-full rounded-2xl">
+                      <Link href={`/system/users/${createdUser.id}`}>
+                        {labels.openDetails}
+                      </Link>
+                    </Button>
+                  </Can>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
-                <Field label={labels.lastName}>
-                  <Input
-                    value={form.last_name}
-                    onChange={(event) => updateField("last_name", event.target.value)}
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-              </div>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card className="rounded-3xl border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle>{labels.basic}</CardTitle>
+              </CardHeader>
 
-              <Field label={labels.displayName}>
-                <Input
-                  value={form.display_name}
-                  onChange={(event) => updateField("display_name", event.target.value)}
-                  className="h-11 rounded-2xl"
-                />
-              </Field>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={labels.phone}>
-                  <Input
-                    value={form.phone_number}
-                    onChange={(event) => updateField("phone_number", event.target.value)}
-                    className="h-11 rounded-2xl"
-                    placeholder="+9665xxxxxxxx"
-                  />
-                </Field>
-
-                <Field label={labels.whatsapp}>
-                  <Input
-                    value={form.whatsapp_number}
-                    onChange={(event) => updateField("whatsapp_number", event.target.value)}
-                    className="h-11 rounded-2xl"
-                    placeholder="+9665xxxxxxxx"
-                  />
-                </Field>
-              </div>
-
-              <Field label={labels.alternateEmail}>
-                <Input
-                  value={form.alternate_email}
-                  onChange={(event) => updateField("alternate_email", event.target.value)}
-                  type="email"
-                  className="h-11 rounded-2xl"
-                />
-              </Field>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle>{labels.link}</CardTitle>
-              <CardDescription>
-                {isArabic
-                  ? "املأ المعرف المناسب حسب نوع المستخدم. مثال: عميل = customer_id، مركز = center_id."
-                  : "Fill the relevant entity ID based on user type."}
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={labels.entityType}>
-                  <Input
-                    value={form.entity_type}
-                    onChange={(event) => updateField("entity_type", event.target.value)}
-                    className="h-11 rounded-2xl"
-                    placeholder="customer / center / provider / agent"
-                  />
-                </Field>
-
-                <Field label={labels.entityId}>
-                  <Input
-                    value={form.entity_id}
-                    onChange={(event) => updateField("entity_id", event.target.value)}
-                    type="number"
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={labels.customerId}>
-                  <Input
-                    value={form.customer_id}
-                    onChange={(event) => updateField("customer_id", event.target.value)}
-                    type="number"
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-
-                <Field label={labels.centerId}>
-                  <Input
-                    value={form.center_id}
-                    onChange={(event) => updateField("center_id", event.target.value)}
-                    type="number"
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={labels.providerId}>
-                  <Input
-                    value={form.provider_id}
-                    onChange={(event) => updateField("provider_id", event.target.value)}
-                    type="number"
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-
-                <Field label={labels.agentId}>
-                  <Input
-                    value={form.agent_id}
-                    onChange={(event) => updateField("agent_id", event.target.value)}
-                    type="number"
-                    className="h-11 rounded-2xl"
-                  />
-                </Field>
-              </div>
-
-              <Field label={labels.brokerId}>
-                <Input
-                  value={form.broker_id}
-                  onChange={(event) => updateField("broker_id", event.target.value)}
-                  type="number"
-                  className="h-11 rounded-2xl"
-                />
-              </Field>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-0 shadow-sm">
-            <CardHeader>
-              <CardTitle>{labels.flags}</CardTitle>
-            </CardHeader>
-
-            <CardContent className="grid gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label={labels.language}>
+              <CardContent className="grid gap-4">
+                <Field label={labels.userType}>
                   <select
-                    value={form.preferred_language}
+                    value={form.user_type}
                     onChange={(event) =>
-                      updateField("preferred_language", event.target.value as "ar" | "en")
+                      updateField("user_type", event.target.value as UserType)
                     }
                     className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400"
                   >
-                    <option value="ar">العربية</option>
-                    <option value="en">English</option>
+                    {USER_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {isArabic ? option.ar : option.en}
+                      </option>
+                    ))}
                   </select>
                 </Field>
 
-                <Field label={labels.timezone}>
+                <Field label={labels.email}>
                   <Input
-                    value={form.timezone}
-                    onChange={(event) => updateField("timezone", event.target.value)}
+                    value={form.email}
+                    onChange={(event) =>
+                      updateField("email", event.target.value)
+                    }
+                    type="email"
+                    className="h-11 rounded-2xl"
+                    placeholder="user@example.com"
+                  />
+                </Field>
+
+                <Field label={labels.username}>
+                  <Input
+                    value={form.username}
+                    onChange={(event) =>
+                      updateField("username", event.target.value)
+                    }
+                    className="h-11 rounded-2xl"
+                    placeholder="optional_username"
+                  />
+                </Field>
+
+                <Field label={labels.password}>
+                  <Input
+                    value={form.password}
+                    onChange={(event) =>
+                      updateField("password", event.target.value)
+                    }
+                    type="password"
+                    className="h-11 rounded-2xl"
+                    placeholder={
+                      isArabic
+                        ? "اتركها فارغة لتوليد كلمة مؤقتة"
+                        : "Leave empty to generate temporary password"
+                    }
+                  />
+                </Field>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle>{labels.profile}</CardTitle>
+              </CardHeader>
+
+              <CardContent className="grid gap-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label={labels.firstName}>
+                    <Input
+                      value={form.first_name}
+                      onChange={(event) =>
+                        updateField("first_name", event.target.value)
+                      }
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+
+                  <Field label={labels.lastName}>
+                    <Input
+                      value={form.last_name}
+                      onChange={(event) =>
+                        updateField("last_name", event.target.value)
+                      }
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+                </div>
+
+                <Field label={labels.displayName}>
+                  <Input
+                    value={form.display_name}
+                    onChange={(event) =>
+                      updateField("display_name", event.target.value)
+                    }
                     className="h-11 rounded-2xl"
                   />
                 </Field>
-              </div>
 
-              <label className="flex cursor-pointer items-center gap-3 rounded-2xl border bg-white p-4 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.is_active}
-                  onChange={(event) => updateField("is_active", event.target.checked)}
-                  className="h-4 w-4"
-                />
-                <span>{labels.isActive}</span>
-              </label>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label={labels.phone}>
+                    <Input
+                      value={form.phone_number}
+                      onChange={(event) =>
+                        updateField("phone_number", event.target.value)
+                      }
+                      className="h-11 rounded-2xl"
+                      placeholder="+9665xxxxxxxx"
+                    />
+                  </Field>
 
-              <label className="flex cursor-pointer items-center gap-3 rounded-2xl border bg-white p-4 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.create_group}
-                  onChange={(event) => updateField("create_group", event.target.checked)}
-                  className="h-4 w-4"
-                />
-                <span>{labels.createGroup}</span>
-              </label>
-            </CardContent>
-          </Card>
-        </div>
-      </form>
-    </main>
+                  <Field label={labels.whatsapp}>
+                    <Input
+                      value={form.whatsapp_number}
+                      onChange={(event) =>
+                        updateField("whatsapp_number", event.target.value)
+                      }
+                      className="h-11 rounded-2xl"
+                      placeholder="+9665xxxxxxxx"
+                    />
+                  </Field>
+                </div>
+
+                <Field label={labels.alternateEmail}>
+                  <Input
+                    value={form.alternate_email}
+                    onChange={(event) =>
+                      updateField("alternate_email", event.target.value)
+                    }
+                    type="email"
+                    className="h-11 rounded-2xl"
+                  />
+                </Field>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle>{labels.link}</CardTitle>
+                <CardDescription>
+                  {isArabic
+                    ? "املأ المعرف المناسب حسب نوع المستخدم. مثال: عميل = customer_id، مركز = center_id."
+                    : "Fill the relevant entity ID based on user type."}
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent className="grid gap-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label={labels.entityType}>
+                    <Input
+                      value={form.entity_type}
+                      onChange={(event) =>
+                        updateField("entity_type", event.target.value)
+                      }
+                      className="h-11 rounded-2xl"
+                      placeholder="customer / center / provider / agent"
+                    />
+                  </Field>
+
+                  <Field label={labels.entityId}>
+                    <Input
+                      value={form.entity_id}
+                      onChange={(event) =>
+                        updateField("entity_id", event.target.value)
+                      }
+                      type="number"
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label={labels.customerId}>
+                    <Input
+                      value={form.customer_id}
+                      onChange={(event) =>
+                        updateField("customer_id", event.target.value)
+                      }
+                      type="number"
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+
+                  <Field label={labels.centerId}>
+                    <Input
+                      value={form.center_id}
+                      onChange={(event) =>
+                        updateField("center_id", event.target.value)
+                      }
+                      type="number"
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label={labels.providerId}>
+                    <Input
+                      value={form.provider_id}
+                      onChange={(event) =>
+                        updateField("provider_id", event.target.value)
+                      }
+                      type="number"
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+
+                  <Field label={labels.agentId}>
+                    <Input
+                      value={form.agent_id}
+                      onChange={(event) =>
+                        updateField("agent_id", event.target.value)
+                      }
+                      type="number"
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+                </div>
+
+                <Field label={labels.brokerId}>
+                  <Input
+                    value={form.broker_id}
+                    onChange={(event) =>
+                      updateField("broker_id", event.target.value)
+                    }
+                    type="number"
+                    className="h-11 rounded-2xl"
+                  />
+                </Field>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-0 shadow-sm">
+              <CardHeader>
+                <CardTitle>{labels.flags}</CardTitle>
+              </CardHeader>
+
+              <CardContent className="grid gap-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label={labels.language}>
+                    <select
+                      value={form.preferred_language}
+                      onChange={(event) =>
+                        updateField(
+                          "preferred_language",
+                          event.target.value as "ar" | "en",
+                        )
+                      }
+                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400"
+                    >
+                      <option value="ar">العربية</option>
+                      <option value="en">English</option>
+                    </select>
+                  </Field>
+
+                  <Field label={labels.timezone}>
+                    <Input
+                      value={form.timezone}
+                      onChange={(event) =>
+                        updateField("timezone", event.target.value)
+                      }
+                      className="h-11 rounded-2xl"
+                    />
+                  </Field>
+                </div>
+
+                <label className="flex cursor-pointer items-center gap-3 rounded-2xl border bg-white p-4 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.is_active}
+                    onChange={(event) =>
+                      updateField("is_active", event.target.checked)
+                    }
+                    className="h-4 w-4"
+                  />
+                  <span>{labels.isActive}</span>
+                </label>
+
+                <label className="flex cursor-pointer items-center gap-3 rounded-2xl border bg-white p-4 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.create_group}
+                    onChange={(event) =>
+                      updateField("create_group", event.target.checked)
+                    }
+                    className="h-4 w-4"
+                  />
+                  <span>{labels.createGroup}</span>
+                </label>
+              </CardContent>
+            </Card>
+          </div>
+        </form>
+      </main>
+    </PermissionGuard>
   );
 }
 

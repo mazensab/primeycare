@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Can } from "@/components/guards/Can";
+import { PermissionGuard } from "@/components/guards/PermissionGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,10 +49,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PERMISSIONS } from "@/lib/permissions";
 
 type AppLocale = "ar" | "en";
 
-type TreasuryAccountStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED" | "CLOSED" | string;
+type TreasuryAccountStatus =
+  | "ACTIVE"
+  | "INACTIVE"
+  | "SUSPENDED"
+  | "CLOSED"
+  | string;
 
 type TreasuryCashbox = {
   id: number | string;
@@ -79,28 +87,102 @@ type TreasuryCashbox = {
 };
 
 function readLocale(): AppLocale {
-  if (typeof window === "undefined") return "ar";
+  try {
+    if (typeof window === "undefined") return "ar";
 
-  const saved = window.localStorage.getItem("primey-locale");
-  if (saved === "ar" || saved === "en") return saved;
+    const saved = window.localStorage.getItem("primey-locale");
+    if (saved === "ar" || saved === "en") return saved;
 
-  return document.documentElement.lang === "en" ? "en" : "ar";
+    return document.documentElement.lang === "en" ? "en" : "ar";
+  } catch (error) {
+    console.error("Read locale error:", error);
+    return "ar";
+  }
 }
 
-function toArray(payload: any): any[] {
+function applyDocumentLocale(locale: AppLocale) {
+  try {
+    if (typeof document === "undefined") return;
+
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch (error) {
+    console.error("Apply locale error:", error);
+  }
+}
+
+function toArray(payload: unknown): unknown[] {
+  const data = payload as {
+    data?: unknown[] | { items?: unknown[] };
+    items?: unknown[];
+    results?: unknown[];
+  };
+
   if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.data?.items)) return payload.data.items;
-  if (Array.isArray(payload?.items)) return payload.items;
-  if (Array.isArray(payload?.results)) return payload.results;
-  if (Array.isArray(payload?.data)) return payload.data;
+
+  if (
+    data?.data &&
+    typeof data.data === "object" &&
+    !Array.isArray(data.data) &&
+    Array.isArray(data.data.items)
+  ) {
+    return data.data.items;
+  }
+
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.results)) return data.results;
+  if (Array.isArray(data?.data)) return data.data;
+
   return [];
 }
 
+function normalizeCashbox(item: unknown): TreasuryCashbox {
+  const row = (item || {}) as Record<string, unknown>;
+
+  return {
+    id: (row.id as number | string | undefined) || "",
+    name: String(row.name || ""),
+    code: String(row.code || ""),
+    account_type: String(row.account_type || "CASHBOX"),
+    account_type_label: row.account_type_label
+      ? String(row.account_type_label)
+      : undefined,
+    status: String(row.status || "ACTIVE"),
+    status_label: row.status_label ? String(row.status_label) : undefined,
+    ledger_account_id:
+      row.ledger_account_id === undefined || row.ledger_account_id === null
+        ? null
+        : (row.ledger_account_id as number | string),
+    ledger_account:
+      row.ledger_account && typeof row.ledger_account === "object"
+        ? (row.ledger_account as TreasuryCashbox["ledger_account"])
+        : null,
+    opening_balance: String(row.opening_balance || "0.00"),
+    current_balance: String(row.current_balance || "0.00"),
+    currency: String(row.currency || "SAR"),
+    description: row.description ? String(row.description) : undefined,
+    is_default: Boolean(row.is_default),
+    created_at: row.created_at ? String(row.created_at) : null,
+    updated_at: row.updated_at ? String(row.updated_at) : null,
+  };
+}
+
 function money(value: string | number | null | undefined) {
+  const number = Number(value || 0);
+
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(Number(value || 0));
+  }).format(Number.isFinite(number) ? number : 0);
+}
+
+function formatNumber(value: string | number | null | undefined) {
+  const number = Number(value || 0);
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(number) ? number : 0);
 }
 
 function dateOnly(value?: string | null) {
@@ -132,12 +214,16 @@ function dictionary(locale: AppLocale) {
     refresh: ar ? "تحديث" : "Refresh",
     export: ar ? "تصدير Excel" : "Export Excel",
     print: ar ? "طباعة" : "Print",
-    search: ar ? "ابحث باسم الصندوق أو الكود أو الوصف..." : "Search by cashbox name, code, or description...",
+    search: ar
+      ? "ابحث باسم الصندوق أو الكود أو الوصف..."
+      : "Search by cashbox name, code, or description...",
     loading: ar ? "جاري تحميل الصناديق النقدية..." : "Loading cashboxes...",
     noData: ar ? "لا توجد صناديق نقدية." : "No cashboxes found.",
     apiError: ar ? "تعذر تحميل الصناديق النقدية." : "Unable to load cashboxes.",
     refreshed: ar ? "تم تحديث الصناديق النقدية" : "Cashboxes refreshed",
-    exported: ar ? "تم تصدير الصناديق النقدية Excel" : "Cashboxes exported to Excel",
+    exported: ar
+      ? "تم تصدير الصناديق النقدية Excel"
+      : "Cashboxes exported to Excel",
     actions: ar ? "الإجراءات" : "Actions",
     details: ar ? "عرض التفاصيل" : "View Details",
     statement: ar ? "كشف الحساب" : "Statement",
@@ -230,6 +316,7 @@ export default function TreasuryCashboxesPage() {
   const [selectedIds, setSelectedIds] = useState<Array<string | number>>([]);
 
   const t = useMemo(() => dictionary(locale), [locale]);
+  const isArabic = locale === "ar";
 
   const filteredRows = useMemo(() => {
     const clean = query.trim().toLowerCase();
@@ -257,8 +344,14 @@ export default function TreasuryCashboxesPage() {
       0,
     );
 
-    const activeCashboxes = rows.filter((item) => item.status === "ACTIVE").length;
-    const inactiveCashboxes = rows.filter((item) => item.status === "INACTIVE").length;
+    const activeCashboxes = rows.filter(
+      (item) => item.status === "ACTIVE",
+    ).length;
+
+    const inactiveCashboxes = rows.filter(
+      (item) => item.status === "INACTIVE",
+    ).length;
+
     const defaultCashboxes = rows.filter((item) => item.is_default).length;
 
     return {
@@ -270,7 +363,8 @@ export default function TreasuryCashboxesPage() {
   }, [rows, filteredRows]);
 
   const allSelected =
-    filteredRows.length > 0 && filteredRows.every((item) => selectedIds.includes(item.id));
+    filteredRows.length > 0 &&
+    filteredRows.every((item) => selectedIds.includes(item.id));
 
   async function loadRows(showToast = false) {
     try {
@@ -283,21 +377,22 @@ export default function TreasuryCashboxesPage() {
           headers: {
             Accept: "application/json",
           },
+          cache: "no-store",
         },
       );
 
       const payload = await response.json().catch(() => null);
 
-      if (!response.ok || payload?.success === false) {
+      if (!response.ok || payload?.success === false || payload?.ok === false) {
         throw new Error(payload?.message || `HTTP ${response.status}`);
       }
 
-      setRows(toArray(payload) as TreasuryCashbox[]);
+      setRows(toArray(payload).map(normalizeCashbox));
       setSelectedIds([]);
 
       if (showToast) toast.success(t.refreshed);
     } catch (error) {
-      console.error(error);
+      console.error("Treasury cashboxes load error:", error);
       setRows([]);
       toast.error(t.apiError);
     } finally {
@@ -311,7 +406,8 @@ export default function TreasuryCashboxesPage() {
       [t.table.cashbox]: item.name,
       [t.table.openingBalance]: money(item.opening_balance),
       [t.table.currentBalance]: money(item.current_balance),
-      [t.table.status]: t.statuses[item.status as keyof typeof t.statuses] || item.status,
+      [t.table.status]:
+        t.statuses[item.status as keyof typeof t.statuses] || item.status,
       [t.table.ledgerAccount]: ledgerName(item),
       [t.table.createdAt]: dateOnly(item.created_at),
       [t.table.description]: item.description || "-",
@@ -319,6 +415,7 @@ export default function TreasuryCashboxesPage() {
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(data);
+
     worksheet["!cols"] = [
       { wch: 18 },
       { wch: 32 },
@@ -332,6 +429,7 @@ export default function TreasuryCashboxesPage() {
     ];
 
     const workbook = XLSX.utils.book_new();
+
     XLSX.utils.book_append_sheet(
       workbook,
       worksheet,
@@ -346,10 +444,14 @@ export default function TreasuryCashboxesPage() {
     toast.success(t.exported);
   }
 
+  function handlePrint() {
+    if (typeof window === "undefined") return;
+    window.print();
+  }
+
   useEffect(() => {
     const next = readLocale();
-    document.documentElement.lang = next;
-    document.documentElement.dir = next === "ar" ? "rtl" : "ltr";
+    applyDocumentLocale(next);
     setLocale(next);
   }, []);
 
@@ -363,365 +465,443 @@ export default function TreasuryCashboxesPage() {
   }, [query, status]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="rounded-full">
-              /system/treasury/cashboxes
-            </Badge>
-            <Badge className="rounded-full">
-              {filteredRows.length} / {rows.length}
-            </Badge>
+    <PermissionGuard
+      permission={PERMISSIONS.TREASURY_VIEW}
+      workspace="system"
+      mode="fallback"
+    >
+      <div className="space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="rounded-full">
+                /system/treasury/cashboxes
+              </Badge>
+              <Badge className="rounded-full">
+                {filteredRows.length} / {rows.length}
+              </Badge>
+            </div>
+
+            <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+              {t.title}
+            </h1>
+
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+              {t.subtitle}
+            </p>
           </div>
 
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.title}
-          </h1>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button asChild variant="outline" className="h-10 rounded-xl">
+              <Link href="/system/treasury">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Link>
+            </Button>
 
-          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            {t.subtitle}
-          </p>
+            <Button asChild variant="outline" className="h-10 rounded-xl">
+              <Link href="/system/treasury/accounts">
+                <Wallet className="h-4 w-4" />
+                {t.allAccounts}
+              </Link>
+            </Button>
+
+            <Button asChild variant="outline" className="h-10 rounded-xl">
+              <Link href="/system/treasury/transactions">
+                <CreditCard className="h-4 w-4" />
+                {t.transactions}
+              </Link>
+            </Button>
+
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl"
+              disabled={isLoading}
+              onClick={() => loadRows(true)}
+            >
+              {isLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-4 w-4" />
+              )}
+              {t.refresh}
+            </Button>
+
+            <Can
+              anyPermissions={[
+                PERMISSIONS.TREASURY_EXPORT,
+                PERMISSIONS.REPORTS_EXPORT,
+              ]}
+            >
+              <Button
+                variant="outline"
+                className="h-10 rounded-xl"
+                disabled={!filteredRows.length}
+                onClick={exportExcel}
+              >
+                <Download className="h-4 w-4" />
+                {t.export}
+              </Button>
+            </Can>
+
+            <Can
+              anyPermissions={[
+                PERMISSIONS.TREASURY_EXPORT,
+                PERMISSIONS.REPORTS_EXPORT,
+              ]}
+            >
+              <Button
+                variant="outline"
+                className="h-10 rounded-xl"
+                onClick={handlePrint}
+              >
+                <Printer className="h-4 w-4" />
+                {t.print}
+              </Button>
+            </Can>
+
+            <Can permission={PERMISSIONS.TREASURY_CREATE}>
+              <Button asChild className="h-10 rounded-xl">
+                <Link href="/system/treasury/accounts/create">
+                  <PlusCircle className="h-4 w-4" />
+                  {t.createAccount}
+                </Link>
+              </Button>
+            </Can>
+          </div>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Link href="/system/treasury">
-            <Button variant="outline" className="h-10 rounded-xl">
-              <ArrowLeft className="h-4 w-4" />
-              {t.back}
-            </Button>
-          </Link>
-
-          <Link href="/system/treasury/accounts">
-            <Button variant="outline" className="h-10 rounded-xl">
-              <Wallet className="h-4 w-4" />
-              {t.allAccounts}
-            </Button>
-          </Link>
-
-          <Link href="/system/treasury/transactions">
-            <Button variant="outline" className="h-10 rounded-xl">
-              <CreditCard className="h-4 w-4" />
-              {t.transactions}
-            </Button>
-          </Link>
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            disabled={isLoading}
-            onClick={() => loadRows(true)}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            {t.refresh}
-          </Button>
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            disabled={!filteredRows.length}
-            onClick={exportExcel}
-          >
-            <Download className="h-4 w-4" />
-            {t.export}
-          </Button>
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => window.print()}
-          >
-            <Printer className="h-4 w-4" />
-            {t.print}
-          </Button>
-
-          <Link href="/system/treasury/accounts/create">
-            <Button className="h-10 rounded-xl">
-              <PlusCircle className="h-4 w-4" />
-              {t.createAccount}
-            </Button>
-          </Link>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm text-muted-foreground">{t.totalBalance}</p>
-                <div className="mt-2 flex items-center gap-2">
-                  <Image src="/currency/sar.svg" alt="SAR" width={18} height={18} />
-                  <p className="text-2xl font-bold">
-                    {isLoading ? "..." : money(summary.totalBalance)}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {t.totalBalance}
                   </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <Image
+                      src="/currency/sar.svg"
+                      alt="SAR"
+                      width={18}
+                      height={18}
+                    />
+                    <p className="text-2xl font-bold">
+                      {isLoading ? "..." : money(summary.totalBalance)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                  <Wallet className="h-5 w-5" />
                 </div>
               </div>
+            </CardContent>
+          </Card>
 
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                <Wallet className="h-5 w-5" />
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {t.activeCashboxes}
+                  </p>
+                  <p className="mt-2 text-2xl font-bold">
+                    {isLoading ? "..." : formatNumber(summary.activeCashboxes)}
+                  </p>
+                </div>
+
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                  <Banknote className="h-5 w-5" />
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {t.inactiveCashboxes}
+                  </p>
+                  <p className="mt-2 text-2xl font-bold">
+                    {isLoading ? "..." : formatNumber(summary.inactiveCashboxes)}
+                  </p>
+                </div>
+
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                  <FileText className="h-5 w-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    {t.defaultCashboxes}
+                  </p>
+                  <p className="mt-2 text-2xl font-bold">
+                    {isLoading ? "..." : formatNumber(summary.defaultCashboxes)}
+                  </p>
+                </div>
+
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                  <Banknote className="h-5 w-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
+          <CardHeader>
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">{t.activeCashboxes}</p>
-                <p className="mt-2 text-2xl font-bold">
-                  {isLoading ? "..." : summary.activeCashboxes}
-                </p>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Banknote className="h-4 w-4" />
+                  {t.title}
+                </CardTitle>
+                <CardDescription>{t.subtitle}</CardDescription>
               </div>
 
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                <Banknote className="h-5 w-5" />
+              <div className="relative w-full xl:max-w-sm">
+                <Search
+                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+                    isArabic ? "right-3" : "left-3"
+                  }`}
+                />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t.search}
+                  className={`h-10 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+                />
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </CardHeader>
 
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm text-muted-foreground">{t.inactiveCashboxes}</p>
-                <p className="mt-2 text-2xl font-bold">
-                  {isLoading ? "..." : summary.inactiveCashboxes}
-                </p>
-              </div>
-
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                <FileText className="h-5 w-5" />
-              </div>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {(["ALL", "ACTIVE", "INACTIVE", "SUSPENDED", "CLOSED"] as const).map(
+                (item) => (
+                  <Button
+                    key={item}
+                    variant={status === item ? "default" : "outline"}
+                    className="h-10 rounded-xl"
+                    onClick={() => setStatus(item)}
+                  >
+                    {t.statuses[item]}
+                  </Button>
+                ),
+              )}
             </div>
-          </CardContent>
-        </Card>
 
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm text-muted-foreground">{t.defaultCashboxes}</p>
-                <p className="mt-2 text-2xl font-bold">
-                  {isLoading ? "..." : summary.defaultCashboxes}
-                </p>
-              </div>
+            <div
+              id="treasury-cashboxes-print-area"
+              className="overflow-hidden rounded-lg border"
+            >
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border"
+                        checked={allSelected}
+                        onChange={() => {
+                          const ids = filteredRows.map((item) => item.id);
 
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                <Banknote className="h-5 w-5" />
-              </div>
+                          setSelectedIds((current) =>
+                            allSelected
+                              ? current.filter((id) => !ids.includes(id))
+                              : Array.from(new Set([...current, ...ids])),
+                          );
+                        }}
+                      />
+                    </TableHead>
+                    <TableHead>{t.table.cashbox}</TableHead>
+                    <TableHead>{t.table.code}</TableHead>
+                    <TableHead>{t.table.openingBalance}</TableHead>
+                    <TableHead>{t.table.currentBalance}</TableHead>
+                    <TableHead>{t.table.status}</TableHead>
+                    <TableHead>{t.table.ledgerAccount}</TableHead>
+                    <TableHead>{t.actions}</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="h-32 text-center">
+                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          {t.loading}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredRows.length ? (
+                    filteredRows.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border"
+                            checked={selectedIds.includes(item.id)}
+                            onChange={() =>
+                              setSelectedIds((current) =>
+                                current.includes(item.id)
+                                  ? current.filter((id) => id !== item.id)
+                                  : [...current, item.id],
+                              )
+                            }
+                          />
+                        </TableCell>
+
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                              <Banknote className="h-5 w-5" />
+                            </div>
+
+                            <div>
+                              <Link
+                                href={`/system/treasury/accounts/${item.id}`}
+                                className="font-medium hover:underline"
+                              >
+                                {item.name}
+                              </Link>
+
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                {item.is_default ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full text-xs"
+                                  >
+                                    {t.defaultAccount}
+                                  </Badge>
+                                ) : null}
+
+                                {item.description ? (
+                                  <p className="max-w-[260px] truncate text-xs text-muted-foreground">
+                                    {item.description}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="font-medium">{item.code}</TableCell>
+
+                        <TableCell>
+                          <span
+                            className="flex items-center gap-2 font-semibold"
+                            dir="ltr"
+                          >
+                            <Image
+                              src="/currency/sar.svg"
+                              alt="SAR"
+                              width={15}
+                              height={15}
+                            />
+                            {money(item.opening_balance)}
+                          </span>
+                        </TableCell>
+
+                        <TableCell>
+                          <span
+                            className="flex items-center gap-2 font-bold"
+                            dir="ltr"
+                          >
+                            <Image
+                              src="/currency/sar.svg"
+                              alt="SAR"
+                              width={15}
+                              height={15}
+                            />
+                            {money(item.current_balance)}
+                          </span>
+                        </TableCell>
+
+                        <TableCell>{statusBadge(item.status, t)}</TableCell>
+
+                        <TableCell>{ledgerName(item)}</TableCell>
+
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+
+                            <DropdownMenuContent align={isArabic ? "start" : "end"}>
+                              <div dir={isArabic ? "rtl" : "ltr"}>
+                                <DropdownMenuLabel>{t.actions}</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/system/treasury/accounts/${item.id}`}>
+                                    <Eye className="h-4 w-4" />
+                                    {t.details}
+                                  </Link>
+                                </DropdownMenuItem>
+
+                                <Can
+                                  anyPermissions={[
+                                    PERMISSIONS.TREASURY_VIEW,
+                                    PERMISSIONS.REPORTS_VIEW,
+                                  ]}
+                                >
+                                  <DropdownMenuItem asChild>
+                                    <Link
+                                      href={`/system/treasury/accounts/${item.id}/statement`}
+                                    >
+                                      <FileText className="h-4 w-4" />
+                                      {t.statement}
+                                    </Link>
+                                  </DropdownMenuItem>
+                                </Can>
+
+                                <Can permission={PERMISSIONS.TREASURY_CREATE}>
+                                  <DropdownMenuItem asChild>
+                                    <Link href="/system/treasury/transactions/create">
+                                      <CreditCard className="h-4 w-4" />
+                                      {t.createTransaction}
+                                    </Link>
+                                  </DropdownMenuItem>
+                                </Can>
+                              </div>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell
+                        colSpan={8}
+                        className="h-32 text-center text-muted-foreground"
+                      >
+                        {t.noData}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="text-sm text-muted-foreground">
+              {formatNumber(selectedIds.length)} / {formatNumber(filteredRows.length)}{" "}
+              {t.selected}
             </div>
           </CardContent>
         </Card>
       </div>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardHeader>
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Banknote className="h-4 w-4" />
-                {t.title}
-              </CardTitle>
-              <CardDescription>{t.subtitle}</CardDescription>
-            </div>
-
-            <div className="relative w-full xl:max-w-sm">
-              <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t.search}
-                className="h-10 rounded-xl pr-10"
-              />
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {(["ALL", "ACTIVE", "INACTIVE", "SUSPENDED", "CLOSED"] as const).map(
-              (item) => (
-                <Button
-                  key={item}
-                  variant={status === item ? "default" : "outline"}
-                  className="h-10 rounded-xl"
-                  onClick={() => setStatus(item)}
-                >
-                  {t.statuses[item]}
-                </Button>
-              ),
-            )}
-          </div>
-
-          <div id="treasury-cashboxes-print-area" className="overflow-hidden rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border"
-                      checked={allSelected}
-                      onChange={() => {
-                        const ids = filteredRows.map((item) => item.id);
-
-                        setSelectedIds((current) =>
-                          allSelected
-                            ? current.filter((id) => !ids.includes(id))
-                            : Array.from(new Set([...current, ...ids])),
-                        );
-                      }}
-                    />
-                  </TableHead>
-                  <TableHead>{t.table.cashbox}</TableHead>
-                  <TableHead>{t.table.code}</TableHead>
-                  <TableHead>{t.table.openingBalance}</TableHead>
-                  <TableHead>{t.table.currentBalance}</TableHead>
-                  <TableHead>{t.table.status}</TableHead>
-                  <TableHead>{t.table.ledgerAccount}</TableHead>
-                  <TableHead>{t.actions}</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="h-32 text-center">
-                      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        {t.loading}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : filteredRows.length ? (
-                  filteredRows.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell>
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded border"
-                          checked={selectedIds.includes(item.id)}
-                          onChange={() =>
-                            setSelectedIds((current) =>
-                              current.includes(item.id)
-                                ? current.filter((id) => id !== item.id)
-                                : [...current, item.id],
-                            )
-                          }
-                        />
-                      </TableCell>
-
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                            <Banknote className="h-5 w-5" />
-                          </div>
-
-                          <div>
-                            <Link
-                              href={`/system/treasury/accounts/${item.id}`}
-                              className="font-medium hover:underline"
-                            >
-                              {item.name}
-                            </Link>
-
-                            <div className="mt-1 flex flex-wrap items-center gap-2">
-                              {item.is_default ? (
-                                <Badge variant="outline" className="rounded-full text-xs">
-                                  {t.defaultAccount}
-                                </Badge>
-                              ) : null}
-
-                              {item.description ? (
-                                <p className="max-w-[260px] truncate text-xs text-muted-foreground">
-                                  {item.description}
-                                </p>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="font-medium">{item.code}</TableCell>
-
-                      <TableCell>
-                        <span className="flex items-center gap-2 font-semibold">
-                          <Image src="/currency/sar.svg" alt="SAR" width={15} height={15} />
-                          {money(item.opening_balance)}
-                        </span>
-                      </TableCell>
-
-                      <TableCell>
-                        <span className="flex items-center gap-2 font-bold">
-                          <Image src="/currency/sar.svg" alt="SAR" width={15} height={15} />
-                          {money(item.current_balance)}
-                        </span>
-                      </TableCell>
-
-                      <TableCell>{statusBadge(item.status, t)}</TableCell>
-
-                      <TableCell>{ledgerName(item)}</TableCell>
-
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-
-                          <DropdownMenuContent>
-                            <DropdownMenuLabel>{t.actions}</DropdownMenuLabel>
-                            <DropdownMenuSeparator />
-
-                            <DropdownMenuItem asChild>
-                              <Link href={`/system/treasury/accounts/${item.id}`}>
-                                <Eye className="h-4 w-4" />
-                                {t.details}
-                              </Link>
-                            </DropdownMenuItem>
-
-                            <DropdownMenuItem asChild>
-                              <Link href={`/system/treasury/accounts/${item.id}/statement`}>
-                                <FileText className="h-4 w-4" />
-                                {t.statement}
-                              </Link>
-                            </DropdownMenuItem>
-
-                            <DropdownMenuItem asChild>
-                              <Link href="/system/treasury/transactions/create">
-                                <CreditCard className="h-4 w-4" />
-                                {t.createTransaction}
-                              </Link>
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
-                      {t.noData}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="text-sm text-muted-foreground">
-            {selectedIds.length} / {filteredRows.length} {t.selected}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    </PermissionGuard>
   );
 }

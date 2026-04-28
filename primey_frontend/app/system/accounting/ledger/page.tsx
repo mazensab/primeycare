@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Can } from "@/components/guards/Can";
+import { PermissionGuard } from "@/components/guards/PermissionGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -49,6 +51,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PERMISSIONS } from "@/lib/permissions";
 
 /* ============================================================
    📂 app/system/accounting/ledger/page.tsx
@@ -57,6 +60,8 @@ import {
    ✅ بيانات حقيقية من Accounting Ledger API
    ✅ بحث + فلاتر + أعمدة + فرز + صفحات
    ✅ تصدير Excel من API
+   ✅ حماية الصفحة accounting.view
+   ✅ حماية التصدير accounting.export / reports.export
    ✅ دعم عربي / إنجليزي
    ✅ أرقام إنجليزية دائمًا
    ✅ رمز العملة الرسمي
@@ -392,7 +397,9 @@ async function fetchLedger(path: string): Promise<LedgerPayload> {
     throw new Error(`HTTP ${response.status}`);
   }
 
-  const payload = (await response.json()) as ApiEnvelope<LedgerPayload> | LedgerPayload;
+  const payload = (await response.json()) as
+    | ApiEnvelope<LedgerPayload>
+    | LedgerPayload;
 
   const envelope = payload as ApiEnvelope<LedgerPayload>;
 
@@ -864,720 +871,753 @@ export default function GeneralLedgerPage() {
   ];
 
   return (
-    <div className="space-y-4 p-4 md:p-6" dir="ltr">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            asChild
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-          >
-            <Link href="/system/accounting">
-              <ArrowLeft className="h-4 w-4" />
-              {t.back}
-            </Link>
-          </Button>
+    <PermissionGuard
+      permission={PERMISSIONS.ACCOUNTING_VIEW}
+      workspace="system"
+      mode="fallback"
+    >
+      <div className="space-y-4 p-4 md:p-6" dir="ltr">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              asChild
+              variant="outline"
+              className="h-10 gap-2 rounded-xl bg-white px-4"
+            >
+              <Link href="/system/accounting">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Link>
+            </Button>
 
-          <Button
-            asChild
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-          >
-            <Link href="/system/accounting/reports">
-              <BarChart3 className="h-4 w-4" />
-              {t.reports}
-            </Link>
-          </Button>
+            <Button
+              asChild
+              variant="outline"
+              className="h-10 gap-2 rounded-xl bg-white px-4"
+            >
+              <Link href="/system/accounting/reports">
+                <BarChart3 className="h-4 w-4" />
+                {t.reports}
+              </Link>
+            </Button>
 
-          <Button
-            asChild
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-          >
-            <Link href="/system/accounting/accounts">
-              <BookOpenCheck className="h-4 w-4" />
-              {t.accounts}
-            </Link>
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-            onClick={() => loadLedger(true)}
-            disabled={loading}
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            {t.refresh}
-          </Button>
-
-          <Button
-            type="button"
-            className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
-            onClick={handleExport}
-          >
-            <Download className="h-4 w-4" />
-            {t.export}
-          </Button>
-        </div>
-
-        <div
-          className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}
-          dir={isArabic ? "rtl" : "ltr"}
-        >
-          <h1 className="text-2xl font-bold tracking-tight text-slate-950">
-            {t.title}
-          </h1>
-          <p className="text-sm leading-6 text-slate-500">{t.subtitle}</p>
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
-        <Card
-          className="rounded-2xl border-slate-200 bg-white shadow-sm"
-          dir={isArabic ? "rtl" : "ltr"}
-        >
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
-            <div>
-              <CardTitle className="text-lg font-bold text-slate-950">
-                {t.statusTitle}
-              </CardTitle>
-              <CardDescription className="mt-1">{t.statusDesc}</CardDescription>
-            </div>
+            <Button
+              asChild
+              variant="outline"
+              className="h-10 gap-2 rounded-xl bg-white px-4"
+            >
+              <Link href="/system/accounting/accounts">
+                <BookOpenCheck className="h-4 w-4" />
+                {t.accounts}
+              </Link>
+            </Button>
 
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              className="h-9 gap-2 rounded-xl bg-white"
-              onClick={handleExport}
+              className="h-10 gap-2 rounded-xl bg-white px-4"
+              onClick={() => loadLedger(true)}
+              disabled={loading}
             >
-              <Download className="h-4 w-4" />
-              {t.export}
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-4 w-4" />
+              )}
+              {t.refresh}
             </Button>
-          </CardHeader>
 
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-4">
-              {statusCards.map((card) => {
-                const Icon = card.icon;
-
-                return (
-                  <div key={card.label} className="space-y-2">
-                    <div className="flex items-center justify-between text-sm text-slate-500">
-                      <span>{card.label}</span>
-                      <Icon className="h-4 w-4 text-slate-400" />
-                    </div>
-
-                    <p className="text-2xl font-bold text-slate-950">
-                      {card.money ? (
-                        <MoneyValue value={card.value} />
-                      ) : (
-                        card.value
-                      )}
-                    </p>
-
-                    <div className="h-2 rounded-full bg-slate-100">
-                      <div
-                        className={`h-2 rounded-full ${
-                          card.label === t.totalCredit
-                            ? "bg-sky-500"
-                            : "bg-slate-950"
-                        }`}
-                        style={{ width: `${formatPercent(card.percent)}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
-              <div className="relative">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl border-slate-200 bg-white ${
-                    isArabic ? "pr-10" : "pl-10"
-                  }`}
-                />
-              </div>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 gap-2 rounded-xl bg-white"
-                  >
-                    <Filter className="h-4 w-4" />
-                    {t.filters}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent
-                  align={isArabic ? "start" : "end"}
-                  className="w-72 rounded-2xl"
-                >
-                  <div dir={isArabic ? "rtl" : "ltr"}>
-                    <DropdownMenuLabel>{t.filters}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    <div className="space-y-3 p-2">
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-slate-500">
-                          {t.accountId}
-                        </label>
-                        <Input
-                          value={accountId}
-                          onChange={(event) => setAccountId(event.target.value)}
-                          placeholder="1"
-                          inputMode="numeric"
-                          className="h-9 rounded-xl"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-slate-500">
-                          {t.dateFrom}
-                        </label>
-                        <Input
-                          type="date"
-                          value={dateFrom}
-                          onChange={(event) => setDateFrom(event.target.value)}
-                          className="h-9 rounded-xl"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-slate-500">
-                          {t.dateTo}
-                        </label>
-                        <Input
-                          type="date"
-                          value={dateTo}
-                          onChange={(event) => setDateTo(event.target.value)}
-                          className="h-9 rounded-xl"
-                        />
-                      </div>
-
-                      <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-2 text-sm">
-                        <Checkbox
-                          checked={postedOnly}
-                          onCheckedChange={(value) =>
-                            setPostedOnly(Boolean(value))
-                          }
-                        />
-                        <span>{t.postedOnly}</span>
-                      </label>
-
-                      <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-2 text-sm">
-                        <Checkbox
-                          checked={includeOpening}
-                          onCheckedChange={(value) =>
-                            setIncludeOpening(Boolean(value))
-                          }
-                        />
-                        <span>{t.includeOpening}</span>
-                      </label>
-
-                      <Button
-                        type="button"
-                        className="h-10 w-full rounded-xl"
-                        onClick={() => {
-                          setPage(1);
-                          loadLedger(true);
-                        }}
-                      >
-                        {t.refresh}
-                      </Button>
-                    </div>
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 gap-2 rounded-xl bg-white"
-                  >
-                    <ColumnsIcon className="h-4 w-4" />
-                    {t.columns}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent
-                  align={isArabic ? "start" : "end"}
-                  className="w-56 rounded-2xl"
-                >
-                  <div dir={isArabic ? "rtl" : "ltr"}>
-                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    {columnOptions.map((column) => (
-                      <DropdownMenuCheckboxItem
-                        key={column.key}
-                        checked={visibleColumns[column.key]}
-                        onCheckedChange={(checked) =>
-                          setVisibleColumns((current) => ({
-                            ...current,
-                            [column.key]: Boolean(checked),
-                          }))
-                        }
-                      >
-                        {column.label}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50 hover:bg-slate-50">
-                    {visibleColumns.entry_date ? (
-                      <TableHead>
-                        <SortButton
-                          label={t.entryDate}
-                          sortKey="entry_date"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onClick={() => toggleSort("entry_date")}
-                        />
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.journal_entry_number ? (
-                      <TableHead>
-                        <SortButton
-                          label={t.journalNumber}
-                          sortKey="journal_entry_number"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onClick={() => toggleSort("journal_entry_number")}
-                        />
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.account_code ? (
-                      <TableHead>
-                        <SortButton
-                          label={t.accountCode}
-                          sortKey="account_code"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onClick={() => toggleSort("account_code")}
-                        />
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.account_name ? (
-                      <TableHead>
-                        <SortButton
-                          label={t.accountName}
-                          sortKey="account_name"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onClick={() => toggleSort("account_name")}
-                        />
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.posting_source ? (
-                      <TableHead>{t.source}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.reference ? (
-                      <TableHead>{t.reference}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.description ? (
-                      <TableHead>{t.description}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.debit_amount ? (
-                      <TableHead>
-                        <SortButton
-                          label={t.debit}
-                          sortKey="debit_amount"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onClick={() => toggleSort("debit_amount")}
-                        />
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.credit_amount ? (
-                      <TableHead>
-                        <SortButton
-                          label={t.credit}
-                          sortKey="credit_amount"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onClick={() => toggleSort("credit_amount")}
-                        />
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.movement_amount ? (
-                      <TableHead>{t.movement}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.running_balance ? (
-                      <TableHead>
-                        <SortButton
-                          label={t.runningBalance}
-                          sortKey="running_balance"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onClick={() => toggleSort("running_balance")}
-                        />
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.actions ? (
-                      <TableHead>{t.action}</TableHead>
-                    ) : null}
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={12} className="h-40 text-center">
-                        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {t.refresh}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : paginatedRows.length > 0 ? (
-                    paginatedRows.map((row) => (
-                      <TableRow key={`${row.id}-${row.sort_order}`}>
-                        {visibleColumns.entry_date ? (
-                          <TableCell className="whitespace-nowrap text-slate-600">
-                            {formatDate(row.entry_date, locale)}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.journal_entry_number ? (
-                          <TableCell className="font-semibold text-slate-950">
-                            {row.journal_entry_number || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.account_code ? (
-                          <TableCell className="font-semibold text-slate-950">
-                            {row.account_code || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.account_name ? (
-                          <TableCell className="min-w-[220px] text-slate-700">
-                            {row.account_name || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.posting_source ? (
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className="rounded-full border-slate-200 bg-slate-50 text-slate-700"
-                            >
-                              {row.posting_source || "-"}
-                            </Badge>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.reference ? (
-                          <TableCell className="max-w-[160px] truncate text-slate-600">
-                            {row.reference || row.external_reference || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.description ? (
-                          <TableCell className="max-w-[260px] truncate text-slate-600">
-                            {getDescription(row) || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.debit_amount ? (
-                          <TableCell className="font-semibold text-slate-950">
-                            <MoneyValue value={row.debit_amount} />
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.credit_amount ? (
-                          <TableCell className="font-semibold text-slate-950">
-                            <MoneyValue value={row.credit_amount} />
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.movement_amount ? (
-                          <TableCell className="font-semibold text-slate-950">
-                            <MoneyValue value={row.movement_amount} />
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.running_balance ? (
-                          <TableCell className="font-semibold text-slate-950">
-                            <MoneyValue value={row.running_balance} />
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.actions ? (
-                          <TableCell>
-                            <div className="flex flex-wrap items-center gap-2">
-                              {row.journal_entry_id ? (
-                                <Button
-                                  asChild
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 rounded-lg px-2"
-                                >
-                                  <Link
-                                    href={`/system/accounting/journals/${row.journal_entry_id}`}
-                                  >
-                                    {t.viewJournal}
-                                  </Link>
-                                </Button>
-                              ) : null}
-
-                              {row.account_id ? (
-                                <Button
-                                  asChild
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 rounded-lg px-2"
-                                >
-                                  <Link
-                                    href={`/system/accounting/accounts/${row.account_id}`}
-                                  >
-                                    {t.viewAccount}
-                                  </Link>
-                                </Button>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                        ) : null}
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={12} className="h-48 text-center">
-                        <div className="space-y-2">
-                          <p className="font-semibold text-slate-950">
-                            {t.noRows}
-                          </p>
-                          <p className="text-sm text-slate-500">
-                            {t.noRowsDesc}
-                          </p>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="text-sm text-slate-500">
-                {formatNumber(filteredRows.length)} /{" "}
-                {formatNumber(transactions.length)}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl bg-white"
-                  disabled={page <= 1 || loading}
-                  onClick={() =>
-                    setPage((current) => Math.max(1, current - 1))
-                  }
-                >
-                  {t.previous}
-                </Button>
-
-                <Badge variant="outline" className="rounded-xl bg-white px-3">
-                  {formatNumber(page)} / {formatNumber(totalPages)}
-                </Badge>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl bg-white"
-                  disabled={page >= totalPages || loading}
-                  onClick={() =>
-                    setPage((current) => Math.min(totalPages, current + 1))
-                  }
-                >
-                  {t.next}
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card
-          className="rounded-2xl border-slate-200 bg-white shadow-sm"
-          dir={isArabic ? "rtl" : "ltr"}
-        >
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
-            <div>
-              <CardTitle className="text-lg font-bold text-slate-950">
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription className="mt-1">{t.summaryDesc}</CardDescription>
-            </div>
-
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white">
-              <BookOpenCheck className="h-5 w-5 text-slate-700" />
-            </div>
-          </CardHeader>
-
-          <CardContent className="space-y-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-bold text-slate-950">
-                    {formatNumber(summary.transactionCount)}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {t.transactionCount}
-                  </p>
-                </div>
-
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-950 text-white">
-                  <Layers3 className="h-5 w-5" />
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-dashed border-slate-200 p-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.openingBalance}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    <MoneyValue value={summary.openingBalance} />
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.closingBalance}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    <MoneyValue value={summary.closingBalance} />
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.totalDebit}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    <MoneyValue value={summary.totalDebit} />
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.totalCredit}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    <MoneyValue value={summary.totalCredit} />
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-2">
+            <Can
+              anyPermissions={[
+                PERMISSIONS.ACCOUNTING_EXPORT,
+                PERMISSIONS.REPORTS_EXPORT,
+              ]}
+            >
               <Button
                 type="button"
-                variant="outline"
-                className="h-10 justify-between rounded-xl bg-white"
-                onClick={() => {
-                  setAccountId("");
-                  setSearchTerm("");
-                }}
-              >
-                <span>{isArabic ? "كل الحسابات" : "All Accounts"}</span>
-                <Layers3 className="h-4 w-4" />
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 justify-between rounded-xl bg-white"
-                onClick={() => {
-                  setPostedOnly(true);
-                  setIncludeOpening(true);
-                  loadLedger(true);
-                }}
-              >
-                <span>{t.postedOnly}</span>
-                <ShieldCheck className="h-4 w-4" />
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 justify-between rounded-xl bg-white"
+                className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
                 onClick={handleExport}
               >
-                <span>{t.export}</span>
                 <Download className="h-4 w-4" />
+                {t.export}
               </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </Can>
+          </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {summaryCards.map((card) => {
-          const Icon = card.icon;
+          <div
+            className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}
+            dir={isArabic ? "rtl" : "ltr"}
+          >
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+              {t.title}
+            </h1>
+            <p className="text-sm leading-6 text-slate-500">{t.subtitle}</p>
+          </div>
+        </div>
 
-          return (
-            <Card
-              key={card.title}
-              className="rounded-2xl border-slate-200 bg-white shadow-sm"
-              dir={isArabic ? "rtl" : "ltr"}
-            >
-              <CardContent className="p-5">
-                <div className={`rounded-2xl ${card.bg} p-4`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-slate-500">{card.title}</p>
-                      <p className="mt-2 text-2xl font-bold text-slate-950">
+        <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
+          <Card
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
+            dir={isArabic ? "rtl" : "ltr"}
+          >
+            <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
+              <div>
+                <CardTitle className="text-lg font-bold text-slate-950">
+                  {t.statusTitle}
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  {t.statusDesc}
+                </CardDescription>
+              </div>
+
+              <Can
+                anyPermissions={[
+                  PERMISSIONS.ACCOUNTING_EXPORT,
+                  PERMISSIONS.REPORTS_EXPORT,
+                ]}
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 gap-2 rounded-xl bg-white"
+                  onClick={handleExport}
+                >
+                  <Download className="h-4 w-4" />
+                  {t.export}
+                </Button>
+              </Can>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-4">
+                {statusCards.map((card) => {
+                  const Icon = card.icon;
+
+                  return (
+                    <div key={card.label} className="space-y-2">
+                      <div className="flex items-center justify-between text-sm text-slate-500">
+                        <span>{card.label}</span>
+                        <Icon className="h-4 w-4 text-slate-400" />
+                      </div>
+
+                      <p className="text-2xl font-bold text-slate-950">
                         {card.money ? (
                           <MoneyValue value={card.value} />
                         ) : (
                           card.value
                         )}
                       </p>
-                    </div>
 
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-950 shadow-sm">
-                      <Icon className="h-5 w-5" />
+                      <div className="h-2 rounded-full bg-slate-100">
+                        <div
+                          className={`h-2 rounded-full ${
+                            card.label === t.totalCredit
+                              ? "bg-sky-500"
+                              : "bg-slate-950"
+                          }`}
+                          style={{ width: `${formatPercent(card.percent)}%` }}
+                        />
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
+                <div className="relative">
+                  <Search
+                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${
+                      isArabic ? "right-3" : "left-3"
+                    }`}
+                  />
+                  <Input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder={t.searchPlaceholder}
+                    className={`h-11 rounded-xl border-slate-200 bg-white ${
+                      isArabic ? "pr-10" : "pl-10"
+                    }`}
+                  />
+                </div>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 gap-2 rounded-xl bg-white"
+                    >
+                      <Filter className="h-4 w-4" />
+                      {t.filters}
+                    </Button>
+                  </DropdownMenuTrigger>
+
+                  <DropdownMenuContent
+                    align={isArabic ? "start" : "end"}
+                    className="w-72 rounded-2xl"
+                  >
+                    <div dir={isArabic ? "rtl" : "ltr"}>
+                      <DropdownMenuLabel>{t.filters}</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+
+                      <div className="space-y-3 p-2">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-500">
+                            {t.accountId}
+                          </label>
+                          <Input
+                            value={accountId}
+                            onChange={(event) =>
+                              setAccountId(event.target.value)
+                            }
+                            placeholder="1"
+                            inputMode="numeric"
+                            className="h-9 rounded-xl"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-500">
+                            {t.dateFrom}
+                          </label>
+                          <Input
+                            type="date"
+                            value={dateFrom}
+                            onChange={(event) => setDateFrom(event.target.value)}
+                            className="h-9 rounded-xl"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-500">
+                            {t.dateTo}
+                          </label>
+                          <Input
+                            type="date"
+                            value={dateTo}
+                            onChange={(event) => setDateTo(event.target.value)}
+                            className="h-9 rounded-xl"
+                          />
+                        </div>
+
+                        <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-2 text-sm">
+                          <Checkbox
+                            checked={postedOnly}
+                            onCheckedChange={(value) =>
+                              setPostedOnly(Boolean(value))
+                            }
+                          />
+                          <span>{t.postedOnly}</span>
+                        </label>
+
+                        <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-2 text-sm">
+                          <Checkbox
+                            checked={includeOpening}
+                            onCheckedChange={(value) =>
+                              setIncludeOpening(Boolean(value))
+                            }
+                          />
+                          <span>{t.includeOpening}</span>
+                        </label>
+
+                        <Button
+                          type="button"
+                          className="h-10 w-full rounded-xl"
+                          onClick={() => {
+                            setPage(1);
+                            loadLedger(true);
+                          }}
+                        >
+                          {t.refresh}
+                        </Button>
+                      </div>
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 gap-2 rounded-xl bg-white"
+                    >
+                      <ColumnsIcon className="h-4 w-4" />
+                      {t.columns}
+                    </Button>
+                  </DropdownMenuTrigger>
+
+                  <DropdownMenuContent
+                    align={isArabic ? "start" : "end"}
+                    className="w-56 rounded-2xl"
+                  >
+                    <div dir={isArabic ? "rtl" : "ltr"}>
+                      <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+
+                      {columnOptions.map((column) => (
+                        <DropdownMenuCheckboxItem
+                          key={column.key}
+                          checked={visibleColumns[column.key]}
+                          onCheckedChange={(checked) =>
+                            setVisibleColumns((current) => ({
+                              ...current,
+                              [column.key]: Boolean(checked),
+                            }))
+                          }
+                        >
+                          {column.label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50 hover:bg-slate-50">
+                      {visibleColumns.entry_date ? (
+                        <TableHead>
+                          <SortButton
+                            label={t.entryDate}
+                            sortKey="entry_date"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onClick={() => toggleSort("entry_date")}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.journal_entry_number ? (
+                        <TableHead>
+                          <SortButton
+                            label={t.journalNumber}
+                            sortKey="journal_entry_number"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onClick={() => toggleSort("journal_entry_number")}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.account_code ? (
+                        <TableHead>
+                          <SortButton
+                            label={t.accountCode}
+                            sortKey="account_code"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onClick={() => toggleSort("account_code")}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.account_name ? (
+                        <TableHead>
+                          <SortButton
+                            label={t.accountName}
+                            sortKey="account_name"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onClick={() => toggleSort("account_name")}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.posting_source ? (
+                        <TableHead>{t.source}</TableHead>
+                      ) : null}
+
+                      {visibleColumns.reference ? (
+                        <TableHead>{t.reference}</TableHead>
+                      ) : null}
+
+                      {visibleColumns.description ? (
+                        <TableHead>{t.description}</TableHead>
+                      ) : null}
+
+                      {visibleColumns.debit_amount ? (
+                        <TableHead>
+                          <SortButton
+                            label={t.debit}
+                            sortKey="debit_amount"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onClick={() => toggleSort("debit_amount")}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.credit_amount ? (
+                        <TableHead>
+                          <SortButton
+                            label={t.credit}
+                            sortKey="credit_amount"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onClick={() => toggleSort("credit_amount")}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.movement_amount ? (
+                        <TableHead>{t.movement}</TableHead>
+                      ) : null}
+
+                      {visibleColumns.running_balance ? (
+                        <TableHead>
+                          <SortButton
+                            label={t.runningBalance}
+                            sortKey="running_balance"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onClick={() => toggleSort("running_balance")}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.actions ? (
+                        <TableHead>{t.action}</TableHead>
+                      ) : null}
+                    </TableRow>
+                  </TableHeader>
+
+                  <TableBody>
+                    {loading ? (
+                      <TableRow>
+                        <TableCell colSpan={12} className="h-40 text-center">
+                          <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {t.refresh}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : paginatedRows.length > 0 ? (
+                      paginatedRows.map((row) => (
+                        <TableRow key={`${row.id}-${row.sort_order}`}>
+                          {visibleColumns.entry_date ? (
+                            <TableCell className="whitespace-nowrap text-slate-600">
+                              {formatDate(row.entry_date, locale)}
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.journal_entry_number ? (
+                            <TableCell className="font-semibold text-slate-950">
+                              {row.journal_entry_number || "-"}
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.account_code ? (
+                            <TableCell className="font-semibold text-slate-950">
+                              {row.account_code || "-"}
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.account_name ? (
+                            <TableCell className="min-w-[220px] text-slate-700">
+                              {row.account_name || "-"}
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.posting_source ? (
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className="rounded-full border-slate-200 bg-slate-50 text-slate-700"
+                              >
+                                {row.posting_source || "-"}
+                              </Badge>
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.reference ? (
+                            <TableCell className="max-w-[160px] truncate text-slate-600">
+                              {row.reference || row.external_reference || "-"}
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.description ? (
+                            <TableCell className="max-w-[260px] truncate text-slate-600">
+                              {getDescription(row) || "-"}
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.debit_amount ? (
+                            <TableCell className="font-semibold text-slate-950">
+                              <MoneyValue value={row.debit_amount} />
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.credit_amount ? (
+                            <TableCell className="font-semibold text-slate-950">
+                              <MoneyValue value={row.credit_amount} />
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.movement_amount ? (
+                            <TableCell className="font-semibold text-slate-950">
+                              <MoneyValue value={row.movement_amount} />
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.running_balance ? (
+                            <TableCell className="font-semibold text-slate-950">
+                              <MoneyValue value={row.running_balance} />
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.actions ? (
+                            <TableCell>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {row.journal_entry_id ? (
+                                  <Button
+                                    asChild
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 rounded-lg px-2"
+                                  >
+                                    <Link
+                                      href={`/system/accounting/journals/${row.journal_entry_id}`}
+                                    >
+                                      {t.viewJournal}
+                                    </Link>
+                                  </Button>
+                                ) : null}
+
+                                {row.account_id ? (
+                                  <Button
+                                    asChild
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 rounded-lg px-2"
+                                  >
+                                    <Link
+                                      href={`/system/accounting/accounts/${row.account_id}`}
+                                    >
+                                      {t.viewAccount}
+                                    </Link>
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                          ) : null}
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={12} className="h-48 text-center">
+                          <div className="space-y-2">
+                            <p className="font-semibold text-slate-950">
+                              {t.noRows}
+                            </p>
+                            <p className="text-sm text-slate-500">
+                              {t.noRowsDesc}
+                            </p>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="text-sm text-slate-500">
+                  {formatNumber(filteredRows.length)} /{" "}
+                  {formatNumber(transactions.length)}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl bg-white"
+                    disabled={page <= 1 || loading}
+                    onClick={() =>
+                      setPage((current) => Math.max(1, current - 1))
+                    }
+                  >
+                    {t.previous}
+                  </Button>
+
+                  <Badge variant="outline" className="rounded-xl bg-white px-3">
+                    {formatNumber(page)} / {formatNumber(totalPages)}
+                  </Badge>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl bg-white"
+                    disabled={page >= totalPages || loading}
+                    onClick={() =>
+                      setPage((current) => Math.min(totalPages, current + 1))
+                    }
+                  >
+                    {t.next}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
+            dir={isArabic ? "rtl" : "ltr"}
+          >
+            <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
+              <div>
+                <CardTitle className="text-lg font-bold text-slate-950">
+                  {t.summaryTitle}
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  {t.summaryDesc}
+                </CardDescription>
+              </div>
+
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white">
+                <BookOpenCheck className="h-5 w-5 text-slate-700" />
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-3">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-slate-950">
+                      {formatNumber(summary.transactionCount)}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {t.transactionCount}
+                    </p>
+                  </div>
+
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-950 text-white">
+                    <Layers3 className="h-5 w-5" />
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+              </div>
+
+              <div className="rounded-2xl border border-dashed border-slate-200 p-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">{t.openingBalance}</p>
+                    <p className="mt-1 text-lg font-bold text-slate-950">
+                      <MoneyValue value={summary.openingBalance} />
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">{t.closingBalance}</p>
+                    <p className="mt-1 text-lg font-bold text-slate-950">
+                      <MoneyValue value={summary.closingBalance} />
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">{t.totalDebit}</p>
+                    <p className="mt-1 text-lg font-bold text-slate-950">
+                      <MoneyValue value={summary.totalDebit} />
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">{t.totalCredit}</p>
+                    <p className="mt-1 text-lg font-bold text-slate-950">
+                      <MoneyValue value={summary.totalCredit} />
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 justify-between rounded-xl bg-white"
+                  onClick={() => {
+                    setAccountId("");
+                    setSearchTerm("");
+                  }}
+                >
+                  <span>{isArabic ? "كل الحسابات" : "All Accounts"}</span>
+                  <Layers3 className="h-4 w-4" />
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 justify-between rounded-xl bg-white"
+                  onClick={() => {
+                    setPostedOnly(true);
+                    setIncludeOpening(true);
+                    loadLedger(true);
+                  }}
+                >
+                  <span>{t.postedOnly}</span>
+                  <ShieldCheck className="h-4 w-4" />
+                </Button>
+
+                <Can
+                  anyPermissions={[
+                    PERMISSIONS.ACCOUNTING_EXPORT,
+                    PERMISSIONS.REPORTS_EXPORT,
+                  ]}
+                >
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 justify-between rounded-xl bg-white"
+                    onClick={handleExport}
+                  >
+                    <span>{t.export}</span>
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </Can>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {summaryCards.map((card) => {
+            const Icon = card.icon;
+
+            return (
+              <Card
+                key={card.title}
+                className="rounded-2xl border-slate-200 bg-white shadow-sm"
+                dir={isArabic ? "rtl" : "ltr"}
+              >
+                <CardContent className="p-5">
+                  <div className={`rounded-2xl ${card.bg} p-4`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm text-slate-500">{card.title}</p>
+                        <p className="mt-2 text-2xl font-bold text-slate-950">
+                          {card.money ? (
+                            <MoneyValue value={card.value} />
+                          ) : (
+                            card.value
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-950 shadow-sm">
+                        <Icon className="h-5 w-5" />
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       </div>
-    </div>
+    </PermissionGuard>
   );
 }

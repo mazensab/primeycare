@@ -1,10 +1,12 @@
 # ===============================================================
 # 📂 الملف: api/users/create.py
 # 🧭 Primey Care — User Create API
+# 🚀 الإصدار: Users Create API V1.1
 # ---------------------------------------------------------------
 # ✅ Create actor user
 # ✅ Uses auth_center.services.create_actor_user
 # ✅ Supports system / provider / customer / agent users
+# ✅ Protected by permissions: users.create
 # ===============================================================
 
 from __future__ import annotations
@@ -17,15 +19,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
+from auth_center.permissions import PermissionCodes, permission_required
 from auth_center.services import create_actor_user
-
-
-SYSTEM_ADMIN_GROUPS = {
-    "SUPER_ADMIN",
-    "SYSTEM",
-    "SYSTEM_ADMIN",
-    "ADMIN",
-}
 
 
 def _json_body(request) -> dict:
@@ -52,32 +47,6 @@ def _safe_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _is_system_admin(user) -> bool:
-    if not user.is_authenticated:
-        return False
-
-    if user.is_superuser:
-        return True
-
-    groups = {_normalize_upper(name) for name in user.groups.values_list("name", flat=True)}
-    if groups & SYSTEM_ADMIN_GROUPS:
-        return True
-
-    profile = getattr(user, "profile", None)
-    user_type = _normalize_upper(getattr(profile, "user_type", ""))
-    return user_type in SYSTEM_ADMIN_GROUPS
-
-
-def _forbidden():
-    return JsonResponse(
-        {
-            "success": False,
-            "message": "You do not have permission to create users.",
-        },
-        status=403,
-    )
 
 
 def _bad_request(message: str, errors: dict | None = None):
@@ -108,6 +77,7 @@ def _serialize_result(result) -> dict:
         "profile": {
             "display_name": profile.display_name,
             "user_type": profile.user_type,
+            "role": profile.role,
             "phone_number": profile.phone_number,
             "whatsapp_number": profile.whatsapp_number,
             "alternate_email": profile.alternate_email,
@@ -127,10 +97,8 @@ def _serialize_result(result) -> dict:
 @login_required
 @require_POST
 @csrf_protect
+@permission_required(PermissionCodes.USERS_CREATE)
 def users_create_api(request):
-    if not _is_system_admin(request.user):
-        return _forbidden()
-
     payload = _json_body(request)
 
     user_type = _normalize_upper(payload.get("user_type"))
@@ -155,6 +123,7 @@ def users_create_api(request):
     try:
         result = create_actor_user(
             user_type=user_type,
+            role=_clean_text(payload.get("role")).lower() or None,
             email=email or None,
             username=username or None,
             password=_clean_text(payload.get("password")) or None,
@@ -183,7 +152,10 @@ def users_create_api(request):
             update_existing=bool(payload.get("update_existing", True)),
         )
     except ValidationError as exc:
-        return _bad_request("Validation error.", {"detail": exc.messages if hasattr(exc, "messages") else str(exc)})
+        return _bad_request(
+            "Validation error.",
+            {"detail": exc.messages if hasattr(exc, "messages") else str(exc)},
+        )
     except Exception as exc:
         return JsonResponse(
             {

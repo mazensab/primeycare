@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import {
-  ArrowDownUp,
   ArrowLeft,
   BadgeCheck,
   BarChart3,
@@ -25,6 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { apiGet, API_PATHS } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -55,6 +55,7 @@ import {
    📂 app/system/customers/reports/page.tsx
    🧠 Primey Care | Customers Reports
    ------------------------------------------------------------
+   ✅ مرتبط مع lib/api.ts
    ✅ تصدير Excel للقائمة التفصيلية فقط
    ✅ طباعة / Web PDF للقائمة التفصيلية فقط
    ✅ لا يطبع بطاقات التحليل أو الأقسام الجانبية
@@ -172,9 +173,7 @@ function dictionary(locale: AppLocale) {
       ? "جدول تحليلي قابل للبحث والتصفية وتصدير Excel والطباعة."
       : "Analytical table with search, filters, Excel export, and print.",
 
-    searchPlaceholder: ar
-      ? "ابحث في العملاء..."
-      : "Search customers...",
+    searchPlaceholder: ar ? "ابحث في العملاء..." : "Search customers...",
 
     all: ar ? "الكل" : "All",
     total: ar ? "الإجمالي" : "Total",
@@ -239,7 +238,9 @@ function dictionary(locale: AppLocale) {
       title: ar ? "تقرير العملاء التفصيلي" : "Detailed Customers Report",
       generatedAt: ar ? "تاريخ الطباعة" : "Printed At",
       scope: ar ? "النطاق" : "Scope",
-      filteredOnly: ar ? "القائمة التفصيلية حسب الفلاتر الحالية فقط" : "Current filtered detailed list only",
+      filteredOnly: ar
+        ? "القائمة التفصيلية حسب الفلاتر الحالية فقط"
+        : "Current filtered detailed list only",
       totalRows: ar ? "عدد السجلات" : "Rows Count",
     },
   };
@@ -437,13 +438,8 @@ function groupBy(
   customers.forEach((customer) => {
     let label = String(customer[key] || "-");
 
-    if (key === "status") {
-      label = statusLabel(customer.status, locale);
-    }
-
-    if (key === "customerType") {
-      label = typeLabel(customer.customerType, locale);
-    }
+    if (key === "status") label = statusLabel(customer.status, locale);
+    if (key === "customerType") label = typeLabel(customer.customerType, locale);
 
     map.set(label, (map.get(label) || 0) + 1);
   });
@@ -508,10 +504,7 @@ function buildPrintHtml({
         <meta charset="utf-8" />
         <title>${escapeHtml(title)}</title>
         <style>
-          * {
-            box-sizing: border-box;
-          }
-
+          * { box-sizing: border-box; }
           body {
             margin: 0;
             padding: 24px;
@@ -519,7 +512,6 @@ function buildPrintHtml({
             color: #111827;
             background: #ffffff;
           }
-
           .print-header {
             display: flex;
             justify-content: space-between;
@@ -529,20 +521,17 @@ function buildPrintHtml({
             border-bottom: 1px solid #e5e7eb;
             padding-bottom: 14px;
           }
-
           h1 {
             margin: 0;
             font-size: 22px;
             font-weight: 800;
           }
-
           .meta {
             margin-top: 8px;
             color: #6b7280;
             font-size: 12px;
             line-height: 1.8;
           }
-
           .badge {
             display: inline-block;
             border: 1px solid #d1d5db;
@@ -551,40 +540,29 @@ function buildPrintHtml({
             font-size: 12px;
             color: #374151;
           }
-
           table {
             width: 100%;
             border-collapse: collapse;
             font-size: 12px;
           }
-
           th {
             background: #f3f4f6;
             color: #111827;
             font-weight: 700;
           }
-
-          th,
-          td {
+          th, td {
             border: 1px solid #e5e7eb;
             padding: 9px 8px;
             text-align: ${isArabic ? "right" : "left"};
             vertical-align: top;
           }
-
-          tr:nth-child(even) td {
-            background: #fafafa;
-          }
-
+          tr:nth-child(even) td { background: #fafafa; }
           @page {
             size: A4 landscape;
             margin: 12mm;
           }
-
           @media print {
-            body {
-              padding: 0;
-            }
+            body { padding: 0; }
           }
         </style>
       </head>
@@ -832,35 +810,26 @@ export default function SystemCustomersReportsPage() {
     setSelectedIds((current) => Array.from(new Set([...current, ...pageIds])));
   }
 
-  async function loadCustomers(showToast = false) {
-    try {
-      setIsLoading(true);
+  async function loadCustomers(showSuccessToast = false) {
+    setIsLoading(true);
 
-      const response = await fetch("/api/customers/?page_size=200", {
-        method: "GET",
-        credentials: "include",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
+    const response = await apiGet<CustomersApiResponse>(API_PATHS.customers.list, {
+      page_size: 200,
+    });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const payload = (await response.json()) as CustomersApiResponse;
-      const normalized = normalizeApiList(payload).map(normalizeCustomer);
-
-      setCustomers(normalized);
-
-      if (showToast) {
-        toast.success(t.refreshSuccess);
-      }
-    } catch (error) {
-      console.error("Failed to load customers reports:", error);
+    if (!response.ok) {
       setCustomers([]);
-      toast.error(t.loadError);
-    } finally {
       setIsLoading(false);
+      toast.error(response.message || t.loadError);
+      return;
+    }
+
+    const normalized = normalizeApiList(response.data).map(normalizeCustomer);
+    setCustomers(normalized);
+    setIsLoading(false);
+
+    if (showSuccessToast) {
+      toast.success(t.refreshSuccess);
     }
   }
 
@@ -953,7 +922,6 @@ export default function SystemCustomersReportsPage() {
 
   return (
     <div className="space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
@@ -1015,7 +983,6 @@ export default function SystemCustomersReportsPage() {
         </div>
       </div>
 
-      {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <ReportStatCard title={t.stats.total} value={stats.total} percent={100} icon={UsersRound} />
         <ReportStatCard title={t.stats.active} value={stats.active} percent={calculatePercent(stats.active, stats.total)} icon={BadgeCheck} />
@@ -1023,7 +990,6 @@ export default function SystemCustomersReportsPage() {
         <ReportStatCard title={t.stats.lead} value={stats.lead} percent={calculatePercent(stats.lead, stats.total)} icon={FileText} />
       </div>
 
-      {/* Main Reports Layout */}
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
           <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
@@ -1104,7 +1070,12 @@ export default function SystemCustomersReportsPage() {
               </CardDescription>
             </div>
 
-            <Button variant="outline" className="h-9 rounded-xl" onClick={exportExcel}>
+            <Button
+              variant="outline"
+              className="h-9 rounded-xl"
+              onClick={exportExcel}
+              disabled={isLoading || exportRows.length === 0}
+            >
               <Download className="h-4 w-4" />
               <span>{t.exportExcel}</span>
             </Button>
@@ -1128,7 +1099,6 @@ export default function SystemCustomersReportsPage() {
         </Card>
       </div>
 
-      {/* Detailed Table */}
       <Card className="rounded-2xl border bg-card shadow-sm">
         <CardHeader className="gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>

@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Can } from "@/components/guards/Can";
+import { PermissionGuard } from "@/components/guards/PermissionGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -51,6 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PERMISSIONS } from "@/lib/permissions";
 
 /* ============================================================
    📂 app/system/accounting/accounts/page.tsx
@@ -61,7 +64,8 @@ import {
    ✅ يدعم API دليل الحسابات إذا وجد
    ✅ fallback من ميزان المراجعة إذا API الشجرة غير جاهز
    ✅ بحث + فلاتر + أعمدة + فتح/طي الشجرة
-   ✅ تصدير Excel
+   ✅ حماية الصفحة بالصلاحيات accounting.view
+   ✅ حماية التصدير accounting.export / reports.export
    ✅ دعم عربي / إنجليزي
    ✅ أرقام إنجليزية دائمًا
    ✅ رمز العملة الرسمي
@@ -329,6 +333,7 @@ function flattenTree(
       .toLowerCase();
 
     const matchesSearch = keyword ? nodeText.includes(keyword) : true;
+
     const matchesType =
       accountTypeFilter === "ALL" || node.account_type === accountTypeFilter;
 
@@ -888,28 +893,24 @@ export default function ChartOfAccountsTreePage() {
       value: formatNumber(summary.groupAccounts),
       icon: Layers3,
       bg: "bg-emerald-50",
-      money: false,
     },
     {
       title: t.postableAccounts,
       value: formatNumber(summary.postableAccounts),
       icon: ShieldCheck,
       bg: "bg-sky-50",
-      money: false,
     },
     {
       title: t.asset,
       value: formatNumber(summary.assetAccounts),
       icon: TrendingUp,
       bg: "bg-violet-50",
-      money: false,
     },
     {
       title: t.liability,
       value: formatNumber(summary.liabilityAccounts),
       icon: WalletCards,
       bg: "bg-teal-50",
-      money: false,
     },
   ];
 
@@ -930,719 +931,733 @@ export default function ChartOfAccountsTreePage() {
   ];
 
   return (
-    <div className="space-y-4 p-4 md:p-6" dir="ltr">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            asChild
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-          >
-            <Link href="/system/accounting">
-              <ArrowLeft className="h-4 w-4" />
-              {t.back}
-            </Link>
-          </Button>
+    <PermissionGuard
+      permission={PERMISSIONS.ACCOUNTING_VIEW}
+      workspace="system"
+      mode="fallback"
+    >
+      <div className="space-y-4 p-4 md:p-6" dir="ltr">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              asChild
+              variant="outline"
+              className="h-10 gap-2 rounded-xl bg-white px-4"
+            >
+              <Link href="/system/accounting">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Link>
+            </Button>
 
-          <Button
-            asChild
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-          >
-            <Link href="/system/accounting/reports">
-              <BarChart3 className="h-4 w-4" />
-              {t.reports}
-            </Link>
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-            onClick={() => loadAccounts(true)}
-            disabled={loading}
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            {t.refresh}
-          </Button>
-
-          <Button
-            type="button"
-            className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
-            onClick={handleExport}
-          >
-            <Download className="h-4 w-4" />
-            {t.export}
-          </Button>
-        </div>
-
-        <div
-          className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}
-          dir={isArabic ? "rtl" : "ltr"}
-        >
-          <h1 className="text-2xl font-bold tracking-tight text-slate-950">
-            {t.title}
-          </h1>
-          <p className="text-sm leading-6 text-slate-500">{t.subtitle}</p>
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
-        <Card
-          className="rounded-2xl border-slate-200 bg-white shadow-sm"
-          dir={isArabic ? "rtl" : "ltr"}
-        >
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
-            <div>
-              <CardTitle className="text-lg font-bold text-slate-950">
-                {t.statusTitle}
-              </CardTitle>
-              <CardDescription className="mt-1">{t.statusDesc}</CardDescription>
-            </div>
+            <Button
+              asChild
+              variant="outline"
+              className="h-10 gap-2 rounded-xl bg-white px-4"
+            >
+              <Link href="/system/accounting/reports">
+                <BarChart3 className="h-4 w-4" />
+                {t.reports}
+              </Link>
+            </Button>
 
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              className="h-9 gap-2 rounded-xl bg-white"
-              onClick={handleExport}
+              className="h-10 gap-2 rounded-xl bg-white px-4"
+              onClick={() => loadAccounts(true)}
+              disabled={loading}
             >
-              <Download className="h-4 w-4" />
-              {t.export}
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="h-4 w-4" />
+              )}
+              {t.refresh}
             </Button>
-          </CardHeader>
 
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-4">
-              {statusCards.map((card) => {
-                const Icon = card.icon;
-
-                return (
-                  <div key={card.label} className="space-y-2">
-                    <div className="flex items-center justify-between text-sm text-slate-500">
-                      <span>{card.label}</span>
-                      <Icon className="h-4 w-4 text-slate-400" />
-                    </div>
-
-                    <p className="text-2xl font-bold text-slate-950">
-                      {card.money ? (
-                        <MoneyValue value={card.value} />
-                      ) : (
-                        card.value
-                      )}
-                    </p>
-
-                    <div className="h-2 rounded-full bg-slate-100">
-                      <div
-                        className={`h-2 rounded-full ${
-                          card.label === t.totalCredit
-                            ? "bg-sky-500"
-                            : card.label === t.difference &&
-                                summary.difference !== 0
-                              ? "bg-amber-500"
-                              : "bg-slate-950"
-                        }`}
-                        style={{ width: `${Math.min(card.percent, 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
-              <div className="relative">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl border-slate-200 bg-white ${
-                    isArabic ? "pr-10" : "pl-10"
-                  }`}
-                />
-              </div>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 gap-2 rounded-xl bg-white"
-                  >
-                    <Filter className="h-4 w-4" />
-                    {t.filters}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent
-                  align={isArabic ? "start" : "end"}
-                  className="w-72 rounded-2xl"
-                >
-                  <div dir={isArabic ? "rtl" : "ltr"}>
-                    <DropdownMenuLabel>{t.filters}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    <div className="space-y-3 p-2">
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-slate-500">
-                          {t.dateFrom}
-                        </label>
-                        <Input
-                          type="date"
-                          value={dateFrom}
-                          onChange={(event) => setDateFrom(event.target.value)}
-                          className="h-9 rounded-xl"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-slate-500">
-                          {t.dateTo}
-                        </label>
-                        <Input
-                          type="date"
-                          value={dateTo}
-                          onChange={(event) => setDateTo(event.target.value)}
-                          className="h-9 rounded-xl"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        {(
-                          [
-                            "ALL",
-                            "ASSET",
-                            "LIABILITY",
-                            "EQUITY",
-                            "REVENUE",
-                            "EXPENSE",
-                          ] as AccountTypeFilter[]
-                        ).map((type) => (
-                          <Button
-                            key={type}
-                            type="button"
-                            variant={
-                              accountTypeFilter === type ? "default" : "outline"
-                            }
-                            size="sm"
-                            className="rounded-xl"
-                            onClick={() => setAccountTypeFilter(type)}
-                          >
-                            {type === "ALL"
-                              ? t.all
-                              : accountTypeLabel(type, locale)}
-                          </Button>
-                        ))}
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2">
-                        {(["ALL", "GROUP", "POSTABLE"] as ClassFilter[]).map(
-                          (filter) => (
-                            <Button
-                              key={filter}
-                              type="button"
-                              variant={
-                                classFilter === filter ? "default" : "outline"
-                              }
-                              size="sm"
-                              className="rounded-xl"
-                              onClick={() => setClassFilter(filter)}
-                            >
-                              {filter === "ALL"
-                                ? t.all
-                                : filter === "GROUP"
-                                  ? t.group
-                                  : t.postable}
-                            </Button>
-                          ),
-                        )}
-                      </div>
-
-                      <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-2 text-sm">
-                        <Checkbox
-                          checked={includeZeroAccounts}
-                          onCheckedChange={(value) =>
-                            setIncludeZeroAccounts(Boolean(value))
-                          }
-                        />
-                        <span>{t.includeZero}</span>
-                      </label>
-
-                      <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-2 text-sm">
-                        <Checkbox
-                          checked={postedOnly}
-                          onCheckedChange={(value) =>
-                            setPostedOnly(Boolean(value))
-                          }
-                        />
-                        <span>{t.postedOnly}</span>
-                      </label>
-
-                      <Button
-                        type="button"
-                        className="h-10 w-full rounded-xl"
-                        onClick={() => loadAccounts(true)}
-                      >
-                        {t.refresh}
-                      </Button>
-                    </div>
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 gap-2 rounded-xl bg-white"
-                  >
-                    <ColumnsIcon className="h-4 w-4" />
-                    {t.columns}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent
-                  align={isArabic ? "start" : "end"}
-                  className="w-56 rounded-2xl"
-                >
-                  <div dir={isArabic ? "rtl" : "ltr"}>
-                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    {columnOptions.map((column) => (
-                      <DropdownMenuCheckboxItem
-                        key={column.key}
-                        checked={visibleColumns[column.key]}
-                        onCheckedChange={(checked) =>
-                          setVisibleColumns((current) => ({
-                            ...current,
-                            [column.key]: Boolean(checked),
-                          }))
-                        }
-                      >
-                        {column.label}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="rounded-xl bg-white"
-                onClick={expandAll}
-              >
-                <ChevronDown className="h-4 w-4" />
-                {t.expandAll}
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="rounded-xl bg-white"
-                onClick={collapseAll}
-              >
-                <ChevronRight className="h-4 w-4" />
-                {t.collapseAll}
-              </Button>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50 hover:bg-slate-50">
-                    {visibleColumns.account_code ? (
-                      <TableHead>{t.accountCode}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.account_name ? (
-                      <TableHead>{t.accountName}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.account_type ? (
-                      <TableHead>{t.accountType}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.normal_balance ? (
-                      <TableHead>{t.normalBalance}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.account_class ? (
-                      <TableHead>{t.accountClass}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.total_debit ? (
-                      <TableHead>{t.totalDebit}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.total_credit ? (
-                      <TableHead>{t.totalCredit}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.net_debit ? (
-                      <TableHead>{t.netDebit}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.net_credit ? (
-                      <TableHead>{t.netCredit}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.actions ? (
-                      <TableHead>{t.action}</TableHead>
-                    ) : null}
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={10} className="h-40 text-center">
-                        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {t.refresh}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : paginatedRows.length > 0 ? (
-                    paginatedRows.map((row) => {
-                      const isExpanded = Boolean(expanded[row.account_id]);
-
-                      return (
-                        <TableRow key={`${row.account_id}-${row.path}`}>
-                          {visibleColumns.account_code ? (
-                            <TableCell className="font-semibold text-slate-950">
-                              <div
-                                className="flex items-center gap-2"
-                                style={{
-                                  paddingInlineStart: `${Math.max(row.level, 0) * 16}px`,
-                                }}
-                              >
-                                {row.has_children ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleNode(row.account_id)}
-                                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                                  >
-                                    {isExpanded ? (
-                                      <ChevronDown className="h-4 w-4" />
-                                    ) : (
-                                      <ChevronIcon className="h-4 w-4" />
-                                    )}
-                                  </button>
-                                ) : (
-                                  <span className="h-7 w-7" />
-                                )}
-
-                                <span dir="ltr">{row.account_code}</span>
-                              </div>
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.account_name ? (
-                            <TableCell className="min-w-[240px] text-slate-700">
-                              <div className="flex items-center gap-2">
-                                {row.has_children ? (
-                                  <FolderTree className="h-4 w-4 text-slate-400" />
-                                ) : (
-                                  <WalletCards className="h-4 w-4 text-slate-400" />
-                                )}
-
-                                <span>{row.account_name}</span>
-                              </div>
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.account_type ? (
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={accountTypeBadgeClass(
-                                  row.account_type,
-                                )}
-                              >
-                                {accountTypeLabel(row.account_type, locale)}
-                              </Badge>
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.normal_balance ? (
-                            <TableCell className="text-slate-600">
-                              {row.normal_balance || "-"}
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.account_class ? (
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={
-                                  row.is_group
-                                    ? "rounded-full border-slate-200 bg-slate-50 text-slate-700"
-                                    : "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700"
-                                }
-                              >
-                                {row.is_group ? t.group : t.postable}
-                              </Badge>
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.total_debit ? (
-                            <TableCell className="font-semibold text-slate-950">
-                              <MoneyValue value={row.total_debit} />
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.total_credit ? (
-                            <TableCell className="font-semibold text-slate-950">
-                              <MoneyValue value={row.total_credit} />
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.net_debit ? (
-                            <TableCell>
-                              <MoneyValue value={row.net_debit} />
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.net_credit ? (
-                            <TableCell>
-                              <MoneyValue value={row.net_credit} />
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.actions ? (
-                            <TableCell>
-                              <Button
-                                asChild
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 rounded-lg px-2"
-                              >
-                                <Link
-                                  href={`/system/accounting/accounts/${row.account_id}`}
-                                >
-                                  {t.view}
-                                </Link>
-                              </Button>
-                            </TableCell>
-                          ) : null}
-                        </TableRow>
-                      );
-                    })
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={10} className="h-48 text-center">
-                        <div className="space-y-2">
-                          <p className="font-semibold text-slate-950">
-                            {t.noRows}
-                          </p>
-                          <p className="text-sm text-slate-500">
-                            {t.noRowsDesc}
-                          </p>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="text-sm text-slate-500">
-                {formatNumber(filteredRows.length)} /{" "}
-                {formatNumber(allRows.length)}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl bg-white"
-                  disabled={page <= 1}
-                  onClick={() =>
-                    setPage((current) => Math.max(1, current - 1))
-                  }
-                >
-                  {t.previous}
-                </Button>
-
-                <Badge variant="outline" className="rounded-xl bg-white px-3">
-                  {formatNumber(page)} / {formatNumber(totalPages)}
-                </Badge>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl bg-white"
-                  disabled={page >= totalPages}
-                  onClick={() =>
-                    setPage((current) => Math.min(totalPages, current + 1))
-                  }
-                >
-                  {t.next}
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card
-          className="rounded-2xl border-slate-200 bg-white shadow-sm"
-          dir={isArabic ? "rtl" : "ltr"}
-        >
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
-            <div>
-              <CardTitle className="text-lg font-bold text-slate-950">
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription className="mt-1">{t.summaryDesc}</CardDescription>
-            </div>
-
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white">
-              <FolderTree className="h-5 w-5 text-slate-700" />
-            </div>
-          </CardHeader>
-
-          <CardContent className="space-y-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-bold text-slate-950">
-                    {formatNumber(summary.totalAccounts)}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {t.totalAccounts}
-                  </p>
-                </div>
-
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-950 text-white">
-                  <FolderTree className="h-5 w-5" />
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-dashed border-slate-200 p-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.groupAccounts}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    {formatNumber(summary.groupAccounts)}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.postableAccounts}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    {formatNumber(summary.postableAccounts)}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.totalDebit}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    <MoneyValue value={summary.totalDebit} />
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.totalCredit}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    <MoneyValue value={summary.totalCredit} />
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 justify-between rounded-xl bg-white"
-                onClick={() => {
-                  setAccountTypeFilter("ALL");
-                  setClassFilter("ALL");
-                  setSearchTerm("");
-                }}
-              >
-                <span>{t.all}</span>
-                <Layers3 className="h-4 w-4" />
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 justify-between rounded-xl bg-white"
-                onClick={() => setAccountTypeFilter("ASSET")}
-              >
-                <span>{t.asset}</span>
-                <TrendingUp className="h-4 w-4" />
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 justify-between rounded-xl bg-white"
-                onClick={() => setClassFilter("POSTABLE")}
-              >
-                <span>{t.postable}</span>
-                <ShieldCheck className="h-4 w-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {summaryCards.map((card) => {
-          const Icon = card.icon;
-
-          return (
-            <Card
-              key={card.title}
-              className="rounded-2xl border-slate-200 bg-white shadow-sm"
-              dir={isArabic ? "rtl" : "ltr"}
+            <Can
+              anyPermissions={[
+                PERMISSIONS.ACCOUNTING_EXPORT,
+                PERMISSIONS.REPORTS_EXPORT,
+              ]}
             >
-              <CardContent className="p-5">
-                <div className={`rounded-2xl ${card.bg} p-4`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-slate-500">{card.title}</p>
-                      <p className="mt-2 text-2xl font-bold text-slate-950">
+              <Button
+                type="button"
+                className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
+                onClick={handleExport}
+              >
+                <Download className="h-4 w-4" />
+                {t.export}
+              </Button>
+            </Can>
+          </div>
+
+          <div
+            className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}
+            dir={isArabic ? "rtl" : "ltr"}
+          >
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+              {t.title}
+            </h1>
+            <p className="text-sm leading-6 text-slate-500">{t.subtitle}</p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
+          <Card
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
+            dir={isArabic ? "rtl" : "ltr"}
+          >
+            <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
+              <div>
+                <CardTitle className="text-lg font-bold text-slate-950">
+                  {t.statusTitle}
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  {t.statusDesc}
+                </CardDescription>
+              </div>
+
+              <Can
+                anyPermissions={[
+                  PERMISSIONS.ACCOUNTING_EXPORT,
+                  PERMISSIONS.REPORTS_EXPORT,
+                ]}
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 gap-2 rounded-xl bg-white"
+                  onClick={handleExport}
+                >
+                  <Download className="h-4 w-4" />
+                  {t.export}
+                </Button>
+              </Can>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-4">
+                {statusCards.map((card) => {
+                  const Icon = card.icon;
+
+                  return (
+                    <div key={card.label} className="space-y-2">
+                      <div className="flex items-center justify-between text-sm text-slate-500">
+                        <span>{card.label}</span>
+                        <Icon className="h-4 w-4 text-slate-400" />
+                      </div>
+
+                      <p className="text-2xl font-bold text-slate-950">
                         {card.money ? (
                           <MoneyValue value={card.value} />
                         ) : (
                           card.value
                         )}
                       </p>
-                    </div>
 
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-950 shadow-sm">
-                      <Icon className="h-5 w-5" />
+                      <div className="h-2 rounded-full bg-slate-100">
+                        <div
+                          className={`h-2 rounded-full ${
+                            card.label === t.totalCredit
+                              ? "bg-sky-500"
+                              : card.label === t.difference &&
+                                  summary.difference !== 0
+                                ? "bg-amber-500"
+                                : "bg-slate-950"
+                          }`}
+                          style={{ width: `${Math.min(card.percent, 100)}%` }}
+                        />
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
+                <div className="relative">
+                  <Search
+                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${
+                      isArabic ? "right-3" : "left-3"
+                    }`}
+                  />
+                  <Input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder={t.searchPlaceholder}
+                    className={`h-11 rounded-xl border-slate-200 bg-white ${
+                      isArabic ? "pr-10" : "pl-10"
+                    }`}
+                  />
+                </div>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 gap-2 rounded-xl bg-white"
+                    >
+                      <Filter className="h-4 w-4" />
+                      {t.filters}
+                    </Button>
+                  </DropdownMenuTrigger>
+
+                  <DropdownMenuContent
+                    align={isArabic ? "start" : "end"}
+                    className="w-72 rounded-2xl"
+                  >
+                    <div dir={isArabic ? "rtl" : "ltr"}>
+                      <DropdownMenuLabel>{t.filters}</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+
+                      <div className="space-y-3 p-2">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-500">
+                            {t.dateFrom}
+                          </label>
+                          <Input
+                            type="date"
+                            value={dateFrom}
+                            onChange={(event) =>
+                              setDateFrom(event.target.value)
+                            }
+                            className="h-9 rounded-xl"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-500">
+                            {t.dateTo}
+                          </label>
+                          <Input
+                            type="date"
+                            value={dateTo}
+                            onChange={(event) => setDateTo(event.target.value)}
+                            className="h-9 rounded-xl"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          {(
+                            [
+                              "ALL",
+                              "ASSET",
+                              "LIABILITY",
+                              "EQUITY",
+                              "REVENUE",
+                              "EXPENSE",
+                            ] as AccountTypeFilter[]
+                          ).map((type) => (
+                            <Button
+                              key={type}
+                              type="button"
+                              variant={
+                                accountTypeFilter === type
+                                  ? "default"
+                                  : "outline"
+                              }
+                              size="sm"
+                              className="rounded-xl"
+                              onClick={() => setAccountTypeFilter(type)}
+                            >
+                              {type === "ALL"
+                                ? t.all
+                                : accountTypeLabel(type, locale)}
+                            </Button>
+                          ))}
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          {(["ALL", "GROUP", "POSTABLE"] as ClassFilter[]).map(
+                            (filter) => (
+                              <Button
+                                key={filter}
+                                type="button"
+                                variant={
+                                  classFilter === filter ? "default" : "outline"
+                                }
+                                size="sm"
+                                className="rounded-xl"
+                                onClick={() => setClassFilter(filter)}
+                              >
+                                {filter === "ALL"
+                                  ? t.all
+                                  : filter === "GROUP"
+                                    ? t.group
+                                    : t.postable}
+                              </Button>
+                            ),
+                          )}
+                        </div>
+
+                        <label className="flex cursor-pointer items-center gap-2 rounded-xl border p-3 text-sm">
+                          <Checkbox
+                            checked={includeZeroAccounts}
+                            onCheckedChange={(checked) =>
+                              setIncludeZeroAccounts(Boolean(checked))
+                            }
+                          />
+                          <span>{t.includeZero}</span>
+                        </label>
+
+                        <label className="flex cursor-pointer items-center gap-2 rounded-xl border p-3 text-sm">
+                          <Checkbox
+                            checked={postedOnly}
+                            onCheckedChange={(checked) =>
+                              setPostedOnly(Boolean(checked))
+                            }
+                          />
+                          <span>{t.postedOnly}</span>
+                        </label>
+
+                        <Button
+                          type="button"
+                          className="w-full rounded-xl"
+                          onClick={() => loadAccounts(true)}
+                        >
+                          {t.refresh}
+                        </Button>
+                      </div>
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11 gap-2 rounded-xl bg-white"
+                    >
+                      <ColumnsIcon className="h-4 w-4" />
+                      {t.columns}
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+
+                  <DropdownMenuContent
+                    align={isArabic ? "start" : "end"}
+                    className="w-64 rounded-2xl"
+                  >
+                    <div dir={isArabic ? "rtl" : "ltr"}>
+                      <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+
+                      {columnOptions.map((column) => (
+                        <DropdownMenuCheckboxItem
+                          key={column.key}
+                          checked={visibleColumns[column.key]}
+                          onCheckedChange={(checked) =>
+                            setVisibleColumns((current) => ({
+                              ...current,
+                              [column.key]: checked,
+                            }))
+                          }
+                        >
+                          {column.label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-xl bg-white"
+                  onClick={expandAll}
+                >
+                  {t.expandAll}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-xl bg-white"
+                  onClick={collapseAll}
+                >
+                  {t.collapseAll}
+                </Button>
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        {visibleColumns.account_code ? (
+                          <TableHead className="min-w-[130px]">
+                            {t.accountCode}
+                          </TableHead>
+                        ) : null}
+
+                        {visibleColumns.account_name ? (
+                          <TableHead className="min-w-[280px]">
+                            {t.accountName}
+                          </TableHead>
+                        ) : null}
+
+                        {visibleColumns.account_type ? (
+                          <TableHead className="min-w-[120px]">
+                            {t.accountType}
+                          </TableHead>
+                        ) : null}
+
+                        {visibleColumns.normal_balance ? (
+                          <TableHead className="min-w-[130px]">
+                            {t.normalBalance}
+                          </TableHead>
+                        ) : null}
+
+                        {visibleColumns.account_class ? (
+                          <TableHead className="min-w-[120px]">
+                            {t.accountClass}
+                          </TableHead>
+                        ) : null}
+
+                        {visibleColumns.total_debit ? (
+                          <TableHead className="min-w-[130px]">
+                            {t.totalDebit}
+                          </TableHead>
+                        ) : null}
+
+                        {visibleColumns.total_credit ? (
+                          <TableHead className="min-w-[130px]">
+                            {t.totalCredit}
+                          </TableHead>
+                        ) : null}
+
+                        {visibleColumns.net_debit ? (
+                          <TableHead className="min-w-[130px]">
+                            {t.netDebit}
+                          </TableHead>
+                        ) : null}
+
+                        {visibleColumns.net_credit ? (
+                          <TableHead className="min-w-[130px]">
+                            {t.netCredit}
+                          </TableHead>
+                        ) : null}
+
+                        {visibleColumns.actions ? (
+                          <TableHead className="min-w-[100px]">
+                            {t.action}
+                          </TableHead>
+                        ) : null}
+                      </TableRow>
+                    </TableHeader>
+
+                    <TableBody>
+                      {loading ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={10}
+                            className="h-44 text-center text-slate-500"
+                          >
+                            <div className="flex items-center justify-center gap-2">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span>{t.refresh}...</span>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ) : paginatedRows.length > 0 ? (
+                        paginatedRows.map((row) => {
+                          const isExpanded = expanded[row.account_id];
+                          const padding = Math.min(row.path.split("/").length, 6);
+
+                          return (
+                            <TableRow
+                              key={`${row.account_id}-${row.path}`}
+                              className="hover:bg-slate-50"
+                            >
+                              {visibleColumns.account_code ? (
+                                <TableCell className="font-semibold text-slate-950">
+                                  <span dir="ltr">{row.account_code}</span>
+                                </TableCell>
+                              ) : null}
+
+                              {visibleColumns.account_name ? (
+                                <TableCell>
+                                  <div
+                                    className="flex items-center gap-2"
+                                    style={{
+                                      paddingInlineStart: `${(padding - 1) * 16}px`,
+                                    }}
+                                  >
+                                    {row.has_children ? (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 rounded-lg"
+                                        onClick={() =>
+                                          toggleNode(row.account_id)
+                                        }
+                                      >
+                                        {isExpanded ? (
+                                          <ChevronDown className="h-4 w-4" />
+                                        ) : (
+                                          <ChevronIcon className="h-4 w-4" />
+                                        )}
+                                      </Button>
+                                    ) : (
+                                      <span className="h-7 w-7" />
+                                    )}
+
+                                    <div>
+                                      <div className="font-medium text-slate-950">
+                                        {row.account_name}
+                                      </div>
+                                      <div className="mt-1 text-xs text-slate-400">
+                                        {row.path}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                              ) : null}
+
+                              {visibleColumns.account_type ? (
+                                <TableCell>
+                                  <Badge
+                                    variant="outline"
+                                    className={accountTypeBadgeClass(
+                                      row.account_type,
+                                    )}
+                                  >
+                                    {accountTypeLabel(row.account_type, locale)}
+                                  </Badge>
+                                </TableCell>
+                              ) : null}
+
+                              {visibleColumns.normal_balance ? (
+                                <TableCell className="text-slate-600">
+                                  {row.normal_balance || "-"}
+                                </TableCell>
+                              ) : null}
+
+                              {visibleColumns.account_class ? (
+                                <TableCell>
+                                  <Badge
+                                    variant={row.is_group ? "secondary" : "outline"}
+                                    className="rounded-full"
+                                  >
+                                    {row.is_group ? t.group : t.postable}
+                                  </Badge>
+                                </TableCell>
+                              ) : null}
+
+                              {visibleColumns.total_debit ? (
+                                <TableCell>
+                                  <MoneyValue value={row.total_debit} />
+                                </TableCell>
+                              ) : null}
+
+                              {visibleColumns.total_credit ? (
+                                <TableCell>
+                                  <MoneyValue value={row.total_credit} />
+                                </TableCell>
+                              ) : null}
+
+                              {visibleColumns.net_debit ? (
+                                <TableCell>
+                                  <MoneyValue value={row.net_debit} />
+                                </TableCell>
+                              ) : null}
+
+                              {visibleColumns.net_credit ? (
+                                <TableCell>
+                                  <MoneyValue value={row.net_credit} />
+                                </TableCell>
+                              ) : null}
+
+                              {visibleColumns.actions ? (
+                                <TableCell>
+                                  <Button
+                                    asChild
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 rounded-lg px-2"
+                                  >
+                                    <Link
+                                      href={`/system/accounting/accounts/${row.account_id}`}
+                                    >
+                                      {t.view}
+                                    </Link>
+                                  </Button>
+                                </TableCell>
+                              ) : null}
+                            </TableRow>
+                          );
+                        })
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={10} className="h-44 text-center">
+                            <div className="flex flex-col items-center justify-center gap-2">
+                              <FolderTree className="h-10 w-10 text-slate-300" />
+                              <p className="font-semibold text-slate-950">
+                                {t.noRows}
+                              </p>
+                              <p className="max-w-md text-sm text-slate-500">
+                                {t.noRowsDesc}
+                              </p>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                <span>
+                  {formatNumber(paginatedRows.length)} /{" "}
+                  {formatNumber(filteredRows.length)}
+                </span>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl bg-white"
+                    disabled={page <= 1}
+                    onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  >
+                    {t.previous}
+                  </Button>
+
+                  <span dir="ltr">
+                    {formatNumber(page)} / {formatNumber(totalPages)}
+                  </span>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl bg-white"
+                    disabled={page >= totalPages}
+                    onClick={() =>
+                      setPage((current) => Math.min(totalPages, current + 1))
+                    }
+                  >
+                    {t.next}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
+            dir={isArabic ? "rtl" : "ltr"}
+          >
+            <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
+              <div>
+                <CardTitle className="text-lg font-bold text-slate-950">
+                  {t.summaryTitle}
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  {t.summaryDesc}
+                </CardDescription>
+              </div>
+
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white">
+                <Layers3 className="h-5 w-5 text-slate-700" />
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="grid gap-3">
+                {summaryCards.map((card) => {
+                  const Icon = card.icon;
+
+                  return (
+                    <div
+                      key={card.title}
+                      className={`rounded-2xl ${card.bg} p-4`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm text-slate-500">{card.title}</p>
+                          <p className="mt-2 text-2xl font-bold text-slate-950">
+                            {card.value}
+                          </p>
+                        </div>
+
+                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-950 shadow-sm">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-2xl border border-dashed border-slate-200 p-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">{t.totalDebit}</p>
+                    <p className="mt-1 text-lg font-bold text-slate-950">
+                      <MoneyValue value={summary.totalDebit} />
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">{t.totalCredit}</p>
+                    <p className="mt-1 text-lg font-bold text-slate-950">
+                      <MoneyValue value={summary.totalCredit} />
+                    </p>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-slate-500">{t.difference}</p>
+                    <p className="mt-1 text-xl font-bold text-slate-950">
+                      <MoneyValue value={summary.difference} />
+                    </p>
+                  </div>
+
+                  <Badge
+                    variant="outline"
+                    className={`rounded-full ${
+                      summary.difference === 0
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-amber-200 bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    {summary.difference === 0 ? t.active : t.inactive}
+                  </Badge>
+                </div>
+              </div>
+
+              <Can
+                anyPermissions={[
+                  PERMISSIONS.ACCOUNTING_EXPORT,
+                  PERMISSIONS.REPORTS_EXPORT,
+                ]}
+              >
+                <Button
+                  type="button"
+                  className="h-11 w-full gap-2 rounded-xl bg-slate-950 text-white hover:bg-slate-800"
+                  onClick={handleExport}
+                >
+                  <Download className="h-4 w-4" />
+                  {t.export}
+                </Button>
+              </Can>
+            </CardContent>
+          </Card>
+        </div>
       </div>
-    </div>
+    </PermissionGuard>
   );
 }

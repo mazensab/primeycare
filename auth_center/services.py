@@ -1,18 +1,18 @@
 # ===============================================================
 # 📂 الملف: auth_center/services.py
 # 🧭 Primey Care — Auth Center Services
-# 🚀 الإصدار: Primey Care Auth Services V1.0
+# 🚀 الإصدار: Primey Care Auth Services V1.1
 # ---------------------------------------------------------------
 # ✅ خدمة مركزية لإنشاء حسابات دخول لكل أطراف Primey Care
 # ✅ تدعم:
-#    - سوبر أدمن
-#    - موظفي النظام
-#    - المحاسبين
-#    - العملاء
-#    - المندوبين
-#    - الوكلاء
-#    - المراكز
-#    - مقدمي الخدمة
+#    - system_admin
+#    - provider_admin
+#    - customer_user
+#    - agent_user
+#    - accountant
+#    - support
+#    - viewer
+# ---------------------------------------------------------------
 # ✅ لا تربط auth_center مباشرة بأي موديول تشغيلي
 # ✅ تحفظ الربط داخل UserProfile.extra_data بشكل مرن
 # ✅ تستخدم Django Groups لتجهيز الصلاحيات لاحقًا
@@ -32,7 +32,12 @@ from django.core.validators import validate_email
 from django.db import transaction
 from django.utils.text import slugify
 
-from auth_center.models import UserProfile, UserType
+from auth_center.models import (
+    RoleChoices,
+    UserProfile,
+    UserType,
+    resolve_default_role_for_user_type,
+)
 
 User = get_user_model()
 
@@ -97,6 +102,15 @@ SUPPORTED_USER_TYPES = {
     UserType.OTHER,
 }
 
+SUPPORTED_ROLES = {
+    RoleChoices.SYSTEM_ADMIN,
+    RoleChoices.PROVIDER_ADMIN,
+    RoleChoices.CUSTOMER_USER,
+    RoleChoices.AGENT_USER,
+    RoleChoices.ACCOUNTANT,
+    RoleChoices.SUPPORT,
+    RoleChoices.VIEWER,
+}
 
 GROUP_NAME_BY_USER_TYPE = {
     UserType.SUPER_ADMIN: "SUPER_ADMIN",
@@ -111,6 +125,16 @@ GROUP_NAME_BY_USER_TYPE = {
     UserType.PARTNER: "PARTNER",
     UserType.COMPANY: "COMPANY",
     UserType.OTHER: "OTHER",
+}
+
+GROUP_NAME_BY_ROLE = {
+    RoleChoices.SYSTEM_ADMIN: "role_system_admin",
+    RoleChoices.PROVIDER_ADMIN: "role_provider_admin",
+    RoleChoices.CUSTOMER_USER: "role_customer_user",
+    RoleChoices.AGENT_USER: "role_agent_user",
+    RoleChoices.ACCOUNTANT: "role_accountant",
+    RoleChoices.SUPPORT: "role_support",
+    RoleChoices.VIEWER: "role_viewer",
 }
 
 
@@ -143,6 +167,27 @@ def _normalize_user_type(user_type: str | UserType | None) -> str:
         raise ValidationError(f"Unsupported user_type: {normalized}")
 
     return normalized
+
+
+def _normalize_role(role: str | RoleChoices | None) -> str | None:
+    if role in (None, ""):
+        return None
+
+    normalized = _clean_text(role).lower()
+    valid_values = {choice.value for choice in RoleChoices}
+
+    if normalized not in valid_values:
+        raise ValidationError(f"Unsupported role: {normalized}")
+
+    return normalized
+
+
+def _resolve_role(*, user_type: str, role: str | RoleChoices | None) -> str:
+    explicit_role = _normalize_role(role)
+    if explicit_role:
+        return explicit_role
+
+    return resolve_default_role_for_user_type(user_type)
 
 
 def _validate_email_or_empty(email: str) -> None:
@@ -277,9 +322,7 @@ def _resolve_entity_from_payload(
     return normalized_entity_type, normalized_entity_id, ids
 
 
-def _get_or_create_group(user_type: str) -> Group | None:
-    group_name = GROUP_NAME_BY_USER_TYPE.get(user_type)
-
+def _get_or_create_group(group_name: str | None) -> Group | None:
     if not group_name:
         return None
 
@@ -287,14 +330,27 @@ def _get_or_create_group(user_type: str) -> Group | None:
     return group
 
 
-def _assign_group(user, user_type: str) -> str | None:
-    group = _get_or_create_group(user_type)
+def _assign_groups(user, user_type: str, role: str) -> str | None:
+    """
+    تعيين مجموعات Django.
 
-    if not group:
-        return None
+    - group قديم حسب user_type للتوافق.
+    - group جديد حسب role للصلاحيات.
+    """
+    legacy_group_name = GROUP_NAME_BY_USER_TYPE.get(user_type)
+    role_group_name = GROUP_NAME_BY_ROLE.get(role)
 
-    user.groups.add(group)
-    return group.name
+    legacy_group = _get_or_create_group(legacy_group_name)
+    role_group = _get_or_create_group(role_group_name)
+
+    if legacy_group:
+        user.groups.add(legacy_group)
+
+    if role_group:
+        user.groups.add(role_group)
+        return role_group.name
+
+    return legacy_group.name if legacy_group else None
 
 
 def _merge_extra_data(
@@ -349,6 +405,7 @@ def _find_existing_user(
 def create_actor_user(
     *,
     user_type: str | UserType,
+    role: str | RoleChoices | None = None,
     email: str | None = None,
     username: str | None = None,
     password: str | None = None,
@@ -379,49 +436,39 @@ def create_actor_user(
     """
     إنشاء أو تحديث مستخدم دخول لأي Actor داخل Primey Care.
 
-    أمثلة الاستخدام:
+    أمثلة:
 
-    عميل:
+    system_admin:
         create_actor_user(
-            user_type=UserType.CUSTOMER,
-            email="customer@example.com",
-            display_name="عميل تجريبي",
-            customer_id=10,
+            user_type=UserType.SUPER_ADMIN,
+            role=RoleChoices.SYSTEM_ADMIN,
+            email="admin@example.com",
         )
 
-    مركز:
-        create_actor_user(
-            user_type=UserType.CENTER,
-            email="center@example.com",
-            display_name="مركز النخبة",
-            center_id=5,
-        )
-
-    مقدم خدمة:
-        create_actor_user(
-            user_type=UserType.PROVIDER,
-            email="provider@example.com",
-            display_name="مقدم خدمة",
-            provider_id=7,
-        )
-
-    مندوب:
-        create_actor_user(
-            user_type=UserType.AGENT,
-            email="agent@example.com",
-            display_name="مندوب جدة",
-            agent_id=3,
-        )
-
-    محاسب:
+    accountant:
         create_actor_user(
             user_type=UserType.ACCOUNTANT,
+            role=RoleChoices.ACCOUNTANT,
             email="accountant@example.com",
-            display_name="محاسب النظام",
+        )
+
+    support:
+        create_actor_user(
+            user_type=UserType.STAFF,
+            role=RoleChoices.SUPPORT,
+            email="support@example.com",
+        )
+
+    viewer:
+        create_actor_user(
+            user_type=UserType.STAFF,
+            role=RoleChoices.VIEWER,
+            email="viewer@example.com",
         )
     """
 
     normalized_user_type = _normalize_user_type(user_type)
+    normalized_role = _resolve_role(user_type=normalized_user_type, role=role)
 
     clean_email = _clean_email(email)
     clean_username = _clean_text(username)
@@ -514,8 +561,21 @@ def create_actor_user(
         user.last_name = clean_last_name
         user_dirty_fields.append("last_name")
 
-    desired_is_staff = bool(normalized_user_type in SYSTEM_USER_TYPES) if is_staff is None else bool(is_staff)
-    desired_is_superuser = bool(normalized_user_type == UserType.SUPER_ADMIN) if is_superuser is None else bool(is_superuser)
+    desired_is_staff = (
+        normalized_role in {
+            RoleChoices.SYSTEM_ADMIN,
+            RoleChoices.ACCOUNTANT,
+            RoleChoices.SUPPORT,
+        }
+        if is_staff is None
+        else bool(is_staff)
+    )
+
+    desired_is_superuser = (
+        normalized_role == RoleChoices.SYSTEM_ADMIN
+        if is_superuser is None
+        else bool(is_superuser)
+    )
 
     if user.is_staff != desired_is_staff:
         user.is_staff = desired_is_staff
@@ -550,7 +610,10 @@ def create_actor_user(
     if resolved_entity_id:
         profile_extra_data["entity_id"] = resolved_entity_id
 
+    profile_extra_data["role"] = normalized_role
+
     profile.user_type = normalized_user_type
+    profile.role = normalized_role
     profile.display_name = clean_display_name
     profile.phone_number = clean_phone_number or None
     profile.whatsapp_number = clean_whatsapp_number or clean_phone_number or None
@@ -576,6 +639,7 @@ def create_actor_user(
     profile.save(
         update_fields=[
             "user_type",
+            "role",
             "display_name",
             "phone_number",
             "whatsapp_number",
@@ -592,7 +656,7 @@ def create_actor_user(
 
     group_name = None
     if create_group:
-        group_name = _assign_group(user, normalized_user_type)
+        group_name = _assign_groups(user, normalized_user_type, normalized_role)
 
     message = "User created successfully." if created else "User updated successfully."
 
@@ -612,6 +676,51 @@ def create_actor_user(
 # ✅ Convenience Wrappers
 # ===============================================================
 
+def create_system_admin_user(
+    *,
+    email: str,
+    display_name: str | None = None,
+    **kwargs,
+) -> ActorUserCreationResult:
+    return create_actor_user(
+        user_type=UserType.SUPER_ADMIN,
+        role=RoleChoices.SYSTEM_ADMIN,
+        email=email,
+        display_name=display_name,
+        **kwargs,
+    )
+
+
+def create_support_user(
+    *,
+    email: str,
+    display_name: str | None = None,
+    **kwargs,
+) -> ActorUserCreationResult:
+    return create_actor_user(
+        user_type=UserType.STAFF,
+        role=RoleChoices.SUPPORT,
+        email=email,
+        display_name=display_name,
+        **kwargs,
+    )
+
+
+def create_viewer_user(
+    *,
+    email: str,
+    display_name: str | None = None,
+    **kwargs,
+) -> ActorUserCreationResult:
+    return create_actor_user(
+        user_type=UserType.STAFF,
+        role=RoleChoices.VIEWER,
+        email=email,
+        display_name=display_name,
+        **kwargs,
+    )
+
+
 def create_customer_user(
     *,
     customer_id: int,
@@ -623,6 +732,7 @@ def create_customer_user(
 ) -> ActorUserCreationResult:
     return create_actor_user(
         user_type=UserType.CUSTOMER,
+        role=RoleChoices.CUSTOMER_USER,
         customer_id=customer_id,
         email=email,
         display_name=display_name,
@@ -643,6 +753,7 @@ def create_center_user(
 ) -> ActorUserCreationResult:
     return create_actor_user(
         user_type=UserType.CENTER,
+        role=RoleChoices.PROVIDER_ADMIN,
         center_id=center_id,
         email=email,
         display_name=display_name,
@@ -663,6 +774,7 @@ def create_provider_user(
 ) -> ActorUserCreationResult:
     return create_actor_user(
         user_type=UserType.PROVIDER,
+        role=RoleChoices.PROVIDER_ADMIN,
         provider_id=provider_id,
         email=email,
         display_name=display_name,
@@ -683,6 +795,7 @@ def create_agent_user(
 ) -> ActorUserCreationResult:
     return create_actor_user(
         user_type=UserType.AGENT,
+        role=RoleChoices.AGENT_USER,
         agent_id=agent_id,
         email=email,
         display_name=display_name,
@@ -703,6 +816,7 @@ def create_broker_user(
 ) -> ActorUserCreationResult:
     return create_actor_user(
         user_type=UserType.BROKER,
+        role=RoleChoices.AGENT_USER,
         broker_id=broker_id,
         email=email,
         display_name=display_name,
@@ -717,10 +831,12 @@ def create_staff_user(
     email: str,
     display_name: str | None = None,
     user_type: str | UserType = UserType.STAFF,
+    role: str | RoleChoices = RoleChoices.SUPPORT,
     **kwargs,
 ) -> ActorUserCreationResult:
     return create_actor_user(
         user_type=user_type,
+        role=role,
         email=email,
         display_name=display_name,
         **kwargs,
@@ -735,6 +851,7 @@ def create_accountant_user(
 ) -> ActorUserCreationResult:
     return create_actor_user(
         user_type=UserType.ACCOUNTANT,
+        role=RoleChoices.ACCOUNTANT,
         email=email,
         display_name=display_name,
         **kwargs,

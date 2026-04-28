@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { apiGet, API_PATHS } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -55,10 +56,12 @@ import {
    📂 app/system/customers/list/page.tsx
    🧠 Primey Care | Customers List
    ------------------------------------------------------------
+   ✅ ربط فعلي مع API Layer
+   ✅ فلترة + بحث + ترتيب
+   ✅ تحديد الصفوف
    ✅ تصدير Excel للقائمة فقط
    ✅ طباعة / Web PDF للقائمة فقط
-   ✅ لا يطبع الهيدر أو البطاقات أو الفلاتر
-   ✅ نفس أسلوب قائمة المراكز
+   ✅ نفس أسلوب Primey Care الرسمي
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -162,7 +165,7 @@ function dictionary(locale: AppLocale) {
 
     customersData: ar ? "بيانات العملاء" : "Customers Data",
     customersDataDesc: ar
-      ? "جدول العملاء مرتبط مباشرة بواجهة customers API."
+      ? "جدول العملاء مرتبط مباشرة بواجهة العملاء API."
       : "Customers table connected directly to customers API.",
 
     selectedRows: ar ? "صفوف محددة" : "row(s) selected",
@@ -213,7 +216,9 @@ function dictionary(locale: AppLocale) {
       title: ar ? "قائمة العملاء" : "Customers List",
       generatedAt: ar ? "تاريخ الطباعة" : "Printed At",
       scope: ar ? "النطاق" : "Scope",
-      filteredOnly: ar ? "القائمة حسب الفلاتر الحالية فقط" : "Current filtered list only",
+      filteredOnly: ar
+        ? "القائمة حسب الفلاتر الحالية فقط"
+        : "Current filtered list only",
       totalRows: ar ? "عدد السجلات" : "Rows Count",
     },
   };
@@ -731,35 +736,26 @@ export default function SystemCustomersListPage() {
     setSelectedIds((current) => Array.from(new Set([...current, ...pageIds])));
   }
 
-  async function loadCustomers(showToast = false) {
-    try {
-      setIsLoading(true);
+  async function loadCustomers(showSuccessToast = false) {
+    setIsLoading(true);
 
-      const response = await fetch("/api/customers/?page_size=200", {
-        method: "GET",
-        credentials: "include",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
+    const response = await apiGet<CustomersApiResponse>(API_PATHS.customers.list, {
+      page_size: 200,
+    });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const payload = (await response.json()) as CustomersApiResponse;
-      const normalized = normalizeApiList(payload).map(normalizeCustomer);
-
-      setCustomers(normalized);
-
-      if (showToast) {
-        toast.success(t.refreshSuccess);
-      }
-    } catch (error) {
-      console.error("Failed to load customers:", error);
+    if (!response.ok) {
       setCustomers([]);
-      toast.error(t.loadError);
-    } finally {
       setIsLoading(false);
+      return;
+    }
+
+    const normalized = normalizeApiList(response.data).map(normalizeCustomer);
+
+    setCustomers(normalized);
+    setIsLoading(false);
+
+    if (showSuccessToast) {
+      toast.success(t.refreshSuccess);
     }
   }
 
@@ -786,7 +782,11 @@ export default function SystemCustomersListPage() {
     ];
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(t.print.title));
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      safeSheetName(t.print.title),
+    );
     XLSX.writeFile(
       workbook,
       `primey-care-customers-list-${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -851,7 +851,6 @@ export default function SystemCustomersListPage() {
 
   return (
     <div className="space-y-4">
-      {/* Header 1:1 */}
       <div className="flex items-center justify-between space-y-2">
         <h1 className="text-2xl font-bold tracking-tight">{t.title}</h1>
 
@@ -863,15 +862,33 @@ export default function SystemCustomersListPage() {
         </Button>
       </div>
 
-      {/* Cards 1:1 */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard title={t.totalCustomers} value={stats.total} growth="+12.5%" tone="positive" />
-        <StatCard title={t.activeCustomers} value={stats.active} growth="+8.2%" tone="positive" />
-        <StatCard title={t.corporateCustomers} value={stats.corporate} growth="+4.1%" tone="positive" />
-        <StatCard title={t.leadCustomers} value={stats.lead} growth="-2.4%" tone="negative" />
+        <StatCard
+          title={t.totalCustomers}
+          value={stats.total}
+          growth="+12.5%"
+          tone="positive"
+        />
+        <StatCard
+          title={t.activeCustomers}
+          value={stats.active}
+          growth="+8.2%"
+          tone="positive"
+        />
+        <StatCard
+          title={t.corporateCustomers}
+          value={stats.corporate}
+          growth="+4.1%"
+          tone="positive"
+        />
+        <StatCard
+          title={t.leadCustomers}
+          value={stats.lead}
+          growth="-2.4%"
+          tone="negative"
+        />
       </div>
 
-      {/* List Section */}
       <div className="pt-4">
         <Card className="rounded-2xl">
           <CardHeader className="gap-4">
@@ -925,38 +942,40 @@ export default function SystemCustomersListPage() {
                   </DropdownMenuTrigger>
 
                   <DropdownMenuContent align={isArabic ? "start" : "end"}>
-                    {(Object.keys(visibleColumns) as Array<keyof VisibleColumns>).map(
-                      (key) => (
-                        <DropdownMenuCheckboxItem
-                          key={key}
-                          checked={visibleColumns[key]}
-                          onCheckedChange={(checked) =>
-                            setVisibleColumns((current) => ({
-                              ...current,
-                              [key]: Boolean(checked),
-                            }))
-                          }
-                        >
-                          {key === "select"
-                            ? "#"
-                            : key === "customer"
-                              ? t.table.customer
-                              : key === "code"
-                                ? t.table.code
-                                : key === "customerType"
-                                  ? t.table.customerType
-                                  : key === "city"
-                                    ? t.table.city
-                                    : key === "contact"
-                                      ? t.table.contact
-                                      : key === "status"
-                                        ? t.table.status
-                                        : key === "source"
-                                          ? t.table.source
-                                          : t.table.actions}
-                        </DropdownMenuCheckboxItem>
-                      ),
-                    )}
+                    {(
+                      Object.keys(visibleColumns) as Array<
+                        keyof VisibleColumns
+                      >
+                    ).map((key) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={visibleColumns[key]}
+                        onCheckedChange={(checked) =>
+                          setVisibleColumns((current) => ({
+                            ...current,
+                            [key]: Boolean(checked),
+                          }))
+                        }
+                      >
+                        {key === "select"
+                          ? "#"
+                          : key === "customer"
+                            ? t.table.customer
+                            : key === "code"
+                              ? t.table.code
+                              : key === "customerType"
+                                ? t.table.customerType
+                                : key === "city"
+                                  ? t.table.city
+                                  : key === "contact"
+                                    ? t.table.contact
+                                    : key === "status"
+                                      ? t.table.status
+                                      : key === "source"
+                                        ? t.table.source
+                                        : t.table.actions}
+                      </DropdownMenuCheckboxItem>
+                    ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -981,7 +1000,9 @@ export default function SystemCustomersListPage() {
                 {statusOptions.map((item) => (
                   <Button
                     key={item.value}
-                    variant={statusFilter === item.value ? "default" : "outline"}
+                    variant={
+                      statusFilter === item.value ? "default" : "outline"
+                    }
                     className="rounded-xl"
                     onClick={() => setStatusFilter(item.value)}
                   >
@@ -1089,7 +1110,9 @@ export default function SystemCustomersListPage() {
                       <TableRow
                         key={customer.id}
                         data-state={
-                          selectedIds.includes(customer.id) ? "selected" : undefined
+                          selectedIds.includes(customer.id)
+                            ? "selected"
+                            : undefined
                         }
                       >
                         {visibleColumns.select ? (
@@ -1117,7 +1140,9 @@ export default function SystemCustomersListPage() {
                                   {customer.name}
                                 </div>
                                 <div className="truncate text-xs text-muted-foreground">
-                                  {customer.email || customer.primaryContact || customer.code}
+                                  {customer.email ||
+                                    customer.primaryContact ||
+                                    customer.code}
                                 </div>
                               </div>
                             </div>
@@ -1162,7 +1187,9 @@ export default function SystemCustomersListPage() {
                         ) : null}
 
                         {visibleColumns.status ? (
-                          <TableCell>{statusBadge(customer.status, locale)}</TableCell>
+                          <TableCell>
+                            {statusBadge(customer.status, locale)}
+                          </TableCell>
                         ) : null}
 
                         {visibleColumns.source ? (
@@ -1182,8 +1209,12 @@ export default function SystemCustomersListPage() {
                                 </Button>
                               </DropdownMenuTrigger>
 
-                              <DropdownMenuContent align={isArabic ? "start" : "end"}>
-                                <DropdownMenuLabel>{t.actions}</DropdownMenuLabel>
+                              <DropdownMenuContent
+                                align={isArabic ? "start" : "end"}
+                              >
+                                <DropdownMenuLabel>
+                                  {t.actions}
+                                </DropdownMenuLabel>
                                 <DropdownMenuSeparator />
 
                                 <DropdownMenuItem asChild>
@@ -1202,7 +1233,9 @@ export default function SystemCustomersListPage() {
 
                                 <DropdownMenuItem
                                   onClick={() => {
-                                    navigator.clipboard.writeText(String(customer.code));
+                                    navigator.clipboard.writeText(
+                                      String(customer.code),
+                                    );
                                     toast.success(t.copied);
                                   }}
                                 >
@@ -1211,7 +1244,9 @@ export default function SystemCustomersListPage() {
 
                                 <DropdownMenuItem
                                   onClick={() => {
-                                    navigator.clipboard.writeText(String(customer.id));
+                                    navigator.clipboard.writeText(
+                                      String(customer.id),
+                                    );
                                     toast.success(t.copied);
                                   }}
                                 >
@@ -1230,7 +1265,8 @@ export default function SystemCustomersListPage() {
 
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-sm text-muted-foreground">
-                {selectedIds.length} / {filteredCustomers.length} {t.selectedRows}
+                {selectedIds.length} / {filteredCustomers.length}{" "}
+                {t.selectedRows}
               </div>
 
               <div className="flex items-center gap-3">
@@ -1243,7 +1279,9 @@ export default function SystemCustomersListPage() {
                   size="sm"
                   className="rounded-xl"
                   disabled={pageIndex === 0}
-                  onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
+                  onClick={() =>
+                    setPageIndex((current) => Math.max(0, current - 1))
+                  }
                 >
                   {t.previous}
                 </Button>
@@ -1254,7 +1292,9 @@ export default function SystemCustomersListPage() {
                   className="rounded-xl"
                   disabled={pageIndex >= pageCount - 1}
                   onClick={() =>
-                    setPageIndex((current) => Math.min(pageCount - 1, current + 1))
+                    setPageIndex((current) =>
+                      Math.min(pageCount - 1, current + 1),
+                    )
                   }
                 >
                   {t.next}
@@ -1280,7 +1320,7 @@ function StatCard({
   tone: "positive" | "negative";
 }) {
   return (
-    <Card>
+    <Card className="relative overflow-hidden rounded-2xl">
       <CardHeader>
         <CardDescription>{title}</CardDescription>
         <CardTitle className="font-display text-2xl lg:text-3xl">
@@ -1288,7 +1328,9 @@ function StatCard({
         </CardTitle>
         <div className="absolute end-6 top-6">
           <Badge variant="outline">
-            <span className={tone === "positive" ? "text-green-600" : "text-red-600"}>
+            <span
+              className={tone === "positive" ? "text-green-600" : "text-red-600"}
+            >
               {growth}
             </span>
           </Badge>

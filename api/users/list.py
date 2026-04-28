@@ -1,10 +1,12 @@
 # ===============================================================
 # 📂 الملف: api/users/list.py
 # 🧭 Primey Care — Users List API
+# 🚀 الإصدار: Users List API V1.1
 # ---------------------------------------------------------------
-# ✅ List users for system admins
+# ✅ List users
 # ✅ Search / filter / pagination
 # ✅ Session protected
+# ✅ Protected by permissions: users.view
 # ===============================================================
 
 from __future__ import annotations
@@ -15,15 +17,9 @@ from django.db.models import Q
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
+from auth_center.permissions import PermissionCodes, permission_required
+
 User = get_user_model()
-
-
-SYSTEM_ADMIN_GROUPS = {
-    "SUPER_ADMIN",
-    "SYSTEM",
-    "SYSTEM_ADMIN",
-    "ADMIN",
-}
 
 
 def _normalize_upper(value) -> str:
@@ -36,32 +32,6 @@ def _safe_int(value, default: int) -> int:
         return value if value > 0 else default
     except (TypeError, ValueError):
         return default
-
-
-def _is_system_admin(user) -> bool:
-    if not user.is_authenticated:
-        return False
-
-    if user.is_superuser:
-        return True
-
-    groups = {_normalize_upper(name) for name in user.groups.values_list("name", flat=True)}
-    if groups & SYSTEM_ADMIN_GROUPS:
-        return True
-
-    profile = getattr(user, "profile", None)
-    user_type = _normalize_upper(getattr(profile, "user_type", ""))
-    return user_type in SYSTEM_ADMIN_GROUPS
-
-
-def _forbidden():
-    return JsonResponse(
-        {
-            "success": False,
-            "message": "You do not have permission to manage users.",
-        },
-        status=403,
-    )
 
 
 def _serialize_user(user) -> dict:
@@ -84,6 +54,7 @@ def _serialize_user(user) -> dict:
         "profile": {
             "display_name": profile.display_name if profile else "",
             "user_type": profile.user_type if profile else "OTHER",
+            "role": profile.role if profile else "viewer",
             "phone_number": profile.phone_number if profile else None,
             "whatsapp_number": profile.whatsapp_number if profile else None,
             "alternate_email": profile.alternate_email if profile else None,
@@ -98,10 +69,8 @@ def _serialize_user(user) -> dict:
 
 @login_required
 @require_GET
+@permission_required(PermissionCodes.USERS_VIEW)
 def users_list_api(request):
-    if not _is_system_admin(request.user):
-        return _forbidden()
-
     q = str(request.GET.get("q", "") or "").strip()
     user_type = _normalize_upper(request.GET.get("user_type", ""))
     is_active = str(request.GET.get("is_active", "") or "").strip().lower()

@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/components/providers/AuthProvider";
+import {
+  useAuth,
+  type AuthSession,
+} from "@/components/providers/AuthProvider";
 
 import {
   SidebarGroup,
@@ -57,6 +60,14 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 
+import {
+  canAccess,
+  hasPermission,
+  isSystemAdmin,
+  PERMISSIONS,
+  type PermissionCheckInput,
+} from "@/lib/permissions";
+
 /* =====================================================
    TYPES
 ===================================================== */
@@ -86,6 +97,13 @@ type NavItem = {
   isDataBadge?: string;
   roles?: string[];
   apps?: string[];
+
+  permission?: string | null;
+  permissions?: string[] | readonly string[] | null;
+  anyPermissions?: string[] | readonly string[] | null;
+  allPermissions?: string[] | readonly string[] | null;
+  workspace?: string | null;
+  workspaces?: string[] | readonly string[] | null;
 };
 
 type NavGroup = {
@@ -100,12 +118,7 @@ type NavMainProps = {
   type: WorkspaceType;
 };
 
-type SidebarAuthSession = {
-  role?: string | null;
-  subscription?: {
-    apps?: string[] | null;
-  } | null;
-};
+type SidebarAuthSession = Partial<AuthSession>;
 
 /* =====================================================
    SYSTEM NAV — PRIMEY CARE
@@ -122,31 +135,46 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "الرئيسية", en: "Home" },
         href: "/system",
         icon: Home,
+        permission: PERMISSIONS.SYSTEM_VIEW,
+        workspaces: ["system"],
       },
       {
         title: { ar: "المراكز", en: "Centers" },
         href: "/system/centers",
         icon: Building2,
+        permission: PERMISSIONS.PROVIDERS_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة المراكز", en: "Centers Overview" },
             href: "/system/centers",
             icon: Building2,
+            permission: PERMISSIONS.PROVIDERS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "قائمة المراكز", en: "Centers List" },
             href: "/system/centers/list",
             icon: ListChecks,
+            permission: PERMISSIONS.PROVIDERS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إنشاء مركز", en: "Create Center" },
             href: "/system/centers/create",
             icon: Plus,
+            permission: PERMISSIONS.PROVIDERS_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير المراكز", en: "Centers Reports" },
             href: "/system/centers/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.PROVIDERS_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
         ],
       },
@@ -154,26 +182,39 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "العملاء", en: "Customers" },
         href: "/system/customers",
         icon: Users,
+        permission: PERMISSIONS.CUSTOMERS_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة العملاء", en: "Customers Overview" },
             href: "/system/customers",
             icon: Users,
+            permission: PERMISSIONS.CUSTOMERS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "قائمة العملاء", en: "Customers List" },
             href: "/system/customers/list",
             icon: ListChecks,
+            permission: PERMISSIONS.CUSTOMERS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إنشاء عميل", en: "Create Customer" },
             href: "/system/customers/create",
             icon: Plus,
+            permission: PERMISSIONS.CUSTOMERS_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير العملاء", en: "Customers Reports" },
             href: "/system/customers/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.CUSTOMERS_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
         ],
       },
@@ -181,26 +222,39 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "المندوبون", en: "Agents" },
         href: "/system/agents",
         icon: Briefcase,
+        permission: PERMISSIONS.AGENTS_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة المندوبين", en: "Agents Overview" },
             href: "/system/agents",
             icon: Briefcase,
+            permission: PERMISSIONS.AGENTS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "قائمة المندوبين", en: "Agents List" },
             href: "/system/agents/list",
             icon: ListChecks,
+            permission: PERMISSIONS.AGENTS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إنشاء مندوب", en: "Create Agent" },
             href: "/system/agents/create",
             icon: Plus,
+            permission: PERMISSIONS.AGENTS_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير المندوبين", en: "Agents Reports" },
             href: "/system/agents/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.AGENTS_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
         ],
       },
@@ -208,26 +262,39 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "المنتجات", en: "Products" },
         href: "/system/products",
         icon: Boxes,
+        permission: PERMISSIONS.PRODUCTS_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة المنتجات", en: "Products Overview" },
             href: "/system/products",
             icon: Boxes,
+            permission: PERMISSIONS.PRODUCTS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "قائمة المنتجات", en: "Products List" },
             href: "/system/products/list",
             icon: ListChecks,
+            permission: PERMISSIONS.PRODUCTS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إنشاء منتج", en: "Create Product" },
             href: "/system/products/create",
             icon: Plus,
+            permission: PERMISSIONS.PRODUCTS_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير المنتجات", en: "Products Reports" },
             href: "/system/products/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.PRODUCTS_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
         ],
       },
@@ -235,26 +302,39 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "الطلبات", en: "Orders" },
         href: "/system/orders",
         icon: ShoppingCart,
+        permission: PERMISSIONS.ORDERS_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة الطلبات", en: "Orders Overview" },
             href: "/system/orders",
             icon: ShoppingCart,
+            permission: PERMISSIONS.ORDERS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "قائمة الطلبات", en: "Orders List" },
             href: "/system/orders/list",
             icon: ListChecks,
+            permission: PERMISSIONS.ORDERS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إنشاء طلب", en: "Create Order" },
             href: "/system/orders/create",
             icon: Plus,
+            permission: PERMISSIONS.ORDERS_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير الطلبات", en: "Orders Reports" },
             href: "/system/orders/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.ORDERS_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
         ],
       },
@@ -262,26 +342,39 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "مقدمو الخدمة", en: "Providers" },
         href: "/system/providers",
         icon: Stethoscope,
+        permission: PERMISSIONS.PROVIDERS_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة مقدمي الخدمة", en: "Providers Overview" },
             href: "/system/providers",
             icon: Stethoscope,
+            permission: PERMISSIONS.PROVIDERS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "قائمة مقدمي الخدمة", en: "Providers List" },
             href: "/system/providers/list",
             icon: ListChecks,
+            permission: PERMISSIONS.PROVIDERS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إنشاء مقدم خدمة", en: "Create Provider" },
             href: "/system/providers/create",
             icon: Plus,
+            permission: PERMISSIONS.PROVIDERS_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير مقدمي الخدمة", en: "Providers Reports" },
             href: "/system/providers/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.PROVIDERS_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
         ],
       },
@@ -289,26 +382,39 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "العقود", en: "Contracts" },
         href: "/system/contracts",
         icon: FileText,
+        permission: PERMISSIONS.CONTRACTS_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة العقود", en: "Contracts Overview" },
             href: "/system/contracts",
             icon: FileText,
+            permission: PERMISSIONS.CONTRACTS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "قائمة العقود", en: "Contracts List" },
             href: "/system/contracts/list",
             icon: ListChecks,
+            permission: PERMISSIONS.CONTRACTS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إنشاء عقد", en: "Create Contract" },
             href: "/system/contracts/create",
             icon: Plus,
+            permission: PERMISSIONS.CONTRACTS_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير العقود", en: "Contracts Reports" },
             href: "/system/contracts/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.CONTRACTS_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
         ],
       },
@@ -316,26 +422,39 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "الفواتير", en: "Invoices" },
         href: "/system/invoices",
         icon: ReceiptText,
+        permission: PERMISSIONS.INVOICES_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة الفواتير", en: "Invoices Overview" },
             href: "/system/invoices",
             icon: ReceiptText,
+            permission: PERMISSIONS.INVOICES_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "قائمة الفواتير", en: "Invoices List" },
             href: "/system/invoices/list",
             icon: ListChecks,
+            permission: PERMISSIONS.INVOICES_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إنشاء فاتورة", en: "Create Invoice" },
             href: "/system/invoices/create",
             icon: Plus,
+            permission: PERMISSIONS.INVOICES_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير الفواتير", en: "Invoices Reports" },
             href: "/system/invoices/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.INVOICES_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
         ],
       },
@@ -343,26 +462,39 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "المدفوعات", en: "Payments" },
         href: "/system/payments",
         icon: CreditCard,
+        permission: PERMISSIONS.PAYMENTS_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة المدفوعات", en: "Payments Overview" },
             href: "/system/payments",
             icon: CreditCard,
+            permission: PERMISSIONS.PAYMENTS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "قائمة المدفوعات", en: "Payments List" },
             href: "/system/payments/list",
             icon: ListChecks,
+            permission: PERMISSIONS.PAYMENTS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تسجيل دفعة", en: "Create Payment" },
             href: "/system/payments/create",
             icon: Plus,
+            permission: PERMISSIONS.PAYMENTS_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير المدفوعات", en: "Payments Reports" },
             href: "/system/payments/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.PAYMENTS_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
         ],
       },
@@ -370,46 +502,67 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "المحاسبة", en: "Accounting" },
         href: "/system/accounting",
         icon: BarChart3,
+        permission: PERMISSIONS.ACCOUNTING_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة المحاسبة", en: "Accounting Overview" },
             href: "/system/accounting",
             icon: Calculator,
+            permission: PERMISSIONS.ACCOUNTING_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "دليل الحسابات", en: "Chart of Accounts" },
             href: "/system/accounting/accounts",
             icon: Layers3,
+            permission: PERMISSIONS.ACCOUNTING_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "القيود اليومية", en: "Journal Entries" },
             href: "/system/accounting/journals",
             icon: ReceiptText,
+            permission: PERMISSIONS.ACCOUNTING_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "دفتر الأستاذ", en: "General Ledger" },
             href: "/system/accounting/ledger",
             icon: BookOpenCheck,
+            permission: PERMISSIONS.ACCOUNTING_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير المحاسبة", en: "Accounting Reports" },
             href: "/system/accounting/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.ACCOUNTING_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
           {
             title: { ar: "ميزان المراجعة", en: "Trial Balance" },
             href: "/system/accounting/trial-balance",
             icon: ListChecks,
+            permission: PERMISSIONS.ACCOUNTING_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "الأرباح والخسائر", en: "Profit & Loss" },
             href: "/system/accounting/profit-loss",
             icon: PieChart,
+            permission: PERMISSIONS.ACCOUNTING_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "المركز المالي", en: "Balance Sheet" },
             href: "/system/accounting/balance-sheet",
             icon: Landmark,
+            permission: PERMISSIONS.ACCOUNTING_VIEW,
+            workspaces: ["system"],
           },
         ],
       },
@@ -417,56 +570,81 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "الخزينة", en: "Treasury" },
         href: "/system/treasury",
         icon: Wallet,
+        permission: PERMISSIONS.TREASURY_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة الخزينة", en: "Treasury Overview" },
             href: "/system/treasury",
             icon: Wallet,
+            permission: PERMISSIONS.TREASURY_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "حسابات الخزينة", en: "Treasury Accounts" },
             href: "/system/treasury/accounts",
             icon: Wallet,
+            permission: PERMISSIONS.TREASURY_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إنشاء حساب خزينة", en: "Create Treasury Account" },
             href: "/system/treasury/accounts/create",
             icon: Plus,
+            permission: PERMISSIONS.TREASURY_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "الصناديق النقدية", en: "Cashboxes" },
             href: "/system/treasury/cashboxes",
             icon: Banknote,
+            permission: PERMISSIONS.TREASURY_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "الحسابات البنكية", en: "Bank Accounts" },
             href: "/system/treasury/banks",
             icon: Building2,
+            permission: PERMISSIONS.TREASURY_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "الحركات المالية", en: "Transactions" },
             href: "/system/treasury/transactions",
             icon: CreditCard,
+            permission: PERMISSIONS.TREASURY_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إضافة حركة مالية", en: "Create Transaction" },
             href: "/system/treasury/transactions/create",
             icon: Plus,
+            permission: PERMISSIONS.TREASURY_CREATE,
+            workspaces: ["system"],
           },
           {
             title: { ar: "التحويلات", en: "Transfers" },
             href: "/system/treasury/transfers",
             icon: ArrowLeftRight,
+            permission: PERMISSIONS.TREASURY_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "تقارير الخزينة", en: "Treasury Reports" },
             href: "/system/treasury/reports",
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.TREASURY_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["system"],
           },
           {
             title: { ar: "إعدادات الخزينة", en: "Treasury Settings" },
             href: "/system/treasury/settings",
             icon: Settings,
+            permission: PERMISSIONS.TREASURY_EDIT,
+            workspaces: ["system"],
           },
         ],
       },
@@ -474,26 +652,38 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "واتساب", en: "WhatsApp" },
         href: "/system/whatsapp",
         icon: MessageCircle,
+        roles: ["system_admin"],
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "الرئيسية", en: "Overview" },
             href: "/system/whatsapp",
+            roles: ["system_admin"],
+            workspaces: ["system"],
           },
           {
             title: { ar: "الإعدادات", en: "Settings" },
             href: "/system/whatsapp/settings",
+            roles: ["system_admin"],
+            workspaces: ["system"],
           },
           {
             title: { ar: "السجل", en: "Logs" },
             href: "/system/whatsapp/logs",
+            roles: ["system_admin"],
+            workspaces: ["system"],
           },
           {
             title: { ar: "القوالب", en: "Templates" },
             href: "/system/whatsapp/templates",
+            roles: ["system_admin"],
+            workspaces: ["system"],
           },
           {
             title: { ar: "البث الجماعي", en: "Broadcasts" },
             href: "/system/whatsapp/broadcasts",
+            roles: ["system_admin"],
+            workspaces: ["system"],
           },
         ],
       },
@@ -501,21 +691,29 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "مستخدمو النظام", en: "System Users" },
         href: "/system/users",
         icon: UserCog,
+        permission: PERMISSIONS.USERS_VIEW,
+        workspaces: ["system"],
         items: [
           {
             title: { ar: "لوحة المستخدمين", en: "Users Overview" },
             href: "/system/users",
             icon: UserCog,
+            permission: PERMISSIONS.USERS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "قائمة المستخدمين", en: "Users List" },
             href: "/system/users",
             icon: ListChecks,
+            permission: PERMISSIONS.USERS_VIEW,
+            workspaces: ["system"],
           },
           {
             title: { ar: "إضافة مستخدم", en: "Create User" },
             href: "/system/users/create",
             icon: Plus,
+            permission: PERMISSIONS.USERS_CREATE,
+            workspaces: ["system"],
           },
         ],
       },
@@ -523,13 +721,15 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "الإعدادات", en: "Settings" },
         href: "/system/settings",
         icon: Settings,
+        permission: PERMISSIONS.SYSTEM_SETTINGS,
+        workspaces: ["system"],
       },
     ],
   },
 ];
 
 /* =====================================================
-   CENTER NAV
+   CENTER / PROVIDER NAV
 ===================================================== */
 
 const centerNavItems: NavGroup[] = [
@@ -544,60 +744,89 @@ const centerNavItems: NavGroup[] = [
         href: "/company",
         aliases: ["/center", "/provider"],
         icon: Home,
+        permission: PERMISSIONS.PROVIDER_WORKSPACE_VIEW,
+        workspaces: ["provider"],
       },
       {
         title: { ar: "العملاء", en: "Customers" },
         href: "/company/customers",
         aliases: ["/center/customers", "/provider/customers"],
         icon: Users,
+        permission: PERMISSIONS.CUSTOMERS_VIEW,
+        workspaces: ["provider"],
       },
       {
         title: { ar: "الطلبات", en: "Orders" },
         href: "/company/orders",
         aliases: ["/center/orders", "/provider/orders"],
         icon: ShoppingCart,
+        anyPermissions: [
+          PERMISSIONS.PROVIDER_ORDERS_VIEW,
+          PERMISSIONS.ORDERS_VIEW,
+        ],
+        workspaces: ["provider"],
       },
       {
         title: { ar: "المنتجات", en: "Products" },
         href: "/company/products",
         aliases: ["/center/products", "/provider/products"],
         icon: Boxes,
+        permission: PERMISSIONS.PRODUCTS_VIEW,
+        workspaces: ["provider"],
       },
       {
         title: { ar: "العقود", en: "Contracts" },
         href: "/company/contracts",
         aliases: ["/center/contracts", "/provider/contracts"],
         icon: FileText,
+        anyPermissions: [
+          PERMISSIONS.PROVIDER_CONTRACTS_VIEW,
+          PERMISSIONS.CONTRACTS_VIEW,
+        ],
+        workspaces: ["provider"],
       },
       {
         title: { ar: "الفواتير", en: "Invoices" },
         href: "/company/invoices",
         aliases: ["/center/invoices", "/provider/invoices"],
         icon: ReceiptText,
+        permission: PERMISSIONS.INVOICES_VIEW,
+        workspaces: ["provider"],
         items: [
           {
             title: { ar: "لوحة الفواتير", en: "Invoices Overview" },
             href: "/company/invoices",
             aliases: ["/center/invoices", "/provider/invoices"],
             icon: ReceiptText,
+            permission: PERMISSIONS.INVOICES_VIEW,
+            workspaces: ["provider"],
           },
           {
             title: { ar: "قائمة الفواتير", en: "Invoices List" },
             href: "/company/invoices/list",
             aliases: ["/center/invoices/list", "/provider/invoices/list"],
             icon: ListChecks,
+            permission: PERMISSIONS.INVOICES_VIEW,
+            workspaces: ["provider"],
           },
           {
             title: { ar: "إنشاء فاتورة", en: "Create Invoice" },
             href: "/company/invoices/create",
             aliases: ["/center/invoices/create", "/provider/invoices/create"],
             icon: Plus,
+            permission: PERMISSIONS.INVOICES_CREATE,
+            workspaces: ["provider"],
           },
           {
             title: { ar: "تقارير الفواتير", en: "Invoices Reports" },
             href: "/company/invoices/reports",
             aliases: ["/center/invoices/reports", "/provider/invoices/reports"],
             icon: BarChart3,
+            anyPermissions: [
+              PERMISSIONS.INVOICES_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
+            ],
+            workspaces: ["provider"],
           },
         ],
       },
@@ -606,174 +835,43 @@ const centerNavItems: NavGroup[] = [
         href: "/company/payments",
         aliases: ["/center/payments", "/provider/payments"],
         icon: CreditCard,
+        permission: PERMISSIONS.PAYMENTS_VIEW,
+        workspaces: ["provider"],
         items: [
           {
             title: { ar: "لوحة المدفوعات", en: "Payments Overview" },
             href: "/company/payments",
             aliases: ["/center/payments", "/provider/payments"],
             icon: CreditCard,
+            permission: PERMISSIONS.PAYMENTS_VIEW,
+            workspaces: ["provider"],
           },
           {
             title: { ar: "قائمة المدفوعات", en: "Payments List" },
             href: "/company/payments/list",
             aliases: ["/center/payments/list", "/provider/payments/list"],
             icon: ListChecks,
+            permission: PERMISSIONS.PAYMENTS_VIEW,
+            workspaces: ["provider"],
           },
           {
             title: { ar: "تسجيل دفعة", en: "Create Payment" },
             href: "/company/payments/create",
             aliases: ["/center/payments/create", "/provider/payments/create"],
             icon: Plus,
+            permission: PERMISSIONS.PAYMENTS_CREATE,
+            workspaces: ["provider"],
           },
           {
             title: { ar: "تقارير المدفوعات", en: "Payments Reports" },
             href: "/company/payments/reports",
             aliases: ["/center/payments/reports", "/provider/payments/reports"],
             icon: BarChart3,
-          },
-        ],
-      },
-      {
-        title: { ar: "المحاسبة", en: "Accounting" },
-        href: "/company/accounting",
-        aliases: ["/center/accounting", "/provider/accounting"],
-        icon: BarChart3,
-        roles: ["owner", "admin", "manager"],
-        items: [
-          {
-            title: { ar: "لوحة المحاسبة", en: "Accounting Overview" },
-            href: "/company/accounting",
-            aliases: ["/center/accounting", "/provider/accounting"],
-            icon: Calculator,
-          },
-          {
-            title: { ar: "دليل الحسابات", en: "Chart of Accounts" },
-            href: "/company/accounting/accounts",
-            aliases: ["/center/accounting/accounts", "/provider/accounting/accounts"],
-            icon: Layers3,
-          },
-          {
-            title: { ar: "القيود اليومية", en: "Journal Entries" },
-            href: "/company/accounting/journals",
-            aliases: ["/center/accounting/journals", "/provider/accounting/journals"],
-            icon: ReceiptText,
-          },
-          {
-            title: { ar: "دفتر الأستاذ", en: "General Ledger" },
-            href: "/company/accounting/ledger",
-            aliases: ["/center/accounting/ledger", "/provider/accounting/ledger"],
-            icon: BookOpenCheck,
-          },
-          {
-            title: { ar: "تقارير المحاسبة", en: "Accounting Reports" },
-            href: "/company/accounting/reports",
-            aliases: ["/center/accounting/reports", "/provider/accounting/reports"],
-            icon: BarChart3,
-          },
-          {
-            title: { ar: "ميزان المراجعة", en: "Trial Balance" },
-            href: "/company/accounting/trial-balance",
-            aliases: [
-              "/center/accounting/trial-balance",
-              "/provider/accounting/trial-balance",
+            anyPermissions: [
+              PERMISSIONS.PAYMENTS_VIEW,
+              PERMISSIONS.REPORTS_VIEW,
             ],
-            icon: ListChecks,
-          },
-          {
-            title: { ar: "الأرباح والخسائر", en: "Profit & Loss" },
-            href: "/company/accounting/profit-loss",
-            aliases: [
-              "/center/accounting/profit-loss",
-              "/provider/accounting/profit-loss",
-            ],
-            icon: PieChart,
-          },
-          {
-            title: { ar: "المركز المالي", en: "Balance Sheet" },
-            href: "/company/accounting/balance-sheet",
-            aliases: [
-              "/center/accounting/balance-sheet",
-              "/provider/accounting/balance-sheet",
-            ],
-            icon: Landmark,
-          },
-        ],
-      },
-      {
-        title: { ar: "الخزينة", en: "Treasury" },
-        href: "/company/treasury",
-        aliases: ["/center/treasury", "/provider/treasury"],
-        icon: Wallet,
-        roles: ["owner", "admin", "manager"],
-        items: [
-          {
-            title: { ar: "لوحة الخزينة", en: "Treasury Overview" },
-            href: "/company/treasury",
-            aliases: ["/center/treasury", "/provider/treasury"],
-            icon: Wallet,
-          },
-          {
-            title: { ar: "حسابات الخزينة", en: "Treasury Accounts" },
-            href: "/company/treasury/accounts",
-            aliases: ["/center/treasury/accounts", "/provider/treasury/accounts"],
-            icon: Wallet,
-          },
-          {
-            title: { ar: "إنشاء حساب خزينة", en: "Create Treasury Account" },
-            href: "/company/treasury/accounts/create",
-            aliases: [
-              "/center/treasury/accounts/create",
-              "/provider/treasury/accounts/create",
-            ],
-            icon: Plus,
-          },
-          {
-            title: { ar: "الصناديق النقدية", en: "Cashboxes" },
-            href: "/company/treasury/cashboxes",
-            aliases: ["/center/treasury/cashboxes", "/provider/treasury/cashboxes"],
-            icon: Banknote,
-          },
-          {
-            title: { ar: "الحسابات البنكية", en: "Bank Accounts" },
-            href: "/company/treasury/banks",
-            aliases: ["/center/treasury/banks", "/provider/treasury/banks"],
-            icon: Building2,
-          },
-          {
-            title: { ar: "الحركات المالية", en: "Transactions" },
-            href: "/company/treasury/transactions",
-            aliases: [
-              "/center/treasury/transactions",
-              "/provider/treasury/transactions",
-            ],
-            icon: CreditCard,
-          },
-          {
-            title: { ar: "إضافة حركة مالية", en: "Create Transaction" },
-            href: "/company/treasury/transactions/create",
-            aliases: [
-              "/center/treasury/transactions/create",
-              "/provider/treasury/transactions/create",
-            ],
-            icon: Plus,
-          },
-          {
-            title: { ar: "التحويلات", en: "Transfers" },
-            href: "/company/treasury/transfers",
-            aliases: ["/center/treasury/transfers", "/provider/treasury/transfers"],
-            icon: ArrowLeftRight,
-          },
-          {
-            title: { ar: "تقارير الخزينة", en: "Treasury Reports" },
-            href: "/company/treasury/reports",
-            aliases: ["/center/treasury/reports", "/provider/treasury/reports"],
-            icon: BarChart3,
-          },
-          {
-            title: { ar: "إعدادات الخزينة", en: "Treasury Settings" },
-            href: "/company/treasury/settings",
-            aliases: ["/center/treasury/settings", "/provider/treasury/settings"],
-            icon: Settings,
+            workspaces: ["provider"],
           },
         ],
       },
@@ -782,27 +880,39 @@ const centerNavItems: NavGroup[] = [
         href: "/company/whatsapp",
         aliases: ["/center/whatsapp", "/provider/whatsapp"],
         icon: Send,
-        roles: ["owner", "admin", "manager"],
+        roles: ["provider_admin", "system_admin"],
+        workspaces: ["provider"],
         items: [
           {
             title: { ar: "الرئيسية", en: "Overview" },
             href: "/company/whatsapp",
             aliases: ["/center/whatsapp", "/provider/whatsapp"],
+            roles: ["provider_admin", "system_admin"],
+            workspaces: ["provider"],
           },
           {
             title: { ar: "الإعدادات", en: "Settings" },
             href: "/company/whatsapp/settings",
             aliases: ["/center/whatsapp/settings", "/provider/whatsapp/settings"],
+            roles: ["provider_admin", "system_admin"],
+            workspaces: ["provider"],
           },
           {
             title: { ar: "السجل", en: "Logs" },
             href: "/company/whatsapp/logs",
             aliases: ["/center/whatsapp/logs", "/provider/whatsapp/logs"],
+            roles: ["provider_admin", "system_admin"],
+            workspaces: ["provider"],
           },
           {
             title: { ar: "القوالب", en: "Templates" },
             href: "/company/whatsapp/templates",
-            aliases: ["/center/whatsapp/templates", "/provider/whatsapp/templates"],
+            aliases: [
+              "/center/whatsapp/templates",
+              "/provider/whatsapp/templates",
+            ],
+            roles: ["provider_admin", "system_admin"],
+            workspaces: ["provider"],
           },
         ],
       },
@@ -811,14 +921,16 @@ const centerNavItems: NavGroup[] = [
         href: "/company/users",
         aliases: ["/center/users", "/provider/users"],
         icon: UserCog,
-        roles: ["owner", "admin"],
+        roles: ["provider_admin", "system_admin"],
+        workspaces: ["provider"],
       },
       {
         title: { ar: "الإعدادات", en: "Settings" },
         href: "/company/settings",
         aliases: ["/center/settings", "/provider/settings"],
         icon: Settings,
-        roles: ["owner", "admin"],
+        roles: ["provider_admin", "system_admin"],
+        workspaces: ["provider"],
       },
     ],
   },
@@ -839,41 +951,60 @@ const customerNavItems: NavGroup[] = [
         title: { ar: "الرئيسية", en: "Home" },
         href: "/customer",
         icon: Home,
+        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
+        workspaces: ["customer"],
       },
       {
         title: { ar: "طلباتي", en: "My Orders" },
         href: "/customer/orders",
         icon: ShoppingCart,
+        anyPermissions: [
+          PERMISSIONS.CUSTOMER_ORDERS_VIEW,
+          PERMISSIONS.ORDERS_VIEW,
+        ],
+        workspaces: ["customer"],
       },
       {
         title: { ar: "فواتيري", en: "My Invoices" },
         href: "/customer/invoices",
         icon: ReceiptText,
+        permission: PERMISSIONS.INVOICES_VIEW,
+        workspaces: ["customer"],
       },
       {
         title: { ar: "مدفوعاتي", en: "My Payments" },
         href: "/customer/payments",
         icon: CreditCard,
+        permission: PERMISSIONS.PAYMENTS_VIEW,
+        workspaces: ["customer"],
       },
       {
         title: { ar: "الباقات والخدمات", en: "Plans & Services" },
         href: "/customer/products",
         icon: Package,
+        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
+        workspaces: ["customer"],
       },
       {
         title: { ar: "الدعم والمحادثات", en: "Support & Chats" },
         href: "/customer/support",
         icon: MessageCircle,
+        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
+        workspaces: ["customer"],
       },
       {
         title: { ar: "حسابي", en: "My Account" },
         href: "/customer/account",
         icon: ShieldCheck,
+        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
+        workspaces: ["customer"],
       },
       {
         title: { ar: "الإعدادات", en: "Settings" },
         href: "/customer/settings",
         icon: Settings,
+        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
+        workspaces: ["customer"],
       },
     ],
   },
@@ -894,41 +1025,63 @@ const agentNavItems: NavGroup[] = [
         title: { ar: "الرئيسية", en: "Home" },
         href: "/agent",
         icon: Home,
+        permission: PERMISSIONS.AGENT_WORKSPACE_VIEW,
+        workspaces: ["agent"],
       },
       {
         title: { ar: "عملائي", en: "My Customers" },
         href: "/agent/customers",
         icon: Users,
+        anyPermissions: [
+          PERMISSIONS.AGENT_CUSTOMERS_VIEW,
+          PERMISSIONS.CUSTOMERS_VIEW,
+        ],
+        workspaces: ["agent"],
       },
       {
         title: { ar: "طلباتي", en: "My Orders" },
         href: "/agent/orders",
         icon: ShoppingCart,
+        permission: PERMISSIONS.ORDERS_VIEW,
+        workspaces: ["agent"],
       },
       {
         title: { ar: "عمولاتي", en: "My Commissions" },
         href: "/agent/commissions",
         icon: Wallet,
+        permission: PERMISSIONS.AGENT_COMMISSIONS_VIEW,
+        workspaces: ["agent"],
       },
       {
         title: { ar: "مدفوعاتي", en: "My Payments" },
         href: "/agent/payments",
         icon: CreditCard,
+        permission: PERMISSIONS.PAYMENTS_VIEW,
+        workspaces: ["agent"],
       },
       {
         title: { ar: "تقاريري", en: "My Reports" },
         href: "/agent/reports",
         icon: BarChart3,
+        anyPermissions: [
+          PERMISSIONS.REPORTS_VIEW,
+          PERMISSIONS.AGENT_COMMISSIONS_VIEW,
+        ],
+        workspaces: ["agent"],
       },
       {
         title: { ar: "حسابي", en: "My Account" },
         href: "/agent/account",
         icon: ShieldCheck,
+        permission: PERMISSIONS.AGENT_WORKSPACE_VIEW,
+        workspaces: ["agent"],
       },
       {
         title: { ar: "الإعدادات", en: "Settings" },
         href: "/agent/settings",
         icon: Settings,
+        permission: PERMISSIONS.AGENT_WORKSPACE_VIEW,
+        workspaces: ["agent"],
       },
     ],
   },
@@ -982,14 +1135,18 @@ function isItemActive(pathname: string, item: NavItem): boolean {
   return (item.aliases || []).some((alias) => matchesHref(pathname, alias));
 }
 
+function normalizeLower(value: unknown): string {
+  return String(value || "").trim().toLowerCase();
+}
+
 function hasRequiredRole(
-  itemRoles: string[] | undefined,
+  itemRoles: string[] | readonly string[] | undefined,
   currentRole: string,
 ): boolean {
   if (!itemRoles || itemRoles.length === 0) return true;
   if (!currentRole) return false;
 
-  return itemRoles.includes(currentRole);
+  return itemRoles.map(normalizeLower).includes(currentRole);
 }
 
 function hasRequiredApps(
@@ -1029,35 +1186,251 @@ function applyDocumentLocale(locale: AppLocale): void {
   }
 }
 
+function inferPermissionInputByHref(item: NavItem): PermissionCheckInput {
+  if (
+    item.permission ||
+    item.permissions ||
+    item.anyPermissions ||
+    item.allPermissions ||
+    item.roles ||
+    item.workspace ||
+    item.workspaces
+  ) {
+    return {
+      permission: item.permission,
+      permissions: item.permissions,
+      anyPermissions: item.anyPermissions,
+      allPermissions: item.allPermissions,
+      roles: item.roles,
+      workspace: item.workspace,
+      workspaces: item.workspaces,
+    };
+  }
+
+  const href = item.href;
+
+  if (href === "/system") {
+    return {
+      permission: PERMISSIONS.SYSTEM_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/users/create")) {
+    return {
+      permission: PERMISSIONS.USERS_CREATE,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/users")) {
+    return {
+      permission: PERMISSIONS.USERS_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/settings")) {
+    return {
+      permission: PERMISSIONS.SYSTEM_SETTINGS,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/centers") || href.startsWith("/system/providers")) {
+    return {
+      permission: href.includes("/create")
+        ? PERMISSIONS.PROVIDERS_CREATE
+        : PERMISSIONS.PROVIDERS_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/customers")) {
+    return {
+      permission: href.includes("/create")
+        ? PERMISSIONS.CUSTOMERS_CREATE
+        : PERMISSIONS.CUSTOMERS_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/agents")) {
+    return {
+      permission: href.includes("/create")
+        ? PERMISSIONS.AGENTS_CREATE
+        : PERMISSIONS.AGENTS_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/products")) {
+    return {
+      permission: href.includes("/create")
+        ? PERMISSIONS.PRODUCTS_CREATE
+        : PERMISSIONS.PRODUCTS_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/orders")) {
+    return {
+      permission: href.includes("/create")
+        ? PERMISSIONS.ORDERS_CREATE
+        : PERMISSIONS.ORDERS_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/contracts")) {
+    return {
+      permission: href.includes("/create")
+        ? PERMISSIONS.CONTRACTS_CREATE
+        : PERMISSIONS.CONTRACTS_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/invoices")) {
+    return {
+      permission: href.includes("/create")
+        ? PERMISSIONS.INVOICES_CREATE
+        : PERMISSIONS.INVOICES_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/payments")) {
+    return {
+      permission: href.includes("/create")
+        ? PERMISSIONS.PAYMENTS_CREATE
+        : PERMISSIONS.PAYMENTS_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/accounting")) {
+    return {
+      permission: PERMISSIONS.ACCOUNTING_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/treasury")) {
+    return {
+      permission:
+        href.includes("/create") || href.includes("/settings")
+          ? PERMISSIONS.TREASURY_CREATE
+          : PERMISSIONS.TREASURY_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/customer")) {
+    return {
+      permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
+      workspaces: ["customer"],
+    };
+  }
+
+  if (href.startsWith("/agent")) {
+    return {
+      permission: PERMISSIONS.AGENT_WORKSPACE_VIEW,
+      workspaces: ["agent"],
+    };
+  }
+
+  if (
+    href.startsWith("/company") ||
+    href.startsWith("/center") ||
+    href.startsWith("/provider")
+  ) {
+    return {
+      permission: PERMISSIONS.PROVIDER_WORKSPACE_VIEW,
+      workspaces: ["provider"],
+    };
+  }
+
+  return {};
+}
+
+function canAccessNavItem(
+  authSession: SidebarAuthSession,
+  item: NavItem,
+  currentRole: string,
+  enabledApps: string[],
+): boolean {
+  const appAllowed = hasRequiredApps(item.apps, enabledApps);
+  if (!appAllowed) return false;
+
+  const roleAllowed = hasRequiredRole(item.roles, currentRole);
+  if (!roleAllowed && !isSystemAdmin(authSession)) return false;
+
+  const input = inferPermissionInputByHref(item);
+
+  if (
+    !input.permission &&
+    !input.permissions &&
+    !input.anyPermissions &&
+    !input.allPermissions &&
+    !input.workspace &&
+    !input.workspaces
+  ) {
+    return true;
+  }
+
+  if (canAccess(authSession, input)) {
+    return true;
+  }
+
+  if (input.permission && hasPermission(authSession, input.permission)) {
+    return true;
+  }
+
+  return false;
+}
+
 function filterNavItems(
   items: NavItem[],
+  authSession: SidebarAuthSession,
   currentRole: string,
   enabledApps: string[],
 ): NavItem[] {
   return items
-    .filter((item) => {
-      const roleAllowed = hasRequiredRole(item.roles, currentRole);
-      const appAllowed = hasRequiredApps(item.apps, enabledApps);
+    .map((item) => {
+      const filteredChildren = item.items
+        ? filterNavItems(item.items, authSession, currentRole, enabledApps)
+        : undefined;
 
-      return roleAllowed && appAllowed;
+      return {
+        ...item,
+        items: filteredChildren,
+      };
     })
-    .map((item) => ({
-      ...item,
-      items: item.items
-        ? filterNavItems(item.items, currentRole, enabledApps)
-        : undefined,
-    }));
+    .filter((item) => {
+      const ownAccess = canAccessNavItem(
+        authSession,
+        item,
+        currentRole,
+        enabledApps,
+      );
+
+      const hasVisibleChildren = Boolean(item.items && item.items.length > 0);
+
+      return ownAccess || hasVisibleChildren;
+    });
 }
 
 function filterNavGroups(
   groups: NavGroup[],
+  authSession: SidebarAuthSession,
   currentRole: string,
   enabledApps: string[],
 ): NavGroup[] {
   return groups
     .map((group) => ({
       ...group,
-      items: filterNavItems(group.items, currentRole, enabledApps),
+      items: filterNavItems(group.items, authSession, currentRole, enabledApps),
     }))
     .filter((group) => group.items.length > 0);
 }
@@ -1078,12 +1451,12 @@ function hasActiveChild(pathname: string, item: NavItem): boolean {
 
 export function NavMain({ type }: NavMainProps) {
   const pathname = usePathname();
-  const authSession = useAuth() as SidebarAuthSession | null;
+  const authSession = useAuth() as SidebarAuthSession;
 
   const [locale, setLocale] = useState<AppLocale>("ar");
 
-  const currentRole = String(authSession?.role || "").toLowerCase();
-  const enabledApps = Array.isArray(authSession?.subscription?.apps)
+  const currentRole = String(authSession.role || "").toLowerCase();
+  const enabledApps = Array.isArray(authSession.subscription?.apps)
     ? authSession.subscription.apps.map((app) => String(app).toLowerCase())
     : [];
 
@@ -1119,19 +1492,39 @@ export function NavMain({ type }: NavMainProps) {
 
   const navItems = useMemo(() => {
     if (type === "system") {
-      return systemNavItems;
+      return filterNavGroups(
+        systemNavItems,
+        authSession,
+        currentRole,
+        enabledApps,
+      );
     }
 
     if (type === "customer") {
-      return customerNavItems;
+      return filterNavGroups(
+        customerNavItems,
+        authSession,
+        currentRole,
+        enabledApps,
+      );
     }
 
     if (type === "agent") {
-      return agentNavItems;
+      return filterNavGroups(
+        agentNavItems,
+        authSession,
+        currentRole,
+        enabledApps,
+      );
     }
 
-    return filterNavGroups(centerNavItems, currentRole, enabledApps);
-  }, [type, currentRole, enabledApps]);
+    return filterNavGroups(
+      centerNavItems,
+      authSession,
+      currentRole,
+      enabledApps,
+    );
+  }, [type, authSession, currentRole, enabledApps]);
 
   return (
     <>

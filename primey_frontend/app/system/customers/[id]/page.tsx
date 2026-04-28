@@ -14,7 +14,6 @@ import {
   Copy,
   CreditCard,
   Edit3,
-  Eye,
   FileText,
   Loader2,
   Mail,
@@ -29,6 +28,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { apiDelete, apiGet, API_PATHS } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,14 +51,13 @@ import {
    📂 app/system/customers/[id]/page.tsx
    🧠 Primey Care | Customer Detail Page
    ------------------------------------------------------------
-   ✅ تصميم تفاصيل العميل بنفس روح صفحة التفاصيل المرفقة
-   ✅ Header احترافي + بطاقة ملف العميل + ملخص مالي
+   ✅ مرتبط مع lib/api.ts
+   ✅ Customer Detail + Statement
    ✅ بيانات التواصل والعنوان والهوية
-   ✅ كشف حساب العميل من /api/customers/<id>/statement/
-   ✅ حذف العميل عند الحاجة
+   ✅ روابط تشغيلية للطلبات والفواتير والمدفوعات
+   ✅ حذف العميل
    ✅ دعم عربي / إنجليزي
-   ✅ بدون localhost hardcoded
-   ✅ استخدام UI الداخلي فقط
+   ✅ استخدام رمز العملة /currency/sar.svg
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -126,6 +125,16 @@ type StatementResponse = {
     summary?: StatementSummary;
     lines?: StatementLine[];
   };
+  data?: {
+    statement?: {
+      summary?: StatementSummary;
+      lines?: StatementLine[];
+    };
+    summary?: StatementSummary;
+    lines?: StatementLine[];
+  };
+  summary?: StatementSummary;
+  lines?: StatementLine[];
 };
 
 type StatementSummary = {
@@ -159,10 +168,6 @@ type StatementLine = {
   metadata?: Record<string, unknown>;
 };
 
-/* ============================================================
-   🌐 Locale Helpers
-============================================================ */
-
 function readLocale(): AppLocale {
   try {
     if (typeof window === "undefined") return "ar";
@@ -185,15 +190,10 @@ function applyDocumentLocale(locale: AppLocale) {
   document.body.dir = locale === "ar" ? "rtl" : "ltr";
 }
 
-/* ============================================================
-   🧩 Dictionary
-============================================================ */
-
 function dictionary(locale: AppLocale) {
   const ar = locale === "ar";
 
   return {
-    pageTitle: ar ? "تفاصيل العميل" : "Customer Details",
     pageSubtitle: ar
       ? "عرض الملف الكامل للعميل، بيانات التواصل، العنوان، الملخص المالي، وكشف الحساب."
       : "View customer profile, contact data, address, financial summary, and statement.",
@@ -211,13 +211,7 @@ function dictionary(locale: AppLocale) {
       ? "البيانات الأساسية والتعريفية للعميل."
       : "Basic and identity information for the customer.",
 
-    featured: ar ? "عميل نشط" : "Active Customer",
-    notFeatured: ar ? "حالة غير نشطة" : "Inactive State",
-
     financialSummary: ar ? "الملخص المالي" : "Financial Summary",
-    financialSubtitle: ar
-      ? "ملخص الفواتير والمدفوعات والرصيد حسب كشف الحساب."
-      : "Summary of invoices, payments, and balance from statement.",
 
     statementTitle: ar ? "كشف حساب العميل" : "Customer Statement",
     statementSubtitle: ar
@@ -234,7 +228,6 @@ function dictionary(locale: AppLocale) {
     customerType: ar ? "نوع العميل" : "Customer Type",
     status: ar ? "الحالة" : "Status",
     source: ar ? "المصدر" : "Source",
-    name: ar ? "اسم العميل" : "Customer Name",
     gender: ar ? "الجنس" : "Gender",
     dateOfBirth: ar ? "تاريخ الميلاد" : "Date of Birth",
     createdAt: ar ? "تاريخ الإنشاء" : "Created At",
@@ -301,6 +294,7 @@ function dictionary(locale: AppLocale) {
       ? "لا توجد حركات في كشف الحساب."
       : "No statement lines.",
     copied: ar ? "تم النسخ بنجاح." : "Copied successfully.",
+    refreshed: ar ? "تم تحديث بيانات العميل." : "Customer data refreshed.",
     deleteConfirm: ar
       ? "هل تريد حذف هذا العميل؟ لا يمكن التراجع عن هذه العملية."
       : "Do you want to delete this customer? This action cannot be undone.",
@@ -308,10 +302,6 @@ function dictionary(locale: AppLocale) {
     deleteError: ar ? "تعذر حذف العميل." : "Failed to delete customer.",
   };
 }
-
-/* ============================================================
-   🔁 Normalizers
-============================================================ */
 
 function pickString(
   obj: Record<string, unknown>,
@@ -353,7 +343,7 @@ function normalizeCustomerType(value: unknown): CustomerType {
   return "UNKNOWN";
 }
 
-function normalizeCustomer(payload: unknown): CustomerDetail {
+function normalizeCustomer(payload: CustomerDetailResponse | unknown): CustomerDetail {
   const source = (payload || {}) as Record<string, unknown>;
   const obj =
     (source.customer as Record<string, unknown> | undefined) ||
@@ -438,9 +428,22 @@ function normalizeCustomer(payload: unknown): CustomerDetail {
   };
 }
 
-/* ============================================================
-   🎨 UI Helpers
-============================================================ */
+function extractStatement(payload: StatementResponse) {
+  return {
+    summary:
+      payload.statement?.summary ||
+      payload.data?.statement?.summary ||
+      payload.data?.summary ||
+      payload.summary ||
+      null,
+    lines:
+      payload.statement?.lines ||
+      payload.data?.statement?.lines ||
+      payload.data?.lines ||
+      payload.lines ||
+      [],
+  };
+}
 
 function statusLabel(status: CustomerStatus, locale: AppLocale) {
   const t = dictionary(locale);
@@ -518,10 +521,12 @@ function formatDate(value: string | null | undefined, locale: AppLocale) {
 function money(value: string | number | undefined, currency = "SAR") {
   const amount = Number(value || 0);
 
-  return `${Number.isFinite(amount) ? amount.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }) : "0.00"} ${currency}`;
+  return `${Number.isFinite(amount)
+    ? amount.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    : "0.00"} ${currency}`;
 }
 
 function statementTypeLabel(type: string, locale: AppLocale) {
@@ -533,23 +538,6 @@ function statementTypeLabel(type: string, locale: AppLocale) {
 
   return type || "-";
 }
-
-function getCookie(name: string) {
-  if (typeof document === "undefined") return "";
-
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-
-  if (parts.length === 2) {
-    return parts.pop()?.split(";").shift() || "";
-  }
-
-  return "";
-}
-
-/* ============================================================
-   ✅ Page
-============================================================ */
 
 export default function SystemCustomerDetailPage() {
   const router = useRouter();
@@ -565,7 +553,6 @@ export default function SystemCustomerDetailPage() {
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
-
   const currency = summary?.currency || "SAR";
 
   const financialCards = useMemo(
@@ -598,63 +585,41 @@ export default function SystemCustomerDetailPage() {
     [currency, summary, t],
   );
 
-  async function loadCustomer(showToast = false) {
+  async function loadCustomer(showSuccessToast = false) {
     if (!customerId) return;
 
-    try {
-      setIsLoading(true);
+    setIsLoading(true);
 
-      const detailRequest = fetch(`/api/customers/${customerId}/`, {
-        method: "GET",
-        credentials: "include",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
+    const [detailResponse, statementResponse] = await Promise.all([
+      apiGet<CustomerDetailResponse>(API_PATHS.customers.detail(customerId)),
+      apiGet<StatementResponse>(`/api/customers/${customerId}/statement/`),
+    ]);
 
-      const statementRequest = fetch(`/api/customers/${customerId}/statement/`, {
-        method: "GET",
-        credentials: "include",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-
-      const [detailResponse, statementResponse] = await Promise.all([
-        detailRequest,
-        statementRequest,
-      ]);
-
-      if (!detailResponse.ok) {
-        throw new Error(`HTTP ${detailResponse.status}`);
-      }
-
-      const detailPayload =
-        (await detailResponse.json()) as CustomerDetailResponse;
-
-      setCustomer(normalizeCustomer(detailPayload));
-
-      if (statementResponse.ok) {
-        const statementPayload =
-          (await statementResponse.json()) as StatementResponse;
-
-        setSummary(statementPayload.statement?.summary || null);
-        setLines(statementPayload.statement?.lines || []);
-      } else {
-        setSummary(null);
-        setLines([]);
-        toast.error(t.statementError);
-      }
-
-      if (showToast) {
-        toast.success(t.refresh);
-      }
-    } catch (error) {
-      console.error("Failed to load customer detail:", error);
+    if (!detailResponse.ok) {
       setCustomer(null);
       setSummary(null);
       setLines([]);
-      toast.error(t.loadError);
-    } finally {
       setIsLoading(false);
+      toast.error(detailResponse.message || t.loadError);
+      return;
+    }
+
+    setCustomer(normalizeCustomer(detailResponse.data));
+
+    if (statementResponse.ok) {
+      const statement = extractStatement(statementResponse.data);
+      setSummary(statement.summary);
+      setLines(statement.lines);
+    } else {
+      setSummary(null);
+      setLines([]);
+      toast.error(statementResponse.message || t.statementError);
+    }
+
+    setIsLoading(false);
+
+    if (showSuccessToast) {
+      toast.success(t.refreshed);
     }
   }
 
@@ -664,34 +629,19 @@ export default function SystemCustomerDetailPage() {
     const confirmed = window.confirm(t.deleteConfirm);
     if (!confirmed) return;
 
-    try {
-      setIsDeleting(true);
+    setIsDeleting(true);
 
-      const csrfToken = getCookie("csrftoken");
+    const response = await apiDelete(API_PATHS.customers.detail(customerId));
 
-      const response = await fetch(`/api/customers/${customerId}/`, {
-        method: "DELETE",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-        },
-      });
+    setIsDeleting(false);
 
-      const payload = await response.json().catch(() => ({}));
-
-      if (!response.ok || payload?.ok === false) {
-        throw new Error(payload?.message || t.deleteError);
-      }
-
-      toast.success(t.deleteSuccess);
-      router.push("/system/customers/list");
-    } catch (error) {
-      console.error("Delete customer error:", error);
-      toast.error(error instanceof Error ? error.message : t.deleteError);
-    } finally {
-      setIsDeleting(false);
+    if (!response.ok) {
+      toast.error(response.message || t.deleteError);
+      return;
     }
+
+    toast.success(t.deleteSuccess);
+    router.push("/system/customers/list");
   }
 
   function copyCustomerCode() {
@@ -755,22 +705,17 @@ export default function SystemCustomerDetailPage() {
 
   return (
     <div className="space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Badge variant="secondary" className="rounded-full">
               /system/customers/{customer.id}
             </Badge>
-
             <Badge className="rounded-full">{t.liveData}</Badge>
-
             {statusBadge(customer.status, locale)}
           </div>
 
-          <h1 className="text-2xl font-bold tracking-tight">
-            {customer.name}
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight">{customer.name}</h1>
 
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             {t.pageSubtitle}
@@ -829,9 +774,7 @@ export default function SystemCustomerDetailPage() {
         </div>
       </div>
 
-      {/* Top Layout */}
       <div className="grid gap-4 xl:grid-cols-3">
-        {/* Profile Card */}
         <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between gap-3">
@@ -882,22 +825,31 @@ export default function SystemCustomerDetailPage() {
             </div>
 
             <InfoRow label={t.customerCode} value={customer.code} />
-            <InfoRow label={t.customerType} value={typeLabel(customer.customerType, locale)} />
-            <InfoRow label={t.status} value={statusLabel(customer.status, locale)} />
+            <InfoRow
+              label={t.customerType}
+              value={typeLabel(customer.customerType, locale)}
+            />
+            <InfoRow
+              label={t.status}
+              value={statusLabel(customer.status, locale)}
+            />
             <InfoRow label={t.source} value={customer.source || "-"} />
-            <InfoRow label={t.createdAt} value={formatDate(customer.createdAt, locale)} />
-            <InfoRow label={t.updatedAt} value={formatDate(customer.updatedAt, locale)} />
+            <InfoRow
+              label={t.createdAt}
+              value={formatDate(customer.createdAt, locale)}
+            />
+            <InfoRow
+              label={t.updatedAt}
+              value={formatDate(customer.updatedAt, locale)}
+            />
 
-            <div className="grid gap-2 pt-2">
-              <Button variant="outline" className="rounded-xl" disabled>
-                <Edit3 className="h-4 w-4" />
-                {t.edit}
-              </Button>
-            </div>
+            <Button variant="outline" className="w-full rounded-xl" disabled>
+              <Edit3 className="h-4 w-4" />
+              {t.edit}
+            </Button>
           </CardContent>
         </Card>
 
-        {/* Summary + Info */}
         <div className="space-y-4 xl:col-span-2">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {financialCards.map((item) => {
@@ -943,7 +895,11 @@ export default function SystemCustomerDetailPage() {
               items={[
                 { label: t.email, value: customer.email || "-", icon: Mail },
                 { label: t.phone, value: customer.phone || "-", icon: Phone },
-                { label: t.whatsapp, value: customer.whatsapp || "-", icon: Phone },
+                {
+                  label: t.whatsapp,
+                  value: customer.whatsapp || "-",
+                  icon: Phone,
+                },
                 {
                   label: t.alternativePhone,
                   value: customer.alternativePhone || "-",
@@ -1023,7 +979,6 @@ export default function SystemCustomerDetailPage() {
         </div>
       </div>
 
-      {/* Operational Links */}
       <Card className="rounded-2xl border bg-card shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-bold">
@@ -1038,24 +993,23 @@ export default function SystemCustomerDetailPage() {
           <div className="grid gap-4 md:grid-cols-3">
             <QuickLink
               title={t.invoices}
-              href="/system/invoices"
+              href={`/system/invoices/list?customer=${customer.id}`}
               icon={FileText}
             />
             <QuickLink
               title={t.payments}
-              href="/system/payments"
+              href={`/system/payments/list?customer=${customer.id}`}
               icon={Wallet}
             />
             <QuickLink
               title={t.orders}
-              href="/system/orders"
+              href={`/system/orders/list?customer=${customer.id}`}
               icon={CheckCircle2}
             />
           </div>
         </CardContent>
       </Card>
 
-      {/* Statement */}
       <Card className="rounded-2xl border bg-card shadow-sm">
         <CardHeader className="gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -1132,10 +1086,6 @@ export default function SystemCustomerDetailPage() {
     </div>
   );
 }
-
-/* ============================================================
-   Components
-============================================================ */
 
 function InfoRow({
   label,
@@ -1216,9 +1166,7 @@ function QuickLink({
     <Link href={href} className="block">
       <Card className="h-full rounded-2xl border bg-background shadow-none transition hover:bg-muted/40">
         <CardContent className="flex items-center justify-between gap-4 p-4">
-          <div>
-            <p className="font-semibold">{title}</p>
-          </div>
+          <p className="font-semibold">{title}</p>
 
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
             <Icon className="h-5 w-5" />

@@ -4,14 +4,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft,
   BadgeCheck,
   Building2,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Loader2,
-  Mail,
   MapPin,
   Phone,
   Plus,
@@ -22,6 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { apiPost, API_PATHS } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,12 +37,12 @@ import { Label } from "@/components/ui/label";
    📂 app/system/customers/create/page.tsx
    🧠 Primey Care | Create Customer Page
    ------------------------------------------------------------
-   ✅ تصميم قريب من الصفحة المرفقة: max-w-5xl + Form Cards
-   ✅ متوافق مع بيانات موديول العملاء الحالي
+   ✅ مرتبط مع lib/api.ts
    ✅ POST /api/customers/
-   ✅ CSRF + credentials
    ✅ sonner toast
+   ✅ Validation قبل الإرسال
    ✅ دعم عربي / إنجليزي
+   ✅ نفس تصميم Primey Care الرسمي
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -94,11 +93,19 @@ type CreateCustomerResponse = {
   ok?: boolean;
   message?: string;
   errors?: Record<string, unknown>;
+  data?: {
+    id?: number | string;
+    customer_code?: string;
+    display_name?: string;
+  };
   customer?: {
     id?: number | string;
     customer_code?: string;
     display_name?: string;
   };
+  id?: number | string;
+  customer_code?: string;
+  display_name?: string;
 };
 
 const INITIAL_FORM: CustomerForm = {
@@ -212,10 +219,9 @@ const TEXT = {
     requiredName: "يرجى إدخال الاسم الأول واسم العائلة.",
     requiredCompany: "يرجى إدخال اسم الشركة.",
     requiredContact: "يرجى إدخال وسيلة تواصل واحدة على الأقل.",
+    invalidEmail: "صيغة البريد الإلكتروني غير صحيحة.",
     success: "تم إنشاء العميل بنجاح.",
     error: "تعذر إنشاء العميل.",
-    invalidJson: "تعذر قراءة استجابة الخادم.",
-    customerCreated: "تم إنشاء العميل",
     openList: "فتح قائمة العملاء",
   },
   en: {
@@ -297,17 +303,12 @@ const TEXT = {
     requiredName: "Please enter first name and last name.",
     requiredCompany: "Please enter company name.",
     requiredContact: "Please enter at least one contact method.",
+    invalidEmail: "Invalid email format.",
     success: "Customer created successfully.",
     error: "Failed to create customer.",
-    invalidJson: "Failed to parse server response.",
-    customerCreated: "Customer created",
     openList: "Open customers list",
   },
 } as const;
-
-/* ============================================================
-   Locale Helpers
-============================================================ */
 
 function readLocale(): AppLocale {
   try {
@@ -331,35 +332,68 @@ function applyDocumentLocale(locale: AppLocale) {
   document.body.dir = locale === "ar" ? "rtl" : "ltr";
 }
 
-/* ============================================================
-   Helpers
-============================================================ */
+function normalizeServerMessage(
+  payload: CreateCustomerResponse | unknown,
+  fallback: string,
+) {
+  if (!payload || typeof payload !== "object") return fallback;
 
-function getCookie(name: string) {
-  if (typeof document === "undefined") return "";
+  const data = payload as CreateCustomerResponse;
 
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
+  if (data.message) return data.message;
 
-  if (parts.length === 2) {
-    return parts.pop()?.split(";").shift() || "";
-  }
-
-  return "";
-}
-
-function normalizeServerMessage(payload: CreateCustomerResponse, fallback: string) {
-  if (payload?.message) return payload.message;
-
-  if (payload?.errors) {
-    const firstKey = Object.keys(payload.errors)[0];
-    const firstValue = payload.errors[firstKey];
+  if (data.errors) {
+    const firstKey = Object.keys(data.errors)[0];
+    const firstValue = data.errors[firstKey];
 
     if (Array.isArray(firstValue)) return String(firstValue[0]);
     if (firstValue) return String(firstValue);
   }
 
   return fallback;
+}
+
+function normalizePayload(form: CustomerForm) {
+  return {
+    customer_type: form.customer_type,
+    status: form.status,
+    source: form.source,
+
+    first_name: form.customer_type === "individual" ? form.first_name.trim() : "",
+    last_name: form.customer_type === "individual" ? form.last_name.trim() : "",
+    company_name:
+      form.customer_type === "corporate" ? form.company_name.trim() : "",
+
+    gender: form.gender,
+    date_of_birth: form.date_of_birth || null,
+    national_id: form.national_id.trim(),
+    passport_number: form.passport_number.trim(),
+    nationality: form.nationality.trim(),
+
+    email: form.email.trim(),
+    phone_number: form.phone_number.trim(),
+    whatsapp_number: form.whatsapp_number.trim(),
+    alternative_phone_number: form.alternative_phone_number.trim(),
+
+    country: form.country.trim(),
+    city: form.city.trim(),
+    district: form.district.trim(),
+    street_address: form.street_address.trim(),
+    postal_code: form.postal_code.trim(),
+    national_address_text: form.national_address_text.trim(),
+
+    notes: form.notes.trim(),
+    tags: form.tags.trim(),
+  };
+}
+
+function getCreatedCustomerId(payload: CreateCustomerResponse) {
+  return payload.customer?.id || payload.data?.id || payload.id || null;
+}
+
+function isValidEmail(email: string) {
+  if (!email.trim()) return true;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
 export default function CreateCustomerPage() {
@@ -402,7 +436,10 @@ export default function CreateCustomerPage() {
       form.city,
     ];
 
-    const done = requiredValues.filter((value) => String(value || "").trim()).length;
+    const done = requiredValues.filter((value) =>
+      String(value || "").trim(),
+    ).length;
+
     return Math.round((done / requiredValues.length) * 100);
   }, [form, isCorporate]);
 
@@ -412,10 +449,12 @@ export default function CreateCustomerPage() {
       : Boolean(form.first_name.trim() && form.last_name.trim());
 
     const hasContact = Boolean(
-      form.email.trim() || form.phone_number.trim() || form.whatsapp_number.trim(),
+      form.email.trim() ||
+        form.phone_number.trim() ||
+        form.whatsapp_number.trim(),
     );
 
-    return hasName && hasContact;
+    return hasName && hasContact && isValidEmail(form.email);
   }, [form, isCorporate]);
 
   function update<K extends keyof CustomerForm>(key: K, value: CustomerForm[K]) {
@@ -449,6 +488,11 @@ export default function CreateCustomerPage() {
       return false;
     }
 
+    if (!isValidEmail(form.email)) {
+      toast.error(t.invalidEmail);
+      return false;
+    }
+
     return true;
   }
 
@@ -460,36 +504,31 @@ export default function CreateCustomerPage() {
     setIsSaving(true);
 
     try {
-      const csrfToken = getCookie("csrftoken");
+      const response = await apiPost<CreateCustomerResponse>(
+        API_PATHS.customers.list,
+        normalizePayload(form),
+      );
 
-      const response = await fetch("/api/customers/", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-        },
-        body: JSON.stringify(form),
-      });
-
-      const payload = (await response.json().catch(() => {
-        throw new Error(t.invalidJson);
-      })) as CreateCustomerResponse;
-
-      if (!response.ok || payload.ok === false) {
-        throw new Error(normalizeServerMessage(payload, t.error));
+      if (!response.ok) {
+        toast.error(response.message || t.error);
+        return;
       }
 
-      toast.success(t.success);
+      if (response.data?.ok === false) {
+        toast.error(normalizeServerMessage(response.data, t.error));
+        return;
+      }
 
-      const customerId = payload.customer?.id;
+      toast.success(response.data?.message || t.success);
+
+      const customerId = getCreatedCustomerId(response.data);
 
       if (customerId) {
         router.push(`/system/customers/${customerId}`);
-      } else {
-        router.push("/system/customers/list");
+        return;
       }
+
+      router.push("/system/customers/list");
     } catch (error) {
       console.error("Create customer error:", error);
       toast.error(error instanceof Error ? error.message : t.error);
@@ -508,7 +547,6 @@ export default function CreateCustomerPage() {
       className="mx-auto max-w-5xl space-y-4"
       dir={isArabic ? "rtl" : "ltr"}
     >
-      {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -560,7 +598,6 @@ export default function CreateCustomerPage() {
         </div>
       </div>
 
-      {/* Steps */}
       <Card className="rounded-2xl">
         <CardContent className="p-4">
           <div className="grid gap-3 md:grid-cols-4">
@@ -570,18 +607,25 @@ export default function CreateCustomerPage() {
               title={t.stepProfile}
               value={`${completion}%`}
             />
+
             <StepCard
-              active={Boolean(form.email || form.phone_number || form.whatsapp_number)}
+              active={Boolean(
+                form.email || form.phone_number || form.whatsapp_number,
+              )}
               icon={Phone}
               title={t.stepContact}
-              value={form.whatsapp_number || form.phone_number || form.email || "-"}
+              value={
+                form.whatsapp_number || form.phone_number || form.email || "-"
+              }
             />
+
             <StepCard
               active={Boolean(form.city)}
               icon={MapPin}
               title={t.stepAddress}
               value={form.city || "-"}
             />
+
             <StepCard
               active={isReady}
               icon={CheckCircle2}
@@ -594,7 +638,6 @@ export default function CreateCustomerPage() {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <div className="space-y-4">
-          {/* Basic Info */}
           <Card className="rounded-2xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -652,7 +695,6 @@ export default function CreateCustomerPage() {
             </CardContent>
           </Card>
 
-          {/* Identity Info */}
           <Card className="rounded-2xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -671,8 +713,11 @@ export default function CreateCustomerPage() {
                 <Field label={t.companyName} className="md:col-span-2">
                   <Input
                     value={form.company_name}
-                    onChange={(event) => update("company_name", event.target.value)}
+                    onChange={(event) =>
+                      update("company_name", event.target.value)
+                    }
                     className="rounded-xl"
+                    autoComplete="organization"
                   />
                 </Field>
               ) : (
@@ -680,16 +725,22 @@ export default function CreateCustomerPage() {
                   <Field label={t.firstName}>
                     <Input
                       value={form.first_name}
-                      onChange={(event) => update("first_name", event.target.value)}
+                      onChange={(event) =>
+                        update("first_name", event.target.value)
+                      }
                       className="rounded-xl"
+                      autoComplete="given-name"
                     />
                   </Field>
 
                   <Field label={t.lastName}>
                     <Input
                       value={form.last_name}
-                      onChange={(event) => update("last_name", event.target.value)}
+                      onChange={(event) =>
+                        update("last_name", event.target.value)
+                      }
                       className="rounded-xl"
+                      autoComplete="family-name"
                     />
                   </Field>
                 </>
@@ -698,7 +749,9 @@ export default function CreateCustomerPage() {
               <Field label={t.gender}>
                 <select
                   value={form.gender}
-                  onChange={(event) => update("gender", event.target.value as Gender)}
+                  onChange={(event) =>
+                    update("gender", event.target.value as Gender)
+                  }
                   className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                 >
                   <option value="not_specified">{t.notSpecified}</option>
@@ -711,7 +764,9 @@ export default function CreateCustomerPage() {
                 <Input
                   type="date"
                   value={form.date_of_birth}
-                  onChange={(event) => update("date_of_birth", event.target.value)}
+                  onChange={(event) =>
+                    update("date_of_birth", event.target.value)
+                  }
                   className="rounded-xl"
                 />
               </Field>
@@ -719,7 +774,9 @@ export default function CreateCustomerPage() {
               <Field label={t.nationalId}>
                 <Input
                   value={form.national_id}
-                  onChange={(event) => update("national_id", event.target.value)}
+                  onChange={(event) =>
+                    update("national_id", event.target.value)
+                  }
                   className="rounded-xl"
                 />
               </Field>
@@ -727,7 +784,9 @@ export default function CreateCustomerPage() {
               <Field label={t.passportNumber}>
                 <Input
                   value={form.passport_number}
-                  onChange={(event) => update("passport_number", event.target.value)}
+                  onChange={(event) =>
+                    update("passport_number", event.target.value)
+                  }
                   className="rounded-xl"
                 />
               </Field>
@@ -735,14 +794,15 @@ export default function CreateCustomerPage() {
               <Field label={t.nationality} className="md:col-span-2">
                 <Input
                   value={form.nationality}
-                  onChange={(event) => update("nationality", event.target.value)}
+                  onChange={(event) =>
+                    update("nationality", event.target.value)
+                  }
                   className="rounded-xl"
                 />
               </Field>
             </CardContent>
           </Card>
 
-          {/* Contact Info */}
           <Card className="rounded-2xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -759,22 +819,29 @@ export default function CreateCustomerPage() {
                   value={form.email}
                   onChange={(event) => update("email", event.target.value)}
                   className="rounded-xl"
+                  autoComplete="email"
                 />
               </Field>
 
               <Field label={t.phone}>
                 <Input
                   value={form.phone_number}
-                  onChange={(event) => update("phone_number", event.target.value)}
+                  onChange={(event) =>
+                    update("phone_number", event.target.value)
+                  }
                   className="rounded-xl"
+                  autoComplete="tel"
                 />
               </Field>
 
               <Field label={t.whatsapp}>
                 <Input
                   value={form.whatsapp_number}
-                  onChange={(event) => update("whatsapp_number", event.target.value)}
+                  onChange={(event) =>
+                    update("whatsapp_number", event.target.value)
+                  }
                   className="rounded-xl"
+                  autoComplete="tel"
                 />
               </Field>
 
@@ -785,12 +852,12 @@ export default function CreateCustomerPage() {
                     update("alternative_phone_number", event.target.value)
                   }
                   className="rounded-xl"
+                  autoComplete="tel"
                 />
               </Field>
             </CardContent>
           </Card>
 
-          {/* Address Info */}
           <Card className="rounded-2xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -806,6 +873,7 @@ export default function CreateCustomerPage() {
                   value={form.country}
                   onChange={(event) => update("country", event.target.value)}
                   className="rounded-xl"
+                  autoComplete="country-name"
                 />
               </Field>
 
@@ -814,6 +882,7 @@ export default function CreateCustomerPage() {
                   value={form.city}
                   onChange={(event) => update("city", event.target.value)}
                   className="rounded-xl"
+                  autoComplete="address-level2"
                 />
               </Field>
 
@@ -822,22 +891,29 @@ export default function CreateCustomerPage() {
                   value={form.district}
                   onChange={(event) => update("district", event.target.value)}
                   className="rounded-xl"
+                  autoComplete="address-level3"
                 />
               </Field>
 
               <Field label={t.postalCode}>
                 <Input
                   value={form.postal_code}
-                  onChange={(event) => update("postal_code", event.target.value)}
+                  onChange={(event) =>
+                    update("postal_code", event.target.value)
+                  }
                   className="rounded-xl"
+                  autoComplete="postal-code"
                 />
               </Field>
 
               <Field label={t.street} className="md:col-span-2">
                 <Input
                   value={form.street_address}
-                  onChange={(event) => update("street_address", event.target.value)}
+                  onChange={(event) =>
+                    update("street_address", event.target.value)
+                  }
                   className="rounded-xl"
+                  autoComplete="street-address"
                 />
               </Field>
 
@@ -853,7 +929,6 @@ export default function CreateCustomerPage() {
             </CardContent>
           </Card>
 
-          {/* Notes */}
           <Card className="rounded-2xl">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -883,7 +958,6 @@ export default function CreateCustomerPage() {
           </Card>
         </div>
 
-        {/* Sidebar Summary */}
         <div className="space-y-4">
           <Card className="rounded-2xl lg:sticky lg:top-4">
             <CardHeader>
@@ -928,10 +1002,7 @@ export default function CreateCustomerPage() {
               <SummaryRow
                 label={t.contactInfo}
                 value={
-                  form.whatsapp_number ||
-                  form.phone_number ||
-                  form.email ||
-                  "-"
+                  form.whatsapp_number || form.phone_number || form.email || "-"
                 }
               />
 
@@ -971,9 +1042,7 @@ export default function CreateCustomerPage() {
                 </Button>
 
                 <Button asChild variant="ghost" className="rounded-xl">
-                  <Link href="/system/customers/list">
-                    {t.openList}
-                  </Link>
+                  <Link href="/system/customers/list">{t.openList}</Link>
                 </Button>
               </div>
             </CardContent>
@@ -983,10 +1052,6 @@ export default function CreateCustomerPage() {
     </form>
   );
 }
-
-/* ============================================================
-   Components
-============================================================ */
 
 function Field({
   label,
@@ -1052,9 +1117,7 @@ function SummaryRow({
   return (
     <div className="flex items-start justify-between gap-4 rounded-xl border bg-background p-3">
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="max-w-[170px] truncate text-sm font-medium">
-        {value}
-      </span>
+      <span className="max-w-[170px] truncate text-sm font-medium">{value}</span>
     </div>
   );
 }

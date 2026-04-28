@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { Can } from "@/components/guards/Can";
+import { PermissionGuard } from "@/components/guards/PermissionGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -52,6 +54,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PERMISSIONS } from "@/lib/permissions";
 
 /* ============================================================
    📂 app/system/accounting/reports/page.tsx
@@ -62,6 +65,8 @@ import {
    ✅ تصدير Excel منظم
    ✅ طباعة Web PDF
    ✅ ربط حقيقي مع Accounting API
+   ✅ حماية الصفحة accounting.view
+   ✅ حماية التصدير accounting.export / reports.export
    ✅ دعم عربي / إنجليزي
    ✅ أرقام إنجليزية دائمًا
    ✅ رمز العملة الرسمي
@@ -1010,541 +1015,580 @@ export default function AccountingReportsPage() {
   ];
 
   return (
-    <div className="space-y-6 p-4 md:p-6 print:p-0" dir="ltr">
-      <div className="flex flex-col gap-4 print:hidden lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            asChild
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-          >
-            <Link href="/system/accounting">
-              <ArrowLeft className="h-4 w-4" />
-              {t.back}
-            </Link>
-          </Button>
-
-          <Button
-            asChild
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-          >
-            <Link href="/system/accounting/ledger">
-              <BookOpenCheck className="h-4 w-4" />
-              {t.ledger}
-            </Link>
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-            onClick={() => loadReports(true)}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            {t.refresh}
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-            onClick={handlePrint}
-          >
-            <Printer className="h-4 w-4" />
-            {t.print}
-          </Button>
-
-          <Button
-            type="button"
-            className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
-            onClick={handleLocalExcelExport}
-          >
-            <Download className="h-4 w-4" />
-            {t.export}
-          </Button>
-        </div>
-
-        <div
-          className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}
-          dir={isArabic ? "rtl" : "ltr"}
-        >
-          <h1 className="text-2xl font-bold tracking-tight text-slate-950">
-            {t.title}
-          </h1>
-          <p className="text-sm leading-6 text-slate-500">{t.subtitle}</p>
-        </div>
-      </div>
-
-      <div className="hidden print:block print:space-y-2 print:border-b print:pb-4">
-        <h1 className="text-xl font-bold">{t.title}</h1>
-        <p className="text-sm text-slate-600">{t.subtitle}</p>
-      </div>
-
-      <Card
-        className="rounded-2xl border bg-card shadow-sm print:shadow-none"
-        dir={isArabic ? "rtl" : "ltr"}
-      >
-        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
-          <div>
-            <CardTitle className="text-lg font-bold">{t.summaryTitle}</CardTitle>
-            <CardDescription>{t.summaryDesc}</CardDescription>
-          </div>
-
-          <div className="print:hidden">
-            <Badge
+    <PermissionGuard
+      permission={PERMISSIONS.ACCOUNTING_VIEW}
+      workspace="system"
+      mode="fallback"
+    >
+      <div className="space-y-6 p-4 md:p-6 print:p-0" dir="ltr">
+        <div className="flex flex-col gap-4 print:hidden lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              asChild
               variant="outline"
-              className={
-                summary.trialBalanced && summary.balanceSheetBalanced
-                  ? "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "rounded-full border-amber-200 bg-amber-50 text-amber-700"
-              }
+              className="h-10 gap-2 rounded-xl bg-white px-4"
             >
-              <BadgeCheck className="me-1 h-3.5 w-3.5" />
-              {summary.trialBalanced && summary.balanceSheetBalanced
-                ? t.balanced
-                : t.unbalanced}
-            </Badge>
-          </div>
-        </CardHeader>
+              <Link href="/system/accounting">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Link>
+            </Button>
 
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {reportCards.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <div
-                  key={item.title}
-                  className="rounded-2xl border bg-background p-4"
-                >
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="text-sm text-muted-foreground">
-                        {item.title}
-                      </p>
-
-                      <p className="text-2xl font-bold text-slate-950">
-                        {item.money ? (
-                          <MoneyValue value={item.value} />
-                        ) : (
-                          item.value
-                        )}
-                      </p>
-                    </div>
-
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl border bg-muted">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                  </div>
-
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${Math.min(item.percent, 100)}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {financialCards.map((item) => {
-          const Icon = item.icon;
-
-          return (
-            <Card
-              key={item.title}
-              className="rounded-2xl border bg-card shadow-sm print:shadow-none"
-              dir={isArabic ? "rtl" : "ltr"}
+            <Button
+              asChild
+              variant="outline"
+              className="h-10 gap-2 rounded-xl bg-white px-4"
             >
-              <CardContent className="p-5">
-                <div className={`rounded-2xl ${item.bg} p-4`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-slate-500">{item.title}</p>
-                      <p className="mt-2 text-2xl font-bold text-slate-950">
-                        <MoneyValue value={item.value} />
-                      </p>
-                    </div>
-
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-sm">
-                      <Icon className="h-5 w-5 text-slate-900" />
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      <Card
-        className="rounded-2xl border bg-card shadow-sm print:hidden"
-        dir={isArabic ? "rtl" : "ltr"}
-      >
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base font-bold">
-            <FilterIcon className="h-4 w-4" />
-            {t.filters}
-          </CardTitle>
-        </CardHeader>
-
-        <CardContent>
-          <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr_auto]">
-            <div className="relative">
-              <Search
-                className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                  isArabic ? "right-3" : "left-3"
-                }`}
-              />
-              <Input
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder={t.searchPlaceholder}
-                className={`h-11 rounded-xl ${
-                  isArabic ? "pr-10" : "pl-10"
-                }`}
-              />
-            </div>
-
-            <Input
-              type="date"
-              value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
-              className="h-11 rounded-xl"
-              aria-label={t.dateFrom}
-            />
-
-            <Input
-              type="date"
-              value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
-              className="h-11 rounded-xl"
-              aria-label={t.dateTo}
-            />
-
-            <Input
-              type="date"
-              value={asOfDate}
-              onChange={(event) => setAsOfDate(event.target.value)}
-              className="h-11 rounded-xl"
-              aria-label={t.asOfDate}
-            />
+              <Link href="/system/accounting/ledger">
+                <BookOpenCheck className="h-4 w-4" />
+                {t.ledger}
+              </Link>
+            </Button>
 
             <Button
               type="button"
-              className="h-11 rounded-xl"
+              variant="outline"
+              className="h-10 gap-2 rounded-xl bg-white px-4"
               onClick={() => loadReports(true)}
               disabled={isLoading}
             >
               {isLoading ? (
-                <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <RefreshCcw className="me-2 h-4 w-4" />
+                <RefreshCcw className="h-4 w-4" />
               )}
               {t.refresh}
             </Button>
+
+            <Can
+              anyPermissions={[
+                PERMISSIONS.ACCOUNTING_EXPORT,
+                PERMISSIONS.REPORTS_EXPORT,
+              ]}
+            >
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 gap-2 rounded-xl bg-white px-4"
+                onClick={handlePrint}
+              >
+                <Printer className="h-4 w-4" />
+                {t.print}
+              </Button>
+            </Can>
+
+            <Can
+              anyPermissions={[
+                PERMISSIONS.ACCOUNTING_EXPORT,
+                PERMISSIONS.REPORTS_EXPORT,
+              ]}
+            >
+              <Button
+                type="button"
+                className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
+                onClick={handleLocalExcelExport}
+              >
+                <Download className="h-4 w-4" />
+                {t.export}
+              </Button>
+            </Can>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            {(
-              [
-                "ALL",
-                "TRIAL_BALANCE",
-                "PROFIT_LOSS",
-                "BALANCE_SHEET",
-              ] as ReportScope[]
-            ).map((scope) => (
-              <Button
-                key={scope}
-                type="button"
-                size="sm"
-                variant={reportScope === scope ? "default" : "outline"}
-                className="rounded-xl"
-                onClick={() => setReportScope(scope)}
+          <div
+            className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}
+            dir={isArabic ? "rtl" : "ltr"}
+          >
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
+              {t.title}
+            </h1>
+            <p className="text-sm leading-6 text-slate-500">{t.subtitle}</p>
+          </div>
+        </div>
+
+        <div className="hidden print:block print:space-y-2 print:border-b print:pb-4">
+          <h1 className="text-xl font-bold">{t.title}</h1>
+          <p className="text-sm text-slate-600">{t.subtitle}</p>
+        </div>
+
+        <Card
+          className="rounded-2xl border bg-card shadow-sm print:shadow-none"
+          dir={isArabic ? "rtl" : "ltr"}
+        >
+          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+            <div>
+              <CardTitle className="text-lg font-bold">{t.summaryTitle}</CardTitle>
+              <CardDescription>{t.summaryDesc}</CardDescription>
+            </div>
+
+            <div className="print:hidden">
+              <Badge
+                variant="outline"
+                className={
+                  summary.trialBalanced && summary.balanceSheetBalanced
+                    ? "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "rounded-full border-amber-200 bg-amber-50 text-amber-700"
+                }
               >
-                {scope === "ALL" ? t.all : reportLabel(scope, locale)}
+                <BadgeCheck className="me-1 h-3.5 w-3.5" />
+                {summary.trialBalanced && summary.balanceSheetBalanced
+                  ? t.balanced
+                  : t.unbalanced}
+              </Badge>
+            </div>
+          </CardHeader>
+
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {reportCards.map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <div
+                    key={item.title}
+                    className="rounded-2xl border bg-background p-4"
+                  >
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="text-sm text-muted-foreground">
+                          {item.title}
+                        </p>
+
+                        <p className="text-2xl font-bold text-slate-950">
+                          {item.money ? (
+                            <MoneyValue value={item.value} />
+                          ) : (
+                            item.value
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl border bg-muted">
+                        <Icon className="h-5 w-5" />
+                      </div>
+                    </div>
+
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{ width: `${Math.min(item.percent, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {financialCards.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <Card
+                key={item.title}
+                className="rounded-2xl border bg-card shadow-sm print:shadow-none"
+                dir={isArabic ? "rtl" : "ltr"}
+              >
+                <CardContent className="p-5">
+                  <div className={`rounded-2xl ${item.bg} p-4`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm text-slate-500">{item.title}</p>
+                        <p className="mt-2 text-2xl font-bold text-slate-950">
+                          <MoneyValue value={item.value} />
+                        </p>
+                      </div>
+
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-sm">
+                        <Icon className="h-5 w-5 text-slate-900" />
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+
+        <Card
+          className="rounded-2xl border bg-card shadow-sm print:hidden"
+          dir={isArabic ? "rtl" : "ltr"}
+        >
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base font-bold">
+              <FilterIcon className="h-4 w-4" />
+              {t.filters}
+            </CardTitle>
+          </CardHeader>
+
+          <CardContent>
+            <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr_auto]">
+              <div className="relative">
+                <Search
+                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+                    isArabic ? "right-3" : "left-3"
+                  }`}
+                />
+                <Input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder={t.searchPlaceholder}
+                  className={`h-11 rounded-xl ${
+                    isArabic ? "pr-10" : "pl-10"
+                  }`}
+                />
+              </div>
+
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(event) => setDateFrom(event.target.value)}
+                className="h-11 rounded-xl"
+                aria-label={t.dateFrom}
+              />
+
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(event) => setDateTo(event.target.value)}
+                className="h-11 rounded-xl"
+                aria-label={t.dateTo}
+              />
+
+              <Input
+                type="date"
+                value={asOfDate}
+                onChange={(event) => setAsOfDate(event.target.value)}
+                className="h-11 rounded-xl"
+                aria-label={t.asOfDate}
+              />
+
+              <Button
+                type="button"
+                className="h-11 rounded-xl"
+                onClick={() => loadReports(true)}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="me-2 h-4 w-4" />
+                )}
+                {t.refresh}
               </Button>
-            ))}
+            </div>
 
-            <div className="mx-1 h-6 w-px bg-border" />
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {(
+                [
+                  "ALL",
+                  "TRIAL_BALANCE",
+                  "PROFIT_LOSS",
+                  "BALANCE_SHEET",
+                ] as ReportScope[]
+              ).map((scope) => (
+                <Button
+                  key={scope}
+                  type="button"
+                  size="sm"
+                  variant={reportScope === scope ? "default" : "outline"}
+                  className="rounded-xl"
+                  onClick={() => setReportScope(scope)}
+                >
+                  {scope === "ALL" ? t.all : reportLabel(scope, locale)}
+                </Button>
+              ))}
 
-            <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
-              <Checkbox
-                checked={postedOnly}
-                onCheckedChange={(value) => setPostedOnly(Boolean(value))}
-              />
-              {t.postedOnly}
-            </label>
+              <div className="mx-1 h-6 w-px bg-border" />
 
-            <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
-              <Checkbox
-                checked={includeZeroAccounts}
-                onCheckedChange={(value) =>
-                  setIncludeZeroAccounts(Boolean(value))
-                }
-              />
-              {t.includeZeroAccounts}
-            </label>
+              <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
+                <Checkbox
+                  checked={postedOnly}
+                  onCheckedChange={(value) => setPostedOnly(Boolean(value))}
+                />
+                {t.postedOnly}
+              </label>
 
-            <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
-              <Checkbox
-                checked={includeCurrentEarnings}
-                onCheckedChange={(value) =>
-                  setIncludeCurrentEarnings(Boolean(value))
-                }
-              />
-              {t.includeCurrentEarnings}
-            </label>
+              <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
+                <Checkbox
+                  checked={includeZeroAccounts}
+                  onCheckedChange={(value) =>
+                    setIncludeZeroAccounts(Boolean(value))
+                  }
+                />
+                {t.includeZeroAccounts}
+              </label>
 
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="rounded-xl"
-              onClick={handleResetFilters}
-            >
-              {t.reset}
-            </Button>
+              <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
+                <Checkbox
+                  checked={includeCurrentEarnings}
+                  onCheckedChange={(value) =>
+                    setIncludeCurrentEarnings(Boolean(value))
+                  }
+                />
+                {t.includeCurrentEarnings}
+              </label>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="rounded-xl"
+                onClick={handleResetFilters}
+              >
+                {t.reset}
+              </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl"
+                  >
+                    <ColumnsIcon className="me-2 h-4 w-4" />
+                    {t.columns}
+                  </Button>
+                </DropdownMenuTrigger>
+
+                <DropdownMenuContent
+                  align={isArabic ? "start" : "end"}
+                  className="w-56 rounded-2xl"
+                >
+                  <div dir={isArabic ? "rtl" : "ltr"}>
+                    {columnOptions.map((column) => (
+                      <DropdownMenuCheckboxItem
+                        key={column.key}
+                        checked={visibleColumns[column.key]}
+                        onCheckedChange={(checked) =>
+                          setVisibleColumns((current) => ({
+                            ...current,
+                            [column.key]: Boolean(checked),
+                          }))
+                        }
+                      >
+                        {column.label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          {reportMiniTables.map((report) => (
+            <ReportMiniTable
+              key={report.title}
+              title={report.title}
+              icon={report.icon}
+              rows={report.rows}
+              loading={isLoading}
+              loadingText={t.loading}
+              noResults={t.noResults}
+            />
+          ))}
+        </div>
+
+        <Can
+          anyPermissions={[
+            PERMISSIONS.ACCOUNTING_EXPORT,
+            PERMISSIONS.REPORTS_EXPORT,
+          ]}
+        >
+          <Card className="rounded-2xl border bg-card shadow-sm print:hidden">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Download className="h-4 w-4" />
+                {t.exportApi}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
                   className="rounded-xl"
+                  onClick={() => handleApiExport("TRIAL_BALANCE")}
                 >
-                  <ColumnsIcon className="me-2 h-4 w-4" />
-                  {t.columns}
+                  <Calculator className="me-2 h-4 w-4" />
+                  {t.trialBalance}
                 </Button>
-              </DropdownMenuTrigger>
 
-              <DropdownMenuContent
-                align={isArabic ? "start" : "end"}
-                className="w-56 rounded-2xl"
-              >
-                <div dir={isArabic ? "rtl" : "ltr"}>
-                  {columnOptions.map((column) => (
-                    <DropdownMenuCheckboxItem
-                      key={column.key}
-                      checked={visibleColumns[column.key]}
-                      onCheckedChange={(checked) =>
-                        setVisibleColumns((current) => ({
-                          ...current,
-                          [column.key]: Boolean(checked),
-                        }))
-                      }
-                    >
-                      {column.label}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </div>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </CardContent>
-      </Card>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-xl"
+                  onClick={() => handleApiExport("PROFIT_LOSS")}
+                >
+                  <PieChart className="me-2 h-4 w-4" />
+                  {t.profitLoss}
+                </Button>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        {reportMiniTables.map((report) => (
-          <ReportMiniTable
-            key={report.title}
-            title={report.title}
-            icon={report.icon}
-            rows={report.rows}
-            loading={isLoading}
-            loadingText={t.loading}
-            noResults={t.noResults}
-          />
-        ))}
-      </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-xl"
+                  onClick={() => handleApiExport("BALANCE_SHEET")}
+                >
+                  <Landmark className="me-2 h-4 w-4" />
+                  {t.balanceSheet}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </Can>
 
-      <Card className="rounded-2xl border bg-card shadow-sm print:hidden">
-        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Download className="h-4 w-4" />
-            {t.exportApi}
-          </div>
+        <Card
+          className="rounded-2xl border bg-card shadow-sm print:shadow-none"
+          dir={isArabic ? "rtl" : "ltr"}
+        >
+          <CardHeader>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-lg font-bold">
+                  <FileText className="h-5 w-5" />
+                  {t.detailedReport}
+                </CardTitle>
+                <CardDescription>{t.detailedDesc}</CardDescription>
+              </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => handleApiExport("TRIAL_BALANCE")}
-            >
-              <Calculator className="me-2 h-4 w-4" />
-              {t.trialBalance}
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => handleApiExport("PROFIT_LOSS")}
-            >
-              <PieChart className="me-2 h-4 w-4" />
-              {t.profitLoss}
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => handleApiExport("BALANCE_SHEET")}
-            >
-              <Landmark className="me-2 h-4 w-4" />
-              {t.balanceSheet}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card
-        className="rounded-2xl border bg-card shadow-sm print:shadow-none"
-        dir={isArabic ? "rtl" : "ltr"}
-      >
-        <CardHeader>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-lg font-bold">
-                <FileText className="h-5 w-5" />
-                {t.detailedReport}
-              </CardTitle>
-              <CardDescription>{t.detailedDesc}</CardDescription>
+              <Badge variant="secondary" className="w-fit rounded-full">
+                {t.showing}: {formatNumber(filteredRows.length)}
+              </Badge>
             </div>
+          </CardHeader>
 
-            <Badge variant="secondary" className="w-fit rounded-full">
-              {t.showing}: {formatNumber(filteredRows.length)}
-            </Badge>
-          </div>
-        </CardHeader>
-
-        <CardContent>
-          <div className="overflow-hidden rounded-2xl border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {visibleColumns.report ? <TableHead>{t.report}</TableHead> : null}
-                  {visibleColumns.section ? <TableHead>{t.section}</TableHead> : null}
-                  {visibleColumns.accountCode ? (
-                    <TableHead>{t.accountCode}</TableHead>
-                  ) : null}
-                  {visibleColumns.accountName ? (
-                    <TableHead>{t.accountName}</TableHead>
-                  ) : null}
-                  {visibleColumns.accountType ? (
-                    <TableHead>{t.accountType}</TableHead>
-                  ) : null}
-                  {visibleColumns.debit ? <TableHead>{t.debit}</TableHead> : null}
-                  {visibleColumns.credit ? <TableHead>{t.credit}</TableHead> : null}
-                  {visibleColumns.amount ? <TableHead>{t.amount}</TableHead> : null}
-                  {visibleColumns.side ? <TableHead>{t.side}</TableHead> : null}
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {isLoading ? (
+          <CardContent>
+            <div className="overflow-hidden rounded-2xl border">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={9} className="h-28">
-                      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        {t.loading}
-                      </div>
-                    </TableCell>
+                    {visibleColumns.report ? (
+                      <TableHead>{t.report}</TableHead>
+                    ) : null}
+                    {visibleColumns.section ? (
+                      <TableHead>{t.section}</TableHead>
+                    ) : null}
+                    {visibleColumns.accountCode ? (
+                      <TableHead>{t.accountCode}</TableHead>
+                    ) : null}
+                    {visibleColumns.accountName ? (
+                      <TableHead>{t.accountName}</TableHead>
+                    ) : null}
+                    {visibleColumns.accountType ? (
+                      <TableHead>{t.accountType}</TableHead>
+                    ) : null}
+                    {visibleColumns.debit ? (
+                      <TableHead>{t.debit}</TableHead>
+                    ) : null}
+                    {visibleColumns.credit ? (
+                      <TableHead>{t.credit}</TableHead>
+                    ) : null}
+                    {visibleColumns.amount ? (
+                      <TableHead>{t.amount}</TableHead>
+                    ) : null}
+                    {visibleColumns.side ? (
+                      <TableHead>{t.side}</TableHead>
+                    ) : null}
                   </TableRow>
-                ) : filteredRows.length ? (
-                  filteredRows.map((row) => (
-                    <TableRow key={row.id}>
-                      {visibleColumns.report ? (
-                        <TableCell>
-                          <Badge variant="outline" className="rounded-full">
-                            {reportLabel(row.report, locale)}
-                          </Badge>
-                        </TableCell>
-                      ) : null}
+                </TableHeader>
 
-                      {visibleColumns.section ? (
-                        <TableCell className="font-medium">
-                          {row.section}
-                        </TableCell>
-                      ) : null}
-
-                      {visibleColumns.accountCode ? (
-                        <TableCell className="font-medium">
-                          {row.accountCode || "-"}
-                        </TableCell>
-                      ) : null}
-
-                      {visibleColumns.accountName ? (
-                        <TableCell>
-                          <div className="min-w-[220px]">
-                            {row.accountName || "-"}
-                          </div>
-                        </TableCell>
-                      ) : null}
-
-                      {visibleColumns.accountType ? (
-                        <TableCell>{row.accountType || "-"}</TableCell>
-                      ) : null}
-
-                      {visibleColumns.debit ? (
-                        <TableCell>
-                          <MoneyValue value={row.debit} />
-                        </TableCell>
-                      ) : null}
-
-                      {visibleColumns.credit ? (
-                        <TableCell>
-                          <MoneyValue value={row.credit} />
-                        </TableCell>
-                      ) : null}
-
-                      {visibleColumns.amount ? (
-                        <TableCell className="font-semibold">
-                          <MoneyValue value={row.amount} />
-                        </TableCell>
-                      ) : null}
-
-                      {visibleColumns.side ? (
-                        <TableCell>{row.side || "-"}</TableCell>
-                      ) : null}
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={9} className="h-28">
+                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          {t.loading}
+                        </div>
+                      </TableCell>
                     </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={9} className="h-32 text-center">
-                      <div className="space-y-2">
-                        <p className="font-semibold">{t.noResults}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {t.noResultsDesc}
-                        </p>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                  ) : filteredRows.length ? (
+                    filteredRows.map((row) => (
+                      <TableRow key={row.id}>
+                        {visibleColumns.report ? (
+                          <TableCell>
+                            <Badge variant="outline" className="rounded-full">
+                              {reportLabel(row.report, locale)}
+                            </Badge>
+                          </TableCell>
+                        ) : null}
 
-          <div className="mt-4 flex flex-col gap-3 print:hidden sm:flex-row sm:items-center sm:justify-end">
-            <div className="text-muted-foreground flex-1 text-sm">
-              {formatNumber(filteredRows.length)} {t.selectedRows}
+                        {visibleColumns.section ? (
+                          <TableCell className="font-medium">
+                            {row.section}
+                          </TableCell>
+                        ) : null}
+
+                        {visibleColumns.accountCode ? (
+                          <TableCell className="font-medium">
+                            {row.accountCode || "-"}
+                          </TableCell>
+                        ) : null}
+
+                        {visibleColumns.accountName ? (
+                          <TableCell>
+                            <div className="min-w-[220px]">
+                              {row.accountName || "-"}
+                            </div>
+                          </TableCell>
+                        ) : null}
+
+                        {visibleColumns.accountType ? (
+                          <TableCell>{row.accountType || "-"}</TableCell>
+                        ) : null}
+
+                        {visibleColumns.debit ? (
+                          <TableCell>
+                            <MoneyValue value={row.debit} />
+                          </TableCell>
+                        ) : null}
+
+                        {visibleColumns.credit ? (
+                          <TableCell>
+                            <MoneyValue value={row.credit} />
+                          </TableCell>
+                        ) : null}
+
+                        {visibleColumns.amount ? (
+                          <TableCell className="font-semibold">
+                            <MoneyValue value={row.amount} />
+                          </TableCell>
+                        ) : null}
+
+                        {visibleColumns.side ? (
+                          <TableCell>{row.side || "-"}</TableCell>
+                        ) : null}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={9} className="h-32 text-center">
+                        <div className="space-y-2">
+                          <p className="font-semibold">{t.noResults}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {t.noResultsDesc}
+                          </p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+
+            <div className="mt-4 flex flex-col gap-3 print:hidden sm:flex-row sm:items-center sm:justify-end">
+              <div className="text-muted-foreground flex-1 text-sm">
+                {formatNumber(filteredRows.length)} {t.selectedRows}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </PermissionGuard>
   );
 }
 

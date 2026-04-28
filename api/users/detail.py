@@ -1,9 +1,13 @@
 # ===============================================================
 # 📂 الملف: api/users/detail.py
 # 🧭 Primey Care — User Detail API
+# 🚀 الإصدار: Users Detail API V1.1
 # ---------------------------------------------------------------
 # ✅ GET user details
 # ✅ PATCH update user/profile
+# ✅ Protected by permissions:
+#    - GET   users.view
+#    - PATCH users.edit
 # ===============================================================
 
 from __future__ import annotations
@@ -19,17 +23,10 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
-from auth_center.models import UserProfile, UserType
+from auth_center.models import RoleChoices, UserProfile, UserType, resolve_default_role_for_user_type
+from auth_center.permissions import PermissionCodes, has_permission
 
 User = get_user_model()
-
-
-SYSTEM_ADMIN_GROUPS = {
-    "SUPER_ADMIN",
-    "SYSTEM",
-    "SYSTEM_ADMIN",
-    "ADMIN",
-}
 
 
 def _json_body(request) -> dict:
@@ -49,27 +46,12 @@ def _normalize_upper(value) -> str:
     return _clean_text(value).upper()
 
 
-def _is_system_admin(user) -> bool:
-    if not user.is_authenticated:
-        return False
-
-    if user.is_superuser:
-        return True
-
-    groups = {_normalize_upper(name) for name in user.groups.values_list("name", flat=True)}
-    if groups & SYSTEM_ADMIN_GROUPS:
-        return True
-
-    profile = getattr(user, "profile", None)
-    user_type = _normalize_upper(getattr(profile, "user_type", ""))
-    return user_type in SYSTEM_ADMIN_GROUPS
-
-
-def _forbidden():
+def _forbidden(required_permission: str):
     return JsonResponse(
         {
             "success": False,
             "message": "You do not have permission to manage users.",
+            "required_permission": required_permission,
         },
         status=403,
     )
@@ -118,6 +100,7 @@ def _serialize_user(user) -> dict:
             "avatar_url": profile.avatar_url if profile else None,
             "bio": profile.bio if profile else "",
             "user_type": profile.user_type if profile else "OTHER",
+            "role": profile.role if profile else RoleChoices.VIEWER,
             "phone_number": profile.phone_number if profile else None,
             "whatsapp_number": profile.whatsapp_number if profile else None,
             "alternate_email": profile.alternate_email if profile else None,
@@ -142,12 +125,30 @@ def _validate_user_type(value: str) -> str:
     return normalized
 
 
+def _validate_role(value: str) -> str:
+    normalized = _clean_text(value).lower()
+    if not normalized:
+        return ""
+
+    valid_values = {choice.value for choice in RoleChoices}
+    if normalized not in valid_values:
+        raise ValidationError(f"Unsupported role: {normalized}")
+
+    return normalized
+
+
 @login_required
 @require_http_methods(["GET", "PATCH"])
 @csrf_protect
 def users_detail_api(request, user_id: int):
-    if not _is_system_admin(request.user):
-        return _forbidden()
+    required_permission = (
+        PermissionCodes.USERS_VIEW
+        if request.method == "GET"
+        else PermissionCodes.USERS_EDIT
+    )
+
+    if not has_permission(request.user, required_permission):
+        return _forbidden(required_permission)
 
     user = (
         User.objects.filter(id=user_id)
@@ -175,6 +176,7 @@ def users_detail_api(request, user_id: int):
     email = _clean_text(payload.get("email")).lower() if "email" in payload else None
     username = _clean_text(payload.get("username")) if "username" in payload else None
     user_type = _clean_text(payload.get("user_type")) if "user_type" in payload else None
+    role = _clean_text(payload.get("role")) if "role" in payload else None
 
     if email:
         try:
@@ -195,6 +197,13 @@ def users_detail_api(request, user_id: int):
             normalized_user_type = _validate_user_type(user_type)
         except ValidationError as exc:
             errors["user_type"] = exc.messages if hasattr(exc, "messages") else str(exc)
+
+    normalized_role = ""
+    if role is not None:
+        try:
+            normalized_role = _validate_role(role)
+        except ValidationError as exc:
+            errors["role"] = exc.messages if hasattr(exc, "messages") else str(exc)
 
     preferred_language = _clean_text(payload.get("preferred_language")) if "preferred_language" in payload else None
     if preferred_language and preferred_language not in {"ar", "en"}:
@@ -223,6 +232,11 @@ def users_detail_api(request, user_id: int):
             user_dirty_fields.append("last_name")
 
         if "is_active" in payload:
+            if user.id == request.user.id and not bool(payload.get("is_active")):
+                return _bad_request(
+                    "Validation error.",
+                    {"is_active": "You cannot deactivate your own account."},
+                )
             user.is_active = bool(payload.get("is_active"))
             user_dirty_fields.append("is_active")
 
@@ -260,6 +274,13 @@ def users_detail_api(request, user_id: int):
             profile.user_type = normalized_user_type
             profile_dirty_fields.append("user_type")
 
+        if normalized_role:
+            profile.role = normalized_role
+            profile_dirty_fields.append("role")
+        elif normalized_user_type and "role" not in payload:
+            profile.role = resolve_default_role_for_user_type(normalized_user_type)
+            profile_dirty_fields.append("role")
+
         editable_profile_fields = {
             "display_name",
             "avatar_url",
@@ -271,10 +292,21 @@ def users_detail_api(request, user_id: int):
             "timezone",
         }
 
+        nullable_profile_fields = {
+            "avatar_url",
+            "phone_number",
+            "whatsapp_number",
+            "alternate_email",
+        }
+
         for field in editable_profile_fields:
             if field in payload:
                 value = _clean_text(payload.get(field))
-                setattr(profile, field, value or None if field in {"avatar_url", "phone_number", "whatsapp_number", "alternate_email"} else value)
+                setattr(
+                    profile,
+                    field,
+                    value or None if field in nullable_profile_fields else value,
+                )
                 profile_dirty_fields.append(field)
 
         if "extra_data" in payload and isinstance(payload.get("extra_data"), dict):

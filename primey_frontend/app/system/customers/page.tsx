@@ -21,12 +21,11 @@ import {
   Search,
   ShieldCheck,
   Star,
-  UserRound,
   Users,
-  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { apiGet, API_PATHS } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,12 +49,11 @@ import {
    📂 app/system/customers/page.tsx
    🧠 Primey Care | System Customers Dashboard
    ------------------------------------------------------------
-   ✅ صفحة العملاء الرئيسية بنفس تصميم صفحة المراكز
-   ✅ بدون عرض روابط خام داخل البطاقات
-   ✅ استخدام UI الداخلي فقط
-   ✅ ربط حقيقي مع /api/customers/
-   ✅ دعم عربي / إنجليزي من primey-locale
-   ✅ لا يوجد localhost hardcoded
+   ✅ مرتبط مع lib/api.ts
+   ✅ Dashboard للعملاء
+   ✅ عرض مختصر + إحصائيات + جدول آخر العملاء
+   ✅ روابط تشغيلية منظمة
+   ✅ دعم عربي / إنجليزي
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -99,24 +97,17 @@ type CustomersApiResponse = {
   ok?: boolean;
   message?: string;
   results?: unknown[];
-  data?: unknown[];
+  data?:
+    | unknown[]
+    | {
+        results?: unknown[];
+        customers?: unknown[];
+        items?: unknown[];
+      };
   items?: unknown[];
   customers?: unknown[];
   count?: number;
-  summary?: {
-    total?: number;
-    active?: number;
-    inactive?: number;
-    blocked?: number;
-    lead?: number;
-    individual?: number;
-    corporate?: number;
-  };
 };
-
-/* ============================================================
-   🌐 Locale Helpers
-============================================================ */
 
 function readLocale(): AppLocale {
   try {
@@ -127,38 +118,37 @@ function readLocale(): AppLocale {
     if (savedLocale === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
 
 function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+  if (typeof document === "undefined") return;
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+  document.documentElement.lang = locale;
+  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+  document.body.dir = locale === "ar" ? "rtl" : "ltr";
 }
-
-/* ============================================================
-   🔁 API Normalizers
-============================================================ */
 
 function normalizeApiList(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
 
-  if (payload && typeof payload === "object") {
-    const data = payload as CustomersApiResponse;
+  if (!payload || typeof payload !== "object") return [];
 
-    if (Array.isArray(data.results)) return data.results;
-    if (Array.isArray(data.data)) return data.data;
-    if (Array.isArray(data.items)) return data.items;
-    if (Array.isArray(data.customers)) return data.customers;
+  const data = payload as CustomersApiResponse;
+
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.data)) return data.data;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.customers)) return data.customers;
+
+  if (data.data && typeof data.data === "object") {
+    const nested = data.data;
+
+    if (Array.isArray(nested.results)) return nested.results;
+    if (Array.isArray(nested.customers)) return nested.customers;
+    if (Array.isArray(nested.items)) return nested.items;
   }
 
   return [];
@@ -220,7 +210,11 @@ function normalizeCustomer(item: unknown): Customer {
       ? companyName
       : `${firstName} ${lastName}`.trim();
 
-  const whatsapp = pickString(obj, ["whatsapp_number", "whatsappNumber"]);
+  const whatsapp = pickString(obj, [
+    "whatsapp_number",
+    "whatsappNumber",
+    "whatsapp",
+  ]);
   const phone = pickString(obj, ["phone_number", "phoneNumber", "phone"]);
   const email = pickString(obj, ["email"]);
 
@@ -263,10 +257,6 @@ function normalizeCustomer(item: unknown): Customer {
   };
 }
 
-/* ============================================================
-   📚 Dictionary
-============================================================ */
-
 function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
@@ -292,9 +282,7 @@ function dictionary(locale: AppLocale) {
       ? "تحليل سريع لحالة العملاء ونوع الحساب."
       : "Quick analysis of customer status and account type.",
 
-    filterPlaceholder: isArabic
-      ? "ابحث في العملاء..."
-      : "Filter customers...",
+    filterPlaceholder: isArabic ? "ابحث في العملاء..." : "Filter customers...",
     columns: isArabic ? "الأعمدة" : "Columns",
     previous: isArabic ? "السابق" : "Previous",
     next: isArabic ? "التالي" : "Next",
@@ -369,10 +357,6 @@ function dictionary(locale: AppLocale) {
   };
 }
 
-/* ============================================================
-   🎨 UI Helpers
-============================================================ */
-
 function statusLabel(status: CustomerStatus, locale: AppLocale) {
   const t = dictionary(locale);
 
@@ -434,10 +418,6 @@ function percent(value: number, total: number) {
   return Math.round((value / total) * 100);
 }
 
-/* ============================================================
-   ✅ Page
-============================================================ */
-
 export default function SystemCustomersPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -452,20 +432,23 @@ export default function SystemCustomersPage() {
 
     if (!cleanQuery) return customers;
 
-    return customers.filter((customer) => {
-      return (
-        customer.name.toLowerCase().includes(cleanQuery) ||
-        customer.code.toLowerCase().includes(cleanQuery) ||
-        customer.city.toLowerCase().includes(cleanQuery) ||
-        customer.district.toLowerCase().includes(cleanQuery) ||
-        customer.phone.toLowerCase().includes(cleanQuery) ||
-        customer.whatsapp.toLowerCase().includes(cleanQuery) ||
-        customer.email.toLowerCase().includes(cleanQuery) ||
-        customer.customerType.toLowerCase().includes(cleanQuery) ||
-        customer.status.toLowerCase().includes(cleanQuery) ||
-        customer.source.toLowerCase().includes(cleanQuery)
-      );
-    });
+    return customers.filter((customer) =>
+      [
+        customer.name,
+        customer.code,
+        customer.city,
+        customer.district,
+        customer.phone,
+        customer.whatsapp,
+        customer.email,
+        customer.customerType,
+        customer.status,
+        customer.source,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(cleanQuery),
+    );
   }, [customers, query]);
 
   const stats = useMemo(() => {
@@ -476,12 +459,6 @@ export default function SystemCustomersPage() {
     const inactive = customers.filter(
       (item) => item.status === "INACTIVE",
     ).length;
-    const individual = customers.filter(
-      (item) => item.customerType === "INDIVIDUAL",
-    ).length;
-    const corporate = customers.filter(
-      (item) => item.customerType === "CORPORATE",
-    ).length;
 
     return {
       total,
@@ -489,8 +466,6 @@ export default function SystemCustomersPage() {
       lead,
       blocked,
       inactive,
-      individual,
-      corporate,
       stopped: blocked + inactive,
     };
   }, [customers]);
@@ -498,9 +473,7 @@ export default function SystemCustomersPage() {
   const featuredCustomers = useMemo(() => {
     const activeCustomers = customers.filter((item) => item.status === "ACTIVE");
 
-    if (activeCustomers.length > 0) {
-      return activeCustomers.slice(0, 6);
-    }
+    if (activeCustomers.length > 0) return activeCustomers.slice(0, 6);
 
     return customers.slice(0, 6);
   }, [customers]);
@@ -578,36 +551,27 @@ export default function SystemCustomersPage() {
     [customers.length, isArabic, t],
   );
 
-  async function loadCustomers(showToast = false) {
-    try {
-      setIsLoading(true);
+  async function loadCustomers(showSuccessToast = false) {
+    setIsLoading(true);
 
-      const response = await fetch("/api/customers/?page_size=100", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
+    const response = await apiGet<CustomersApiResponse>(API_PATHS.customers.list, {
+      page_size: 100,
+    });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const payload = (await response.json()) as CustomersApiResponse;
-      const normalized = normalizeApiList(payload).map(normalizeCustomer);
-
-      setCustomers(normalized);
-
-      if (showToast) {
-        toast.success(t.refreshSuccess);
-      }
-    } catch (error) {
-      console.error("Failed to load customers:", error);
+    if (!response.ok) {
       setCustomers([]);
-      toast.error(t.apiError);
-    } finally {
       setIsLoading(false);
+      toast.error(response.message || t.apiError);
+      return;
+    }
+
+    const normalized = normalizeApiList(response.data).map(normalizeCustomer);
+
+    setCustomers(normalized);
+    setIsLoading(false);
+
+    if (showSuccessToast) {
+      toast.success(t.refreshSuccess);
     }
   }
 
@@ -619,22 +583,14 @@ export default function SystemCustomersPage() {
       setLocale(nextLocale);
     };
 
-    const syncAfterPaint = () => {
-      syncLocale();
+    syncLocale();
 
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+    window.addEventListener("primey-locale-changed", syncLocale);
+    window.addEventListener("storage", syncLocale);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
+      window.removeEventListener("primey-locale-changed", syncLocale);
+      window.removeEventListener("storage", syncLocale);
     };
   }, []);
 
@@ -645,9 +601,6 @@ export default function SystemCustomersPage() {
 
   return (
     <div className="space-y-4">
-      {/* =====================================================
-          Header
-      ====================================================== */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
@@ -673,27 +626,23 @@ export default function SystemCustomersPage() {
             <span>{t.refresh}</span>
           </Button>
 
-          <Link href="/system/customers/reports">
-            <Button variant="outline" className="h-10 w-full rounded-xl sm:w-auto">
+          <Button asChild variant="outline" className="h-10 rounded-xl">
+            <Link href="/system/customers/reports">
               <BarChart3 className="h-4 w-4" />
               <span>{t.reports}</span>
-            </Button>
-          </Link>
+            </Link>
+          </Button>
 
-          <Link href="/system/customers/create">
-            <Button className="h-10 w-full rounded-xl sm:w-auto">
+          <Button asChild className="h-10 rounded-xl">
+            <Link href="/system/customers/create">
               <Plus className="h-4 w-4" />
               <span>{t.addCustomer}</span>
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       </div>
 
-      {/* =====================================================
-          Main Layout
-      ====================================================== */}
       <div className="grid gap-4 xl:grid-cols-3">
-        {/* Featured Customers */}
         <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
           <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
             <div>
@@ -705,11 +654,11 @@ export default function SystemCustomersPage() {
               </CardDescription>
             </div>
 
-            <Link href="/system/customers/list">
-              <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl">
+            <Button asChild variant="outline" size="icon" className="h-9 w-9 rounded-xl">
+              <Link href="/system/customers/list">
                 <ListChecks className="h-4 w-4" />
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </CardHeader>
 
           <CardContent className="space-y-3">
@@ -774,7 +723,6 @@ export default function SystemCustomersPage() {
           </CardContent>
         </Card>
 
-        {/* Status + Table */}
         <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-2">
           <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -786,14 +734,15 @@ export default function SystemCustomersPage() {
               </CardDescription>
             </div>
 
-            <Button variant="outline" className="h-9 rounded-xl">
-              <Download className="h-4 w-4" />
-              <span>{t.export}</span>
+            <Button asChild variant="outline" className="h-9 rounded-xl">
+              <Link href="/system/customers/list">
+                <Download className="h-4 w-4" />
+                <span>{t.export}</span>
+              </Link>
             </Button>
           </CardHeader>
 
           <CardContent className="space-y-4">
-            {/* Status Cards */}
             <div className="grid gap-3 md:grid-cols-4">
               {statusCards.map((card) => {
                 const Icon = card.icon;
@@ -829,7 +778,6 @@ export default function SystemCustomersPage() {
               })}
             </div>
 
-            {/* Filter */}
             <div className="grid gap-3 md:grid-cols-[1fr_auto]">
               <div className="relative">
                 <Search
@@ -847,13 +795,14 @@ export default function SystemCustomersPage() {
                 />
               </div>
 
-              <Button variant="outline" className="h-10 rounded-xl">
-                <Filter className="h-4 w-4" />
-                <span>{t.columns}</span>
+              <Button asChild variant="outline" className="h-10 rounded-xl">
+                <Link href="/system/customers/list">
+                  <Filter className="h-4 w-4" />
+                  <span>{t.columns}</span>
+                </Link>
               </Button>
             </div>
 
-            {/* Table */}
             <div className="overflow-hidden rounded-xl border">
               <Table>
                 <TableHeader>
@@ -949,15 +898,16 @@ export default function SystemCustomersPage() {
                         <TableCell>{statusBadge(customer.status, locale)}</TableCell>
 
                         <TableCell>
-                          <Link href={`/system/customers/${customer.id}`}>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 rounded-lg"
-                            >
+                          <Button
+                            asChild
+                            variant="outline"
+                            size="sm"
+                            className="h-8 rounded-lg"
+                          >
+                            <Link href={`/system/customers/${customer.id}`}>
                               <Eye className="h-4 w-4" />
-                            </Button>
-                          </Link>
+                            </Link>
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))
@@ -966,7 +916,6 @@ export default function SystemCustomersPage() {
               </Table>
             </div>
 
-            {/* Footer */}
             <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
               <p>
                 {filteredCustomers.length} / {customers.length}
@@ -977,21 +926,18 @@ export default function SystemCustomersPage() {
                   {t.previous}
                 </Button>
 
-                <Link href="/system/customers/list">
-                  <Button variant="outline" size="sm" className="rounded-xl">
+                <Button asChild variant="outline" size="sm" className="rounded-xl">
+                  <Link href="/system/customers/list">
                     <ListChecks className="h-4 w-4" />
                     {t.next}
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* =====================================================
-          Professional Action Cards
-      ====================================================== */}
       <Card className="rounded-2xl border bg-card shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-bold">
