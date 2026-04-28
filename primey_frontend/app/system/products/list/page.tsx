@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownUp,
   ArrowLeft,
@@ -16,13 +16,16 @@ import {
   Eye,
   FileSpreadsheet,
   FilterIcon,
+  Layers3,
   Loader2,
   Package,
   Plus,
   Printer,
   RefreshCcw,
   Search,
+  ShieldCheck,
   Star,
+  Stethoscope,
   Tag,
   X,
 } from "lucide-react";
@@ -58,18 +61,19 @@ import {
 
 /* ============================================================
    📂 app/system/products/list/page.tsx
-   🧠 Primey Care | System Products List
+   🧠 Primey Care | System Products & Programs List
    ------------------------------------------------------------
-   ✅ قائمة المنتجات كوحدة مستقلة
-   ✅ نفس نمط قائمة المراكز / العملاء / المندوبين
-   ✅ بحث + فلاتر + فرز + أعمدة + تحديد + صفحات
-   ✅ تصدير Excel منظم للقائمة فقط
-   ✅ طباعة Web PDF للقائمة فقط
    ✅ ربط حقيقي مع /api/products/
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ الأرقام دائمًا إنجليزية
-   ✅ لا يوجد localhost hardcoded
-   ✅ استخدام رمز العملة من /currency/sar.svg
+   ✅ متوافق مع Backend المرحلة 5
+   ✅ Cards / Programs / Services / Memberships
+   ✅ Pricing / Orders / Contracts readiness
+   ✅ Service Items count
+   ✅ Search + Filters + Sort + Columns + Selection + Pagination
+   ✅ Excel export للقائمة فقط
+   ✅ Web PDF Print للقائمة فقط
+   ✅ Arabic / English via primey-locale
+   ✅ English numbers always
+   ✅ SAR icon from /currency/sar.svg
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -91,6 +95,14 @@ type ProductType =
 
 type BillingType = "one_time" | "recurring" | "UNKNOWN";
 
+type FulfillmentType =
+  | "digital"
+  | "physical"
+  | "both"
+  | "service_based"
+  | "none"
+  | "UNKNOWN";
+
 type SortKey =
   | "name"
   | "code"
@@ -110,6 +122,17 @@ type ProductCategory = {
   status?: string | null;
 };
 
+type ProductServiceItem = {
+  id: number | string;
+  name?: string | null;
+  included_quantity?: number | null;
+  unit_price?: string | number | null;
+  discount_rate?: string | number | null;
+  requires_provider?: boolean | null;
+  is_optional?: boolean | null;
+  is_active?: boolean | null;
+};
+
 type Product = {
   id: number | string;
   code?: string | null;
@@ -120,6 +143,7 @@ type Product = {
   category?: ProductCategory | null;
   status?: ProductStatus | string | null;
   billing_type?: BillingType | string | null;
+  fulfillment_type?: FulfillmentType | string | null;
   short_description?: string | null;
   description?: string | null;
   tags?: string | null;
@@ -127,6 +151,8 @@ type Product = {
   price?: string | number | null;
   sale_price?: string | number | null;
   effective_price?: string | number | null;
+  tax_amount?: string | number | null;
+  total_price_with_tax?: string | number | null;
   has_discount?: boolean | null;
   is_taxable?: boolean | null;
   tax_rate?: string | number | null;
@@ -136,6 +162,14 @@ type Product = {
   is_featured?: boolean | null;
   requires_approval?: boolean | null;
   allow_online_purchase?: boolean | null;
+  allow_agent_sale?: boolean | null;
+  allow_provider_sale?: boolean | null;
+  can_be_ordered?: boolean | null;
+  can_be_used_in_contracts?: boolean | null;
+  requires_provider?: boolean | null;
+  max_discount_rate?: string | number | null;
+  default_agent_commission_rate?: string | number | null;
+  service_items?: ProductServiceItem[];
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -144,7 +178,7 @@ type ProductsApiResponse = {
   ok?: boolean;
   message?: string;
   results?: Product[];
-  data?: Product[];
+  data?: Product[] | Product;
   pagination?: {
     page?: number;
     page_size?: number;
@@ -160,6 +194,7 @@ type ColumnKey =
   | "category"
   | "price"
   | "billing"
+  | "readiness"
   | "visibility"
   | "status"
   | "updated"
@@ -177,6 +212,7 @@ const DEFAULT_COLUMNS: ColumnState = {
   category: true,
   price: true,
   billing: true,
+  readiness: true,
   visibility: true,
   status: true,
   updated: true,
@@ -261,16 +297,22 @@ function normalizeBillingType(type?: string | null): BillingType {
   return "UNKNOWN";
 }
 
+function normalizeFulfillmentType(type?: string | null): FulfillmentType {
+  const value = String(type || "").toLowerCase();
+
+  if (value === "digital") return "digital";
+  if (value === "physical") return "physical";
+  if (value === "both") return "both";
+  if (value === "service_based") return "service_based";
+  if (value === "none") return "none";
+
+  return "UNKNOWN";
+}
+
 function getStatusMeta(status: ProductStatus, locale: AppLocale) {
   const isArabic = locale === "ar";
 
-  const map: Record<
-    ProductStatus,
-    {
-      label: string;
-      className: string;
-    }
-  > = {
+  const map: Record<ProductStatus, { label: string; className: string }> = {
     active: {
       label: isArabic ? "نشط" : "Active",
       className:
@@ -327,6 +369,27 @@ function getBillingLabel(type: BillingType, locale: AppLocale) {
   return map[type] || map.UNKNOWN;
 }
 
+function getFulfillmentLabel(type: FulfillmentType, locale: AppLocale) {
+  const isArabic = locale === "ar";
+
+  const map: Record<FulfillmentType, string> = {
+    digital: isArabic ? "رقمي" : "Digital",
+    physical: isArabic ? "فعلي" : "Physical",
+    both: isArabic ? "رقمي وفعلي" : "Digital & physical",
+    service_based: isArabic ? "خدمة" : "Service based",
+    none: isArabic ? "بدون" : "None",
+    UNKNOWN: isArabic ? "غير محدد" : "Unknown",
+  };
+
+  return map[type] || map.UNKNOWN;
+}
+
+function extractProducts(payload: ProductsApiResponse): Product[] {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.data)) return payload.data;
+  return [];
+}
+
 function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
@@ -336,10 +399,9 @@ function dictionary(locale: AppLocale) {
 
     title: isArabic ? "قائمة المنتجات" : "Products List",
     subtitle: isArabic
-      ? "إدارة المنتجات والبطاقات والبرامج والخدمات مع البحث والتصفية والتصدير والطباعة."
-      : "Manage products, cards, programs, and services with search, filters, export, and print.",
+      ? "إدارة المنتجات والبطاقات والبرامج والخدمات مع البحث والتصفية والتصدير والطباعة وربطها بالطلبات والعقود."
+      : "Manage products, cards, programs, and services with search, filters, export, print, orders, and contracts readiness.",
 
-    back: isArabic ? "رجوع" : "Back",
     dashboard: isArabic ? "لوحة المنتجات" : "Products Dashboard",
     refresh: isArabic ? "تحديث" : "Refresh",
     create: isArabic ? "إنشاء منتج" : "Create Product",
@@ -347,7 +409,6 @@ function dictionary(locale: AppLocale) {
     exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
     print: isArabic ? "طباعة Web PDF" : "Print Web PDF",
     columns: isArabic ? "الأعمدة" : "Columns",
-    filters: isArabic ? "الفلاتر" : "Filters",
     clear: isArabic ? "مسح" : "Clear",
 
     searchPlaceholder: isArabic
@@ -375,7 +436,9 @@ function dictionary(locale: AppLocale) {
     total: isArabic ? "إجمالي المنتجات" : "Total Products",
     activeProducts: isArabic ? "منتجات نشطة" : "Active Products",
     featured: isArabic ? "مميزة" : "Featured",
-    online: isArabic ? "شراء إلكتروني" : "Online Purchase",
+    orderable: isArabic ? "قابلة للطلب" : "Orderable",
+    contractReady: isArabic ? "جاهزة للعقود" : "Contract Ready",
+    requiresProvider: isArabic ? "تتطلب مقدم خدمة" : "Requires Provider",
 
     selected: isArabic ? "محدد" : "Selected",
     showing: isArabic ? "عرض" : "Showing",
@@ -388,6 +451,7 @@ function dictionary(locale: AppLocale) {
     colCategory: isArabic ? "التصنيف" : "Category",
     colPrice: isArabic ? "السعر" : "Price",
     colBilling: isArabic ? "الفوترة" : "Billing",
+    colReadiness: isArabic ? "الجاهزية" : "Readiness",
     colVisibility: isArabic ? "الظهور" : "Visibility",
     colStatus: isArabic ? "الحالة" : "Status",
     colUpdated: isArabic ? "آخر تحديث" : "Updated",
@@ -396,19 +460,21 @@ function dictionary(locale: AppLocale) {
     public: isArabic ? "عام" : "Public",
     private: isArabic ? "خاص" : "Private",
     featuredLabel: isArabic ? "مميز" : "Featured",
-    onlineLabel: isArabic ? "متاح للشراء" : "Online",
-    taxable: isArabic ? "خاضع للضريبة" : "Taxable",
+    onlineLabel: isArabic ? "شراء إلكتروني" : "Online",
+    agentSale: isArabic ? "بيع مندوب" : "Agent sale",
+    providerSale: isArabic ? "بيع مقدم" : "Provider sale",
+    taxable: isArabic ? "ضريبة" : "Tax",
     discount: isArabic ? "خصم" : "Discount",
+    serviceItems: isArabic ? "خدمات" : "Services",
 
     noCategory: isArabic ? "بدون تصنيف" : "No category",
     unnamedProduct: isArabic ? "منتج بدون اسم" : "Unnamed product",
-    notSet: isArabic ? "غير محدد" : "Not set",
     view: isArabic ? "عرض" : "View",
 
     tableTitle: isArabic ? "جدول المنتجات" : "Products Table",
     tableDesc: isArabic
-      ? "القائمة التشغيلية للمنتجات المسجلة في النظام."
-      : "Operational list of products registered in the system.",
+      ? "القائمة التشغيلية للمنتجات والباقات والخدمات المسجلة في النظام."
+      : "Operational list of products, programs, and services registered in the system.",
 
     loading: isArabic ? "جاري تحميل المنتجات..." : "Loading products...",
     noProducts: isArabic ? "لا توجد منتجات مطابقة" : "No matching products",
@@ -434,6 +500,7 @@ function getColumnLabel(key: ColumnKey, locale: AppLocale) {
     category: t.colCategory,
     price: t.colPrice,
     billing: t.colBilling,
+    readiness: t.colReadiness,
     visibility: t.colVisibility,
     status: t.colStatus,
     updated: t.colUpdated,
@@ -486,50 +553,47 @@ export default function SystemProductsListPage() {
     };
   }, []);
 
-  async function loadProducts(showToast = false) {
-    setIsLoading(true);
+  const loadProducts = useCallback(
+    async (showToast = false) => {
+      setIsLoading(true);
 
-    try {
-      const response = await fetch("/api/products/?page_size=100", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
+      try {
+        const response = await fetch(
+          "/api/products/?page_size=100&include_children=true",
+          {
+            method: "GET",
+            credentials: "include",
+            headers: {
+              Accept: "application/json",
+            },
+          }
+        );
 
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as ProductsApiResponse;
+        const payload = (await response.json().catch(() => ({}))) as ProductsApiResponse;
 
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.message || t.loadError);
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.message || t.loadError);
+        }
+
+        setProducts(extractProducts(payload));
+
+        if (showToast) {
+          toast.success(t.refreshSuccess);
+        }
+      } catch (error) {
+        console.error("Failed to load products:", error);
+        toast.error(t.loadError);
+        setProducts([]);
+      } finally {
+        setIsLoading(false);
       }
-
-      const rows = Array.isArray(payload.results)
-        ? payload.results
-        : Array.isArray(payload.data)
-          ? payload.data
-          : [];
-
-      setProducts(rows);
-
-      if (showToast) {
-        toast.success(t.refreshSuccess);
-      }
-    } catch (error) {
-      console.error("Failed to load products:", error);
-      toast.error(t.loadError);
-      setProducts([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }
+    },
+    [t.loadError, t.refreshSuccess]
+  );
 
   useEffect(() => {
     loadProducts(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadProducts]);
 
   const stats = useMemo(() => {
     return {
@@ -538,8 +602,13 @@ export default function SystemProductsListPage() {
         (product) => normalizeStatus(product.status) === "active"
       ).length,
       featured: products.filter((product) => Boolean(product.is_featured)).length,
-      online: products.filter((product) =>
-        Boolean(product.allow_online_purchase)
+      orderable: products.filter((product) => Boolean(product.can_be_ordered))
+        .length,
+      contractReady: products.filter((product) =>
+        Boolean(product.can_be_used_in_contracts)
+      ).length,
+      requiresProvider: products.filter((product) =>
+        Boolean(product.requires_provider)
       ).length,
     };
   }, [products]);
@@ -551,6 +620,7 @@ export default function SystemProductsListPage() {
       const status = normalizeStatus(product.status);
       const type = normalizeType(product.product_type);
       const billing = normalizeBillingType(product.billing_type);
+      const fulfillment = normalizeFulfillmentType(product.fulfillment_type);
 
       const matchesSearch = term
         ? [
@@ -565,6 +635,10 @@ export default function SystemProductsListPage() {
             product.status,
             product.product_type,
             product.billing_type,
+            product.fulfillment_type,
+            getTypeLabel(type, locale),
+            getBillingLabel(billing, locale),
+            getFulfillmentLabel(fulfillment, locale),
           ].some((value) => String(value || "").toLowerCase().includes(term))
         : true;
 
@@ -578,7 +652,7 @@ export default function SystemProductsListPage() {
 
       return matchesSearch && matchesStatus && matchesType && matchesBilling;
     });
-  }, [products, search, statusFilter, typeFilter, billingFilter]);
+  }, [products, search, statusFilter, typeFilter, billingFilter, locale]);
 
   const sortedProducts = useMemo(() => {
     const rows = [...filteredProducts];
@@ -624,6 +698,7 @@ export default function SystemProductsListPage() {
 
       if (first < second) return sortDirection === "asc" ? -1 : 1;
       if (first > second) return sortDirection === "asc" ? 1 : -1;
+
       return 0;
     });
 
@@ -710,6 +785,7 @@ export default function SystemProductsListPage() {
       const status = normalizeStatus(product.status);
       const type = normalizeType(product.product_type);
       const billing = normalizeBillingType(product.billing_type);
+      const fulfillment = normalizeFulfillmentType(product.fulfillment_type);
 
       return {
         "#": index + 1,
@@ -717,8 +793,15 @@ export default function SystemProductsListPage() {
         [t.colCategory]: product.category?.name || t.noCategory,
         [t.colType]: getTypeLabel(type, locale),
         [t.colBilling]: getBillingLabel(billing, locale),
+        Fulfillment: getFulfillmentLabel(fulfillment, locale),
         [t.colPrice]: formatMoney(product.effective_price || product.price),
         [t.colStatus]: getStatusMeta(status, locale).label,
+        [t.orderable]: product.can_be_ordered ? t.orderable : "-",
+        [t.contractReady]: product.can_be_used_in_contracts
+          ? t.contractReady
+          : "-",
+        [t.requiresProvider]: product.requires_provider ? t.requiresProvider : "-",
+        [t.serviceItems]: formatNumber(product.service_items?.length || 0),
         [t.public]: product.is_public ? t.public : t.private,
         [t.featuredLabel]: product.is_featured ? t.featuredLabel : "-",
         [t.onlineLabel]: product.allow_online_purchase ? t.onlineLabel : "-",
@@ -740,7 +823,9 @@ export default function SystemProductsListPage() {
         [t.total, formatNumber(stats.total)],
         [t.activeProducts, formatNumber(stats.active)],
         [t.featured, formatNumber(stats.featured)],
-        [t.online, formatNumber(stats.online)],
+        [t.orderable, formatNumber(stats.orderable)],
+        [t.contractReady, formatNumber(stats.contractReady)],
+        [t.requiresProvider, formatNumber(stats.requiresProvider)],
         [],
       ];
 
@@ -756,11 +841,15 @@ export default function SystemProductsListPage() {
         { wch: 24 },
         { wch: 18 },
         { wch: 18 },
+        { wch: 18 },
         { wch: 14 },
         { wch: 16 },
         { wch: 16 },
-        { wch: 16 },
         { wch: 18 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 16 },
+        { wch: 16 },
         { wch: 18 },
         { wch: 18 },
         { wch: 18 },
@@ -895,6 +984,7 @@ export default function SystemProductsListPage() {
               padding: 3px 8px;
               font-size: 11px;
               background: #ffffff;
+              margin: 1px;
             }
 
             @media print {
@@ -1042,13 +1132,13 @@ export default function SystemProductsListPage() {
         <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
           <CardContent className="flex items-start justify-between gap-3 p-5">
             <div>
-              <p className="text-sm text-muted-foreground">{t.featured}</p>
+              <p className="text-sm text-muted-foreground">{t.orderable}</p>
               <p className="mt-2 text-2xl font-bold">
-                {formatNumber(stats.featured)}
+                {formatNumber(stats.orderable)}
               </p>
             </div>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <Star className="h-5 w-5" />
+              <ShieldCheck className="h-5 w-5" />
             </div>
           </CardContent>
         </Card>
@@ -1056,8 +1146,10 @@ export default function SystemProductsListPage() {
         <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
           <CardContent className="flex items-start justify-between gap-3 p-5">
             <div>
-              <p className="text-sm text-muted-foreground">{t.online}</p>
-              <p className="mt-2 text-2xl font-bold">{formatNumber(stats.online)}</p>
+              <p className="text-sm text-muted-foreground">{t.contractReady}</p>
+              <p className="mt-2 text-2xl font-bold">
+                {formatNumber(stats.contractReady)}
+              </p>
             </div>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
               <Boxes className="h-5 w-5" />
@@ -1328,6 +1420,10 @@ export default function SystemProductsListPage() {
 
                   {columns.billing ? <TableHead>{t.colBilling}</TableHead> : null}
 
+                  {columns.readiness ? (
+                    <TableHead>{t.colReadiness}</TableHead>
+                  ) : null}
+
                   {columns.visibility ? (
                     <TableHead>{t.colVisibility}</TableHead>
                   ) : null}
@@ -1367,7 +1463,7 @@ export default function SystemProductsListPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="h-32 text-center">
+                    <TableCell colSpan={11} className="h-32 text-center">
                       <div className="flex items-center justify-center text-sm text-muted-foreground">
                         <Loader2 className="mx-2 h-4 w-4 animate-spin" />
                         {t.loading}
@@ -1381,6 +1477,9 @@ export default function SystemProductsListPage() {
                     const statusMeta = getStatusMeta(status, locale);
                     const type = normalizeType(product.product_type);
                     const billing = normalizeBillingType(product.billing_type);
+                    const fulfillment = normalizeFulfillmentType(
+                      product.fulfillment_type
+                    );
 
                     return (
                       <TableRow key={id}>
@@ -1396,20 +1495,18 @@ export default function SystemProductsListPage() {
 
                         {columns.product ? (
                           <TableCell>
-                            <div className="min-w-[220px]">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                                  <Package className="h-4 w-4" />
-                                </div>
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                                <Package className="h-4 w-4" />
+                              </div>
 
-                                <div className="min-w-0">
-                                  <p className="truncate font-semibold">
-                                    {product.name || t.unnamedProduct}
-                                  </p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {product.code || product.slug || "-"}
-                                  </p>
-                                </div>
+                              <div className="min-w-0">
+                                <p className="truncate font-semibold">
+                                  {product.name || t.unnamedProduct}
+                                </p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {product.code || product.slug || "-"}
+                                </p>
                               </div>
                             </div>
                           </TableCell>
@@ -1417,9 +1514,14 @@ export default function SystemProductsListPage() {
 
                         {columns.type ? (
                           <TableCell>
-                            <Badge variant="secondary" className="rounded-full">
-                              {getTypeLabel(type, locale)}
-                            </Badge>
+                            <div className="flex flex-col gap-1">
+                              <Badge variant="secondary" className="w-fit rounded-full">
+                                {getTypeLabel(type, locale)}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground">
+                                {getFulfillmentLabel(fulfillment, locale)}
+                              </span>
+                            </div>
                           </TableCell>
                         ) : null}
 
@@ -1447,14 +1549,25 @@ export default function SystemProductsListPage() {
                                 />
                               </div>
 
-                              {product.has_discount ? (
-                                <Badge
-                                  variant="outline"
-                                  className="rounded-full text-[11px]"
-                                >
-                                  {t.discount}
-                                </Badge>
-                              ) : null}
+                              <div className="flex flex-wrap gap-1">
+                                {product.has_discount ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full text-[11px]"
+                                  >
+                                    {t.discount}
+                                  </Badge>
+                                ) : null}
+
+                                {product.is_taxable ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full text-[11px]"
+                                  >
+                                    {t.taxable}
+                                  </Badge>
+                                ) : null}
+                              </div>
                             </div>
                           </TableCell>
                         ) : null}
@@ -1462,6 +1575,41 @@ export default function SystemProductsListPage() {
                         {columns.billing ? (
                           <TableCell>
                             {getBillingLabel(billing, locale)}
+                          </TableCell>
+                        ) : null}
+
+                        {columns.readiness ? (
+                          <TableCell>
+                            <div className="flex max-w-[240px] flex-wrap gap-1">
+                              {product.can_be_ordered ? (
+                                <Badge variant="secondary" className="rounded-full">
+                                  <ShieldCheck className="h-3 w-3" />
+                                  {t.orderable}
+                                </Badge>
+                              ) : null}
+
+                              {product.can_be_used_in_contracts ? (
+                                <Badge variant="outline" className="rounded-full">
+                                  <Boxes className="h-3 w-3" />
+                                  {t.contractReady}
+                                </Badge>
+                              ) : null}
+
+                              {product.requires_provider ? (
+                                <Badge variant="outline" className="rounded-full">
+                                  <Stethoscope className="h-3 w-3" />
+                                  {t.requiresProvider}
+                                </Badge>
+                              ) : null}
+
+                              {(product.service_items?.length || 0) > 0 ? (
+                                <Badge variant="outline" className="rounded-full">
+                                  <Layers3 className="h-3 w-3" />
+                                  {formatNumber(product.service_items?.length || 0)}{" "}
+                                  {t.serviceItems}
+                                </Badge>
+                              ) : null}
+                            </div>
                           </TableCell>
                         ) : null}
 
@@ -1482,6 +1630,18 @@ export default function SystemProductsListPage() {
                               {product.allow_online_purchase ? (
                                 <Badge variant="secondary" className="rounded-full">
                                   {t.onlineLabel}
+                                </Badge>
+                              ) : null}
+
+                              {product.allow_agent_sale ? (
+                                <Badge variant="outline" className="rounded-full">
+                                  {t.agentSale}
+                                </Badge>
+                              ) : null}
+
+                              {product.allow_provider_sale ? (
+                                <Badge variant="outline" className="rounded-full">
+                                  {t.providerSale}
                                 </Badge>
                               ) : null}
                             </div>
@@ -1530,7 +1690,7 @@ export default function SystemProductsListPage() {
                 ) : (
                   <TableRow>
                     <TableCell
-                      colSpan={10}
+                      colSpan={11}
                       className="h-32 text-center text-sm text-muted-foreground"
                     >
                       {t.noProducts}
@@ -1566,13 +1726,15 @@ export default function SystemProductsListPage() {
             </div>
 
             <div className="print-card">
-              <div className="print-card-label">{t.featured}</div>
-              <div className="print-card-value">{formatNumber(stats.featured)}</div>
+              <div className="print-card-label">{t.orderable}</div>
+              <div className="print-card-value">{formatNumber(stats.orderable)}</div>
             </div>
 
             <div className="print-card">
-              <div className="print-card-label">{t.online}</div>
-              <div className="print-card-value">{formatNumber(stats.online)}</div>
+              <div className="print-card-label">{t.contractReady}</div>
+              <div className="print-card-value">
+                {formatNumber(stats.contractReady)}
+              </div>
             </div>
           </div>
 
@@ -1585,6 +1747,7 @@ export default function SystemProductsListPage() {
                 <th>{t.colCategory}</th>
                 <th>{t.colPrice}</th>
                 <th>{t.colBilling}</th>
+                <th>{t.colReadiness}</th>
                 <th>{t.colVisibility}</th>
                 <th>{t.colStatus}</th>
                 <th>{t.colUpdated}</th>
@@ -1597,6 +1760,7 @@ export default function SystemProductsListPage() {
                 const statusMeta = getStatusMeta(status, locale);
                 const type = normalizeType(product.product_type);
                 const billing = normalizeBillingType(product.billing_type);
+                const fulfillment = normalizeFulfillmentType(product.fulfillment_type);
 
                 return (
                   <tr key={product.id}>
@@ -1605,25 +1769,35 @@ export default function SystemProductsListPage() {
                       <strong>{product.name || t.unnamedProduct}</strong>
                       <div className="muted">{product.code || "-"}</div>
                     </td>
-                    <td>{getTypeLabel(type, locale)}</td>
+                    <td>
+                      {getTypeLabel(type, locale)}
+                      <div className="muted">
+                        {getFulfillmentLabel(fulfillment, locale)}
+                      </div>
+                    </td>
                     <td>{product.category?.name || t.noCategory}</td>
                     <td>{formatMoney(product.effective_price || product.price)}</td>
                     <td>{getBillingLabel(billing, locale)}</td>
+                    <td>
+                      {product.can_be_ordered ? (
+                        <span className="badge">{t.orderable}</span>
+                      ) : null}
+                      {product.can_be_used_in_contracts ? (
+                        <span className="badge">{t.contractReady}</span>
+                      ) : null}
+                      {product.requires_provider ? (
+                        <span className="badge">{t.requiresProvider}</span>
+                      ) : null}
+                    </td>
                     <td>
                       <span className="badge">
                         {product.is_public ? t.public : t.private}
                       </span>
                       {product.is_featured ? (
-                        <>
-                          {" "}
-                          <span className="badge">{t.featuredLabel}</span>
-                        </>
+                        <span className="badge">{t.featuredLabel}</span>
                       ) : null}
                       {product.allow_online_purchase ? (
-                        <>
-                          {" "}
-                          <span className="badge">{t.onlineLabel}</span>
-                        </>
+                        <span className="badge">{t.onlineLabel}</span>
                       ) : null}
                     </td>
                     <td>

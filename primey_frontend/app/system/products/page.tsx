@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BadgeCheck,
@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Stethoscope,
   Tag,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -46,12 +47,13 @@ import {
 
 /* ============================================================
    📂 app/system/products/page.tsx
-   🧠 Primey Care | System Products Dashboard
+   🧠 Primey Care | System Products & Programs Dashboard
    ------------------------------------------------------------
    ✅ صفحة المنتجات الرئيسية كوحدة مستقلة
-   ✅ نفس نمط صفحة المراكز / العملاء / المندوبين
-   ✅ استخدام UI الداخلي فقط
    ✅ ربط حقيقي مع /api/products/
+   ✅ متوافقة مع Backend المرحلة 5
+   ✅ Cards / Programs / Services / Memberships
+   ✅ Pricing / Contracts / Orders readiness
    ✅ دعم عربي / إنجليزي من primey-locale
    ✅ الأرقام دائمًا إنجليزية
    ✅ لا يوجد localhost hardcoded
@@ -77,12 +79,46 @@ type ProductType =
 
 type BillingType = "one_time" | "recurring" | "UNKNOWN";
 
+type FulfillmentType =
+  | "digital"
+  | "physical"
+  | "both"
+  | "service_based"
+  | "none"
+  | "UNKNOWN";
+
 type ProductCategory = {
   id: number | string;
   code?: string | null;
   name?: string | null;
   category_type?: string | null;
   status?: string | null;
+};
+
+type ProductBenefit = {
+  id: number | string;
+  title?: string | null;
+  description?: string | null;
+  is_active?: boolean | null;
+};
+
+type ProductPricingTier = {
+  id: number | string;
+  name?: string | null;
+  pricing_type?: string | null;
+  price?: string | number | null;
+  sale_price?: string | number | null;
+  effective_price?: string | number | null;
+  is_active?: boolean | null;
+};
+
+type ProductServiceItem = {
+  id: number | string;
+  name?: string | null;
+  included_quantity?: number | null;
+  unit_price?: string | number | null;
+  discount_rate?: string | number | null;
+  is_active?: boolean | null;
 };
 
 type Product = {
@@ -95,6 +131,7 @@ type Product = {
   category?: ProductCategory | null;
   status?: ProductStatus | string | null;
   billing_type?: BillingType | string | null;
+  fulfillment_type?: FulfillmentType | string | null;
   short_description?: string | null;
   description?: string | null;
   tags?: string | null;
@@ -102,6 +139,8 @@ type Product = {
   price?: string | number | null;
   sale_price?: string | number | null;
   effective_price?: string | number | null;
+  tax_amount?: string | number | null;
+  total_price_with_tax?: string | number | null;
   has_discount?: boolean | null;
   is_taxable?: boolean | null;
   tax_rate?: string | number | null;
@@ -111,6 +150,16 @@ type Product = {
   is_featured?: boolean | null;
   requires_approval?: boolean | null;
   allow_online_purchase?: boolean | null;
+  allow_agent_sale?: boolean | null;
+  allow_provider_sale?: boolean | null;
+  can_be_ordered?: boolean | null;
+  can_be_used_in_contracts?: boolean | null;
+  requires_provider?: boolean | null;
+  max_discount_rate?: string | number | null;
+  default_agent_commission_rate?: string | number | null;
+  benefits?: ProductBenefit[];
+  pricing_tiers?: ProductPricingTier[];
+  service_items?: ProductServiceItem[];
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -119,7 +168,7 @@ type ProductsApiResponse = {
   ok?: boolean;
   message?: string;
   results?: Product[];
-  data?: Product[];
+  data?: Product[] | Product;
   pagination?: {
     page?: number;
     page_size?: number;
@@ -212,6 +261,18 @@ function normalizeBillingType(type?: string | null): BillingType {
   return "UNKNOWN";
 }
 
+function normalizeFulfillmentType(type?: string | null): FulfillmentType {
+  const value = String(type || "").toLowerCase();
+
+  if (value === "digital") return "digital";
+  if (value === "physical") return "physical";
+  if (value === "both") return "both";
+  if (value === "service_based") return "service_based";
+  if (value === "none") return "none";
+
+  return "UNKNOWN";
+}
+
 function getStatusMeta(status: ProductStatus, locale: AppLocale) {
   const isArabic = locale === "ar";
 
@@ -278,17 +339,56 @@ function getBillingLabel(type: BillingType, locale: AppLocale) {
   return map[type] || map.UNKNOWN;
 }
 
+function getFulfillmentLabel(type: FulfillmentType, locale: AppLocale) {
+  const isArabic = locale === "ar";
+
+  const map: Record<FulfillmentType, string> = {
+    digital: isArabic ? "رقمي" : "Digital",
+    physical: isArabic ? "فعلي" : "Physical",
+    both: isArabic ? "رقمي وفعلي" : "Digital & physical",
+    service_based: isArabic ? "خدمة" : "Service based",
+    none: isArabic ? "بدون" : "None",
+    UNKNOWN: isArabic ? "غير محدد" : "Unknown",
+  };
+
+  return map[type] || map.UNKNOWN;
+}
+
+function extractProducts(payload: ProductsApiResponse): Product[] {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.data)) return payload.data;
+  return [];
+}
+
+async function fetchProducts(endpoint: string): Promise<Product[]> {
+  const response = await fetch(endpoint, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as ProductsApiResponse;
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.message || "Products request failed");
+  }
+
+  return extractProducts(payload);
+}
+
 function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
     badge1: "System Products",
-    badge2: "Products Module",
+    badge2: "Products & Programs",
 
-    title: isArabic ? "إدارة المنتجات" : "Products Management",
+    title: isArabic ? "إدارة المنتجات والباقات" : "Products & Programs",
     subtitle: isArabic
-      ? "وحدة المنتجات تجمع البطاقات والعضويات والبرامج والخدمات داخل Primey Care مع متابعة الأسعار والحالة والربط التشغيلي."
-      : "The products module manages cards, memberships, programs, and services inside Primey Care with pricing, status, and operational tracking.",
+      ? "وحدة المنتجات تجمع البطاقات والعضويات والبرامج والخدمات داخل Primey Care مع التسعير والربط مع الطلبات والعقود."
+      : "Manage cards, memberships, programs, and services inside Primey Care with pricing, orders, and contracts readiness.",
 
     refresh: isArabic ? "تحديث" : "Refresh",
     create: isArabic ? "إنشاء منتج" : "Create Product",
@@ -334,8 +434,8 @@ function dictionary(locale: AppLocale) {
 
     actionsTitle: isArabic ? "إجراءات وحدة المنتجات" : "Products Module Actions",
     actionsDesc: isArabic
-      ? "اختصارات سريعة لإدارة وحدة المنتجات."
-      : "Quick shortcuts for managing the products module.",
+      ? "اختصارات سريعة لإدارة المنتجات والباقات والخدمات."
+      : "Quick shortcuts for managing products, programs, and services.",
 
     tableProduct: isArabic ? "المنتج" : "Product",
     tableType: isArabic ? "النوع" : "Type",
@@ -360,6 +460,10 @@ function dictionary(locale: AppLocale) {
     services: isArabic ? "الخدمات" : "Services",
     publicProducts: isArabic ? "متاحة للعامة" : "Public",
     onlinePurchase: isArabic ? "شراء إلكتروني" : "Online purchase",
+    orderableProducts: isArabic ? "قابلة للطلب" : "Orderable",
+    contractProducts: isArabic ? "جاهزة للعقود" : "Contract ready",
+    requiresProvider: isArabic ? "تتطلب مقدم خدمة" : "Requires provider",
+    serviceItems: isArabic ? "عناصر الخدمات" : "Service items",
 
     actionCreateTitle: isArabic ? "إنشاء منتج جديد" : "Create a new product",
     actionCreateDesc: isArabic
@@ -384,10 +488,12 @@ function dictionary(locale: AppLocale) {
 export default function SystemProductsPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [products, setProducts] = useState<Product[]>([]);
+  const [featuredApiProducts, setFeaturedApiProducts] = useState<Product[]>([]);
+  const [orderableProducts, setOrderableProducts] = useState<Product[]>([]);
+  const [contractProducts, setContractProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
-  const isArabic = locale === "ar";
   const t = dictionary(locale);
 
   useEffect(() => {
@@ -415,50 +521,50 @@ export default function SystemProductsPage() {
     };
   }, []);
 
-  async function loadProducts(showToast = false) {
-    setIsLoading(true);
+  const loadProducts = useCallback(
+    async (showToast = false) => {
+      setIsLoading(true);
 
-    try {
-      const response = await fetch("/api/products/?page_size=100", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
+      try {
+        const [allRows, featuredRows, orderableRows, contractRows] =
+          await Promise.all([
+            fetchProducts("/api/products/?page_size=100&include_children=true"),
+            fetchProducts(
+              "/api/products/featured/?page_size=8&include_children=true"
+            ).catch(() => []),
+            fetchProducts(
+              "/api/products/orderable/?page_size=100&include_children=false"
+            ).catch(() => []),
+            fetchProducts(
+              "/api/products/contract/?page_size=100&include_children=false"
+            ).catch(() => []),
+          ]);
 
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as ProductsApiResponse;
+        setProducts(allRows);
+        setFeaturedApiProducts(featuredRows);
+        setOrderableProducts(orderableRows);
+        setContractProducts(contractRows);
 
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.message || t.loadError);
+        if (showToast) {
+          toast.success(t.refreshSuccess);
+        }
+      } catch (error) {
+        console.error("Failed to load products:", error);
+        toast.error(t.loadError);
+        setProducts([]);
+        setFeaturedApiProducts([]);
+        setOrderableProducts([]);
+        setContractProducts([]);
+      } finally {
+        setIsLoading(false);
       }
-
-      const rows = Array.isArray(payload.results)
-        ? payload.results
-        : Array.isArray(payload.data)
-          ? payload.data
-          : [];
-
-      setProducts(rows);
-
-      if (showToast) {
-        toast.success(t.refreshSuccess);
-      }
-    } catch (error) {
-      console.error("Failed to load products:", error);
-      toast.error(t.loadError);
-      setProducts([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }
+    },
+    [t.loadError, t.refreshSuccess]
+  );
 
   useEffect(() => {
     loadProducts(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadProducts]);
 
   const filteredProducts = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -472,6 +578,7 @@ export default function SystemProductsPage() {
         product.slug,
         product.short_description,
         product.category?.name,
+        product.category?.code,
         product.product_type,
         product.status,
         product.tags,
@@ -518,6 +625,15 @@ export default function SystemProductsPage() {
       (product) => normalizeType(product.product_type) === "service"
     ).length;
 
+    const requiresProvider = products.filter((product) =>
+      Boolean(product.requires_provider)
+    ).length;
+
+    const serviceItems = products.reduce(
+      (sum, product) => sum + (product.service_items?.length || 0),
+      0
+    );
+
     const totalValue = products.reduce(
       (sum, product) => sum + toNumber(product.effective_price || product.price),
       0
@@ -533,13 +649,19 @@ export default function SystemProductsPage() {
       programs,
       memberships,
       services,
+      requiresProvider,
+      serviceItems,
       totalValue,
+      orderable: orderableProducts.length,
+      contractReady: contractProducts.length,
     };
-  }, [products]);
+  }, [contractProducts.length, orderableProducts.length, products]);
 
   const featuredProducts = useMemo(() => {
+    if (featuredApiProducts.length) return featuredApiProducts.slice(0, 4);
+
     return products.filter((product) => Boolean(product.is_featured)).slice(0, 4);
-  }, [products]);
+  }, [featuredApiProducts, products]);
 
   const latestProducts = useMemo(() => {
     return [...filteredProducts]
@@ -752,6 +874,80 @@ export default function SystemProductsPage() {
         })}
       </div>
 
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-muted-foreground">
+                  {t.orderableProducts}
+                </p>
+                <p className="mt-2 text-2xl font-bold">
+                  {formatNumber(stats.orderable)}
+                </p>
+              </div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <ListChecks className="h-5 w-5" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-muted-foreground">
+                  {t.contractProducts}
+                </p>
+                <p className="mt-2 text-2xl font-bold">
+                  {formatNumber(stats.contractReady)}
+                </p>
+              </div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-muted-foreground">
+                  {t.requiresProvider}
+                </p>
+                <p className="mt-2 text-2xl font-bold">
+                  {formatNumber(stats.requiresProvider)}
+                </p>
+              </div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Stethoscope className="h-5 w-5" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-muted-foreground">
+                  {t.serviceItems}
+                </p>
+                <p className="mt-2 text-2xl font-bold">
+                  {formatNumber(stats.serviceItems)}
+                </p>
+              </div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Layers3 className="h-5 w-5" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
           <CardHeader className="pb-3">
@@ -785,6 +981,10 @@ export default function SystemProductsPage() {
                   const status = normalizeStatus(product.status);
                   const statusMeta = getStatusMeta(status, locale);
                   const type = normalizeType(product.product_type);
+                  const billingType = normalizeBillingType(product.billing_type);
+                  const fulfillmentType = normalizeFulfillmentType(
+                    product.fulfillment_type
+                  );
 
                   return (
                     <div
@@ -793,7 +993,7 @@ export default function SystemProductsPage() {
                     >
                       <div className="mb-3 flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <h3 className="truncate font-semibold">
+                          <h3 className="truncate font-bold">
                             {product.name || t.unnamedProduct}
                           </h3>
 
@@ -816,15 +1016,16 @@ export default function SystemProductsPage() {
                         </Badge>
 
                         <Badge variant="outline" className="rounded-full">
-                          {getBillingLabel(
-                            normalizeBillingType(product.billing_type),
-                            locale
-                          )}
+                          {getBillingLabel(billingType, locale)}
+                        </Badge>
+
+                        <Badge variant="outline" className="rounded-full">
+                          {getFulfillmentLabel(fulfillmentType, locale)}
                         </Badge>
                       </div>
 
                       <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted/50 p-3">
-                        <p className="text-xs text-muted-foreground">
+                        <p className="truncate text-xs text-muted-foreground">
                           {product.category?.name || t.noCategory}
                         </p>
 
@@ -976,6 +1177,7 @@ export default function SystemProductsPage() {
                     const status = normalizeStatus(product.status);
                     const statusMeta = getStatusMeta(status, locale);
                     const type = normalizeType(product.product_type);
+                    const billingType = normalizeBillingType(product.billing_type);
 
                     return (
                       <TableRow key={product.id}>
@@ -999,6 +1201,10 @@ export default function SystemProductsPage() {
 
                             <span className="text-xs text-muted-foreground">
                               {product.category?.name || t.noCategory}
+                            </span>
+
+                            <span className="text-xs text-muted-foreground">
+                              {getBillingLabel(billingType, locale)}
                             </span>
                           </div>
                         </TableCell>

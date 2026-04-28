@@ -1,12 +1,13 @@
 # ============================================================
 # 📂 products/services.py
-# 🧭 Primey Care — Products Services
+# 🧭 Primey Care — Products & Programs Services
 # ------------------------------------------------------------
 # ✅ خدمات مساعدة رسمية لموديول المنتجات
 # ✅ Serialization
 # ✅ Validation helpers
 # ✅ Filters / pagination
-# ✅ Nested benefits / pricing tiers sync
+# ✅ Nested benefits / pricing tiers / service items sync
+# ✅ جاهز للربط مع الطلبات والعقود ومقدمي الخدمة
 # ============================================================
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from products.models import (
     ProductBenefit,
     ProductCategory,
     ProductPricingTier,
+    ProductServiceItem,
 )
 
 
@@ -53,8 +55,10 @@ def parse_bool(value: Any, default: bool | None = None) -> bool | None:
         return bool(value)
 
     value_str = str(value).strip().lower()
+
     if value_str in {"1", "true", "yes", "on"}:
         return True
+
     if value_str in {"0", "false", "no", "off"}:
         return False
 
@@ -84,14 +88,28 @@ def parse_decimal(value: Any, default: Decimal | None = None) -> Decimal | None:
 def normalize_text(value: Any, default: str = "") -> str:
     if value is None:
         return default
+
     return str(value).strip()
+
+
+def normalize_choice(value: Any, default: str) -> str:
+    value_text = normalize_text(value)
+
+    if not value_text:
+        return default
+
+    return value_text
 
 
 # ============================================================
 # 🔹 Query Helpers
 # ============================================================
 
-def paginate_queryset(queryset: QuerySet, page: int = 1, page_size: int = 20) -> dict[str, Any]:
+def paginate_queryset(
+    queryset: QuerySet,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict[str, Any]:
     safe_page = max(page or 1, 1)
     safe_page_size = min(max(page_size or 20, 1), 100)
 
@@ -111,15 +129,29 @@ def paginate_queryset(queryset: QuerySet, page: int = 1, page_size: int = 20) ->
     }
 
 
-def apply_product_filters(queryset: QuerySet[Product], params) -> QuerySet[Product]:
+def apply_product_filters(
+    queryset: QuerySet[Product],
+    params,
+) -> QuerySet[Product]:
     q = normalize_text(params.get("q"))
     status_value = normalize_text(params.get("status"))
     product_type = normalize_text(params.get("product_type"))
     billing_type = normalize_text(params.get("billing_type"))
+    fulfillment_type = normalize_text(params.get("fulfillment_type"))
     category_id = parse_int(params.get("category_id"))
+
     is_public = parse_bool(params.get("is_public"))
     is_featured = parse_bool(params.get("is_featured"))
     allow_online_purchase = parse_bool(params.get("allow_online_purchase"))
+    allow_agent_sale = parse_bool(params.get("allow_agent_sale"))
+    allow_provider_sale = parse_bool(params.get("allow_provider_sale"))
+    can_be_ordered = parse_bool(params.get("can_be_ordered"))
+    can_be_used_in_contracts = parse_bool(params.get("can_be_used_in_contracts"))
+    requires_provider = parse_bool(params.get("requires_provider"))
+    is_taxable = parse_bool(params.get("is_taxable"))
+
+    min_price = parse_decimal(params.get("min_price"))
+    max_price = parse_decimal(params.get("max_price"))
 
     if q:
         queryset = queryset.filter(
@@ -128,7 +160,11 @@ def apply_product_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
             | Q(slug__icontains=q)
             | Q(short_description__icontains=q)
             | Q(description__icontains=q)
+            | Q(features__icontains=q)
+            | Q(terms_and_conditions__icontains=q)
             | Q(tags__icontains=q)
+            | Q(category__name__icontains=q)
+            | Q(category__code__icontains=q)
         )
 
     if status_value:
@@ -139,6 +175,9 @@ def apply_product_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
 
     if billing_type:
         queryset = queryset.filter(billing_type=billing_type)
+
+    if fulfillment_type:
+        queryset = queryset.filter(fulfillment_type=fulfillment_type)
 
     if category_id:
         queryset = queryset.filter(category_id=category_id)
@@ -152,10 +191,37 @@ def apply_product_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
     if allow_online_purchase is not None:
         queryset = queryset.filter(allow_online_purchase=allow_online_purchase)
 
+    if allow_agent_sale is not None:
+        queryset = queryset.filter(allow_agent_sale=allow_agent_sale)
+
+    if allow_provider_sale is not None:
+        queryset = queryset.filter(allow_provider_sale=allow_provider_sale)
+
+    if can_be_ordered is not None:
+        queryset = queryset.filter(can_be_ordered=can_be_ordered)
+
+    if can_be_used_in_contracts is not None:
+        queryset = queryset.filter(can_be_used_in_contracts=can_be_used_in_contracts)
+
+    if requires_provider is not None:
+        queryset = queryset.filter(requires_provider=requires_provider)
+
+    if is_taxable is not None:
+        queryset = queryset.filter(is_taxable=is_taxable)
+
+    if min_price is not None:
+        queryset = queryset.filter(price__gte=min_price)
+
+    if max_price is not None:
+        queryset = queryset.filter(price__lte=max_price)
+
     return queryset
 
 
-def apply_category_filters(queryset: QuerySet[ProductCategory], params) -> QuerySet[ProductCategory]:
+def apply_category_filters(
+    queryset: QuerySet[ProductCategory],
+    params,
+) -> QuerySet[ProductCategory]:
     q = normalize_text(params.get("q"))
     status_value = normalize_text(params.get("status"))
     category_type = normalize_text(params.get("category_type"))
@@ -211,15 +277,24 @@ def serialize_benefit(obj: ProductBenefit) -> dict[str, Any]:
 
 
 def serialize_pricing_tier(obj: ProductPricingTier) -> dict[str, Any]:
-    effective_price = obj.sale_price if obj.sale_price is not None else obj.price
-
     return {
         "id": obj.id,
         "product_id": obj.product_id,
         "name": obj.name,
+        "pricing_type": obj.pricing_type,
+        "currency_code": obj.currency_code,
         "price": str(obj.price),
         "sale_price": str(obj.sale_price) if obj.sale_price is not None else None,
-        "effective_price": str(effective_price),
+        "effective_price": str(obj.effective_price),
+        "has_discount": obj.has_discount,
+        "min_quantity": obj.min_quantity,
+        "max_quantity": obj.max_quantity,
+        "discount_rate": str(obj.discount_rate),
+        "agent_commission_rate": str(obj.agent_commission_rate),
+        "provider_share_rate": str(obj.provider_share_rate),
+        "system_share_rate": str(obj.system_share_rate),
+        "starts_at": obj.starts_at.isoformat() if obj.starts_at else None,
+        "ends_at": obj.ends_at.isoformat() if obj.ends_at else None,
         "sort_order": obj.sort_order,
         "is_active": obj.is_active,
         "created_at": obj.created_at.isoformat() if obj.created_at else None,
@@ -227,7 +302,31 @@ def serialize_pricing_tier(obj: ProductPricingTier) -> dict[str, Any]:
     }
 
 
-def serialize_product(obj: Product, include_children: bool = True) -> dict[str, Any]:
+def serialize_service_item(obj: ProductServiceItem) -> dict[str, Any]:
+    return {
+        "id": obj.id,
+        "product_id": obj.product_id,
+        "name": obj.name,
+        "description": obj.description,
+        "included_quantity": obj.included_quantity,
+        "unit_price": str(obj.unit_price),
+        "discount_rate": str(obj.discount_rate),
+        "total_before_discount": str(obj.total_before_discount),
+        "discount_amount": str(obj.discount_amount),
+        "total_after_discount": str(obj.total_after_discount),
+        "requires_provider": obj.requires_provider,
+        "is_optional": obj.is_optional,
+        "is_active": obj.is_active,
+        "sort_order": obj.sort_order,
+        "created_at": obj.created_at.isoformat() if obj.created_at else None,
+        "updated_at": obj.updated_at.isoformat() if obj.updated_at else None,
+    }
+
+
+def serialize_product(
+    obj: Product,
+    include_children: bool = True,
+) -> dict[str, Any]:
     data = {
         "id": obj.id,
         "code": obj.code,
@@ -238,6 +337,7 @@ def serialize_product(obj: Product, include_children: bool = True) -> dict[str, 
         "category": serialize_category(obj.category) if obj.category else None,
         "status": obj.status,
         "billing_type": obj.billing_type,
+        "fulfillment_type": obj.fulfillment_type,
         "short_description": obj.short_description,
         "description": obj.description,
         "terms_and_conditions": obj.terms_and_conditions,
@@ -248,6 +348,8 @@ def serialize_product(obj: Product, include_children: bool = True) -> dict[str, 
         "sale_price": str(obj.sale_price) if obj.sale_price is not None else None,
         "cost_price": str(obj.cost_price) if obj.cost_price is not None else None,
         "effective_price": str(obj.effective_price),
+        "tax_amount": str(obj.tax_amount),
+        "total_price_with_tax": str(obj.total_price_with_tax),
         "has_discount": obj.has_discount,
         "is_taxable": obj.is_taxable,
         "tax_rate": str(obj.tax_rate),
@@ -257,6 +359,18 @@ def serialize_product(obj: Product, include_children: bool = True) -> dict[str, 
         "is_featured": obj.is_featured,
         "requires_approval": obj.requires_approval,
         "allow_online_purchase": obj.allow_online_purchase,
+        "allow_agent_sale": obj.allow_agent_sale,
+        "allow_provider_sale": obj.allow_provider_sale,
+        "can_be_ordered": obj.can_be_ordered,
+        "can_be_used_in_contracts": obj.can_be_used_in_contracts,
+        "requires_provider": obj.requires_provider,
+        "max_discount_rate": str(obj.max_discount_rate),
+        "default_agent_commission_rate": str(obj.default_agent_commission_rate),
+        "is_active_product": obj.is_active_product,
+        "is_card": obj.is_card,
+        "is_program": obj.is_program,
+        "is_service": obj.is_service,
+        "is_membership": obj.is_membership,
         "sort_order": obj.sort_order,
         "created_by_id": obj.created_by_id,
         "updated_by_id": obj.updated_by_id,
@@ -265,10 +379,19 @@ def serialize_product(obj: Product, include_children: bool = True) -> dict[str, 
     }
 
     if include_children:
-        data["benefits"] = [serialize_benefit(item) for item in obj.benefits.all().order_by("sort_order", "id")]
+        data["benefits"] = [
+            serialize_benefit(item)
+            for item in obj.benefits.all().order_by("sort_order", "id")
+        ]
+
         data["pricing_tiers"] = [
             serialize_pricing_tier(item)
             for item in obj.pricing_tiers.all().order_by("sort_order", "id")
+        ]
+
+        data["service_items"] = [
+            serialize_service_item(item)
+            for item in obj.service_items.all().order_by("sort_order", "id")
         ]
 
     return data
@@ -278,23 +401,40 @@ def serialize_product(obj: Product, include_children: bool = True) -> dict[str, 
 # 🔹 Create / Update Category
 # ============================================================
 
-def create_category(*, payload: dict[str, Any], user) -> ProductCategory:
+def create_category(
+    *,
+    payload: dict[str, Any],
+    user,
+) -> ProductCategory:
     category = ProductCategory(
         code=normalize_text(payload.get("code")).upper(),
         name=normalize_text(payload.get("name")),
-        category_type=normalize_text(payload.get("category_type")) or ProductCategory.CategoryType.PROGRAM,
-        status=normalize_text(payload.get("status")) or ProductCategory.Status.ACTIVE,
+        category_type=normalize_choice(
+            payload.get("category_type"),
+            ProductCategory.CategoryType.PROGRAM,
+        ),
+        status=normalize_choice(
+            payload.get("status"),
+            ProductCategory.Status.ACTIVE,
+        ),
         description=normalize_text(payload.get("description")),
         sort_order=parse_int(payload.get("sort_order"), 0) or 0,
-        created_by=user,
-        updated_by=user,
+        created_by=user if getattr(user, "is_authenticated", False) else None,
+        updated_by=user if getattr(user, "is_authenticated", False) else None,
     )
+
     category.full_clean()
     category.save()
+
     return category
 
 
-def update_category(*, instance: ProductCategory, payload: dict[str, Any], user) -> ProductCategory:
+def update_category(
+    *,
+    instance: ProductCategory,
+    payload: dict[str, Any],
+    user,
+) -> ProductCategory:
     if "code" in payload:
         instance.code = normalize_text(payload.get("code")).upper()
 
@@ -313,14 +453,15 @@ def update_category(*, instance: ProductCategory, payload: dict[str, Any], user)
     if "sort_order" in payload:
         instance.sort_order = parse_int(payload.get("sort_order"), 0) or 0
 
-    instance.updated_by = user
+    instance.updated_by = user if getattr(user, "is_authenticated", False) else None
     instance.full_clean()
     instance.save()
+
     return instance
 
 
 # ============================================================
-# 🔹 Create / Update Product
+# 🔹 Product Helpers
 # ============================================================
 
 def _resolve_category(payload: dict[str, Any]) -> ProductCategory | None:
@@ -328,6 +469,7 @@ def _resolve_category(payload: dict[str, Any]) -> ProductCategory | None:
         return None
 
     category_id = payload.get("category_id")
+
     if category_id in (None, "", 0, "0"):
         return None
 
@@ -337,148 +479,228 @@ def _resolve_category(payload: dict[str, Any]) -> ProductCategory | None:
         raise ValidationError("Selected category does not exist.")
 
 
-def create_product(*, payload: dict[str, Any], user) -> Product:
-    category = _resolve_category(payload)
+def _apply_product_payload(
+    *,
+    product: Product,
+    payload: dict[str, Any],
+    user,
+    is_create: bool,
+) -> Product:
+    if is_create or "name" in payload:
+        product.name = normalize_text(payload.get("name"))
 
-    product = Product(
-        name=normalize_text(payload.get("name")),
-        product_type=normalize_text(payload.get("product_type")) or Product.ProductType.PROGRAM,
-        category=category,
-        status=normalize_text(payload.get("status")) or Product.Status.DRAFT,
-        billing_type=normalize_text(payload.get("billing_type")) or Product.BillingType.ONE_TIME,
-        short_description=normalize_text(payload.get("short_description")),
-        description=normalize_text(payload.get("description")),
-        terms_and_conditions=normalize_text(payload.get("terms_and_conditions")),
-        features=normalize_text(payload.get("features")),
-        tags=normalize_text(payload.get("tags")),
-        currency_code=normalize_text(payload.get("currency_code"), "SAR").upper(),
-        price=parse_decimal(payload.get("price"), Decimal("0.00")) or Decimal("0.00"),
-        sale_price=parse_decimal(payload.get("sale_price")),
-        cost_price=parse_decimal(payload.get("cost_price")),
-        is_taxable=parse_bool(payload.get("is_taxable"), False) or False,
-        tax_rate=parse_decimal(payload.get("tax_rate"), Decimal("0.00")) or Decimal("0.00"),
-        duration_value=parse_int(payload.get("duration_value"), 0) or 0,
-        duration_unit=normalize_text(payload.get("duration_unit")) or Product.DurationUnit.NONE,
-        is_public=parse_bool(payload.get("is_public"), True) if payload.get("is_public") is not None else True,
-        is_featured=parse_bool(payload.get("is_featured"), False) or False,
-        requires_approval=parse_bool(payload.get("requires_approval"), False) or False,
-        allow_online_purchase=parse_bool(payload.get("allow_online_purchase"), True)
-        if payload.get("allow_online_purchase") is not None
-        else True,
-        sort_order=parse_int(payload.get("sort_order"), 0) or 0,
-        created_by=user,
-        updated_by=user,
+    if is_create or "product_type" in payload:
+        product.product_type = normalize_choice(
+            payload.get("product_type"),
+            Product.ProductType.PROGRAM,
+        )
+
+    if "category_id" in payload:
+        product.category = _resolve_category(payload)
+
+    if is_create or "status" in payload:
+        product.status = normalize_choice(
+            payload.get("status"),
+            Product.Status.DRAFT,
+        )
+
+    if is_create or "billing_type" in payload:
+        product.billing_type = normalize_choice(
+            payload.get("billing_type"),
+            Product.BillingType.ONE_TIME,
+        )
+
+    if is_create or "fulfillment_type" in payload:
+        product.fulfillment_type = normalize_choice(
+            payload.get("fulfillment_type"),
+            Product.FulfillmentType.DIGITAL,
+        )
+
+    text_fields = (
+        "short_description",
+        "description",
+        "terms_and_conditions",
+        "features",
+        "tags",
     )
 
-    if "slug" in payload and normalize_text(payload.get("slug")):
+    for field_name in text_fields:
+        if is_create or field_name in payload:
+            setattr(product, field_name, normalize_text(payload.get(field_name)))
+
+    if is_create or "currency_code" in payload:
+        product.currency_code = normalize_text(
+            payload.get("currency_code"),
+            "SAR",
+        ).upper()
+
+    if is_create or "price" in payload:
+        product.price = parse_decimal(
+            payload.get("price"),
+            Decimal("0.00"),
+        ) or Decimal("0.00")
+
+    if "sale_price" in payload:
+        product.sale_price = parse_decimal(payload.get("sale_price"))
+
+    if "cost_price" in payload:
+        product.cost_price = parse_decimal(payload.get("cost_price"))
+
+    if is_create or "is_taxable" in payload:
+        product.is_taxable = parse_bool(
+            payload.get("is_taxable"),
+            False,
+        ) or False
+
+    if is_create or "tax_rate" in payload:
+        product.tax_rate = parse_decimal(
+            payload.get("tax_rate"),
+            Decimal("0.00"),
+        ) or Decimal("0.00")
+
+    if is_create or "duration_value" in payload:
+        product.duration_value = parse_int(
+            payload.get("duration_value"),
+            0,
+        ) or 0
+
+    if is_create or "duration_unit" in payload:
+        product.duration_unit = normalize_choice(
+            payload.get("duration_unit"),
+            Product.DurationUnit.NONE,
+        )
+
+    bool_fields_with_defaults = {
+        "is_public": True,
+        "is_featured": False,
+        "requires_approval": False,
+        "allow_online_purchase": True,
+        "allow_agent_sale": True,
+        "allow_provider_sale": False,
+        "can_be_ordered": True,
+        "can_be_used_in_contracts": True,
+        "requires_provider": False,
+    }
+
+    for field_name, default_value in bool_fields_with_defaults.items():
+        if is_create or field_name in payload:
+            current_value = getattr(product, field_name, default_value)
+            parsed_value = parse_bool(payload.get(field_name), current_value if not is_create else default_value)
+            setattr(product, field_name, default_value if parsed_value is None else parsed_value)
+
+    if is_create or "max_discount_rate" in payload:
+        product.max_discount_rate = parse_decimal(
+            payload.get("max_discount_rate"),
+            Decimal("0.00"),
+        ) or Decimal("0.00")
+
+    if is_create or "default_agent_commission_rate" in payload:
+        product.default_agent_commission_rate = parse_decimal(
+            payload.get("default_agent_commission_rate"),
+            Decimal("0.00"),
+        ) or Decimal("0.00")
+
+    if is_create or "sort_order" in payload:
+        product.sort_order = parse_int(
+            payload.get("sort_order"),
+            0,
+        ) or 0
+
+    if "slug" in payload:
         product.slug = normalize_text(payload.get("slug"))
 
-    if "code" in payload and normalize_text(payload.get("code")):
+    if "code" in payload:
         product.code = normalize_text(payload.get("code")).upper()
+
+    if is_create:
+        product.created_by = user if getattr(user, "is_authenticated", False) else None
+
+    product.updated_by = user if getattr(user, "is_authenticated", False) else None
+
+    return product
+
+
+# ============================================================
+# 🔹 Create / Update Product
+# ============================================================
+
+def create_product(
+    *,
+    payload: dict[str, Any],
+    user,
+) -> Product:
+    product = Product()
+    product.category = _resolve_category(payload)
+
+    _apply_product_payload(
+        product=product,
+        payload=payload,
+        user=user,
+        is_create=True,
+    )
 
     with transaction.atomic():
         product.full_clean()
         product.save()
 
         if "benefits" in payload:
-            sync_product_benefits(product=product, items=payload.get("benefits") or [])
+            sync_product_benefits(
+                product=product,
+                items=payload.get("benefits") or [],
+            )
 
         if "pricing_tiers" in payload:
-            sync_product_pricing_tiers(product=product, items=payload.get("pricing_tiers") or [])
+            sync_product_pricing_tiers(
+                product=product,
+                items=payload.get("pricing_tiers") or [],
+            )
+
+        if "service_items" in payload:
+            sync_product_service_items(
+                product=product,
+                items=payload.get("service_items") or [],
+            )
 
     return product
 
 
-def update_product(*, instance: Product, payload: dict[str, Any], user) -> Product:
-    if "name" in payload:
-        instance.name = normalize_text(payload.get("name"))
-
-    if "product_type" in payload:
-        instance.product_type = normalize_text(payload.get("product_type"))
-
+def update_product(
+    *,
+    instance: Product,
+    payload: dict[str, Any],
+    user,
+) -> Product:
     if "category_id" in payload:
         instance.category = _resolve_category(payload)
 
-    if "status" in payload:
-        instance.status = normalize_text(payload.get("status"))
-
-    if "billing_type" in payload:
-        instance.billing_type = normalize_text(payload.get("billing_type"))
-
-    if "short_description" in payload:
-        instance.short_description = normalize_text(payload.get("short_description"))
-
-    if "description" in payload:
-        instance.description = normalize_text(payload.get("description"))
-
-    if "terms_and_conditions" in payload:
-        instance.terms_and_conditions = normalize_text(payload.get("terms_and_conditions"))
-
-    if "features" in payload:
-        instance.features = normalize_text(payload.get("features"))
-
-    if "tags" in payload:
-        instance.tags = normalize_text(payload.get("tags"))
-
-    if "currency_code" in payload:
-        instance.currency_code = normalize_text(payload.get("currency_code"), "SAR").upper()
-
-    if "price" in payload:
-        instance.price = parse_decimal(payload.get("price"), Decimal("0.00")) or Decimal("0.00")
-
-    if "sale_price" in payload:
-        instance.sale_price = parse_decimal(payload.get("sale_price"))
-
-    if "cost_price" in payload:
-        instance.cost_price = parse_decimal(payload.get("cost_price"))
-
-    if "is_taxable" in payload:
-        instance.is_taxable = parse_bool(payload.get("is_taxable"), False) or False
-
-    if "tax_rate" in payload:
-        instance.tax_rate = parse_decimal(payload.get("tax_rate"), Decimal("0.00")) or Decimal("0.00")
-
-    if "duration_value" in payload:
-        instance.duration_value = parse_int(payload.get("duration_value"), 0) or 0
-
-    if "duration_unit" in payload:
-        instance.duration_unit = normalize_text(payload.get("duration_unit"))
-
-    if "is_public" in payload:
-        instance.is_public = parse_bool(payload.get("is_public"), instance.is_public)
-
-    if "is_featured" in payload:
-        instance.is_featured = parse_bool(payload.get("is_featured"), instance.is_featured)
-
-    if "requires_approval" in payload:
-        instance.requires_approval = parse_bool(payload.get("requires_approval"), instance.requires_approval)
-
-    if "allow_online_purchase" in payload:
-        instance.allow_online_purchase = parse_bool(
-            payload.get("allow_online_purchase"),
-            instance.allow_online_purchase,
-        )
-
-    if "sort_order" in payload:
-        instance.sort_order = parse_int(payload.get("sort_order"), 0) or 0
-
-    if "slug" in payload:
-        instance.slug = normalize_text(payload.get("slug"))
-
-    if "code" in payload:
-        instance.code = normalize_text(payload.get("code")).upper()
-
-    instance.updated_by = user
+    _apply_product_payload(
+        product=instance,
+        payload=payload,
+        user=user,
+        is_create=False,
+    )
 
     with transaction.atomic():
         instance.full_clean()
         instance.save()
 
         if "benefits" in payload:
-            sync_product_benefits(product=instance, items=payload.get("benefits") or [])
+            sync_product_benefits(
+                product=instance,
+                items=payload.get("benefits") or [],
+            )
 
         if "pricing_tiers" in payload:
-            sync_product_pricing_tiers(product=instance, items=payload.get("pricing_tiers") or [])
+            sync_product_pricing_tiers(
+                product=instance,
+                items=payload.get("pricing_tiers") or [],
+            )
+
+        if "service_items" in payload:
+            sync_product_service_items(
+                product=instance,
+                items=payload.get("service_items") or [],
+            )
 
     return instance
 
@@ -487,7 +709,11 @@ def update_product(*, instance: Product, payload: dict[str, Any], user) -> Produ
 # 🔹 Nested Sync — Benefits
 # ============================================================
 
-def sync_product_benefits(*, product: Product, items: list[dict[str, Any]]) -> None:
+def sync_product_benefits(
+    *,
+    product: Product,
+    items: list[dict[str, Any]],
+) -> None:
     if not isinstance(items, list):
         raise ValidationError("Benefits must be a list.")
 
@@ -495,6 +721,7 @@ def sync_product_benefits(*, product: Product, items: list[dict[str, Any]]) -> N
         item.id: item
         for item in product.benefits.all()
     }
+
     keep_ids: list[int] = []
 
     for raw in items:
@@ -515,6 +742,7 @@ def sync_product_benefits(*, product: Product, items: list[dict[str, Any]]) -> N
                 raise ValidationError("Invalid benefit id.")
 
             benefit = existing_map.get(benefit_id)
+
             if not benefit:
                 raise ValidationError(f"Benefit id {benefit_id} does not belong to this product.")
 
@@ -534,7 +762,7 @@ def sync_product_benefits(*, product: Product, items: list[dict[str, Any]]) -> N
         if marked_delete:
             continue
 
-        benefit = ProductBenefit.objects.create(
+        benefit = ProductBenefit(
             product=product,
             title=title,
             description=description,
@@ -552,7 +780,11 @@ def sync_product_benefits(*, product: Product, items: list[dict[str, Any]]) -> N
 # 🔹 Nested Sync — Pricing Tiers
 # ============================================================
 
-def sync_product_pricing_tiers(*, product: Product, items: list[dict[str, Any]]) -> None:
+def sync_product_pricing_tiers(
+    *,
+    product: Product,
+    items: list[dict[str, Any]],
+) -> None:
     if not isinstance(items, list):
         raise ValidationError("Pricing tiers must be a list.")
 
@@ -560,6 +792,7 @@ def sync_product_pricing_tiers(*, product: Product, items: list[dict[str, Any]])
         item.id: item
         for item in product.pricing_tiers.all()
     }
+
     keep_ids: list[int] = []
 
     for raw in items:
@@ -568,8 +801,24 @@ def sync_product_pricing_tiers(*, product: Product, items: list[dict[str, Any]])
 
         tier_id = raw.get("id")
         name = normalize_text(raw.get("name"))
+        pricing_type = normalize_choice(
+            raw.get("pricing_type"),
+            ProductPricingTier.PricingType.STANDARD,
+        )
+        currency_code = normalize_text(
+            raw.get("currency_code"),
+            product.currency_code or "SAR",
+        ).upper()
         price = parse_decimal(raw.get("price"), Decimal("0.00")) or Decimal("0.00")
         sale_price = parse_decimal(raw.get("sale_price"))
+        min_quantity = parse_int(raw.get("min_quantity"), 1) or 1
+        max_quantity = parse_int(raw.get("max_quantity"))
+        discount_rate = parse_decimal(raw.get("discount_rate"), Decimal("0.00")) or Decimal("0.00")
+        agent_commission_rate = parse_decimal(raw.get("agent_commission_rate"), Decimal("0.00")) or Decimal("0.00")
+        provider_share_rate = parse_decimal(raw.get("provider_share_rate"), Decimal("0.00")) or Decimal("0.00")
+        system_share_rate = parse_decimal(raw.get("system_share_rate"), Decimal("0.00")) or Decimal("0.00")
+        starts_at = raw.get("starts_at") or None
+        ends_at = raw.get("ends_at") or None
         sort_order = parse_int(raw.get("sort_order"), 0) or 0
         is_active = parse_bool(raw.get("is_active"), True)
         marked_delete = parse_bool(raw.get("delete"), False) or False
@@ -581,6 +830,7 @@ def sync_product_pricing_tiers(*, product: Product, items: list[dict[str, Any]])
                 raise ValidationError("Invalid pricing tier id.")
 
             tier = existing_map.get(tier_id)
+
             if not tier:
                 raise ValidationError(f"Pricing tier id {tier_id} does not belong to this product.")
 
@@ -589,8 +839,18 @@ def sync_product_pricing_tiers(*, product: Product, items: list[dict[str, Any]])
                 continue
 
             tier.name = name
+            tier.pricing_type = pricing_type
+            tier.currency_code = currency_code
             tier.price = price
             tier.sale_price = sale_price
+            tier.min_quantity = min_quantity
+            tier.max_quantity = max_quantity
+            tier.discount_rate = discount_rate
+            tier.agent_commission_rate = agent_commission_rate
+            tier.provider_share_rate = provider_share_rate
+            tier.system_share_rate = system_share_rate
+            tier.starts_at = starts_at
+            tier.ends_at = ends_at
             tier.sort_order = sort_order
             tier.is_active = True if is_active is None else is_active
             tier.full_clean()
@@ -601,11 +861,21 @@ def sync_product_pricing_tiers(*, product: Product, items: list[dict[str, Any]])
         if marked_delete:
             continue
 
-        tier = ProductPricingTier.objects.create(
+        tier = ProductPricingTier(
             product=product,
             name=name,
+            pricing_type=pricing_type,
+            currency_code=currency_code,
             price=price,
             sale_price=sale_price,
+            min_quantity=min_quantity,
+            max_quantity=max_quantity,
+            discount_rate=discount_rate,
+            agent_commission_rate=agent_commission_rate,
+            provider_share_rate=provider_share_rate,
+            system_share_rate=system_share_rate,
+            starts_at=starts_at,
+            ends_at=ends_at,
             sort_order=sort_order,
             is_active=True if is_active is None else is_active,
         )
@@ -614,3 +884,140 @@ def sync_product_pricing_tiers(*, product: Product, items: list[dict[str, Any]])
         keep_ids.append(tier.id)
 
     product.pricing_tiers.exclude(id__in=keep_ids).delete()
+
+
+# ============================================================
+# 🔹 Nested Sync — Service Items
+# ============================================================
+
+def sync_product_service_items(
+    *,
+    product: Product,
+    items: list[dict[str, Any]],
+) -> None:
+    if not isinstance(items, list):
+        raise ValidationError("Service items must be a list.")
+
+    existing_map = {
+        item.id: item
+        for item in product.service_items.all()
+    }
+
+    keep_ids: list[int] = []
+
+    for raw in items:
+        if not isinstance(raw, dict):
+            raise ValidationError("Each service item must be an object.")
+
+        item_id = raw.get("id")
+        name = normalize_text(raw.get("name"))
+        description = normalize_text(raw.get("description"))
+        included_quantity = parse_int(raw.get("included_quantity"), 1) or 1
+        unit_price = parse_decimal(raw.get("unit_price"), Decimal("0.00")) or Decimal("0.00")
+        discount_rate = parse_decimal(raw.get("discount_rate"), Decimal("0.00")) or Decimal("0.00")
+        requires_provider = parse_bool(raw.get("requires_provider"), True)
+        is_optional = parse_bool(raw.get("is_optional"), False)
+        is_active = parse_bool(raw.get("is_active"), True)
+        sort_order = parse_int(raw.get("sort_order"), 0) or 0
+        marked_delete = parse_bool(raw.get("delete"), False) or False
+
+        if item_id:
+            try:
+                item_id = int(item_id)
+            except (TypeError, ValueError):
+                raise ValidationError("Invalid service item id.")
+
+            service_item = existing_map.get(item_id)
+
+            if not service_item:
+                raise ValidationError(f"Service item id {item_id} does not belong to this product.")
+
+            if marked_delete:
+                service_item.delete()
+                continue
+
+            service_item.name = name
+            service_item.description = description
+            service_item.included_quantity = included_quantity
+            service_item.unit_price = unit_price
+            service_item.discount_rate = discount_rate
+            service_item.requires_provider = True if requires_provider is None else requires_provider
+            service_item.is_optional = False if is_optional is None else is_optional
+            service_item.is_active = True if is_active is None else is_active
+            service_item.sort_order = sort_order
+            service_item.full_clean()
+            service_item.save()
+            keep_ids.append(service_item.id)
+            continue
+
+        if marked_delete:
+            continue
+
+        service_item = ProductServiceItem(
+            product=product,
+            name=name,
+            description=description,
+            included_quantity=included_quantity,
+            unit_price=unit_price,
+            discount_rate=discount_rate,
+            requires_provider=True if requires_provider is None else requires_provider,
+            is_optional=False if is_optional is None else is_optional,
+            is_active=True if is_active is None else is_active,
+            sort_order=sort_order,
+        )
+        service_item.full_clean()
+        service_item.save()
+        keep_ids.append(service_item.id)
+
+    product.service_items.exclude(id__in=keep_ids).delete()
+
+
+# ============================================================
+# 🔹 Product Business Helpers
+# ============================================================
+
+def get_orderable_products_queryset() -> QuerySet[Product]:
+    return Product.objects.select_related("category").filter(
+        status=Product.Status.ACTIVE,
+        can_be_ordered=True,
+    )
+
+
+def get_contract_products_queryset() -> QuerySet[Product]:
+    return Product.objects.select_related("category").filter(
+        status=Product.Status.ACTIVE,
+        can_be_used_in_contracts=True,
+    )
+
+
+def get_public_products_queryset() -> QuerySet[Product]:
+    return Product.objects.select_related("category").filter(
+        status=Product.Status.ACTIVE,
+        is_public=True,
+    )
+
+
+def get_featured_products_queryset() -> QuerySet[Product]:
+    return Product.objects.select_related("category").filter(
+        status=Product.Status.ACTIVE,
+        is_featured=True,
+    )
+
+
+def calculate_product_price_snapshot(product: Product) -> dict[str, Any]:
+    return {
+        "product_id": product.id,
+        "product_code": product.code,
+        "product_name": product.name,
+        "product_type": product.product_type,
+        "currency_code": product.currency_code,
+        "price": str(product.price),
+        "sale_price": str(product.sale_price) if product.sale_price is not None else None,
+        "effective_price": str(product.effective_price),
+        "is_taxable": product.is_taxable,
+        "tax_rate": str(product.tax_rate),
+        "tax_amount": str(product.tax_amount),
+        "total_price_with_tax": str(product.total_price_with_tax),
+        "max_discount_rate": str(product.max_discount_rate),
+        "default_agent_commission_rate": str(product.default_agent_commission_rate),
+    }

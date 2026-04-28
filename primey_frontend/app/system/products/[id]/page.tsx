@@ -2,28 +2,27 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BadgeCheck,
+  BarChart3,
   Boxes,
-  CalendarDays,
   CheckCircle2,
   CreditCard,
-  Edit3,
   Eye,
   FileText,
-  Layers2,
+  Layers3,
   Loader2,
   Package,
   RefreshCcw,
   ShieldCheck,
   Sparkles,
   Star,
+  Stethoscope,
   Tag,
   Trash2,
-  WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -40,23 +39,30 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableHead,
+  TableHeader,
   TableRow,
 } from "@/components/ui/table";
 
 /* ============================================================
    📂 app/system/products/[id]/page.tsx
-   🧠 Primey Care | Product Detail
+   🧠 Primey Care | Product Details
    ------------------------------------------------------------
-   ✅ صفحة تفاصيل المنتج
-   ✅ نفس نمط الصفحات المرفقة
    ✅ ربط حقيقي مع /api/products/<id>/
-   ✅ حذف المنتج عبر DELETE
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ الأرقام دائمًا إنجليزية
-   ✅ استخدام UI الداخلي فقط
-   ✅ استخدام sonner
-   ✅ استخدام رمز SAR من /currency/sar.svg
-   ✅ لا يوجد localhost hardcoded
+   ✅ متوافق مع Backend المرحلة 5
+   ✅ عرض:
+      - Product core
+      - Pricing
+      - Benefits
+      - Pricing tiers
+      - Service items
+      - Readiness for orders/contracts
+   ✅ Delete product
+   ✅ Arabic / English via primey-locale
+   ✅ English numbers always
+   ✅ SAR icon from /currency/sar.svg
+   ✅ sonner toast
+   ✅ no localhost hardcoded
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -77,7 +83,14 @@ type ProductType =
   | "UNKNOWN";
 
 type BillingType = "one_time" | "recurring" | "UNKNOWN";
-type DurationUnit = "none" | "day" | "month" | "year" | "UNKNOWN";
+
+type FulfillmentType =
+  | "digital"
+  | "physical"
+  | "both"
+  | "service_based"
+  | "none"
+  | "UNKNOWN";
 
 type ProductCategory = {
   id: number | string;
@@ -86,11 +99,11 @@ type ProductCategory = {
   category_type?: string | null;
   status?: string | null;
   description?: string | null;
-  sort_order?: number | null;
 };
 
 type ProductBenefit = {
   id: number | string;
+  product_id?: number | string | null;
   title?: string | null;
   description?: string | null;
   sort_order?: number | null;
@@ -99,12 +112,41 @@ type ProductBenefit = {
 
 type ProductPricingTier = {
   id: number | string;
+  product_id?: number | string | null;
   name?: string | null;
+  pricing_type?: string | null;
+  currency_code?: string | null;
   price?: string | number | null;
   sale_price?: string | number | null;
   effective_price?: string | number | null;
+  has_discount?: boolean | null;
+  min_quantity?: number | null;
+  max_quantity?: number | null;
+  discount_rate?: string | number | null;
+  agent_commission_rate?: string | number | null;
+  provider_share_rate?: string | number | null;
+  system_share_rate?: string | number | null;
+  starts_at?: string | null;
+  ends_at?: string | null;
   sort_order?: number | null;
   is_active?: boolean | null;
+};
+
+type ProductServiceItem = {
+  id: number | string;
+  product_id?: number | string | null;
+  name?: string | null;
+  description?: string | null;
+  included_quantity?: number | null;
+  unit_price?: string | number | null;
+  discount_rate?: string | number | null;
+  total_before_discount?: string | number | null;
+  discount_amount?: string | number | null;
+  total_after_discount?: string | number | null;
+  requires_provider?: boolean | null;
+  is_optional?: boolean | null;
+  is_active?: boolean | null;
+  sort_order?: number | null;
 };
 
 type Product = {
@@ -117,34 +159,38 @@ type Product = {
   category?: ProductCategory | null;
   status?: ProductStatus | string | null;
   billing_type?: BillingType | string | null;
-
+  fulfillment_type?: FulfillmentType | string | null;
   short_description?: string | null;
   description?: string | null;
   terms_and_conditions?: string | null;
   features?: string | null;
   tags?: string | null;
-
   currency_code?: string | null;
   price?: string | number | null;
   sale_price?: string | number | null;
   cost_price?: string | number | null;
   effective_price?: string | number | null;
+  tax_amount?: string | number | null;
+  total_price_with_tax?: string | number | null;
   has_discount?: boolean | null;
   is_taxable?: boolean | null;
   tax_rate?: string | number | null;
-
   duration_value?: number | null;
-  duration_unit?: DurationUnit | string | null;
-
+  duration_unit?: string | null;
   is_public?: boolean | null;
   is_featured?: boolean | null;
   requires_approval?: boolean | null;
   allow_online_purchase?: boolean | null;
-  sort_order?: number | null;
-
+  allow_agent_sale?: boolean | null;
+  allow_provider_sale?: boolean | null;
+  can_be_ordered?: boolean | null;
+  can_be_used_in_contracts?: boolean | null;
+  requires_provider?: boolean | null;
+  max_discount_rate?: string | number | null;
+  default_agent_commission_rate?: string | number | null;
   benefits?: ProductBenefit[];
   pricing_tiers?: ProductPricingTier[];
-
+  service_items?: ProductServiceItem[];
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -196,6 +242,13 @@ function formatMoney(value: string | number | null | undefined) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
+}
+
+function formatPercent(value: string | number | null | undefined) {
+  return `${new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(toNumber(value))}%`;
 }
 
 function formatDate(value: string | null | undefined, locale: AppLocale) {
@@ -251,34 +304,22 @@ function normalizeBillingType(type?: string | null): BillingType {
   return "UNKNOWN";
 }
 
-function normalizeDurationUnit(unit?: string | null): DurationUnit {
-  const value = String(unit || "").toLowerCase();
+function normalizeFulfillmentType(type?: string | null): FulfillmentType {
+  const value = String(type || "").toLowerCase();
 
+  if (value === "digital") return "digital";
+  if (value === "physical") return "physical";
+  if (value === "both") return "both";
+  if (value === "service_based") return "service_based";
   if (value === "none") return "none";
-  if (value === "day") return "day";
-  if (value === "month") return "month";
-  if (value === "year") return "year";
 
   return "UNKNOWN";
-}
-
-function splitLines(value?: string | null) {
-  return String(value || "")
-    .split(/\r?\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function getStatusMeta(status: ProductStatus, locale: AppLocale) {
   const isArabic = locale === "ar";
 
-  const map: Record<
-    ProductStatus,
-    {
-      label: string;
-      className: string;
-    }
-  > = {
+  const map: Record<ProductStatus, { label: string; className: string }> = {
     active: {
       label: isArabic ? "نشط" : "Active",
       className:
@@ -335,18 +376,34 @@ function getBillingLabel(type: BillingType, locale: AppLocale) {
   return map[type] || map.UNKNOWN;
 }
 
-function getDurationLabel(unit: DurationUnit, locale: AppLocale) {
+function getFulfillmentLabel(type: FulfillmentType, locale: AppLocale) {
   const isArabic = locale === "ar";
 
-  const map: Record<DurationUnit, string> = {
-    none: isArabic ? "بدون مدة" : "No duration",
-    day: isArabic ? "يوم" : "Day",
-    month: isArabic ? "شهر" : "Month",
-    year: isArabic ? "سنة" : "Year",
+  const map: Record<FulfillmentType, string> = {
+    digital: isArabic ? "رقمي" : "Digital",
+    physical: isArabic ? "فعلي" : "Physical",
+    both: isArabic ? "رقمي وفعلي" : "Digital & physical",
+    service_based: isArabic ? "حسب الخدمة" : "Service based",
+    none: isArabic ? "بدون" : "None",
     UNKNOWN: isArabic ? "غير محدد" : "Unknown",
   };
 
-  return map[unit] || map.UNKNOWN;
+  return map[type] || map.UNKNOWN;
+}
+
+function getPricingTypeLabel(value: string | null | undefined, locale: AppLocale) {
+  const isArabic = locale === "ar";
+
+  const map: Record<string, string> = {
+    standard: isArabic ? "قياسي" : "Standard",
+    customer: isArabic ? "عميل" : "Customer",
+    agent: isArabic ? "مندوب" : "Agent",
+    provider: isArabic ? "مقدم خدمة" : "Provider",
+    contract: isArabic ? "عقد" : "Contract",
+    promotional: isArabic ? "ترويجي" : "Promotional",
+  };
+
+  return map[String(value || "").toLowerCase()] || (isArabic ? "غير محدد" : "Unknown");
 }
 
 function dictionary(locale: AppLocale) {
@@ -354,86 +411,149 @@ function dictionary(locale: AppLocale) {
 
   return {
     badge1: "System Products",
-    badge2: "Product Detail",
+    badge2: "Product Details",
 
-    loading: isArabic ? "جاري تحميل تفاصيل المنتج..." : "Loading product details...",
-    notFound: isArabic ? "لم يتم العثور على المنتج" : "Product not found",
-    loadError: isArabic ? "تعذر تحميل تفاصيل المنتج" : "Could not load product details",
-    deleteSuccess: isArabic ? "تم حذف المنتج بنجاح" : "Product deleted successfully",
-    deleteError: isArabic ? "تعذر حذف المنتج" : "Could not delete product",
-    deleteConfirm: isArabic
-      ? "هل تريد حذف هذا المنتج؟ لا يمكن التراجع عن هذه العملية."
-      : "Delete this product? This action cannot be undone.",
+    title: isArabic ? "تفاصيل المنتج" : "Product Details",
+    subtitle: isArabic
+      ? "عرض بيانات المنتج أو البطاقة أو البرنامج أو الخدمة مع التسعير والجاهزية للطلبات والعقود."
+      : "View product, card, program, or service details with pricing and readiness for orders and contracts.",
 
     back: isArabic ? "رجوع" : "Back",
     dashboard: isArabic ? "لوحة المنتجات" : "Products Dashboard",
     list: isArabic ? "قائمة المنتجات" : "Products List",
-    edit: isArabic ? "تعديل" : "Edit",
-    delete: isArabic ? "حذف" : "Delete",
+    reports: isArabic ? "التقارير" : "Reports",
     refresh: isArabic ? "تحديث" : "Refresh",
+    delete: isArabic ? "حذف المنتج" : "Delete Product",
+    deleting: isArabic ? "جاري الحذف..." : "Deleting...",
 
-    seller: isArabic ? "التصنيف" : "Category",
-    published: isArabic ? "تاريخ الإنشاء" : "Published",
-    sku: isArabic ? "الكود" : "SKU",
+    overview: isArabic ? "نظرة عامة" : "Overview",
+    overviewDesc: isArabic
+      ? "البيانات الأساسية للمنتج وحالته التشغيلية."
+      : "Core product information and operational status.",
 
-    price: isArabic ? "السعر" : "Price",
-    productType: isArabic ? "نوع المنتج" : "Product Type",
-    billingType: isArabic ? "الفوترة" : "Billing",
-    value: isArabic ? "القيمة" : "Value",
+    pricing: isArabic ? "التسعير" : "Pricing",
+    pricingDesc: isArabic
+      ? "السعر الأساسي وسعر العرض والضريبة والتكلفة."
+      : "Base price, sale price, tax, and cost.",
 
-    description: isArabic ? "الوصف" : "Description",
-    keyFeatures: isArabic ? "الخصائص الرئيسية" : "Key Features",
-    productInfo: isArabic ? "معلومات المنتج" : "Product Information",
+    readiness: isArabic ? "الجاهزية والربط" : "Readiness & Binding",
+    readinessDesc: isArabic
+      ? "جاهزية المنتج للطلبات والعقود ومقدم الخدمة."
+      : "Product readiness for orders, contracts, and provider binding.",
+
+    content: isArabic ? "الوصف والمحتوى" : "Description & Content",
+    contentDesc: isArabic
+      ? "الوصف والخصائص والشروط والوسوم."
+      : "Description, features, terms, and tags.",
+
     benefits: isArabic ? "مزايا المنتج" : "Product Benefits",
-    pricingTiers: isArabic ? "شرائح التسعير" : "Pricing Tiers",
-    terms: isArabic ? "الشروط والأحكام" : "Terms & Conditions",
-    operationalOptions: isArabic ? "خيارات التشغيل والبيع" : "Sales & Operational Options",
+    benefitsDesc: isArabic
+      ? "المزايا المرتبطة بالمنتج."
+      : "Benefits linked to this product.",
 
-    status: isArabic ? "الحالة" : "Status",
+    pricingTiers: isArabic ? "شرائح التسعير" : "Pricing Tiers",
+    pricingTiersDesc: isArabic
+      ? "الأسعار المختلفة حسب العميل أو المندوب أو مقدم الخدمة أو العقد."
+      : "Different prices for customer, agent, provider, or contract.",
+
+    serviceItems: isArabic ? "عناصر الخدمات" : "Service Items",
+    serviceItemsDesc: isArabic
+      ? "الخدمات الداخلية للبرامج والباقات."
+      : "Internal services for programs and packages.",
+
+    productName: isArabic ? "اسم المنتج" : "Product Name",
+    code: isArabic ? "الكود" : "Code",
+    type: isArabic ? "النوع" : "Type",
     category: isArabic ? "التصنيف" : "Category",
-    currency: isArabic ? "العملة" : "Currency",
+    status: isArabic ? "الحالة" : "Status",
+    billing: isArabic ? "الفوترة" : "Billing",
+    fulfillment: isArabic ? "التسليم" : "Fulfillment",
+    duration: isArabic ? "المدة" : "Duration",
+    createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
+    updatedAt: isArabic ? "آخر تحديث" : "Updated At",
+
     basePrice: isArabic ? "السعر الأساسي" : "Base Price",
     salePrice: isArabic ? "سعر العرض" : "Sale Price",
+    effectivePrice: isArabic ? "السعر الفعلي" : "Effective Price",
     costPrice: isArabic ? "التكلفة" : "Cost Price",
     taxRate: isArabic ? "نسبة الضريبة" : "Tax Rate",
-    duration: isArabic ? "المدة" : "Duration",
-    sortOrder: isArabic ? "ترتيب العرض" : "Sort Order",
-    slug: isArabic ? "Slug" : "Slug",
-    updatedAt: isArabic ? "آخر تحديث" : "Updated At",
-    createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
+    taxAmount: isArabic ? "قيمة الضريبة" : "Tax Amount",
+    totalWithTax: isArabic ? "الإجمالي مع الضريبة" : "Total With Tax",
+    maxDiscount: isArabic ? "أعلى خصم" : "Max Discount",
+    agentCommission: isArabic ? "عمولة المندوب" : "Agent Commission",
 
-    public: isArabic ? "ظاهر للعامة" : "Public",
-    featured: isArabic ? "منتج مميز" : "Featured",
-    online: isArabic ? "شراء إلكتروني" : "Online Purchase",
-    approval: isArabic ? "يتطلب اعتماد" : "Requires Approval",
+    public: isArabic ? "عام" : "Public",
+    private: isArabic ? "خاص" : "Private",
+    featured: isArabic ? "مميز" : "Featured",
+    onlinePurchase: isArabic ? "شراء إلكتروني" : "Online Purchase",
+    agentSale: isArabic ? "بيع مندوب" : "Agent Sale",
+    providerSale: isArabic ? "بيع مقدم خدمة" : "Provider Sale",
+    canBeOrdered: isArabic ? "قابل للطلب" : "Can Be Ordered",
+    canBeUsedInContracts: isArabic ? "قابل للاستخدام في العقود" : "Can Be Used In Contracts",
+    requiresProvider: isArabic ? "يتطلب مقدم خدمة" : "Requires Provider",
+    requiresApproval: isArabic ? "يتطلب اعتماد" : "Requires Approval",
     taxable: isArabic ? "خاضع للضريبة" : "Taxable",
-    discount: isArabic ? "يوجد خصم" : "Discount",
+    hasDiscount: isArabic ? "يوجد خصم" : "Has Discount",
 
-    yes: isArabic ? "نعم" : "Yes",
-    no: isArabic ? "لا" : "No",
+    shortDescription: isArabic ? "وصف مختصر" : "Short Description",
+    description: isArabic ? "الوصف التفصيلي" : "Description",
+    features: isArabic ? "الخصائص" : "Features",
+    terms: isArabic ? "الشروط والأحكام" : "Terms & Conditions",
+    tags: isArabic ? "الوسوم" : "Tags",
+
+    tableName: isArabic ? "الاسم" : "Name",
+    tableType: isArabic ? "النوع" : "Type",
+    tablePrice: isArabic ? "السعر" : "Price",
+    tableStatus: isArabic ? "الحالة" : "Status",
+    tableQuantity: isArabic ? "الكمية" : "Quantity",
+    tableDiscount: isArabic ? "الخصم" : "Discount",
+    tableTotal: isArabic ? "الإجمالي" : "Total",
+    tableProviderShare: isArabic ? "حصة مقدم الخدمة" : "Provider Share",
+    tableSystemShare: isArabic ? "حصة النظام" : "System Share",
+
     active: isArabic ? "نشط" : "Active",
     inactive: isArabic ? "غير نشط" : "Inactive",
+    optional: isArabic ? "اختياري" : "Optional",
+    required: isArabic ? "إجباري" : "Required",
+
+    emptyBenefits: isArabic ? "لا توجد مزايا مسجلة" : "No benefits registered",
+    emptyTiers: isArabic ? "لا توجد شرائح تسعير" : "No pricing tiers",
+    emptyServiceItems: isArabic ? "لا توجد عناصر خدمات" : "No service items",
+
     noCategory: isArabic ? "بدون تصنيف" : "No category",
-    notSet: isArabic ? "غير محدد" : "Not set",
-    noDescription: isArabic ? "لا يوجد وصف لهذا المنتج." : "No description for this product.",
-    noFeatures: isArabic ? "لا توجد خصائص مسجلة." : "No features registered.",
-    noTerms: isArabic ? "لا توجد شروط وأحكام مسجلة." : "No terms and conditions registered.",
-    noBenefits: isArabic ? "لا توجد مزايا مسجلة." : "No benefits registered.",
-    noTiers: isArabic ? "لا توجد شرائح تسعير مسجلة." : "No pricing tiers registered.",
+    noData: isArabic ? "غير محدد" : "Not set",
+    unnamedProduct: isArabic ? "منتج بدون اسم" : "Unnamed product",
 
-    tierName: isArabic ? "الشريحة" : "Tier",
-    tierPrice: isArabic ? "السعر" : "Price",
-    tierSalePrice: isArabic ? "سعر العرض" : "Sale Price",
-    tierStatus: isArabic ? "الحالة" : "Status",
-
-    quickSummary: isArabic ? "ملخص سريع" : "Quick Summary",
-    quickSummaryDesc: isArabic
-      ? "نظرة مختصرة على حالة المنتج وإعداداته."
-      : "A quick view of product status and configuration.",
-
-    tags: isArabic ? "الوسوم" : "Tags",
-    noTags: isArabic ? "لا توجد وسوم" : "No tags",
+    loading: isArabic ? "جاري تحميل المنتج..." : "Loading product...",
+    loadError: isArabic ? "تعذر تحميل بيانات المنتج" : "Could not load product",
+    refreshSuccess: isArabic ? "تم تحديث بيانات المنتج" : "Product data refreshed",
+    deleteConfirm: isArabic
+      ? "هل أنت متأكد من حذف هذا المنتج؟"
+      : "Are you sure you want to delete this product?",
+    deleteSuccess: isArabic ? "تم حذف المنتج بنجاح" : "Product deleted successfully",
+    deleteError: isArabic ? "تعذر حذف المنتج" : "Could not delete product",
   };
+}
+
+function MoneyValue({
+  value,
+  className = "",
+}: {
+  value: string | number | null | undefined;
+  className?: string;
+}) {
+  return (
+    <div className={`flex items-center gap-1 ${className}`}>
+      <span>{formatMoney(value)}</span>
+      <Image
+        src={SAR_ICON_PATH}
+        alt="SAR"
+        width={15}
+        height={15}
+        className="opacity-80"
+      />
+    </div>
+  );
 }
 
 function InfoRow({
@@ -444,40 +564,37 @@ function InfoRow({
   value: React.ReactNode;
 }) {
   return (
-    <TableRow>
-      <TableCell className="w-[42%] font-semibold">{label}</TableCell>
-      <TableCell className="text-end text-muted-foreground">{value}</TableCell>
-    </TableRow>
+    <div className="flex items-center justify-between gap-4 rounded-2xl border bg-background/50 p-4">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="text-end text-sm font-semibold">{value}</div>
+    </div>
   );
 }
 
-function OptionBadge({
-  enabled,
-  label,
+function TextBlock({
+  title,
+  value,
+  fallback,
 }: {
-  enabled: boolean;
-  label: string;
+  title: string;
+  value?: string | null;
+  fallback: string;
 }) {
   return (
-    <Badge
-      variant={enabled ? "default" : "outline"}
-      className="rounded-full px-3 py-1"
-    >
-      {enabled ? (
-        <CheckCircle2 className="h-3.5 w-3.5" />
-      ) : (
-        <Eye className="h-3.5 w-3.5 opacity-50" />
-      )}
-      {label}
-    </Badge>
+    <div className="rounded-3xl border bg-background/50 p-4">
+      <p className="mb-2 text-sm font-semibold">{title}</p>
+      <p className="whitespace-pre-line text-sm leading-7 text-muted-foreground">
+        {value?.trim() || fallback}
+      </p>
+    </div>
   );
 }
 
-export default function SystemProductDetailPage() {
-  const params = useParams();
+export default function SystemProductDetailsPage() {
+  const params = useParams<{ id: string }>();
   const router = useRouter();
 
-  const productId = String(params?.id || "");
+  const productId = params?.id;
 
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [product, setProduct] = useState<Product | null>(null);
@@ -525,9 +642,7 @@ export default function SystemProductDetailPage() {
         },
       });
 
-      const payload = (await response
-        .json()
-        .catch(() => ({}))) as ProductApiResponse;
+      const payload = (await response.json().catch(() => ({}))) as ProductApiResponse;
 
       if (!response.ok || payload.ok === false || !payload.data) {
         throw new Error(payload.message || t.loadError);
@@ -536,7 +651,7 @@ export default function SystemProductDetailPage() {
       setProduct(payload.data);
 
       if (showToast) {
-        toast.success(locale === "ar" ? "تم تحديث تفاصيل المنتج" : "Product details refreshed");
+        toast.success(t.refreshSuccess);
       }
     } catch (error) {
       console.error("Failed to load product:", error);
@@ -553,7 +668,10 @@ export default function SystemProductDetailPage() {
   }, [productId]);
 
   async function deleteProduct() {
-    if (!productId || !window.confirm(t.deleteConfirm)) return;
+    if (!productId || !product) return;
+
+    const confirmed = window.confirm(t.deleteConfirm);
+    if (!confirmed) return;
 
     setIsDeleting(true);
 
@@ -567,7 +685,7 @@ export default function SystemProductDetailPage() {
         },
       });
 
-      const payload = await response.json().catch(() => ({}));
+      const payload = (await response.json().catch(() => ({}))) as ProductApiResponse;
 
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.message || t.deleteError);
@@ -584,30 +702,61 @@ export default function SystemProductDetailPage() {
     }
   }
 
-  const productStatus = normalizeStatus(product?.status);
+  const status = normalizeStatus(product?.status);
+  const statusMeta = getStatusMeta(status, locale);
   const productType = normalizeType(product?.product_type);
   const billingType = normalizeBillingType(product?.billing_type);
-  const durationUnit = normalizeDurationUnit(product?.duration_unit);
-  const statusMeta = getStatusMeta(productStatus, locale);
+  const fulfillmentType = normalizeFulfillmentType(product?.fulfillment_type);
 
-  const features = useMemo(() => splitLines(product?.features), [product?.features]);
-  const tags = useMemo(() => splitLines(product?.tags), [product?.tags]);
+  const durationLabel = useMemo(() => {
+    if (!product) return t.noData;
 
-  const durationText = useMemo(() => {
-    const durationValue = Number(product?.duration_value || 0);
+    const value = Number(product.duration_value || 0);
+    const unit = String(product.duration_unit || "none");
 
-    if (!durationValue || durationUnit === "none" || durationUnit === "UNKNOWN") {
-      return t.notSet;
+    if (!value || unit === "none") return t.noData;
+
+    const unitMap: Record<string, string> = {
+      day: locale === "ar" ? "يوم" : "Day",
+      month: locale === "ar" ? "شهر" : "Month",
+      year: locale === "ar" ? "سنة" : "Year",
+    };
+
+    return `${formatNumber(value)} ${unitMap[unit] || unit}`;
+  }, [locale, product, t.noData]);
+
+  const stats = useMemo(() => {
+    if (!product) {
+      return {
+        benefits: 0,
+        pricingTiers: 0,
+        serviceItems: 0,
+        readiness: 0,
+      };
     }
 
-    return `${formatNumber(durationValue)} ${getDurationLabel(durationUnit, locale)}`;
-  }, [durationUnit, locale, product?.duration_value, t.notSet]);
+    const readinessFlags = [
+      product.can_be_ordered,
+      product.can_be_used_in_contracts,
+      product.requires_provider,
+      product.allow_online_purchase,
+      product.allow_agent_sale,
+      product.allow_provider_sale,
+    ].filter(Boolean).length;
+
+    return {
+      benefits: product.benefits?.length || 0,
+      pricingTiers: product.pricing_tiers?.length || 0,
+      serviceItems: product.service_items?.length || 0,
+      readiness: readinessFlags,
+    };
+  }, [product]);
 
   if (isLoading) {
     return (
       <div className="flex min-h-[55vh] items-center justify-center">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
+        <div className="flex items-center gap-3 rounded-3xl border bg-white/70 px-5 py-4 text-sm text-muted-foreground shadow-sm backdrop-blur-xl dark:bg-white/5">
+          <Loader2 className="h-5 w-5 animate-spin text-primary" />
           {t.loading}
         </div>
       </div>
@@ -616,465 +765,624 @@ export default function SystemProductDetailPage() {
 
   if (!product) {
     return (
-      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-        <CardContent className="flex min-h-[360px] flex-col items-center justify-center gap-4 p-8 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-muted text-muted-foreground">
-            <Package className="h-8 w-8" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold">{t.notFound}</h1>
-            <p className="mt-2 text-sm text-muted-foreground">{t.loadError}</p>
-          </div>
-          <Button asChild className="rounded-2xl">
-            <Link href="/system/products/list">
-              <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
-              {t.list}
-            </Link>
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardContent className="flex min-h-[280px] flex-col items-center justify-center gap-4 p-8 text-center">
+            <Package className="h-12 w-12 text-muted-foreground" />
+            <div>
+              <h1 className="text-xl font-bold">{t.loadError}</h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {t.noData}
+              </p>
+            </div>
+            <Button asChild className="rounded-2xl">
+              <Link href="/system/products/list">
+                <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
+                {t.list}
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
-
-  const priceCards = [
-    {
-      label: t.price,
-      value: formatMoney(product.effective_price || product.price),
-      icon: CreditCard,
-      money: true,
-    },
-    {
-      label: t.productType,
-      value: getTypeLabel(productType, locale),
-      icon: Layers2,
-      money: false,
-    },
-    {
-      label: t.billingType,
-      value: getBillingLabel(billingType, locale),
-      icon: WalletCards,
-      money: false,
-    },
-    {
-      label: t.value,
-      value: formatMoney(product.price),
-      icon: Boxes,
-      money: true,
-    },
-  ];
 
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden rounded-3xl border-white/20 bg-white/70 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
         <CardContent className="p-6 md:p-7">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr] xl:items-center">
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge className="rounded-full px-3 py-1">{t.badge1}</Badge>
                 <Badge variant="secondary" className="rounded-full px-3 py-1">
                   {t.badge2}
                 </Badge>
-                <Badge className={`rounded-full border px-3 py-1 ${statusMeta.className}`}>
+                <Badge
+                  className={`rounded-full border px-3 py-1 ${statusMeta.className}`}
+                >
                   {statusMeta.label}
                 </Badge>
               </div>
 
               <div className="space-y-2">
                 <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-                  {product.name || t.notSet}
+                  {product.name || t.unnamedProduct}
                 </h1>
 
-                <div className="flex flex-col gap-2 text-sm text-muted-foreground lg:flex-row lg:flex-wrap lg:gap-4">
-                  <div>
-                    <span className="font-semibold text-foreground">{t.seller}: </span>
+                <p className="max-w-3xl text-sm leading-7 text-muted-foreground">
+                  {product.short_description || t.subtitle}
+                </p>
+
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Badge variant="outline" className="rounded-full">
+                    <Package className="h-3.5 w-3.5" />
+                    {product.code || t.noData}
+                  </Badge>
+
+                  <Badge variant="outline" className="rounded-full">
+                    <Tag className="h-3.5 w-3.5" />
+                    {getTypeLabel(productType, locale)}
+                  </Badge>
+
+                  <Badge variant="outline" className="rounded-full">
                     {product.category?.name || t.noCategory}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-foreground">{t.published}: </span>
-                    {formatDate(product.created_at, locale)}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-foreground">{t.sku}: </span>
-                    {product.code || product.slug || "-"}
-                  </div>
+                  </Badge>
+
+                  {product.is_featured ? (
+                    <Badge className="rounded-full">
+                      <Star className="h-3.5 w-3.5" />
+                      {t.featured}
+                    </Badge>
+                  ) : null}
                 </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button asChild variant="outline" className="rounded-2xl">
+                  <Link href="/system/products/list">
+                    <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
+                    {t.back}
+                  </Link>
+                </Button>
+
+                <Button asChild variant="outline" className="rounded-2xl">
+                  <Link href="/system/products">
+                    <Eye className="h-4 w-4" />
+                    {t.dashboard}
+                  </Link>
+                </Button>
+
+                <Button asChild variant="outline" className="rounded-2xl">
+                  <Link href="/system/products/reports">
+                    <BarChart3 className="h-4 w-4" />
+                    {t.reports}
+                  </Link>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-2xl"
+                  onClick={() => loadProduct(true)}
+                  disabled={isLoading}
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  {t.refresh}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="rounded-2xl"
+                  onClick={deleteProduct}
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                  {isDeleting ? t.deleting : t.delete}
+                </Button>
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Button asChild variant="outline" className="rounded-2xl">
-                <Link href="/system/products/list">
-                  <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
-                  {t.list}
-                </Link>
-              </Button>
+            <div className="rounded-3xl border border-white/20 bg-gradient-to-br from-primary/10 via-background/60 to-background p-5 shadow-inner dark:border-white/10">
+              <p className="text-sm text-muted-foreground">{t.effectivePrice}</p>
+              <MoneyValue
+                value={product.effective_price || product.price}
+                className="mt-2 text-3xl font-bold"
+              />
 
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl"
-                onClick={() => loadProduct(true)}
-                disabled={isLoading}
-              >
-                <RefreshCcw className="h-4 w-4" />
-                {t.refresh}
-              </Button>
+              <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-2xl bg-white/70 p-3 dark:bg-white/5">
+                  <p className="text-muted-foreground">{t.benefits}</p>
+                  <p className="mt-1 font-bold">{formatNumber(stats.benefits)}</p>
+                </div>
 
-              <Button asChild className="rounded-2xl">
-                <Link href={`/system/products/${product.id}/edit`}>
-                  <Edit3 className="h-4 w-4" />
-                  {t.edit}
-                </Link>
-              </Button>
+                <div className="rounded-2xl bg-white/70 p-3 dark:bg-white/5">
+                  <p className="text-muted-foreground">{t.pricingTiers}</p>
+                  <p className="mt-1 font-bold">
+                    {formatNumber(stats.pricingTiers)}
+                  </p>
+                </div>
 
-              <Button
-                type="button"
-                variant="destructive"
-                className="rounded-2xl"
-                onClick={deleteProduct}
-                disabled={isDeleting}
-              >
-                {isDeleting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
-                {t.delete}
-              </Button>
+                <div className="rounded-2xl bg-white/70 p-3 dark:bg-white/5">
+                  <p className="text-muted-foreground">{t.serviceItems}</p>
+                  <p className="mt-1 font-bold">
+                    {formatNumber(stats.serviceItems)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-white/70 p-3 dark:bg-white/5">
+                  <p className="text-muted-foreground">{t.readiness}</p>
+                  <p className="mt-1 font-bold">
+                    {formatNumber(stats.readiness)}
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-3">
-        <div className="min-w-0 xl:col-span-1">
-          <Card className="overflow-hidden rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardContent className="p-5">
-              <div className="flex aspect-square items-center justify-center rounded-3xl border bg-gradient-to-br from-primary/10 via-background to-muted">
-                <div className="text-center">
-                  <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-[2rem] bg-primary/10 text-primary">
-                    <Package className="h-14 w-14" />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardContent className="flex items-start justify-between gap-3 p-5">
+            <div>
+              <p className="text-sm text-muted-foreground">{t.basePrice}</p>
+              <MoneyValue value={product.price} className="mt-2 text-2xl font-bold" />
+            </div>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <CreditCard className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardContent className="flex items-start justify-between gap-3 p-5">
+            <div>
+              <p className="text-sm text-muted-foreground">{t.taxAmount}</p>
+              <MoneyValue
+                value={product.tax_amount}
+                className="mt-2 text-2xl font-bold"
+              />
+            </div>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <BadgeCheck className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardContent className="flex items-start justify-between gap-3 p-5">
+            <div>
+              <p className="text-sm text-muted-foreground">{t.totalWithTax}</p>
+              <MoneyValue
+                value={product.total_price_with_tax}
+                className="mt-2 text-2xl font-bold"
+              />
+            </div>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardContent className="flex items-start justify-between gap-3 p-5">
+            <div>
+              <p className="text-sm text-muted-foreground">{t.agentCommission}</p>
+              <p className="mt-2 text-2xl font-bold">
+                {formatPercent(product.default_agent_commission_rate)}
+              </p>
+            </div>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <Sparkles className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1fr_0.85fr]">
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5 text-primary" />
+              {t.overview}
+            </CardTitle>
+            <CardDescription>{t.overviewDesc}</CardDescription>
+          </CardHeader>
+
+          <CardContent className="grid gap-3 md:grid-cols-2">
+            <InfoRow label={t.productName} value={product.name || t.noData} />
+            <InfoRow label={t.code} value={product.code || t.noData} />
+            <InfoRow label={t.type} value={getTypeLabel(productType, locale)} />
+            <InfoRow label={t.category} value={product.category?.name || t.noCategory} />
+            <InfoRow label={t.status} value={statusMeta.label} />
+            <InfoRow label={t.billing} value={getBillingLabel(billingType, locale)} />
+            <InfoRow
+              label={t.fulfillment}
+              value={getFulfillmentLabel(fulfillmentType, locale)}
+            />
+            <InfoRow label={t.duration} value={durationLabel} />
+            <InfoRow
+              label={t.createdAt}
+              value={formatDate(product.created_at, locale)}
+            />
+            <InfoRow
+              label={t.updatedAt}
+              value={formatDate(product.updated_at, locale)}
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              {t.readiness}
+            </CardTitle>
+            <CardDescription>{t.readinessDesc}</CardDescription>
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <Badge
+                variant={product.is_public ? "secondary" : "outline"}
+                className="rounded-full"
+              >
+                {product.is_public ? t.public : t.private}
+              </Badge>
+
+              {product.is_featured ? (
+                <Badge className="rounded-full">
+                  <Star className="h-3 w-3" />
+                  {t.featured}
+                </Badge>
+              ) : null}
+
+              {product.allow_online_purchase ? (
+                <Badge variant="secondary" className="rounded-full">
+                  {t.onlinePurchase}
+                </Badge>
+              ) : null}
+
+              {product.allow_agent_sale ? (
+                <Badge variant="outline" className="rounded-full">
+                  {t.agentSale}
+                </Badge>
+              ) : null}
+
+              {product.allow_provider_sale ? (
+                <Badge variant="outline" className="rounded-full">
+                  {t.providerSale}
+                </Badge>
+              ) : null}
+
+              {product.can_be_ordered ? (
+                <Badge variant="secondary" className="rounded-full">
+                  <ShieldCheck className="h-3 w-3" />
+                  {t.canBeOrdered}
+                </Badge>
+              ) : null}
+
+              {product.can_be_used_in_contracts ? (
+                <Badge variant="outline" className="rounded-full">
+                  <Boxes className="h-3 w-3" />
+                  {t.canBeUsedInContracts}
+                </Badge>
+              ) : null}
+
+              {product.requires_provider ? (
+                <Badge variant="outline" className="rounded-full">
+                  <Stethoscope className="h-3 w-3" />
+                  {t.requiresProvider}
+                </Badge>
+              ) : null}
+
+              {product.requires_approval ? (
+                <Badge variant="outline" className="rounded-full">
+                  {t.requiresApproval}
+                </Badge>
+              ) : null}
+
+              {product.is_taxable ? (
+                <Badge variant="outline" className="rounded-full">
+                  {t.taxable}
+                </Badge>
+              ) : null}
+
+              {product.has_discount ? (
+                <Badge variant="outline" className="rounded-full">
+                  {t.hasDiscount}
+                </Badge>
+              ) : null}
+            </div>
+
+            <div className="grid gap-3 pt-2">
+              <InfoRow label={t.maxDiscount} value={formatPercent(product.max_discount_rate)} />
+              <InfoRow
+                label={t.agentCommission}
+                value={formatPercent(product.default_agent_commission_rate)}
+              />
+              <InfoRow label={t.taxRate} value={formatPercent(product.tax_rate)} />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5 text-primary" />
+            {t.pricing}
+          </CardTitle>
+          <CardDescription>{t.pricingDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <InfoRow label={t.basePrice} value={<MoneyValue value={product.price} />} />
+          <InfoRow label={t.salePrice} value={<MoneyValue value={product.sale_price} />} />
+          <InfoRow
+            label={t.effectivePrice}
+            value={<MoneyValue value={product.effective_price} />}
+          />
+          <InfoRow label={t.costPrice} value={<MoneyValue value={product.cost_price} />} />
+          <InfoRow label={t.taxRate} value={formatPercent(product.tax_rate)} />
+          <InfoRow label={t.taxAmount} value={<MoneyValue value={product.tax_amount} />} />
+          <InfoRow
+            label={t.totalWithTax}
+            value={<MoneyValue value={product.total_price_with_tax} />}
+          />
+          <InfoRow label={t.maxDiscount} value={formatPercent(product.max_discount_rate)} />
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-primary" />
+            {t.content}
+          </CardTitle>
+          <CardDescription>{t.contentDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <TextBlock
+            title={t.shortDescription}
+            value={product.short_description}
+            fallback={t.noData}
+          />
+          <TextBlock title={t.tags} value={product.tags} fallback={t.noData} />
+          <TextBlock
+            title={t.description}
+            value={product.description}
+            fallback={t.noData}
+          />
+          <TextBlock title={t.features} value={product.features} fallback={t.noData} />
+          <div className="md:col-span-2">
+            <TextBlock
+              title={t.terms}
+              value={product.terms_and_conditions}
+              fallback={t.noData}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-primary" />
+            {t.benefits}
+          </CardTitle>
+          <CardDescription>{t.benefitsDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent>
+          {product.benefits?.length ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {product.benefits.map((benefit) => (
+                <div
+                  key={benefit.id}
+                  className="rounded-3xl border bg-background/50 p-4"
+                >
+                  <div className="mb-2 flex items-start justify-between gap-3">
+                    <h3 className="font-bold">{benefit.title || t.noData}</h3>
+                    <Badge
+                      variant={benefit.is_active ? "secondary" : "outline"}
+                      className="rounded-full"
+                    >
+                      {benefit.is_active ? t.active : t.inactive}
+                    </Badge>
                   </div>
-                  <h2 className="mt-5 text-xl font-bold">
-                    {product.name || t.notSet}
-                  </h2>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {product.short_description || product.category?.name || t.noCategory}
+
+                  <p className="text-sm leading-7 text-muted-foreground">
+                    {benefit.description || t.noData}
                   </p>
                 </div>
-              </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex min-h-[130px] items-center justify-center rounded-3xl border border-dashed text-sm text-muted-foreground">
+              {t.emptyBenefits}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-              <div className="mt-4 flex flex-wrap gap-2">
-                <OptionBadge enabled={Boolean(product.is_public)} label={t.public} />
-                <OptionBadge enabled={Boolean(product.is_featured)} label={t.featured} />
-                <OptionBadge enabled={Boolean(product.allow_online_purchase)} label={t.online} />
-                <OptionBadge enabled={Boolean(product.requires_approval)} label={t.approval} />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Layers3 className="h-5 w-5 text-primary" />
+            {t.pricingTiers}
+          </CardTitle>
+          <CardDescription>{t.pricingTiersDesc}</CardDescription>
+        </CardHeader>
 
-        <div className="space-y-6 xl:col-span-2">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {priceCards.map((item) => {
-              const Icon = item.icon;
+        <CardContent>
+          {product.pricing_tiers?.length ? (
+            <div className="overflow-hidden rounded-3xl border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead>{t.tableName}</TableHead>
+                    <TableHead>{t.tableType}</TableHead>
+                    <TableHead>{t.tablePrice}</TableHead>
+                    <TableHead>{t.tableDiscount}</TableHead>
+                    <TableHead>{t.agentCommission}</TableHead>
+                    <TableHead>{t.tableProviderShare}</TableHead>
+                    <TableHead>{t.tableSystemShare}</TableHead>
+                    <TableHead>{t.tableStatus}</TableHead>
+                  </TableRow>
+                </TableHeader>
 
-              return (
-                <Card
-                  key={item.label}
-                  className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl transition hover:-translate-y-0.5 hover:shadow-lg dark:border-white/10 dark:bg-white/5"
-                >
-                  <CardContent className="grid auto-cols-max grid-flow-col gap-4 p-4">
-                    <Icon className="h-6 w-6 opacity-40" />
-                    <div className="flex flex-col gap-1">
-                      <span className="text-sm text-muted-foreground">
-                        {item.label}
-                      </span>
-                      <span className="flex items-center gap-1 text-lg font-semibold">
-                        {item.value}
-                        {item.money ? (
-                          <Image
-                            src={SAR_ICON_PATH}
-                            alt="SAR"
-                            width={15}
-                            height={15}
-                            className="opacity-80"
-                          />
-                        ) : null}
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+                <TableBody>
+                  {product.pricing_tiers.map((tier) => (
+                    <TableRow key={tier.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-semibold">{tier.name || t.noData}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatNumber(tier.min_quantity || 1)}
+                            {tier.max_quantity
+                              ? ` - ${formatNumber(tier.max_quantity)}`
+                              : ""}
+                          </p>
+                        </div>
+                      </TableCell>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardContent className="space-y-6 p-6">
-              <div className="grid items-start gap-8 xl:grid-cols-3">
-                <div className="space-y-8 xl:col-span-2">
-                  <div>
-                    <h3 className="mb-2 flex items-center gap-2 font-semibold">
-                      <FileText className="h-4 w-4 text-primary" />
-                      {t.description}:
-                    </h3>
-                    <p className="leading-7 text-muted-foreground">
-                      {product.description || product.short_description || t.noDescription}
-                    </p>
-                  </div>
+                      <TableCell>
+                        {getPricingTypeLabel(tier.pricing_type, locale)}
+                      </TableCell>
 
-                  <div>
-                    <h3 className="mb-2 flex items-center gap-2 font-semibold">
-                      <Sparkles className="h-4 w-4 text-primary" />
-                      {t.keyFeatures}:
-                    </h3>
-
-                    {features.length ? (
-                      <ul className="list-inside list-disc space-y-1 text-muted-foreground">
-                        {features.map((feature, index) => (
-                          <li key={`${feature}-${index}`}>{feature}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-muted-foreground">{t.noFeatures}</p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="overflow-hidden rounded-2xl border xl:col-span-1">
-                  <Table>
-                    <TableBody>
-                      <InfoRow label={t.category} value={product.category?.name || t.noCategory} />
-                      <InfoRow label={t.status} value={statusMeta.label} />
-                      <InfoRow label={t.billingType} value={getBillingLabel(billingType, locale)} />
-                      <InfoRow label={t.duration} value={durationText} />
-                      <InfoRow label={t.slug} value={product.slug || t.notSet} />
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <Card className="rounded-3xl bg-muted/30">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <ShieldCheck className="h-4 w-4 text-primary" />
-                      {t.operationalOptions}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="flex flex-wrap gap-2">
-                    <OptionBadge enabled={Boolean(product.is_public)} label={t.public} />
-                    <OptionBadge enabled={Boolean(product.is_featured)} label={t.featured} />
-                    <OptionBadge enabled={Boolean(product.allow_online_purchase)} label={t.online} />
-                    <OptionBadge enabled={Boolean(product.requires_approval)} label={t.approval} />
-                    <OptionBadge enabled={Boolean(product.is_taxable)} label={t.taxable} />
-                    <OptionBadge enabled={Boolean(product.has_discount)} label={t.discount} />
-                  </CardContent>
-                </Card>
-
-                <Card className="rounded-3xl bg-muted/30">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Tag className="h-4 w-4 text-primary" />
-                      {t.tags}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="flex flex-wrap gap-2">
-                    {tags.length ? (
-                      tags.map((tag, index) => (
-                        <Badge
-                          key={`${tag}-${index}`}
-                          variant="secondary"
-                          className="rounded-full"
-                        >
-                          {tag}
-                        </Badge>
-                      ))
-                    ) : (
-                      <p className="text-sm text-muted-foreground">{t.noTags}</p>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-6 xl:grid-cols-2">
-            <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CreditCard className="h-5 w-5 text-primary" />
-                  {t.productInfo}
-                </CardTitle>
-                <CardDescription>{t.quickSummaryDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                <div className="overflow-hidden rounded-2xl border">
-                  <Table>
-                    <TableBody>
-                      <InfoRow label={t.basePrice} value={
-                        <span className="inline-flex items-center gap-1">
-                          {formatMoney(product.price)}
-                          <Image src={SAR_ICON_PATH} alt="SAR" width={13} height={13} />
-                        </span>
-                      } />
-                      <InfoRow label={t.salePrice} value={
-                        product.sale_price ? (
-                          <span className="inline-flex items-center gap-1">
-                            {formatMoney(product.sale_price)}
-                            <Image src={SAR_ICON_PATH} alt="SAR" width={13} height={13} />
-                          </span>
-                        ) : t.notSet
-                      } />
-                      <InfoRow label={t.costPrice} value={
-                        product.cost_price ? (
-                          <span className="inline-flex items-center gap-1">
-                            {formatMoney(product.cost_price)}
-                            <Image src={SAR_ICON_PATH} alt="SAR" width={13} height={13} />
-                          </span>
-                        ) : t.notSet
-                      } />
-                      <InfoRow label={t.taxRate} value={`${formatMoney(product.tax_rate)}%`} />
-                      <InfoRow label={t.sortOrder} value={formatNumber(Number(product.sort_order || 0))} />
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CalendarDays className="h-5 w-5 text-primary" />
-                  {t.quickSummary}
-                </CardTitle>
-                <CardDescription>{t.quickSummaryDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                <div className="overflow-hidden rounded-2xl border">
-                  <Table>
-                    <TableBody>
-                      <InfoRow label={t.createdAt} value={formatDate(product.created_at, locale)} />
-                      <InfoRow label={t.updatedAt} value={formatDate(product.updated_at, locale)} />
-                      <InfoRow label={t.productType} value={getTypeLabel(productType, locale)} />
-                      <InfoRow label={t.currency} value={product.currency_code || "SAR"} />
-                      <InfoRow label={t.sku} value={product.code || "-"} />
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BadgeCheck className="h-5 w-5 text-primary" />
-                {t.benefits}
-              </CardTitle>
-              <CardDescription>{t.benefits}</CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              {product.benefits?.length ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  {product.benefits.map((benefit, index) => (
-                    <div
-                      key={benefit.id || index}
-                      className="rounded-3xl border bg-background/50 p-4"
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <h3 className="font-semibold">
-                          {benefit.title || t.notSet}
-                        </h3>
-                        <Badge
-                          variant={benefit.is_active ? "default" : "outline"}
-                          className="rounded-full"
-                        >
-                          {benefit.is_active ? t.active : t.inactive}
-                        </Badge>
-                      </div>
-                      <p className="text-sm leading-7 text-muted-foreground">
-                        {benefit.description || t.noDescription}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex min-h-[140px] items-center justify-center rounded-3xl border border-dashed text-sm text-muted-foreground">
-                  {t.noBenefits}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <WalletCards className="h-5 w-5 text-primary" />
-                {t.pricingTiers}
-              </CardTitle>
-              <CardDescription>{t.pricingTiers}</CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              {product.pricing_tiers?.length ? (
-                <div className="overflow-hidden rounded-3xl border">
-                  <Table>
-                    <TableBody>
-                      {product.pricing_tiers.map((tier) => (
-                        <TableRow key={tier.id}>
-                          <TableCell className="font-semibold">
-                            {tier.name || t.notSet}
-                          </TableCell>
-                          <TableCell>
-                            <span className="inline-flex items-center gap-1">
-                              {formatMoney(tier.effective_price || tier.price)}
-                              <Image src={SAR_ICON_PATH} alt="SAR" width={13} height={13} />
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {tier.sale_price ? formatMoney(tier.sale_price) : t.notSet}
-                          </TableCell>
-                          <TableCell className="text-end">
-                            <Badge
-                              variant={tier.is_active ? "default" : "outline"}
-                              className="rounded-full"
-                            >
-                              {tier.is_active ? t.active : t.inactive}
+                      <TableCell>
+                        <div className="space-y-1">
+                          <MoneyValue value={tier.effective_price || tier.price} />
+                          {tier.has_discount ? (
+                            <Badge variant="outline" className="rounded-full">
+                              {t.hasDiscount}
                             </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              ) : (
-                <div className="flex min-h-[140px] items-center justify-center rounded-3xl border border-dashed text-sm text-muted-foreground">
-                  {t.noTiers}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                          ) : null}
+                        </div>
+                      </TableCell>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-primary" />
-                {t.terms}
-              </CardTitle>
-            </CardHeader>
+                      <TableCell>{formatPercent(tier.discount_rate)}</TableCell>
+                      <TableCell>{formatPercent(tier.agent_commission_rate)}</TableCell>
+                      <TableCell>{formatPercent(tier.provider_share_rate)}</TableCell>
+                      <TableCell>{formatPercent(tier.system_share_rate)}</TableCell>
 
-            <CardContent>
-              <p className="whitespace-pre-line leading-7 text-muted-foreground">
-                {product.terms_and_conditions || t.noTerms}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+                      <TableCell>
+                        <Badge
+                          variant={tier.is_active ? "secondary" : "outline"}
+                          className="rounded-full"
+                        >
+                          {tier.is_active ? t.active : t.inactive}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="flex min-h-[130px] items-center justify-center rounded-3xl border border-dashed text-sm text-muted-foreground">
+              {t.emptyTiers}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Stethoscope className="h-5 w-5 text-primary" />
+            {t.serviceItems}
+          </CardTitle>
+          <CardDescription>{t.serviceItemsDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent>
+          {product.service_items?.length ? (
+            <div className="overflow-hidden rounded-3xl border">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead>{t.tableName}</TableHead>
+                    <TableHead>{t.tableQuantity}</TableHead>
+                    <TableHead>{t.tablePrice}</TableHead>
+                    <TableHead>{t.tableDiscount}</TableHead>
+                    <TableHead>{t.tableTotal}</TableHead>
+                    <TableHead>{t.requiresProvider}</TableHead>
+                    <TableHead>{t.tableStatus}</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {product.service_items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-semibold">{item.name || t.noData}</p>
+                          <p className="max-w-[360px] text-xs leading-5 text-muted-foreground">
+                            {item.description || t.noData}
+                          </p>
+                        </div>
+                      </TableCell>
+
+                      <TableCell>
+                        {formatNumber(item.included_quantity || 0)}
+                      </TableCell>
+
+                      <TableCell>
+                        <MoneyValue value={item.unit_price} />
+                      </TableCell>
+
+                      <TableCell>{formatPercent(item.discount_rate)}</TableCell>
+
+                      <TableCell>
+                        <MoneyValue value={item.total_after_discount} />
+                      </TableCell>
+
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge variant="outline" className="rounded-full">
+                            {item.requires_provider
+                              ? t.requiresProvider
+                              : t.noData}
+                          </Badge>
+
+                          <Badge
+                            variant={item.is_optional ? "secondary" : "outline"}
+                            className="rounded-full"
+                          >
+                            {item.is_optional ? t.optional : t.required}
+                          </Badge>
+                        </div>
+                      </TableCell>
+
+                      <TableCell>
+                        <Badge
+                          variant={item.is_active ? "secondary" : "outline"}
+                          className="rounded-full"
+                        >
+                          {item.is_active ? t.active : t.inactive}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="flex min-h-[130px] items-center justify-center rounded-3xl border border-dashed text-sm text-muted-foreground">
+              {t.emptyServiceItems}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

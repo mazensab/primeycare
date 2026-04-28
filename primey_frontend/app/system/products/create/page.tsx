@@ -9,6 +9,7 @@ import {
   BadgeCheck,
   Boxes,
   CheckCircle2,
+  CreditCard,
   FileText,
   Layers3,
   Loader2,
@@ -18,6 +19,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Stethoscope,
   Tag,
   Trash2,
 } from "lucide-react";
@@ -40,16 +42,23 @@ import { Label } from "@/components/ui/label";
    📂 app/system/products/create/page.tsx
    🧠 Primey Care | Create Product
    ------------------------------------------------------------
-   ✅ صفحة إضافة منتج كوحدة مستقلة
-   ✅ نفس نمط المراكز / العملاء / المندوبين
-   ✅ ربط مع /api/products/
-   ✅ ربط التصنيفات مع /api/products/categories/
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ الأرقام دائمًا إنجليزية
-   ✅ استخدام UI الداخلي فقط
-   ✅ استخدام sonner
-   ✅ استخدام رمز SAR من /currency/sar.svg
-   ✅ لا يوجد localhost hardcoded
+   ✅ Create Card / Membership / Program / Service
+   ✅ Backend المرحلة 5:
+      - fulfillment_type
+      - allow_agent_sale
+      - allow_provider_sale
+      - can_be_ordered
+      - can_be_used_in_contracts
+      - requires_provider
+      - max_discount_rate
+      - default_agent_commission_rate
+      - pricing_tiers expanded
+      - service_items
+   ✅ Arabic / English via primey-locale
+   ✅ English numbers always
+   ✅ SAR icon from /currency/sar.svg
+   ✅ sonner toast
+   ✅ no localhost hardcoded
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -58,6 +67,14 @@ type ProductType = "membership" | "card" | "program" | "service" | "other";
 type ProductStatus = "draft" | "active" | "inactive" | "archived";
 type BillingType = "one_time" | "recurring";
 type DurationUnit = "none" | "day" | "month" | "year";
+type FulfillmentType = "digital" | "physical" | "both" | "service_based" | "none";
+type PricingType =
+  | "standard"
+  | "customer"
+  | "agent"
+  | "provider"
+  | "contract"
+  | "promotional";
 
 type ProductCategory = {
   id: number | string;
@@ -92,10 +109,32 @@ type BenefitForm = {
 
 type PricingTierForm = {
   name: string;
+  pricing_type: PricingType;
+  currency_code: string;
   price: string;
   sale_price: string;
+  min_quantity: string;
+  max_quantity: string;
+  discount_rate: string;
+  agent_commission_rate: string;
+  provider_share_rate: string;
+  system_share_rate: string;
+  starts_at: string;
+  ends_at: string;
   sort_order: string;
   is_active: boolean;
+};
+
+type ServiceItemForm = {
+  name: string;
+  description: string;
+  included_quantity: string;
+  unit_price: string;
+  discount_rate: string;
+  requires_provider: boolean;
+  is_optional: boolean;
+  is_active: boolean;
+  sort_order: string;
 };
 
 type ProductForm = {
@@ -104,6 +143,7 @@ type ProductForm = {
   product_type: ProductType;
   status: ProductStatus;
   billing_type: BillingType;
+  fulfillment_type: FulfillmentType;
 
   short_description: string;
   description: string;
@@ -125,10 +165,19 @@ type ProductForm = {
   is_featured: boolean;
   requires_approval: boolean;
   allow_online_purchase: boolean;
+  allow_agent_sale: boolean;
+  allow_provider_sale: boolean;
+  can_be_ordered: boolean;
+  can_be_used_in_contracts: boolean;
+  requires_provider: boolean;
+
+  max_discount_rate: string;
+  default_agent_commission_rate: string;
   sort_order: string;
 
   benefits: BenefitForm[];
   pricing_tiers: PricingTierForm[];
+  service_items: ServiceItemForm[];
 };
 
 const SAR_ICON_PATH = "/currency/sar.svg";
@@ -139,6 +188,7 @@ const initialForm: ProductForm = {
   product_type: "program",
   status: "draft",
   billing_type: "one_time",
+  fulfillment_type: "digital",
 
   short_description: "",
   description: "",
@@ -160,10 +210,19 @@ const initialForm: ProductForm = {
   is_featured: false,
   requires_approval: false,
   allow_online_purchase: true,
+  allow_agent_sale: true,
+  allow_provider_sale: false,
+  can_be_ordered: true,
+  can_be_used_in_contracts: true,
+  requires_provider: false,
+
+  max_discount_rate: "0",
+  default_agent_commission_rate: "0",
   sort_order: "0",
 
   benefits: [],
   pricing_tiers: [],
+  service_items: [],
 };
 
 function readStoredLocale(): AppLocale {
@@ -211,6 +270,12 @@ function normalizeInt(value: string, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function normalizeDateTimeLocal(value: string) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return null;
+  return trimmed;
+}
+
 function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
@@ -220,8 +285,8 @@ function dictionary(locale: AppLocale) {
 
     title: isArabic ? "إضافة منتج جديد" : "Create New Product",
     subtitle: isArabic
-      ? "إضافة بطاقة أو عضوية أو برنامج أو خدمة وربطها بالتصنيف والتسعير وخيارات البيع."
-      : "Add a card, membership, program, or service and connect it to category, pricing, and sales options.",
+      ? "إضافة بطاقة أو عضوية أو برنامج أو خدمة وربطها بالتصنيف والتسعير وخيارات البيع والطلبات والعقود."
+      : "Add a card, membership, program, or service and connect it to category, pricing, sales, orders, and contracts.",
 
     back: isArabic ? "رجوع" : "Back",
     dashboard: isArabic ? "لوحة المنتجات" : "Products Dashboard",
@@ -231,8 +296,8 @@ function dictionary(locale: AppLocale) {
 
     mainInfo: isArabic ? "بيانات المنتج الأساسية" : "Main Product Information",
     mainInfoDesc: isArabic
-      ? "الاسم، النوع، التصنيف، الحالة وطريقة الفوترة."
-      : "Name, type, category, status, and billing method.",
+      ? "الاسم، النوع، التصنيف، الحالة، طريقة الفوترة وطريقة التسليم."
+      : "Name, type, category, status, billing method, and fulfillment method.",
 
     marketingInfo: isArabic ? "الوصف والمحتوى التسويقي" : "Description & Marketing Content",
     marketingInfoDesc: isArabic
@@ -246,13 +311,18 @@ function dictionary(locale: AppLocale) {
 
     durationInfo: isArabic ? "المدة والصلاحية" : "Duration & Validity",
     durationInfoDesc: isArabic
-      ? "إعداد مدة المنتج في حال كان متكررًا أو له صلاحية."
-      : "Configure product duration if recurring or validity-based.",
+      ? "إعداد مدة المنتج للبطاقات والعضويات والاشتراكات المتكررة."
+      : "Configure duration for cards, memberships, and recurring products.",
 
-    salesInfo: isArabic ? "خيارات البيع والظهور" : "Sales & Visibility Options",
+    salesInfo: isArabic ? "خيارات البيع والربط" : "Sales & Binding Options",
     salesInfoDesc: isArabic
-      ? "تحكم في ظهوره للعامة والشراء الإلكتروني والاعتماد."
-      : "Control public visibility, online purchase, and approval.",
+      ? "تحكم في الظهور والشراء الإلكتروني والطلب والعقود ومقدم الخدمة."
+      : "Control visibility, online purchase, ordering, contracts, and provider requirements.",
+
+    commissionsInfo: isArabic ? "الخصومات والعمولات" : "Discounts & Commissions",
+    commissionsInfoDesc: isArabic
+      ? "إعداد الحد الأعلى للخصم وعمولة المندوب الافتراضية."
+      : "Configure maximum discount and default agent commission.",
 
     benefitsInfo: isArabic ? "مزايا المنتج" : "Product Benefits",
     benefitsInfoDesc: isArabic
@@ -261,19 +331,23 @@ function dictionary(locale: AppLocale) {
 
     tiersInfo: isArabic ? "شرائح التسعير" : "Pricing Tiers",
     tiersInfoDesc: isArabic
-      ? "إضافة أسعار متعددة عند الحاجة."
-      : "Add multiple pricing options when needed.",
+      ? "إضافة أسعار متعددة للعميل أو المندوب أو مقدم الخدمة أو العقد."
+      : "Add multiple pricing options for customer, agent, provider, or contract.",
+
+    serviceItemsInfo: isArabic ? "عناصر الخدمات داخل المنتج" : "Product Service Items",
+    serviceItemsInfoDesc: isArabic
+      ? "إضافة الخدمات الداخلية للبرامج والباقات مثل الكشف أو المتابعة أو الخصومات."
+      : "Add internal service items for programs and packages, such as visits, follow-ups, or discounts.",
 
     previewTitle: isArabic ? "معاينة المنتج" : "Product Preview",
-    previewDesc: isArabic
-      ? "ملخص سريع قبل الحفظ."
-      : "Quick summary before saving.",
+    previewDesc: isArabic ? "ملخص سريع قبل الحفظ." : "Quick summary before saving.",
 
     name: isArabic ? "اسم المنتج" : "Product Name",
     category: isArabic ? "التصنيف" : "Category",
     productType: isArabic ? "نوع المنتج" : "Product Type",
     status: isArabic ? "الحالة" : "Status",
     billingType: isArabic ? "طريقة الفوترة" : "Billing Type",
+    fulfillmentType: isArabic ? "طريقة التسليم" : "Fulfillment Type",
 
     shortDescription: isArabic ? "وصف مختصر" : "Short Description",
     description: isArabic ? "الوصف التفصيلي" : "Description",
@@ -296,6 +370,16 @@ function dictionary(locale: AppLocale) {
     isFeatured: isArabic ? "منتج مميز" : "Featured",
     requiresApproval: isArabic ? "يتطلب اعتماد" : "Requires Approval",
     allowOnlinePurchase: isArabic ? "السماح بالشراء الإلكتروني" : "Allow Online Purchase",
+    allowAgentSale: isArabic ? "السماح ببيع المندوب" : "Allow Agent Sale",
+    allowProviderSale: isArabic ? "السماح ببيع مقدم الخدمة" : "Allow Provider Sale",
+    canBeOrdered: isArabic ? "قابل للطلب" : "Can Be Ordered",
+    canBeUsedInContracts: isArabic ? "قابل للاستخدام في العقود" : "Can Be Used In Contracts",
+    requiresProvider: isArabic ? "يتطلب مقدم خدمة" : "Requires Provider",
+
+    maxDiscountRate: isArabic ? "أعلى نسبة خصم %" : "Max Discount Rate %",
+    defaultAgentCommissionRate: isArabic
+      ? "عمولة المندوب الافتراضية %"
+      : "Default Agent Commission %",
 
     addBenefit: isArabic ? "إضافة ميزة" : "Add Benefit",
     benefitTitle: isArabic ? "عنوان الميزة" : "Benefit Title",
@@ -303,11 +387,28 @@ function dictionary(locale: AppLocale) {
 
     addTier: isArabic ? "إضافة شريحة" : "Add Tier",
     tierName: isArabic ? "اسم الشريحة" : "Tier Name",
+    tierType: isArabic ? "نوع الشريحة" : "Tier Type",
     tierPrice: isArabic ? "سعر الشريحة" : "Tier Price",
     tierSalePrice: isArabic ? "سعر العرض للشريحة" : "Tier Sale Price",
+    minQuantity: isArabic ? "أقل كمية" : "Min Quantity",
+    maxQuantity: isArabic ? "أعلى كمية" : "Max Quantity",
+    discountRate: isArabic ? "نسبة الخصم %" : "Discount Rate %",
+    agentCommissionRate: isArabic ? "عمولة المندوب %" : "Agent Commission %",
+    providerShareRate: isArabic ? "حصة مقدم الخدمة %" : "Provider Share %",
+    systemShareRate: isArabic ? "حصة النظام %" : "System Share %",
+    startsAt: isArabic ? "تبدأ في" : "Starts At",
+    endsAt: isArabic ? "تنتهي في" : "Ends At",
+
+    addServiceItem: isArabic ? "إضافة خدمة" : "Add Service Item",
+    serviceItemName: isArabic ? "اسم الخدمة" : "Service Item Name",
+    serviceItemDescription: isArabic ? "وصف الخدمة" : "Service Item Description",
+    includedQuantity: isArabic ? "الكمية المشمولة" : "Included Quantity",
+    unitPrice: isArabic ? "سعر الوحدة" : "Unit Price",
+    isOptional: isArabic ? "اختياري" : "Optional",
 
     noCategory: isArabic ? "بدون تصنيف" : "No Category",
     chooseCategory: isArabic ? "اختر التصنيف" : "Choose Category",
+    loadingCategories: isArabic ? "جاري تحميل التصنيفات..." : "Loading categories...",
 
     membership: isArabic ? "عضوية" : "Membership",
     card: isArabic ? "بطاقة" : "Card",
@@ -323,18 +424,38 @@ function dictionary(locale: AppLocale) {
     oneTime: isArabic ? "مرة واحدة" : "One Time",
     recurring: isArabic ? "متكرر" : "Recurring",
 
+    digital: isArabic ? "رقمي" : "Digital",
+    physical: isArabic ? "فعلي" : "Physical",
+    both: isArabic ? "رقمي وفعلي" : "Digital & Physical",
+    serviceBased: isArabic ? "حسب الخدمة" : "Service Based",
+    fulfillmentNone: isArabic ? "بدون" : "None",
+
     none: isArabic ? "بدون مدة" : "No Duration",
     day: isArabic ? "يوم" : "Day",
     month: isArabic ? "شهر" : "Month",
     year: isArabic ? "سنة" : "Year",
 
+    standard: isArabic ? "قياسي" : "Standard",
+    customer: isArabic ? "عميل" : "Customer",
+    agent: isArabic ? "مندوب" : "Agent",
+    provider: isArabic ? "مقدم خدمة" : "Provider",
+    contract: isArabic ? "عقد" : "Contract",
+    promotional: isArabic ? "ترويجي" : "Promotional",
+
     remove: isArabic ? "حذف" : "Remove",
     activeItem: isArabic ? "نشط" : "Active",
+
     requiredName: isArabic ? "اسم المنتج مطلوب" : "Product name is required",
     requiredPrice: isArabic ? "السعر الأساسي مطلوب" : "Base price is required",
     invalidRecurring: isArabic
       ? "المنتج المتكرر يحتاج مدة ووحدة مدة صحيحة"
       : "Recurring product requires a valid duration value and unit",
+    invalidCardDuration: isArabic
+      ? "البطاقة أو العضوية تحتاج مدة ووحدة مدة صحيحة"
+      : "Card or membership requires a valid duration value and unit",
+    invalidProviderBinding: isArabic
+      ? "المنتج الذي يتطلب مقدم خدمة يجب أن يكون قابلًا للاستخدام في العقود"
+      : "Product requiring provider must be usable in contracts",
     loadCategoriesError: isArabic
       ? "تعذر تحميل تصنيفات المنتجات"
       : "Could not load product categories",
@@ -348,15 +469,11 @@ function dictionary(locale: AppLocale) {
     placeholderDescription: isArabic
       ? "اكتب وصف المنتج التفصيلي..."
       : "Write detailed product description...",
-    placeholderTerms: isArabic
-      ? "اكتب الشروط والأحكام..."
-      : "Write terms and conditions...",
+    placeholderTerms: isArabic ? "اكتب الشروط والأحكام..." : "Write terms and conditions...",
     placeholderFeatures: isArabic
       ? "اكتب الخصائص، كل خاصية في سطر..."
       : "Write features, one per line...",
-    placeholderTags: isArabic
-      ? "بطاقة، رعاية، خصومات"
-      : "card, care, discounts",
+    placeholderTags: isArabic ? "بطاقة، رعاية، خصومات" : "card, care, discounts",
     unnamed: isArabic ? "منتج جديد" : "New Product",
   };
 }
@@ -452,9 +569,7 @@ export default function SystemProductsCreatePage() {
           },
         });
 
-        const payload = (await response
-          .json()
-          .catch(() => ({}))) as CategoriesApiResponse;
+        const payload = (await response.json().catch(() => ({}))) as CategoriesApiResponse;
 
         if (!response.ok || payload.ok === false) {
           throw new Error(payload.message || t.loadCategoriesError);
@@ -511,6 +626,23 @@ export default function SystemProductsCreatePage() {
     { value: "year", label: t.year },
   ];
 
+  const fulfillmentOptions: Array<{ value: FulfillmentType; label: string }> = [
+    { value: "digital", label: t.digital },
+    { value: "physical", label: t.physical },
+    { value: "both", label: t.both },
+    { value: "service_based", label: t.serviceBased },
+    { value: "none", label: t.fulfillmentNone },
+  ];
+
+  const pricingTypeOptions: Array<{ value: PricingType; label: string }> = [
+    { value: "standard", label: t.standard },
+    { value: "customer", label: t.customer },
+    { value: "agent", label: t.agent },
+    { value: "provider", label: t.provider },
+    { value: "contract", label: t.contract },
+    { value: "promotional", label: t.promotional },
+  ];
+
   function updateField<K extends keyof ProductForm>(key: K, value: ProductForm[K]) {
     setForm((current) => ({
       ...current,
@@ -556,8 +688,18 @@ export default function SystemProductsCreatePage() {
         ...current.pricing_tiers,
         {
           name: "",
+          pricing_type: "standard",
+          currency_code: "SAR",
           price: "",
           sale_price: "",
+          min_quantity: "1",
+          max_quantity: "",
+          discount_rate: "0",
+          agent_commission_rate: "0",
+          provider_share_rate: "0",
+          system_share_rate: "0",
+          starts_at: "",
+          ends_at: "",
           sort_order: String(current.pricing_tiers.length),
           is_active: true,
         },
@@ -581,6 +723,42 @@ export default function SystemProductsCreatePage() {
     }));
   }
 
+  function addServiceItem() {
+    setForm((current) => ({
+      ...current,
+      service_items: [
+        ...current.service_items,
+        {
+          name: "",
+          description: "",
+          included_quantity: "1",
+          unit_price: "0",
+          discount_rate: "0",
+          requires_provider: true,
+          is_optional: false,
+          is_active: true,
+          sort_order: String(current.service_items.length),
+        },
+      ],
+    }));
+  }
+
+  function updateServiceItem(index: number, patch: Partial<ServiceItemForm>) {
+    setForm((current) => ({
+      ...current,
+      service_items: current.service_items.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...patch } : item
+      ),
+    }));
+  }
+
+  function removeServiceItem(index: number) {
+    setForm((current) => ({
+      ...current,
+      service_items: current.service_items.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  }
+
   function validateForm() {
     if (!form.name.trim()) {
       toast.error(t.requiredName);
@@ -597,6 +775,19 @@ export default function SystemProductsCreatePage() {
       (normalizeInt(form.duration_value, 0) <= 0 || form.duration_unit === "none")
     ) {
       toast.error(t.invalidRecurring);
+      return false;
+    }
+
+    if (
+      (form.product_type === "card" || form.product_type === "membership") &&
+      (normalizeInt(form.duration_value, 0) <= 0 || form.duration_unit === "none")
+    ) {
+      toast.error(t.invalidCardDuration);
+      return false;
+    }
+
+    if (form.requires_provider && !form.can_be_used_in_contracts) {
+      toast.error(t.invalidProviderBinding);
       return false;
     }
 
@@ -617,10 +808,34 @@ export default function SystemProductsCreatePage() {
       .filter((item) => item.name.trim())
       .map((item) => ({
         name: item.name.trim(),
+        pricing_type: item.pricing_type,
+        currency_code: "SAR",
         price: normalizeDecimal(item.price) || "0",
         sale_price: normalizeDecimal(item.sale_price),
+        min_quantity: normalizeInt(item.min_quantity, 1),
+        max_quantity: item.max_quantity.trim() ? normalizeInt(item.max_quantity, 0) : null,
+        discount_rate: normalizeDecimal(item.discount_rate) || "0",
+        agent_commission_rate: normalizeDecimal(item.agent_commission_rate) || "0",
+        provider_share_rate: normalizeDecimal(item.provider_share_rate) || "0",
+        system_share_rate: normalizeDecimal(item.system_share_rate) || "0",
+        starts_at: normalizeDateTimeLocal(item.starts_at),
+        ends_at: normalizeDateTimeLocal(item.ends_at),
         sort_order: normalizeInt(item.sort_order, 0),
         is_active: item.is_active,
+      }));
+
+    const serviceItems = form.service_items
+      .filter((item) => item.name.trim())
+      .map((item) => ({
+        name: item.name.trim(),
+        description: item.description.trim(),
+        included_quantity: normalizeInt(item.included_quantity, 1),
+        unit_price: normalizeDecimal(item.unit_price) || "0",
+        discount_rate: normalizeDecimal(item.discount_rate) || "0",
+        requires_provider: item.requires_provider,
+        is_optional: item.is_optional,
+        is_active: item.is_active,
+        sort_order: normalizeInt(item.sort_order, 0),
       }));
 
     return {
@@ -629,6 +844,7 @@ export default function SystemProductsCreatePage() {
       product_type: form.product_type,
       status: form.status,
       billing_type: form.billing_type,
+      fulfillment_type: form.fulfillment_type,
 
       short_description: form.short_description.trim(),
       description: form.description.trim(),
@@ -650,10 +866,19 @@ export default function SystemProductsCreatePage() {
       is_featured: form.is_featured,
       requires_approval: form.requires_approval,
       allow_online_purchase: form.allow_online_purchase,
+      allow_agent_sale: form.allow_agent_sale,
+      allow_provider_sale: form.allow_provider_sale,
+      can_be_ordered: form.can_be_ordered,
+      can_be_used_in_contracts: form.can_be_used_in_contracts,
+      requires_provider: form.requires_provider,
+
+      max_discount_rate: normalizeDecimal(form.max_discount_rate) || "0",
+      default_agent_commission_rate: normalizeDecimal(form.default_agent_commission_rate) || "0",
       sort_order: normalizeInt(form.sort_order, 0),
 
       benefits,
       pricing_tiers: pricingTiers,
+      service_items: serviceItems,
     };
   }
 
@@ -690,6 +915,18 @@ export default function SystemProductsCreatePage() {
       setIsSaving(false);
     }
   }
+
+  const selectedTypeLabel =
+    productTypeOptions.find((item) => item.value === form.product_type)?.label || t.program;
+
+  const selectedStatusLabel =
+    statusOptions.find((item) => item.value === form.status)?.label || t.draft;
+
+  const selectedBillingLabel =
+    billingOptions.find((item) => item.value === form.billing_type)?.label || t.oneTime;
+
+  const selectedFulfillmentLabel =
+    fulfillmentOptions.find((item) => item.value === form.fulfillment_type)?.label || t.digital;
 
   return (
     <div className="space-y-6">
@@ -776,7 +1013,7 @@ export default function SystemProductsCreatePage() {
                   onChange={(value) => updateField("category_id", value)}
                 >
                   <option value="">
-                    {isLoadingCategories ? t.loadCategoriesError : t.chooseCategory}
+                    {isLoadingCategories ? t.loadingCategories : t.chooseCategory}
                   </option>
                   {categories.map((category) => (
                     <option key={category.id} value={String(category.id)}>
@@ -790,7 +1027,24 @@ export default function SystemProductsCreatePage() {
                 <Label>{t.productType}</Label>
                 <SelectField
                   value={form.product_type}
-                  onChange={(value) => updateField("product_type", value as ProductType)}
+                  onChange={(value) => {
+                    const nextType = value as ProductType;
+
+                    setForm((current) => ({
+                      ...current,
+                      product_type: nextType,
+                      fulfillment_type:
+                        nextType === "service" ? "service_based" : current.fulfillment_type,
+                      requires_provider:
+                        nextType === "service" || nextType === "program"
+                          ? true
+                          : current.requires_provider,
+                      can_be_used_in_contracts:
+                        nextType === "service" || nextType === "program"
+                          ? true
+                          : current.can_be_used_in_contracts,
+                    }));
+                  }}
                 >
                   {productTypeOptions.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -824,13 +1078,37 @@ export default function SystemProductsCreatePage() {
                       ...current,
                       billing_type: nextValue,
                       duration_unit:
-                        nextValue === "one_time" ? "none" : current.duration_unit,
+                        nextValue === "one_time" &&
+                        current.product_type !== "card" &&
+                        current.product_type !== "membership"
+                          ? "none"
+                          : current.duration_unit,
                       duration_value:
-                        nextValue === "one_time" ? "0" : current.duration_value,
+                        nextValue === "one_time" &&
+                        current.product_type !== "card" &&
+                        current.product_type !== "membership"
+                          ? "0"
+                          : current.duration_value,
                     }));
                   }}
                 >
                   {billingOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </SelectField>
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <Label>{t.fulfillmentType}</Label>
+                <SelectField
+                  value={form.fulfillment_type}
+                  onChange={(value) =>
+                    updateField("fulfillment_type", value as FulfillmentType)
+                  }
+                >
+                  {fulfillmentOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
@@ -945,9 +1223,7 @@ export default function SystemProductsCreatePage() {
                     min="0"
                     step="0.01"
                     value={form.sale_price}
-                    onChange={(event) =>
-                      updateField("sale_price", event.target.value)
-                    }
+                    onChange={(event) => updateField("sale_price", event.target.value)}
                     className="rounded-2xl bg-background/70 ltr:pr-10 rtl:pl-10"
                   />
                   <Image
@@ -968,9 +1244,7 @@ export default function SystemProductsCreatePage() {
                     min="0"
                     step="0.01"
                     value={form.cost_price}
-                    onChange={(event) =>
-                      updateField("cost_price", event.target.value)
-                    }
+                    onChange={(event) => updateField("cost_price", event.target.value)}
                     className="rounded-2xl bg-background/70 ltr:pr-10 rtl:pl-10"
                   />
                   <Image
@@ -988,6 +1262,7 @@ export default function SystemProductsCreatePage() {
                 <Input
                   type="number"
                   min="0"
+                  max="100"
                   step="0.01"
                   value={form.tax_rate}
                   onChange={(event) => updateField("tax_rate", event.target.value)}
@@ -1023,9 +1298,7 @@ export default function SystemProductsCreatePage() {
                   type="number"
                   min="0"
                   value={form.duration_value}
-                  onChange={(event) =>
-                    updateField("duration_value", event.target.value)
-                  }
+                  onChange={(event) => updateField("duration_value", event.target.value)}
                   className="rounded-2xl bg-background/70"
                 />
               </div>
@@ -1034,9 +1307,7 @@ export default function SystemProductsCreatePage() {
                 <Label>{t.durationUnit}</Label>
                 <SelectField
                   value={form.duration_unit}
-                  onChange={(value) =>
-                    updateField("duration_unit", value as DurationUnit)
-                  }
+                  onChange={(value) => updateField("duration_unit", value as DurationUnit)}
                 >
                   {durationOptions.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -1074,6 +1345,11 @@ export default function SystemProductsCreatePage() {
                 ["is_featured", t.isFeatured],
                 ["requires_approval", t.requiresApproval],
                 ["allow_online_purchase", t.allowOnlinePurchase],
+                ["allow_agent_sale", t.allowAgentSale],
+                ["allow_provider_sale", t.allowProviderSale],
+                ["can_be_ordered", t.canBeOrdered],
+                ["can_be_used_in_contracts", t.canBeUsedInContracts],
+                ["requires_provider", t.requiresProvider],
               ].map(([key, label]) => (
                 <div
                   key={key}
@@ -1088,6 +1364,48 @@ export default function SystemProductsCreatePage() {
                   <Label className="cursor-pointer">{label}</Label>
                 </div>
               ))}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CreditCard className="h-5 w-5 text-primary" />
+                {t.commissionsInfo}
+              </CardTitle>
+              <CardDescription>{t.commissionsInfoDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>{t.maxDiscountRate}</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={form.max_discount_rate}
+                  onChange={(event) =>
+                    updateField("max_discount_rate", event.target.value)
+                  }
+                  className="rounded-2xl bg-background/70"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>{t.defaultAgentCommissionRate}</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={form.default_agent_commission_rate}
+                  onChange={(event) =>
+                    updateField("default_agent_commission_rate", event.target.value)
+                  }
+                  className="rounded-2xl bg-background/70"
+                />
+              </div>
             </CardContent>
           </Card>
 
@@ -1114,10 +1432,7 @@ export default function SystemProductsCreatePage() {
 
             <CardContent className="space-y-3">
               {form.benefits.map((benefit, index) => (
-                <div
-                  key={index}
-                  className="rounded-3xl border bg-background/50 p-4"
-                >
+                <div key={index} className="rounded-3xl border bg-background/50 p-4">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <Badge variant="secondary" className="rounded-full">
                       {t.addBenefit} #{index + 1}
@@ -1209,10 +1524,7 @@ export default function SystemProductsCreatePage() {
 
             <CardContent className="space-y-3">
               {form.pricing_tiers.map((tier, index) => (
-                <div
-                  key={index}
-                  className="rounded-3xl border bg-background/50 p-4"
-                >
+                <div key={index} className="rounded-3xl border bg-background/50 p-4">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <Badge variant="secondary" className="rounded-full">
                       {t.addTier} #{index + 1}
@@ -1240,6 +1552,22 @@ export default function SystemProductsCreatePage() {
                         }
                         className="rounded-2xl bg-background/70"
                       />
+                    </div>
+
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>{t.tierType}</Label>
+                      <SelectField
+                        value={tier.pricing_type}
+                        onChange={(value) =>
+                          updateTier(index, { pricing_type: value as PricingType })
+                        }
+                      >
+                        {pricingTypeOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </SelectField>
                     </div>
 
                     <div className="space-y-2">
@@ -1271,6 +1599,118 @@ export default function SystemProductsCreatePage() {
                     </div>
 
                     <div className="space-y-2">
+                      <Label>{t.minQuantity}</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={tier.min_quantity}
+                        onChange={(event) =>
+                          updateTier(index, { min_quantity: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.maxQuantity}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={tier.max_quantity}
+                        onChange={(event) =>
+                          updateTier(index, { max_quantity: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.discountRate}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={tier.discount_rate}
+                        onChange={(event) =>
+                          updateTier(index, { discount_rate: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.agentCommissionRate}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={tier.agent_commission_rate}
+                        onChange={(event) =>
+                          updateTier(index, {
+                            agent_commission_rate: event.target.value,
+                          })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.providerShareRate}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={tier.provider_share_rate}
+                        onChange={(event) =>
+                          updateTier(index, { provider_share_rate: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.systemShareRate}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={tier.system_share_rate}
+                        onChange={(event) =>
+                          updateTier(index, { system_share_rate: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.startsAt}</Label>
+                      <Input
+                        type="datetime-local"
+                        value={tier.starts_at}
+                        onChange={(event) =>
+                          updateTier(index, { starts_at: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.endsAt}</Label>
+                      <Input
+                        type="datetime-local"
+                        value={tier.ends_at}
+                        onChange={(event) =>
+                          updateTier(index, { ends_at: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
                       <Label>{t.sortOrder}</Label>
                       <Input
                         type="number"
@@ -1283,7 +1723,7 @@ export default function SystemProductsCreatePage() {
                       />
                     </div>
 
-                    <div className="flex items-center gap-3 rounded-2xl border bg-background/50 p-3 md:col-span-3">
+                    <div className="flex items-center gap-3 rounded-2xl border bg-background/50 p-3 md:col-span-4">
                       <Checkbox
                         checked={tier.is_active}
                         onCheckedChange={(checked) =>
@@ -1291,6 +1731,155 @@ export default function SystemProductsCreatePage() {
                         }
                       />
                       <Label>{t.activeItem}</Label>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
+            <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Stethoscope className="h-5 w-5 text-primary" />
+                  {t.serviceItemsInfo}
+                </CardTitle>
+                <CardDescription>{t.serviceItemsInfoDesc}</CardDescription>
+              </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-2xl"
+                onClick={addServiceItem}
+              >
+                <Plus className="h-4 w-4" />
+                {t.addServiceItem}
+              </Button>
+            </CardHeader>
+
+            <CardContent className="space-y-3">
+              {form.service_items.map((item, index) => (
+                <div key={index} className="rounded-3xl border bg-background/50 p-4">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <Badge variant="secondary" className="rounded-full">
+                      {t.addServiceItem} #{index + 1}
+                    </Badge>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="rounded-xl text-destructive"
+                      onClick={() => removeServiceItem(index)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {t.remove}
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-4">
+                    <div className="space-y-2 md:col-span-3">
+                      <Label>{t.serviceItemName}</Label>
+                      <Input
+                        value={item.name}
+                        onChange={(event) =>
+                          updateServiceItem(index, { name: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.sortOrder}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={item.sort_order}
+                        onChange={(event) =>
+                          updateServiceItem(index, { sort_order: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2 md:col-span-4">
+                      <Label>{t.serviceItemDescription}</Label>
+                      <TextAreaField
+                        value={item.description}
+                        onChange={(value) =>
+                          updateServiceItem(index, { description: value })
+                        }
+                        rows={3}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.includedQuantity}</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={item.included_quantity}
+                        onChange={(event) =>
+                          updateServiceItem(index, {
+                            included_quantity: event.target.value,
+                          })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.unitPrice}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={item.unit_price}
+                        onChange={(event) =>
+                          updateServiceItem(index, { unit_price: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>{t.discountRate}</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={item.discount_rate}
+                        onChange={(event) =>
+                          updateServiceItem(index, { discount_rate: event.target.value })
+                        }
+                        className="rounded-2xl bg-background/70"
+                      />
+                    </div>
+
+                    <div className="grid gap-3 md:col-span-4 md:grid-cols-3">
+                      {[
+                        ["requires_provider", t.requiresProvider],
+                        ["is_optional", t.isOptional],
+                        ["is_active", t.activeItem],
+                      ].map(([key, label]) => (
+                        <div
+                          key={key}
+                          className="flex items-center gap-3 rounded-2xl border bg-background/50 p-3"
+                        >
+                          <Checkbox
+                            checked={Boolean(item[key as keyof ServiceItemForm])}
+                            onCheckedChange={(checked) =>
+                              updateServiceItem(index, {
+                                [key]: Boolean(checked),
+                              } as Partial<ServiceItemForm>)
+                            }
+                          />
+                          <Label>{label}</Label>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -1327,12 +1916,14 @@ export default function SystemProductsCreatePage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Badge className="rounded-full">
-                    {productTypeOptions.find((item) => item.value === form.product_type)?.label}
-                  </Badge>
+                  <Badge className="rounded-full">{selectedTypeLabel}</Badge>
 
                   <Badge variant="secondary" className="rounded-full">
-                    {statusOptions.find((item) => item.value === form.status)?.label}
+                    {selectedStatusLabel}
+                  </Badge>
+
+                  <Badge variant="outline" className="rounded-full">
+                    {selectedFulfillmentLabel}
                   </Badge>
 
                   {form.is_featured ? (
@@ -1370,9 +1961,7 @@ export default function SystemProductsCreatePage() {
                   <span className="text-sm text-muted-foreground">
                     {t.billingType}
                   </span>
-                  <span className="text-sm font-semibold">
-                    {billingOptions.find((item) => item.value === form.billing_type)?.label}
-                  </span>
+                  <span className="text-sm font-semibold">{selectedBillingLabel}</span>
                 </div>
 
                 <div className="flex flex-wrap gap-2 rounded-2xl border bg-background/50 p-4">
@@ -1388,9 +1977,21 @@ export default function SystemProductsCreatePage() {
                     </Badge>
                   ) : null}
 
-                  {form.requires_approval ? (
+                  {form.can_be_ordered ? (
                     <Badge variant="secondary" className="rounded-full">
-                      {t.requiresApproval}
+                      {t.canBeOrdered}
+                    </Badge>
+                  ) : null}
+
+                  {form.can_be_used_in_contracts ? (
+                    <Badge variant="secondary" className="rounded-full">
+                      {t.canBeUsedInContracts}
+                    </Badge>
+                  ) : null}
+
+                  {form.requires_provider ? (
+                    <Badge variant="secondary" className="rounded-full">
+                      {t.requiresProvider}
                     </Badge>
                   ) : null}
 
