@@ -5,11 +5,12 @@
 # ✅ هذا الموديول يمثل طبقة الربط الرسمية بين:
 #    - الجهات المقدمة للخدمة providers
 #    - المنتجات products
-# ✅ قابل للتوسع لاحقًا نحو:
+# ✅ قابل للتوسع نحو:
 #    - البرامج
 #    - الخصومات
 #    - الخدمات
 #    - الأسعار
+#    - نسبة النظام
 #    - حدود الاستخدام
 #    - شروط التغطية والتنفيذ
 # ------------------------------------------------------------
@@ -121,6 +122,14 @@ class Contract(models.Model):
         verbose_name="نسبة الخصم العامة",
         help_text="خصم عام على مستوى العقد إن وجد",
     )
+    system_commission_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        verbose_name="نسبة النظام",
+        help_text="نسبة Primey Care من العمليات أو الخدمات المرتبطة بهذا العقد",
+    )
+
     notes = models.TextField(
         blank=True,
         verbose_name="ملاحظات داخلية",
@@ -152,6 +161,7 @@ class Contract(models.Model):
             models.Index(fields=["provider"]),
             models.Index(fields=["start_date"]),
             models.Index(fields=["end_date"]),
+            models.Index(fields=["pricing_model"]),
         ]
 
     def __str__(self):
@@ -169,6 +179,12 @@ class Contract(models.Model):
             if self.discount_percentage < 0 or self.discount_percentage > 100:
                 raise ValidationError(
                     {"discount_percentage": "نسبة الخصم يجب أن تكون بين 0 و 100."}
+                )
+
+        if self.system_commission_percentage is not None:
+            if self.system_commission_percentage < 0 or self.system_commission_percentage > 100:
+                raise ValidationError(
+                    {"system_commission_percentage": "نسبة النظام يجب أن تكون بين 0 و 100."}
                 )
 
 

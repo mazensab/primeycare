@@ -11,7 +11,6 @@ import {
   CalendarRange,
   CheckCircle2,
   Clock3,
-  Download,
   Eye,
   FileSignature,
   FileText,
@@ -51,37 +50,26 @@ import {
    🧾 Primey Care | System Contracts Dashboard
    ------------------------------------------------------------
    ✅ صفحة لوحة العقود الرئيسية
-   ✅ بنفس نمط المراكز / العملاء / المندوبين / المنتجات / الطلبات / مقدمي الخدمة
    ✅ ربط حقيقي مع /api/contracts/
    ✅ دعم عربي / إنجليزي من primey-locale
    ✅ الأرقام دائمًا إنجليزية
    ✅ استخدام UI الداخلي فقط
    ✅ استخدام رمز SAR الرسمي
    ✅ لا يوجد hardcoded localhost
+   ✅ التصدير والطباعة في القائمة والتقارير فقط
 ============================================================ */
 
 type AppLocale = "ar" | "en";
 
 type ContractStatus =
-  | "ACTIVE"
-  | "INACTIVE"
   | "DRAFT"
-  | "PENDING"
+  | "ACTIVE"
   | "EXPIRED"
   | "TERMINATED"
-  | "CANCELLED"
   | "SUSPENDED"
   | "UNKNOWN";
 
-type ContractType =
-  | "GENERAL"
-  | "MEDICAL"
-  | "SERVICE"
-  | "PARTNERSHIP"
-  | "DISCOUNT"
-  | "SUPPLY"
-  | "OTHER"
-  | "UNKNOWN";
+type PricingModel = "FIXED" | "PERCENTAGE" | "CUSTOM" | "FREE" | "UNKNOWN";
 
 type Contract = {
   id: number | string;
@@ -89,23 +77,35 @@ type Contract = {
   title: string;
   providerName: string;
   providerId: number | string | null;
-  contractType: ContractType;
+  pricingModel: PricingModel;
   status: ContractStatus;
   startDate: string;
   endDate: string;
-  contractValue: number;
-  commissionRate: number;
-  currency: string;
+  signedAt: string;
+  discountPercentage: number;
+  systemCommissionPercentage: number;
   productsCount: number;
   notes: string;
+  termsAndConditions: string;
   createdAt: string;
   updatedAt: string;
   raw: Record<string, unknown>;
 };
 
+type ContractsSummary = {
+  total_contracts?: number;
+  active_contracts?: number;
+  draft_contracts?: number;
+  suspended_contracts?: number;
+  expired_contracts?: number;
+  terminated_contracts?: number;
+  contracts_with_products?: number;
+};
+
 type ContractsApiResponse = {
   ok?: boolean;
   message?: string;
+  summary?: ContractsSummary;
   results?: unknown[];
   data?: unknown[] | { results?: unknown[] };
   items?: unknown[];
@@ -159,15 +159,6 @@ function formatEnglishNumber(value: number | string | null | undefined) {
 
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(Number.isFinite(numericValue) ? numericValue : 0);
-}
-
-function formatEnglishMoney(value: number | string | null | undefined) {
-  const numericValue = Number(value || 0);
-
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
   }).format(Number.isFinite(numericValue) ? numericValue : 0);
 }
 
@@ -236,31 +227,22 @@ function normalizeApiList(payload: unknown): unknown[] {
 function normalizeStatus(value: unknown): ContractStatus {
   const status = String(value || "").toUpperCase();
 
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "INACTIVE") return "INACTIVE";
   if (status === "DRAFT") return "DRAFT";
-  if (status === "PENDING") return "PENDING";
+  if (status === "ACTIVE") return "ACTIVE";
   if (status === "EXPIRED") return "EXPIRED";
   if (status === "TERMINATED") return "TERMINATED";
-  if (status === "CANCELLED") return "CANCELLED";
   if (status === "SUSPENDED") return "SUSPENDED";
-
-  if (value === true) return "ACTIVE";
-  if (value === false) return "INACTIVE";
 
   return "UNKNOWN";
 }
 
-function normalizeContractType(value: unknown): ContractType {
-  const contractType = String(value || "").toUpperCase();
+function normalizePricingModel(value: unknown): PricingModel {
+  const pricingModel = String(value || "").toUpperCase();
 
-  if (contractType === "GENERAL") return "GENERAL";
-  if (contractType === "MEDICAL") return "MEDICAL";
-  if (contractType === "SERVICE") return "SERVICE";
-  if (contractType === "PARTNERSHIP") return "PARTNERSHIP";
-  if (contractType === "DISCOUNT") return "DISCOUNT";
-  if (contractType === "SUPPLY") return "SUPPLY";
-  if (contractType === "OTHER") return "OTHER";
+  if (pricingModel === "FIXED") return "FIXED";
+  if (pricingModel === "PERCENTAGE") return "PERCENTAGE";
+  if (pricingModel === "CUSTOM") return "CUSTOM";
+  if (pricingModel === "FREE") return "FREE";
 
   return "UNKNOWN";
 }
@@ -326,24 +308,21 @@ function normalizeContract(item: unknown): Contract {
     title,
     providerName: providerName || "-",
     providerId,
-    contractType: normalizeContractType(
-      obj.contract_type ?? obj.contractType ?? obj.type
-    ),
-    status: normalizeStatus(obj.status ?? obj.is_active),
+    pricingModel: normalizePricingModel(obj.pricing_model ?? obj.pricingModel),
+    status: normalizeStatus(obj.status),
     startDate: String(obj.start_date ?? obj.startDate ?? ""),
     endDate: String(obj.end_date ?? obj.endDate ?? ""),
-    contractValue: Number(
-      obj.contract_value ??
-        obj.contractValue ??
-        obj.total_value ??
-        obj.value ??
-        obj.amount ??
+    signedAt: String(obj.signed_at ?? obj.signedAt ?? ""),
+    discountPercentage: Number(
+      obj.discount_percentage ?? obj.discountPercentage ?? 0
+    ),
+    systemCommissionPercentage: Number(
+      obj.system_commission_percentage ??
+        obj.systemCommissionPercentage ??
+        obj.commission_rate ??
+        obj.commissionRate ??
         0
     ),
-    commissionRate: Number(
-      obj.commission_rate ?? obj.commissionRate ?? obj.rate ?? 0
-    ),
-    currency: String(obj.currency ?? "SAR"),
     productsCount: Number(
       obj.products_count ??
         obj.contract_products_count ??
@@ -352,6 +331,7 @@ function normalizeContract(item: unknown): Contract {
         0
     ),
     notes: String(obj.notes ?? obj.description ?? ""),
+    termsAndConditions: String(obj.terms_and_conditions ?? ""),
     createdAt: String(obj.created_at ?? obj.createdAt ?? ""),
     updatedAt: String(obj.updated_at ?? obj.updatedAt ?? ""),
     raw: obj,
@@ -368,24 +348,23 @@ function dictionary(locale: AppLocale) {
   return {
     pageTitle: isArabic ? "إدارة العقود" : "Contracts Management",
     pageSubtitle: isArabic
-      ? "متابعة عقود مقدمي الخدمة، حالات التفعيل، تواريخ الانتهاء، والقيم المالية من البيانات الحقيقية."
-      : "Monitor provider contracts, activation status, expiry dates, and financial values from live data.",
+      ? "متابعة عقود مقدمي الخدمة، حالات التفعيل، نسب الخصم، نسبة النظام، وتواريخ الانتهاء من البيانات الحقيقية."
+      : "Monitor provider contracts, activation status, discounts, system commission, and expiry dates from live data.",
 
     createContract: isArabic ? "إنشاء عقد" : "Create Contract",
     contractsList: isArabic ? "قائمة العقود" : "Contracts List",
     reports: isArabic ? "التقارير" : "Reports",
-    export: isArabic ? "تصدير" : "Export",
     refresh: isArabic ? "تحديث" : "Refresh",
 
     totalContracts: isArabic ? "إجمالي العقود" : "Total Contracts",
     activeContracts: isArabic ? "العقود النشطة" : "Active Contracts",
     expiringSoon: isArabic ? "قريبة الانتهاء" : "Expiring Soon",
-    totalValue: isArabic ? "إجمالي القيمة" : "Total Value",
+    linkedProducts: isArabic ? "عقود مرتبطة بمنتجات" : "Linked Products",
 
     featuredContracts: isArabic ? "العقود المهمة" : "Featured Contracts",
     featuredSubtitle: isArabic
-      ? "عرض مختصر لأهم العقود بناءً على الحالة والقيمة وأحدث السجلات."
-      : "A compact view of important contracts based on status, value, and latest records.",
+      ? "عرض مختصر لأهم العقود بناءً على الحالة، نسبة النظام، وأحدث السجلات."
+      : "A compact view of important contracts based on status, system commission, and latest records.",
 
     statusOverview: isArabic ? "حالة العقود" : "Contracts Status",
     statusSubtitle: isArabic
@@ -409,12 +388,13 @@ function dictionary(locale: AppLocale) {
     contract: isArabic ? "العقد" : "Contract",
     contractNumber: isArabic ? "رقم العقد" : "Contract No.",
     provider: isArabic ? "مقدم الخدمة" : "Provider",
-    type: isArabic ? "النوع" : "Type",
+    pricingModel: isArabic ? "آلية التسعير" : "Pricing Model",
     status: isArabic ? "الحالة" : "Status",
     startDate: isArabic ? "تاريخ البداية" : "Start Date",
     endDate: isArabic ? "تاريخ النهاية" : "End Date",
-    value: isArabic ? "القيمة" : "Value",
-    commission: isArabic ? "العمولة" : "Commission",
+    discount: isArabic ? "خصم العقد" : "Discount",
+    systemCommission: isArabic ? "نسبة النظام" : "System Commission",
+    products: isArabic ? "المنتجات" : "Products",
     actions: isArabic ? "الإجراءات" : "Actions",
     view: isArabic ? "عرض" : "View",
 
@@ -428,27 +408,18 @@ function dictionary(locale: AppLocale) {
       : "Failed to load contracts data.",
 
     updatedNow: isArabic ? "تم تحديث بيانات العقود" : "Contracts data refreshed",
-    exported: isArabic
-      ? "تم تجهيز تصدير العقود"
-      : "Contracts export prepared",
 
     active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
     draft: isArabic ? "مسودة" : "Draft",
-    pending: isArabic ? "معلق" : "Pending",
     expired: isArabic ? "منتهي" : "Expired",
     terminated: isArabic ? "منهى" : "Terminated",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
     suspended: isArabic ? "موقوف" : "Suspended",
     unknown: isArabic ? "غير معروف" : "Unknown",
 
-    general: isArabic ? "عام" : "General",
-    medical: isArabic ? "طبي" : "Medical",
-    service: isArabic ? "خدمة" : "Service",
-    partnership: isArabic ? "شراكة" : "Partnership",
-    discount: isArabic ? "خصومات" : "Discount",
-    supply: isArabic ? "توريد" : "Supply",
-    other: isArabic ? "أخرى" : "Other",
+    fixed: isArabic ? "سعر ثابت" : "Fixed",
+    percentage: isArabic ? "نسبة" : "Percentage",
+    custom: isArabic ? "مخصص" : "Custom",
+    free: isArabic ? "مجاني" : "Free",
 
     allStatuses: isArabic ? "كل الحالات" : "All Statuses",
   };
@@ -458,13 +429,10 @@ function statusLabel(status: ContractStatus, locale: AppLocale) {
   const t = dictionary(locale);
 
   const labels: Record<ContractStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
     DRAFT: t.draft,
-    PENDING: t.pending,
+    ACTIVE: t.active,
     EXPIRED: t.expired,
     TERMINATED: t.terminated,
-    CANCELLED: t.cancelled,
     SUSPENDED: t.suspended,
     UNKNOWN: t.unknown,
   };
@@ -472,21 +440,18 @@ function statusLabel(status: ContractStatus, locale: AppLocale) {
   return labels[status] || t.unknown;
 }
 
-function typeLabel(type: ContractType, locale: AppLocale) {
+function pricingModelLabel(pricingModel: PricingModel, locale: AppLocale) {
   const t = dictionary(locale);
 
-  const labels: Record<ContractType, string> = {
-    GENERAL: t.general,
-    MEDICAL: t.medical,
-    SERVICE: t.service,
-    PARTNERSHIP: t.partnership,
-    DISCOUNT: t.discount,
-    SUPPLY: t.supply,
-    OTHER: t.other,
+  const labels: Record<PricingModel, string> = {
+    FIXED: t.fixed,
+    PERCENTAGE: t.percentage,
+    CUSTOM: t.custom,
+    FREE: t.free,
     UNKNOWN: t.unknown,
   };
 
-  return labels[type] || t.unknown;
+  return labels[pricingModel] || t.unknown;
 }
 
 function statusBadgeClass(status: ContractStatus) {
@@ -494,15 +459,15 @@ function statusBadgeClass(status: ContractStatus) {
     return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   }
 
-  if (status === "DRAFT" || status === "PENDING") {
+  if (status === "DRAFT") {
     return "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   }
 
-  if (status === "EXPIRED" || status === "TERMINATED" || status === "CANCELLED") {
+  if (status === "EXPIRED" || status === "TERMINATED") {
     return "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300";
   }
 
-  if (status === "SUSPENDED" || status === "INACTIVE") {
+  if (status === "SUSPENDED") {
     return "border-slate-500/25 bg-slate-500/10 text-slate-700 dark:text-slate-300";
   }
 
@@ -513,18 +478,15 @@ function statusBadgeClass(status: ContractStatus) {
    🧾 Small Components
 ============================================================ */
 
-function SarAmount({ amount }: { amount: number }) {
+function SarIcon() {
   return (
-    <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
-      <Image
-        src="/currency/sar.svg"
-        alt="SAR"
-        width={14}
-        height={14}
-        className="opacity-80"
-      />
-      {formatEnglishMoney(amount)}
-    </span>
+    <Image
+      src="/currency/sar.svg"
+      alt="SAR"
+      width={14}
+      height={14}
+      className="opacity-80"
+    />
   );
 }
 
@@ -535,10 +497,13 @@ function SarAmount({ amount }: { amount: number }) {
 export default function SystemContractsPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [apiSummary, setApiSummary] = useState<ContractsSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ContractStatus | "ALL">("ALL");
+  const [statusFilter, setStatusFilter] = useState<ContractStatus | "ALL">(
+    "ALL"
+  );
 
   const isArabic = locale === "ar";
   const t = dictionary(locale);
@@ -585,8 +550,11 @@ export default function SystemContractsPage() {
         throw new Error(payload?.message || "Failed to load contracts.");
       }
 
+      const typedPayload = payload as ContractsApiResponse;
       const items = normalizeApiList(payload).map(normalizeContract);
+
       setContracts(items);
+      setApiSummary(typedPayload.summary || null);
 
       if (options?.silent) {
         toast.success(t.updatedNow);
@@ -595,6 +563,7 @@ export default function SystemContractsPage() {
       console.error("Load contracts error:", error);
       toast.error(t.loadError);
       setContracts([]);
+      setApiSummary(null);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -615,7 +584,8 @@ export default function SystemContractsPage() {
         contract.title.toLowerCase().includes(query) ||
         contract.contractNumber.toLowerCase().includes(query) ||
         contract.providerName.toLowerCase().includes(query) ||
-        contract.notes.toLowerCase().includes(query);
+        contract.notes.toLowerCase().includes(query) ||
+        contract.termsAndConditions.toLowerCase().includes(query);
 
       const matchesStatus =
         statusFilter === "ALL" || contract.status === statusFilter;
@@ -633,11 +603,6 @@ export default function SystemContractsPage() {
       return days !== null && days >= 0 && days <= 30;
     }).length;
 
-    const totalValue = contracts.reduce(
-      (sum, item) => sum + Number(item.contractValue || 0),
-      0
-    );
-
     const expired = contracts.filter((item) => {
       if (item.status === "EXPIRED" || item.status === "TERMINATED") return true;
 
@@ -645,19 +610,27 @@ export default function SystemContractsPage() {
       return days !== null && days < 0;
     }).length;
 
-    const draft = contracts.filter(
-      (item) => item.status === "DRAFT" || item.status === "PENDING"
+    const draft = contracts.filter((item) => item.status === "DRAFT").length;
+    const suspended = contracts.filter(
+      (item) => item.status === "SUSPENDED"
+    ).length;
+
+    const contractsWithProducts = contracts.filter(
+      (item) => item.productsCount > 0
     ).length;
 
     return {
-      total,
-      active,
+      total: apiSummary?.total_contracts ?? total,
+      active: apiSummary?.active_contracts ?? active,
+      draft: apiSummary?.draft_contracts ?? draft,
+      suspended: apiSummary?.suspended_contracts ?? suspended,
+      expired: apiSummary?.expired_contracts ?? expired,
+      terminated: apiSummary?.terminated_contracts ?? 0,
       expiringSoon,
-      totalValue,
-      expired,
-      draft,
+      contractsWithProducts:
+        apiSummary?.contracts_with_products ?? contractsWithProducts,
     };
-  }, [contracts]);
+  }, [apiSummary, contracts]);
 
   const featuredContracts = useMemo(() => {
     return [...contracts]
@@ -667,7 +640,10 @@ export default function SystemContractsPage() {
 
         if (activeScoreA !== activeScoreB) return activeScoreB - activeScoreA;
 
-        return Number(b.contractValue || 0) - Number(a.contractValue || 0);
+        return (
+          Number(b.systemCommissionPercentage || 0) -
+          Number(a.systemCommissionPercentage || 0)
+        );
       })
       .slice(0, 4);
   }, [contracts]);
@@ -687,9 +663,8 @@ export default function SystemContractsPage() {
     const statuses: ContractStatus[] = [
       "ACTIVE",
       "DRAFT",
-      "PENDING",
+      "SUSPENDED",
       "EXPIRED",
-      "INACTIVE",
       "TERMINATED",
     ];
 
@@ -706,49 +681,6 @@ export default function SystemContractsPage() {
       })
       .filter((item) => item.count > 0);
   }, [contracts, stats.total]);
-
-  function handleExport() {
-    try {
-      const rows = filteredContracts.map((contract) => ({
-        contract_number: contract.contractNumber,
-        title: contract.title,
-        provider: contract.providerName,
-        type: typeLabel(contract.contractType, locale),
-        status: statusLabel(contract.status, locale),
-        start_date: contract.startDate,
-        end_date: contract.endDate,
-        contract_value: contract.contractValue,
-        commission_rate: contract.commissionRate,
-        products_count: contract.productsCount,
-      }));
-
-      const csvContent = [
-        Object.keys(rows[0] || {}).join(","),
-        ...rows.map((row) =>
-          Object.values(row)
-            .map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`)
-            .join(",")
-        ),
-      ].join("\n");
-
-      const blob = new Blob(["\ufeff" + csvContent], {
-        type: "text/csv;charset=utf-8;",
-      });
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-
-      link.href = url;
-      link.download = "contracts-dashboard.csv";
-      link.click();
-
-      URL.revokeObjectURL(url);
-      toast.success(t.exported);
-    } catch (error) {
-      console.error("Export contracts error:", error);
-      toast.error(isArabic ? "تعذر تصدير العقود" : "Failed to export contracts");
-    }
-  }
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -799,17 +731,11 @@ export default function SystemContractsPage() {
                 {t.refresh}
               </Button>
 
-              <Button
-                variant="outline"
-                className="rounded-2xl bg-white/70 dark:bg-white/5"
-                onClick={handleExport}
-              >
-                <Download className="me-2 h-4 w-4" />
-                {t.export}
-              </Button>
-
               <Link href="/system/contracts/reports">
-                <Button variant="outline" className="rounded-2xl bg-white/70 dark:bg-white/5">
+                <Button
+                  variant="outline"
+                  className="rounded-2xl bg-white/70 dark:bg-white/5"
+                >
                   <BarChart3 className="me-2 h-4 w-4" />
                   {t.reports}
                 </Button>
@@ -831,7 +757,9 @@ export default function SystemContractsPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.totalContracts}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {t.totalContracts}
+                  </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums">
                     {formatEnglishNumber(stats.total)}
                   </p>
@@ -847,7 +775,9 @@ export default function SystemContractsPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.activeContracts}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {t.activeContracts}
+                  </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums">
                     {formatEnglishNumber(stats.active)}
                   </p>
@@ -863,7 +793,9 @@ export default function SystemContractsPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.expiringSoon}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {t.expiringSoon}
+                  </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums">
                     {formatEnglishNumber(stats.expiringSoon)}
                   </p>
@@ -879,9 +811,11 @@ export default function SystemContractsPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.totalValue}</p>
-                  <p className="mt-2 text-2xl font-bold tabular-nums">
-                    <SarAmount amount={stats.totalValue} />
+                  <p className="text-sm text-muted-foreground">
+                    {t.linkedProducts}
+                  </p>
+                  <p className="mt-2 text-3xl font-bold tabular-nums">
+                    {formatEnglishNumber(stats.contractsWithProducts)}
                   </p>
                 </div>
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-600 dark:text-sky-300">
@@ -960,19 +894,39 @@ export default function SystemContractsPage() {
 
                         <div className="mt-4 grid gap-3 text-sm">
                           <div className="flex items-center justify-between gap-3">
-                            <span className="text-muted-foreground">{t.provider}</span>
+                            <span className="text-muted-foreground">
+                              {t.provider}
+                            </span>
                             <span className="truncate font-medium">
                               {contract.providerName}
                             </span>
                           </div>
 
                           <div className="flex items-center justify-between gap-3">
-                            <span className="text-muted-foreground">{t.value}</span>
-                            <SarAmount amount={contract.contractValue} />
+                            <span className="text-muted-foreground">
+                              {t.discount}
+                            </span>
+                            <span className="font-semibold tabular-nums">
+                              {formatPercent(contract.discountPercentage)}
+                            </span>
                           </div>
 
                           <div className="flex items-center justify-between gap-3">
-                            <span className="text-muted-foreground">{t.endDate}</span>
+                            <span className="text-muted-foreground">
+                              {t.systemCommission}
+                            </span>
+                            <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
+                              <SarIcon />
+                              {formatPercent(
+                                contract.systemCommissionPercentage
+                              )}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-muted-foreground">
+                              {t.endDate}
+                            </span>
                             <span className="font-medium">
                               {formatDate(contract.endDate, locale)}
                             </span>
@@ -1010,16 +964,17 @@ export default function SystemContractsPage() {
                       <select
                         value={statusFilter}
                         onChange={(event) =>
-                          setStatusFilter(event.target.value as ContractStatus | "ALL")
+                          setStatusFilter(
+                            event.target.value as ContractStatus | "ALL"
+                          )
                         }
                         className="h-10 rounded-2xl border border-input bg-white/80 px-9 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
                       >
                         <option value="ALL">{t.allStatuses}</option>
                         <option value="ACTIVE">{t.active}</option>
                         <option value="DRAFT">{t.draft}</option>
-                        <option value="PENDING">{t.pending}</option>
+                        <option value="SUSPENDED">{t.suspended}</option>
                         <option value="EXPIRED">{t.expired}</option>
-                        <option value="INACTIVE">{t.inactive}</option>
                         <option value="TERMINATED">{t.terminated}</option>
                       </select>
                     </div>
@@ -1036,8 +991,10 @@ export default function SystemContractsPage() {
                         <TableHead>{t.provider}</TableHead>
                         <TableHead>{t.status}</TableHead>
                         <TableHead>{t.endDate}</TableHead>
-                        <TableHead>{t.value}</TableHead>
-                        <TableHead className="text-center">{t.actions}</TableHead>
+                        <TableHead>{t.systemCommission}</TableHead>
+                        <TableHead className="text-center">
+                          {t.actions}
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
 
@@ -1101,7 +1058,12 @@ export default function SystemContractsPage() {
                             </TableCell>
 
                             <TableCell>
-                              <SarAmount amount={contract.contractValue} />
+                              <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
+                                <SarIcon />
+                                {formatPercent(
+                                  contract.systemCommissionPercentage
+                                )}
+                              </span>
                             </TableCell>
 
                             <TableCell>
@@ -1148,14 +1110,14 @@ export default function SystemContractsPage() {
                   statusRows.map((row) => (
                     <div key={row.status} className="space-y-2">
                       <div className="flex items-center justify-between gap-3 text-sm">
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            variant="outline"
-                            className={`rounded-full ${statusBadgeClass(row.status)}`}
-                          >
-                            {statusLabel(row.status, locale)}
-                          </Badge>
-                        </div>
+                        <Badge
+                          variant="outline"
+                          className={`rounded-full ${statusBadgeClass(
+                            row.status
+                          )}`}
+                        >
+                          {statusLabel(row.status, locale)}
+                        </Badge>
 
                         <div className="font-semibold tabular-nums">
                           {formatEnglishNumber(row.count)}
@@ -1178,16 +1140,16 @@ export default function SystemContractsPage() {
                       {formatEnglishNumber(stats.draft)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {isArabic ? "مسودة / معلقة" : "Draft / Pending"}
+                      {isArabic ? "مسودات" : "Draft"}
                     </p>
                   </div>
 
                   <div className="rounded-2xl border border-white/20 bg-white/70 p-4 text-center dark:border-white/10 dark:bg-white/5">
                     <p className="text-2xl font-bold tabular-nums">
-                      {formatEnglishNumber(stats.expired)}
+                      {formatEnglishNumber(stats.suspended)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {isArabic ? "منتهية" : "Expired"}
+                      {isArabic ? "موقوفة" : "Suspended"}
                     </p>
                   </div>
                 </div>
@@ -1205,28 +1167,40 @@ export default function SystemContractsPage() {
 
               <CardContent className="space-y-3">
                 <Link href="/system/contracts/list" className="block">
-                  <Button variant="outline" className="w-full justify-start rounded-2xl">
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start rounded-2xl"
+                  >
                     <ListChecks className="me-2 h-4 w-4" />
                     {t.contractsList}
                   </Button>
                 </Link>
 
                 <Link href="/system/contracts/create" className="block">
-                  <Button variant="outline" className="w-full justify-start rounded-2xl">
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start rounded-2xl"
+                  >
                     <Plus className="me-2 h-4 w-4" />
                     {t.createContract}
                   </Button>
                 </Link>
 
                 <Link href="/system/contracts/reports" className="block">
-                  <Button variant="outline" className="w-full justify-start rounded-2xl">
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start rounded-2xl"
+                  >
                     <BarChart3 className="me-2 h-4 w-4" />
                     {t.reports}
                   </Button>
                 </Link>
 
                 <Link href="/system/providers/list" className="block">
-                  <Button variant="outline" className="w-full justify-start rounded-2xl">
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start rounded-2xl"
+                  >
                     <Users className="me-2 h-4 w-4" />
                     {isArabic ? "مقدمو الخدمة" : "Providers"}
                   </Button>
@@ -1243,15 +1217,57 @@ export default function SystemContractsPage() {
 
                   <div>
                     <h3 className="font-bold">
-                      {isArabic ? "وحدة عقود موحدة" : "Unified Contracts Module"}
+                      {isArabic
+                        ? "وحدة عقود موحدة"
+                        : "Unified Contracts Module"}
                     </h3>
                     <p className="mt-2 text-sm leading-7 text-primary-foreground/80">
                       {isArabic
-                        ? "تم تجهيز لوحة العقود لتعمل بنفس هوية وحدات النظام وبالاعتماد على API العقود الرسمي."
-                        : "The contracts dashboard is prepared with the same system identity and connected to the official contracts API."}
+                        ? "تم تجهيز لوحة العقود لتعمل بنفس هوية وحدات النظام وبالاعتماد على API العقود الرسمي ونسبة النظام."
+                        : "The contracts dashboard is prepared with the same system identity and connected to the official contracts API and system commission."}
                     </p>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileSignature className="h-5 w-5 text-primary" />
+                  {isArabic ? "نماذج التسعير" : "Pricing Models"}
+                </CardTitle>
+                <CardDescription>
+                  {isArabic
+                    ? "قراءة سريعة لآليات التسعير المستخدمة داخل العقود."
+                    : "Quick reading of pricing models used in contracts."}
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent className="space-y-3">
+                {(["FIXED", "PERCENTAGE", "CUSTOM", "FREE"] as PricingModel[]).map(
+                  (pricingModel) => {
+                    const count = contracts.filter(
+                      (item) => item.pricingModel === pricingModel
+                    ).length;
+
+                    if (count === 0) return null;
+
+                    return (
+                      <div
+                        key={pricingModel}
+                        className="flex items-center justify-between rounded-2xl border border-white/20 bg-white/70 px-4 py-3 text-sm dark:border-white/10 dark:bg-white/5"
+                      >
+                        <span className="font-medium">
+                          {pricingModelLabel(pricingModel, locale)}
+                        </span>
+                        <span className="font-bold tabular-nums">
+                          {formatEnglishNumber(count)}
+                        </span>
+                      </div>
+                    );
+                  }
+                )}
               </CardContent>
             </Card>
           </div>

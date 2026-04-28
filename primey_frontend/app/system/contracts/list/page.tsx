@@ -18,6 +18,7 @@ import {
   FilterIcon,
   Loader2,
   MoreHorizontal,
+  Percent,
   PlusCircle,
   Printer,
   RefreshCcw,
@@ -60,53 +61,44 @@ import {
    📂 app/system/contracts/list/page.tsx
    🧾 Primey Care | Contracts List
    ------------------------------------------------------------
-   ✅ قائمة العقود بنفس نمط المراكز / العملاء / المندوبين / المنتجات
+   ✅ قائمة العقود
    ✅ ربط حقيقي مع /api/contracts/
    ✅ بحث + فلاتر + أعمدة + تحديد + فرز + صفحات
-   ✅ تصدير Excel منظم .xlsx فقط
+   ✅ تصدير Excel للقائمة فقط
    ✅ طباعة Web PDF للقائمة فقط
    ✅ دعم عربي / إنجليزي عبر primey-locale
    ✅ الأرقام دائمًا إنجليزية
-   ✅ استخدام UI الداخلي فقط
+   ✅ استخدام رمز SAR الرسمي
    ✅ لا يوجد hardcoded localhost
 ============================================================ */
 
 type AppLocale = "ar" | "en";
 
 type ContractStatus =
-  | "ACTIVE"
-  | "INACTIVE"
   | "DRAFT"
-  | "PENDING"
+  | "ACTIVE"
   | "EXPIRED"
   | "TERMINATED"
-  | "CANCELLED"
   | "SUSPENDED"
   | "UNKNOWN";
 
-type ContractType =
-  | "GENERAL"
-  | "MEDICAL"
-  | "SERVICE"
-  | "PARTNERSHIP"
-  | "DISCOUNT"
-  | "SUPPLY"
-  | "OTHER"
-  | "UNKNOWN";
+type PricingModel = "FIXED" | "PERCENTAGE" | "CUSTOM" | "FREE" | "UNKNOWN";
 
 type StatusFilter = "ALL" | ContractStatus;
-type TypeFilter = "ALL" | ContractType;
+type PricingFilter = "ALL" | PricingModel;
 
 type SortKey =
   | "contractNumber"
   | "title"
   | "providerName"
-  | "contractType"
+  | "pricingModel"
   | "status"
   | "startDate"
   | "endDate"
-  | "contractValue"
-  | "productsCount";
+  | "discountPercentage"
+  | "systemCommissionPercentage"
+  | "productsCount"
+  | "createdAt";
 
 type SortDirection = "asc" | "desc";
 
@@ -116,15 +108,16 @@ type Contract = {
   title: string;
   providerName: string;
   providerId: number | string | null;
-  contractType: ContractType;
+  pricingModel: PricingModel;
   status: ContractStatus;
   startDate: string;
   endDate: string;
-  contractValue: number;
-  commissionRate: number;
-  currency: string;
+  signedAt: string;
+  discountPercentage: number;
+  systemCommissionPercentage: number;
   productsCount: number;
   notes: string;
+  termsAndConditions: string;
   createdAt: string;
   updatedAt: string;
   raw: Record<string, unknown>;
@@ -150,11 +143,12 @@ type VisibleColumns = {
   contractNumber: boolean;
   title: boolean;
   providerName: boolean;
-  contractType: boolean;
+  pricingModel: boolean;
   status: boolean;
   startDate: boolean;
   endDate: boolean;
-  contractValue: boolean;
+  discountPercentage: boolean;
+  systemCommissionPercentage: boolean;
   productsCount: boolean;
   actions: boolean;
 };
@@ -239,6 +233,19 @@ function toComparableDate(value: string) {
   return Number.isNaN(parsedDate) ? 0 : parsedDate;
 }
 
+function daysUntil(dateValue: string) {
+  if (!dateValue) return null;
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+
+  return Math.ceil((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
 /* ============================================================
    🔁 API Normalizers
 ============================================================ */
@@ -270,31 +277,22 @@ function normalizeApiList(payload: unknown): unknown[] {
 function normalizeStatus(value: unknown): ContractStatus {
   const status = String(value || "").toUpperCase();
 
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "INACTIVE") return "INACTIVE";
   if (status === "DRAFT") return "DRAFT";
-  if (status === "PENDING") return "PENDING";
+  if (status === "ACTIVE") return "ACTIVE";
   if (status === "EXPIRED") return "EXPIRED";
   if (status === "TERMINATED") return "TERMINATED";
-  if (status === "CANCELLED") return "CANCELLED";
   if (status === "SUSPENDED") return "SUSPENDED";
-
-  if (value === true) return "ACTIVE";
-  if (value === false) return "INACTIVE";
 
   return "UNKNOWN";
 }
 
-function normalizeContractType(value: unknown): ContractType {
-  const contractType = String(value || "").toUpperCase();
+function normalizePricingModel(value: unknown): PricingModel {
+  const pricingModel = String(value || "").toUpperCase();
 
-  if (contractType === "GENERAL") return "GENERAL";
-  if (contractType === "MEDICAL") return "MEDICAL";
-  if (contractType === "SERVICE") return "SERVICE";
-  if (contractType === "PARTNERSHIP") return "PARTNERSHIP";
-  if (contractType === "DISCOUNT") return "DISCOUNT";
-  if (contractType === "SUPPLY") return "SUPPLY";
-  if (contractType === "OTHER") return "OTHER";
+  if (pricingModel === "FIXED") return "FIXED";
+  if (pricingModel === "PERCENTAGE") return "PERCENTAGE";
+  if (pricingModel === "CUSTOM") return "CUSTOM";
+  if (pricingModel === "FREE") return "FREE";
 
   return "UNKNOWN";
 }
@@ -354,24 +352,21 @@ function normalizeContract(item: unknown): Contract {
       (obj.provider_id as number | string | undefined) ??
       (providerObj?.id as number | string | undefined) ??
       null,
-    contractType: normalizeContractType(
-      obj.contract_type ?? obj.contractType ?? obj.type
-    ),
-    status: normalizeStatus(obj.status ?? obj.is_active),
+    pricingModel: normalizePricingModel(obj.pricing_model ?? obj.pricingModel),
+    status: normalizeStatus(obj.status),
     startDate: String(obj.start_date ?? obj.startDate ?? ""),
     endDate: String(obj.end_date ?? obj.endDate ?? ""),
-    contractValue: Number(
-      obj.contract_value ??
-        obj.contractValue ??
-        obj.total_value ??
-        obj.value ??
-        obj.amount ??
+    signedAt: String(obj.signed_at ?? obj.signedAt ?? ""),
+    discountPercentage: Number(
+      obj.discount_percentage ?? obj.discountPercentage ?? 0
+    ),
+    systemCommissionPercentage: Number(
+      obj.system_commission_percentage ??
+        obj.systemCommissionPercentage ??
+        obj.commission_rate ??
+        obj.commissionRate ??
         0
     ),
-    commissionRate: Number(
-      obj.commission_rate ?? obj.commissionRate ?? obj.rate ?? 0
-    ),
-    currency: String(obj.currency ?? "SAR"),
     productsCount: Number(
       obj.products_count ??
         obj.contract_products_count ??
@@ -380,6 +375,7 @@ function normalizeContract(item: unknown): Contract {
         0
     ),
     notes: String(obj.notes ?? obj.description ?? ""),
+    termsAndConditions: String(obj.terms_and_conditions ?? ""),
     createdAt: String(obj.created_at ?? obj.createdAt ?? ""),
     updatedAt: String(obj.updated_at ?? obj.updatedAt ?? ""),
     raw: obj,
@@ -410,14 +406,14 @@ function dictionary(locale: AppLocale) {
     totalContracts: isArabic ? "إجمالي العقود" : "Total Contracts",
     activeContracts: isArabic ? "العقود النشطة" : "Active Contracts",
     expiringContracts: isArabic ? "قريبة الانتهاء" : "Expiring Soon",
-    totalValue: isArabic ? "إجمالي القيمة" : "Total Value",
+    linkedProducts: isArabic ? "منتجات مرتبطة" : "Linked Products",
 
     searchPlaceholder: isArabic
       ? "ابحث برقم العقد أو الاسم أو مقدم الخدمة..."
       : "Search by contract number, title, or provider...",
 
     allStatuses: isArabic ? "كل الحالات" : "All Statuses",
-    allTypes: isArabic ? "كل الأنواع" : "All Types",
+    allPricingModels: isArabic ? "كل آليات التسعير" : "All Pricing Models",
     fromDate: isArabic ? "من تاريخ" : "From Date",
     toDate: isArabic ? "إلى تاريخ" : "To Date",
     clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
@@ -432,33 +428,29 @@ function dictionary(locale: AppLocale) {
     contractNumber: isArabic ? "رقم العقد" : "Contract No.",
     title: isArabic ? "العقد" : "Contract",
     providerName: isArabic ? "مقدم الخدمة" : "Provider",
-    contractType: isArabic ? "النوع" : "Type",
+    pricingModel: isArabic ? "آلية التسعير" : "Pricing Model",
     status: isArabic ? "الحالة" : "Status",
     startDate: isArabic ? "تاريخ البداية" : "Start Date",
     endDate: isArabic ? "تاريخ النهاية" : "End Date",
-    contractValue: isArabic ? "القيمة" : "Value",
+    discountPercentage: isArabic ? "خصم العقد" : "Discount",
+    systemCommissionPercentage: isArabic
+      ? "نسبة النظام"
+      : "System Commission",
     productsCount: isArabic ? "الخدمات/المنتجات" : "Products/Services",
-    commissionRate: isArabic ? "العمولة" : "Commission",
     actions: isArabic ? "الإجراءات" : "Actions",
     view: isArabic ? "عرض التفاصيل" : "View Details",
 
     active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
     draft: isArabic ? "مسودة" : "Draft",
-    pending: isArabic ? "معلق" : "Pending",
     expired: isArabic ? "منتهي" : "Expired",
     terminated: isArabic ? "منهى" : "Terminated",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
     suspended: isArabic ? "موقوف" : "Suspended",
     unknown: isArabic ? "غير معروف" : "Unknown",
 
-    general: isArabic ? "عام" : "General",
-    medical: isArabic ? "طبي" : "Medical",
-    service: isArabic ? "خدمة" : "Service",
-    partnership: isArabic ? "شراكة" : "Partnership",
-    discount: isArabic ? "خصومات" : "Discount",
-    supply: isArabic ? "توريد" : "Supply",
-    other: isArabic ? "أخرى" : "Other",
+    fixed: isArabic ? "سعر ثابت" : "Fixed",
+    percentage: isArabic ? "نسبة" : "Percentage",
+    custom: isArabic ? "مخصص" : "Custom",
+    free: isArabic ? "مجاني" : "Free",
 
     loading: isArabic ? "جاري تحميل العقود..." : "Loading contracts...",
     noContracts: isArabic
@@ -484,13 +476,10 @@ function statusLabel(status: ContractStatus, locale: AppLocale) {
   const t = dictionary(locale);
 
   const labels: Record<ContractStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
     DRAFT: t.draft,
-    PENDING: t.pending,
+    ACTIVE: t.active,
     EXPIRED: t.expired,
     TERMINATED: t.terminated,
-    CANCELLED: t.cancelled,
     SUSPENDED: t.suspended,
     UNKNOWN: t.unknown,
   };
@@ -498,21 +487,18 @@ function statusLabel(status: ContractStatus, locale: AppLocale) {
   return labels[status] || t.unknown;
 }
 
-function typeLabel(type: ContractType, locale: AppLocale) {
+function pricingModelLabel(pricingModel: PricingModel, locale: AppLocale) {
   const t = dictionary(locale);
 
-  const labels: Record<ContractType, string> = {
-    GENERAL: t.general,
-    MEDICAL: t.medical,
-    SERVICE: t.service,
-    PARTNERSHIP: t.partnership,
-    DISCOUNT: t.discount,
-    SUPPLY: t.supply,
-    OTHER: t.other,
+  const labels: Record<PricingModel, string> = {
+    FIXED: t.fixed,
+    PERCENTAGE: t.percentage,
+    CUSTOM: t.custom,
+    FREE: t.free,
     UNKNOWN: t.unknown,
   };
 
-  return labels[type] || t.unknown;
+  return labels[pricingModel] || t.unknown;
 }
 
 function statusBadgeClass(status: ContractStatus) {
@@ -520,15 +506,15 @@ function statusBadgeClass(status: ContractStatus) {
     return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   }
 
-  if (status === "DRAFT" || status === "PENDING") {
+  if (status === "DRAFT") {
     return "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   }
 
-  if (status === "EXPIRED" || status === "TERMINATED" || status === "CANCELLED") {
+  if (status === "EXPIRED" || status === "TERMINATED") {
     return "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300";
   }
 
-  if (status === "SUSPENDED" || status === "INACTIVE") {
+  if (status === "SUSPENDED") {
     return "border-slate-500/25 bg-slate-500/10 text-slate-700 dark:text-slate-300";
   }
 
@@ -539,17 +525,23 @@ function statusBadgeClass(status: ContractStatus) {
    🧾 Small Components
 ============================================================ */
 
-function SarAmount({ amount }: { amount: number }) {
+function SarIcon() {
+  return (
+    <Image
+      src="/currency/sar.svg"
+      alt="SAR"
+      width={14}
+      height={14}
+      className="opacity-80"
+    />
+  );
+}
+
+function PercentValue({ value }: { value: number }) {
   return (
     <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
-      <Image
-        src="/currency/sar.svg"
-        alt="SAR"
-        width={14}
-        height={14}
-        className="opacity-80"
-      />
-      {formatEnglishMoney(amount)}
+      <Percent className="h-3.5 w-3.5 text-muted-foreground" />
+      {formatPercent(value)}
     </span>
   );
 }
@@ -568,11 +560,11 @@ export default function SystemContractsListPage() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("ALL");
+  const [pricingFilter, setPricingFilter] = useState<PricingFilter>("ALL");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  const [sortKey, setSortKey] = useState<SortKey>("createdAt" as SortKey);
+  const [sortKey, setSortKey] = useState<SortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const [page, setPage] = useState(1);
@@ -584,11 +576,12 @@ export default function SystemContractsListPage() {
     contractNumber: true,
     title: true,
     providerName: true,
-    contractType: true,
+    pricingModel: true,
     status: true,
     startDate: true,
     endDate: true,
-    contractValue: true,
+    discountPercentage: true,
+    systemCommissionPercentage: true,
     productsCount: true,
     actions: true,
   });
@@ -670,13 +663,14 @@ export default function SystemContractsListPage() {
         contract.contractNumber.toLowerCase().includes(query) ||
         contract.title.toLowerCase().includes(query) ||
         contract.providerName.toLowerCase().includes(query) ||
-        contract.notes.toLowerCase().includes(query);
+        contract.notes.toLowerCase().includes(query) ||
+        contract.termsAndConditions.toLowerCase().includes(query);
 
       const matchesStatus =
         statusFilter === "ALL" || contract.status === statusFilter;
 
-      const matchesType =
-        typeFilter === "ALL" || contract.contractType === typeFilter;
+      const matchesPricing =
+        pricingFilter === "ALL" || contract.pricingModel === pricingFilter;
 
       const start = toComparableDate(contract.startDate);
       const end = toComparableDate(contract.endDate);
@@ -689,12 +683,12 @@ export default function SystemContractsListPage() {
       return (
         matchesSearch &&
         matchesStatus &&
-        matchesType &&
+        matchesPricing &&
         matchesDateFrom &&
         matchesDateTo
       );
     });
-  }, [contracts, searchTerm, statusFilter, typeFilter, dateFrom, dateTo]);
+  }, [contracts, searchTerm, statusFilter, pricingFilter, dateFrom, dateTo]);
 
   const sortedContracts = useMemo(() => {
     const list = [...filteredContracts];
@@ -703,10 +697,18 @@ export default function SystemContractsListPage() {
       let firstValue: string | number = "";
       let secondValue: string | number = "";
 
-      if (sortKey === "contractValue" || sortKey === "productsCount") {
+      if (
+        sortKey === "productsCount" ||
+        sortKey === "discountPercentage" ||
+        sortKey === "systemCommissionPercentage"
+      ) {
         firstValue = Number(a[sortKey] || 0);
         secondValue = Number(b[sortKey] || 0);
-      } else if (sortKey === "startDate" || sortKey === "endDate") {
+      } else if (
+        sortKey === "startDate" ||
+        sortKey === "endDate" ||
+        sortKey === "createdAt"
+      ) {
         firstValue = toComparableDate(a[sortKey]);
         secondValue = toComparableDate(b[sortKey]);
       } else {
@@ -734,40 +736,24 @@ export default function SystemContractsListPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, statusFilter, typeFilter, dateFrom, dateTo]);
+  }, [searchTerm, statusFilter, pricingFilter, dateFrom, dateTo]);
 
   const stats = useMemo(() => {
     const total = contracts.length;
     const active = contracts.filter((item) => item.status === "ACTIVE").length;
 
     const expiring = contracts.filter((item) => {
-      if (!item.endDate) return false;
-
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const endDate = new Date(item.endDate);
-      endDate.setHours(0, 0, 0, 0);
-
-      if (Number.isNaN(endDate.getTime())) return false;
-
-      const days = Math.ceil(
-        (endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-      );
-
-      return days >= 0 && days <= 30;
+      const days = daysUntil(item.endDate);
+      return days !== null && days >= 0 && days <= 30;
     }).length;
 
-    const totalValue = contracts.reduce(
-      (sum, item) => sum + Number(item.contractValue || 0),
-      0
-    );
+    const linkedProducts = contracts.filter((item) => item.productsCount > 0).length;
 
     return {
       total,
       active,
       expiring,
-      totalValue,
+      linkedProducts,
     };
   }, [contracts]);
 
@@ -820,7 +806,7 @@ export default function SystemContractsListPage() {
   function clearFilters() {
     setSearchTerm("");
     setStatusFilter("ALL");
-    setTypeFilter("ALL");
+    setPricingFilter("ALL");
     setDateFrom("");
     setDateTo("");
     setSelectedIds(new Set());
@@ -831,13 +817,15 @@ export default function SystemContractsListPage() {
       [t.contractNumber]: contract.contractNumber,
       [t.title]: contract.title,
       [t.providerName]: contract.providerName,
-      [t.contractType]: typeLabel(contract.contractType, locale),
+      [t.pricingModel]: pricingModelLabel(contract.pricingModel, locale),
       [t.status]: statusLabel(contract.status, locale),
       [t.startDate]: formatDate(contract.startDate, locale),
       [t.endDate]: formatDate(contract.endDate, locale),
-      [t.contractValue]: formatEnglishMoney(contract.contractValue),
+      [t.discountPercentage]: formatPercent(contract.discountPercentage),
+      [t.systemCommissionPercentage]: formatPercent(
+        contract.systemCommissionPercentage
+      ),
       [t.productsCount]: formatEnglishNumber(contract.productsCount),
-      [t.commissionRate]: formatPercent(contract.commissionRate),
     }));
   }
 
@@ -850,7 +838,7 @@ export default function SystemContractsListPage() {
         [t.totalContracts, formatEnglishNumber(stats.total)],
         [t.activeContracts, formatEnglishNumber(stats.active)],
         [t.expiringContracts, formatEnglishNumber(stats.expiring)],
-        [t.totalValue, formatEnglishMoney(stats.totalValue), "SAR"],
+        [t.linkedProducts, formatEnglishNumber(stats.linkedProducts)],
         [],
       ];
 
@@ -868,9 +856,9 @@ export default function SystemContractsListPage() {
         { wch: 16 },
         { wch: 16 },
         { wch: 16 },
+        { wch: 16 },
         { wch: 18 },
         { wch: 18 },
-        { wch: 14 },
       ];
 
       worksheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
@@ -913,9 +901,7 @@ export default function SystemContractsListPage() {
             <meta charset="utf-8" />
             <title>${t.pageTitle}</title>
             <style>
-              * {
-                box-sizing: border-box;
-              }
+              * { box-sizing: border-box; }
 
               body {
                 font-family: Arial, sans-serif;
@@ -988,8 +974,11 @@ export default function SystemContractsListPage() {
                 font-weight: 800;
               }
 
-              .badge {
-                display: inline-block;
+              button, input, svg {
+                display: none !important;
+              }
+
+              .rounded-full {
                 border: 1px solid #e5e7eb;
                 border-radius: 999px;
                 padding: 3px 8px;
@@ -998,9 +987,7 @@ export default function SystemContractsListPage() {
               }
 
               @media print {
-                body {
-                  padding: 0;
-                }
+                body { padding: 0; }
               }
             </style>
           </head>
@@ -1027,8 +1014,8 @@ export default function SystemContractsListPage() {
                 <div class="print-card-value">${formatEnglishNumber(stats.expiring)}</div>
               </div>
               <div class="print-card">
-                <div class="print-card-label">${t.totalValue}</div>
-                <div class="print-card-value">${formatEnglishMoney(stats.totalValue)} SAR</div>
+                <div class="print-card-label">${t.linkedProducts}</div>
+                <div class="print-card-value">${formatEnglishNumber(stats.linkedProducts)}</div>
               </div>
             </div>
 
@@ -1050,11 +1037,12 @@ export default function SystemContractsListPage() {
     contractNumber: t.contractNumber,
     title: t.title,
     providerName: t.providerName,
-    contractType: t.contractType,
+    pricingModel: t.pricingModel,
     status: t.status,
     startDate: t.startDate,
     endDate: t.endDate,
-    contractValue: t.contractValue,
+    discountPercentage: t.discountPercentage,
+    systemCommissionPercentage: t.systemCommissionPercentage,
     productsCount: t.productsCount,
     actions: t.actions,
   };
@@ -1153,7 +1141,9 @@ export default function SystemContractsListPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.totalContracts}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {t.totalContracts}
+                  </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums">
                     {formatEnglishNumber(stats.total)}
                   </p>
@@ -1169,7 +1159,9 @@ export default function SystemContractsListPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.activeContracts}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {t.activeContracts}
+                  </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums">
                     {formatEnglishNumber(stats.active)}
                   </p>
@@ -1185,7 +1177,9 @@ export default function SystemContractsListPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.expiringContracts}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {t.expiringContracts}
+                  </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums">
                     {formatEnglishNumber(stats.expiring)}
                   </p>
@@ -1201,9 +1195,11 @@ export default function SystemContractsListPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.totalValue}</p>
-                  <p className="mt-2 text-2xl font-bold tabular-nums">
-                    <SarAmount amount={stats.totalValue} />
+                  <p className="text-sm text-muted-foreground">
+                    {t.linkedProducts}
+                  </p>
+                  <p className="mt-2 text-3xl font-bold tabular-nums">
+                    {formatEnglishNumber(stats.linkedProducts)}
                   </p>
                 </div>
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-600 dark:text-sky-300">
@@ -1288,33 +1284,31 @@ export default function SystemContractsListPage() {
 
               <select
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as StatusFilter)
+                }
                 className="h-10 rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
               >
                 <option value="ALL">{t.allStatuses}</option>
                 <option value="ACTIVE">{t.active}</option>
                 <option value="DRAFT">{t.draft}</option>
-                <option value="PENDING">{t.pending}</option>
-                <option value="EXPIRED">{t.expired}</option>
-                <option value="INACTIVE">{t.inactive}</option>
-                <option value="TERMINATED">{t.terminated}</option>
-                <option value="CANCELLED">{t.cancelled}</option>
                 <option value="SUSPENDED">{t.suspended}</option>
+                <option value="EXPIRED">{t.expired}</option>
+                <option value="TERMINATED">{t.terminated}</option>
               </select>
 
               <select
-                value={typeFilter}
-                onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}
+                value={pricingFilter}
+                onChange={(event) =>
+                  setPricingFilter(event.target.value as PricingFilter)
+                }
                 className="h-10 rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
               >
-                <option value="ALL">{t.allTypes}</option>
-                <option value="GENERAL">{t.general}</option>
-                <option value="MEDICAL">{t.medical}</option>
-                <option value="SERVICE">{t.service}</option>
-                <option value="PARTNERSHIP">{t.partnership}</option>
-                <option value="DISCOUNT">{t.discount}</option>
-                <option value="SUPPLY">{t.supply}</option>
-                <option value="OTHER">{t.other}</option>
+                <option value="ALL">{t.allPricingModels}</option>
+                <option value="FIXED">{t.fixed}</option>
+                <option value="PERCENTAGE">{t.percentage}</option>
+                <option value="CUSTOM">{t.custom}</option>
+                <option value="FREE">{t.free}</option>
               </select>
 
               <Input
@@ -1419,14 +1413,14 @@ export default function SystemContractsListPage() {
                       </TableHead>
                     )}
 
-                    {visibleColumns.contractType && (
+                    {visibleColumns.pricingModel && (
                       <TableHead>
                         <button
                           type="button"
                           className="inline-flex items-center gap-1"
-                          onClick={() => toggleSort("contractType")}
+                          onClick={() => toggleSort("pricingModel")}
                         >
-                          {t.contractType}
+                          {t.pricingModel}
                           <ArrowDownUp className="h-3.5 w-3.5" />
                         </button>
                       </TableHead>
@@ -1471,14 +1465,29 @@ export default function SystemContractsListPage() {
                       </TableHead>
                     )}
 
-                    {visibleColumns.contractValue && (
+                    {visibleColumns.discountPercentage && (
                       <TableHead>
                         <button
                           type="button"
                           className="inline-flex items-center gap-1"
-                          onClick={() => toggleSort("contractValue")}
+                          onClick={() => toggleSort("discountPercentage")}
                         >
-                          {t.contractValue}
+                          {t.discountPercentage}
+                          <ArrowDownUp className="h-3.5 w-3.5" />
+                        </button>
+                      </TableHead>
+                    )}
+
+                    {visibleColumns.systemCommissionPercentage && (
+                      <TableHead>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1"
+                          onClick={() =>
+                            toggleSort("systemCommissionPercentage")
+                          }
+                        >
+                          {t.systemCommissionPercentage}
                           <ArrowDownUp className="h-3.5 w-3.5" />
                         </button>
                       </TableHead>
@@ -1506,7 +1515,7 @@ export default function SystemContractsListPage() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={11}>
+                      <TableCell colSpan={12}>
                         <div className="flex min-h-52 items-center justify-center text-muted-foreground">
                           <Loader2 className="me-2 h-5 w-5 animate-spin" />
                           {t.loading}
@@ -1515,7 +1524,7 @@ export default function SystemContractsListPage() {
                     </TableRow>
                   ) : paginatedContracts.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={11}>
+                      <TableCell colSpan={12}>
                         <div className="flex min-h-52 flex-col items-center justify-center gap-3 text-center text-muted-foreground">
                           <FileSignature className="h-10 w-10 opacity-60" />
                           <p>{t.noContracts}</p>
@@ -1528,7 +1537,10 @@ export default function SystemContractsListPage() {
                       const isSelected = selectedIds.has(id);
 
                       return (
-                        <TableRow key={id} data-state={isSelected ? "selected" : ""}>
+                        <TableRow
+                          key={id}
+                          data-state={isSelected ? "selected" : ""}
+                        >
                           <TableCell>
                             <Checkbox
                               checked={isSelected}
@@ -1568,18 +1580,23 @@ export default function SystemContractsListPage() {
                             <TableCell>
                               <div className="flex min-w-44 items-center gap-2">
                                 <Building2 className="h-4 w-4 text-muted-foreground" />
-                                <span className="truncate">{contract.providerName}</span>
+                                <span className="truncate">
+                                  {contract.providerName}
+                                </span>
                               </div>
                             </TableCell>
                           )}
 
-                          {visibleColumns.contractType && (
+                          {visibleColumns.pricingModel && (
                             <TableCell>
                               <Badge
                                 variant="outline"
                                 className="rounded-full bg-white/70 dark:bg-white/5"
                               >
-                                {typeLabel(contract.contractType, locale)}
+                                {pricingModelLabel(
+                                  contract.pricingModel,
+                                  locale
+                                )}
                               </Badge>
                             </TableCell>
                           )}
@@ -1615,9 +1632,22 @@ export default function SystemContractsListPage() {
                             </TableCell>
                           )}
 
-                          {visibleColumns.contractValue && (
+                          {visibleColumns.discountPercentage && (
                             <TableCell>
-                              <SarAmount amount={contract.contractValue} />
+                              <PercentValue
+                                value={contract.discountPercentage}
+                              />
+                            </TableCell>
+                          )}
+
+                          {visibleColumns.systemCommissionPercentage && (
+                            <TableCell>
+                              <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
+                                <SarIcon />
+                                {formatPercent(
+                                  contract.systemCommissionPercentage
+                                )}
+                              </span>
                             </TableCell>
                           )}
 
@@ -1646,7 +1676,9 @@ export default function SystemContractsListPage() {
                                   <DropdownMenuContent
                                     align={isArabic ? "start" : "end"}
                                   >
-                                    <DropdownMenuLabel>{t.actions}</DropdownMenuLabel>
+                                    <DropdownMenuLabel>
+                                      {t.actions}
+                                    </DropdownMenuLabel>
                                     <DropdownMenuSeparator />
 
                                     <Link href={`/system/contracts/${contract.id}`}>
@@ -1679,8 +1711,8 @@ export default function SystemContractsListPage() {
 
               <div className="flex items-center justify-between gap-3 sm:justify-end">
                 <p className="text-sm text-muted-foreground">
-                  {t.page} {formatEnglishNumber(Math.min(page, totalPages))} {t.of}{" "}
-                  {formatEnglishNumber(totalPages)}
+                  {t.page} {formatEnglishNumber(Math.min(page, totalPages))}{" "}
+                  {t.of} {formatEnglishNumber(totalPages)}
                 </p>
 
                 <div className="flex items-center gap-2">

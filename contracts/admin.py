@@ -5,6 +5,7 @@
 # ✅ إدارة العقود
 # ✅ إدارة المنتجات المرتبطة بكل عقد
 # ✅ فلاتر + بحث + عرض منظم
+# ✅ عرض نسبة النظام ونسب الخصم
 # ============================================================
 
 from django.contrib import admin
@@ -22,6 +23,7 @@ class ContractProductInline(admin.TabularInline):
         "discount_percentage",
         "coverage_notes",
     )
+    autocomplete_fields = ("product",)
 
 
 @admin.register(Contract)
@@ -34,6 +36,7 @@ class ContractAdmin(admin.ModelAdmin):
         "status",
         "pricing_model",
         "discount_percentage",
+        "system_commission_percentage",
         "start_date",
         "end_date",
         "created_at",
@@ -54,13 +57,77 @@ class ContractAdmin(admin.ModelAdmin):
         "provider_contact_phone",
         "provider_contact_email",
         "notes",
+        "terms_and_conditions",
     )
     readonly_fields = (
         "created_at",
         "updated_at",
     )
+    autocomplete_fields = ("provider",)
     ordering = ("-created_at",)
     inlines = [ContractProductInline]
+
+    fieldsets = (
+        (
+            "بيانات العقد الأساسية",
+            {
+                "fields": (
+                    "provider",
+                    "title",
+                    "contract_number",
+                    "status",
+                )
+            },
+        ),
+        (
+            "تواريخ العقد",
+            {
+                "fields": (
+                    "start_date",
+                    "end_date",
+                    "signed_at",
+                )
+            },
+        ),
+        (
+            "بيانات مسؤول الجهة",
+            {
+                "fields": (
+                    "provider_contact_name",
+                    "provider_contact_phone",
+                    "provider_contact_email",
+                )
+            },
+        ),
+        (
+            "البيانات المالية",
+            {
+                "fields": (
+                    "pricing_model",
+                    "discount_percentage",
+                    "system_commission_percentage",
+                )
+            },
+        ),
+        (
+            "الشروط والملاحظات",
+            {
+                "fields": (
+                    "terms_and_conditions",
+                    "notes",
+                )
+            },
+        ),
+        (
+            "التتبع",
+            {
+                "fields": (
+                    "created_at",
+                    "updated_at",
+                )
+            },
+        ),
+    )
 
 
 @admin.register(ContractProduct)
@@ -88,5 +155,9 @@ class ContractProductAdmin(admin.ModelAdmin):
     readonly_fields = (
         "created_at",
         "updated_at",
+    )
+    autocomplete_fields = (
+        "contract",
+        "product",
     )
     ordering = ("-created_at",)

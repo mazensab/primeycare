@@ -10,13 +10,17 @@ import {
   Building2,
   CalendarRange,
   FileSignature,
-  HandCoins,
-  Landmark,
   Loader2,
+  Mail,
+  Package,
+  Percent,
+  Phone,
   PlusCircle,
   Save,
   ShieldCheck,
   Sparkles,
+  Trash2,
+  UserRound,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -38,38 +42,31 @@ import { Textarea } from "@/components/ui/textarea";
    📂 app/system/contracts/create/page.tsx
    🧾 Primey Care | Create Contract
    ------------------------------------------------------------
-   ✅ صفحة إنشاء عقد بنفس نمط إنشاء المراكز / العملاء / المندوبين
-   ✅ استخدام UI الداخلي فقط
-   ✅ نموذج منظم على بطاقات
+   ✅ إنشاء عقد جديد
+   ✅ ربط مع /api/contracts/
+   ✅ ربط مقدمي الخدمة من /api/providers/
+   ✅ ربط المنتجات من /api/products/
+   ✅ دعم pricing_model
+   ✅ دعم discount_percentage
+   ✅ دعم system_commission_percentage
+   ✅ دعم contract_products
    ✅ دعم عربي / إنجليزي عبر primey-locale
    ✅ الأرقام دائمًا إنجليزية
    ✅ استخدام sonner
    ✅ استخدام رمز SAR الرسمي
-   ✅ ربط مع POST /api/contracts/
-   ✅ ربط مقدمي الخدمة من /api/providers/
    ✅ بدون hardcoded localhost
 ============================================================ */
 
 type AppLocale = "ar" | "en";
 
 type ContractStatus =
-  | "ACTIVE"
-  | "INACTIVE"
   | "DRAFT"
-  | "PENDING"
+  | "ACTIVE"
   | "EXPIRED"
   | "TERMINATED"
-  | "CANCELLED"
   | "SUSPENDED";
 
-type ContractType =
-  | "GENERAL"
-  | "MEDICAL"
-  | "SERVICE"
-  | "PARTNERSHIP"
-  | "DISCOUNT"
-  | "SUPPLY"
-  | "OTHER";
+type PricingModel = "FIXED" | "PERCENTAGE" | "CUSTOM" | "FREE";
 
 type ProviderOption = {
   id: number | string;
@@ -79,24 +76,46 @@ type ProviderOption = {
   status: string;
 };
 
+type ProductOption = {
+  id: number | string;
+  name: string;
+  code: string;
+  productType: string;
+  status: string;
+  price: string;
+  salePrice: string;
+};
+
+type ContractProductFormRow = {
+  localId: string;
+  productId: string;
+  isActive: boolean;
+  specialPrice: string;
+  discountPercentage: string;
+  coverageNotes: string;
+};
+
 type ContractFormData = {
   contractNumber: string;
   title: string;
   providerId: string;
-  contractType: ContractType;
   status: ContractStatus;
+  pricingModel: PricingModel;
   startDate: string;
   endDate: string;
-  contractValue: string;
-  commissionRate: string;
-  currency: string;
-  paymentTerms: string;
-  renewalTerms: string;
-  terminationTerms: string;
+  signedAt: string;
+  providerContactName: string;
+  providerContactPhone: string;
+  providerContactEmail: string;
+  discountPercentage: string;
+  systemCommissionPercentage: string;
+  termsAndConditions: string;
   notes: string;
 };
 
-type ContractFormErrors = Partial<Record<keyof ContractFormData, string>>;
+type ContractFormErrors = Partial<
+  Record<keyof ContractFormData | "contractProducts", string>
+>;
 
 type ApiListResponse = {
   ok?: boolean;
@@ -105,6 +124,7 @@ type ApiListResponse = {
   data?: unknown[] | { results?: unknown[] };
   items?: unknown[];
   providers?: unknown[];
+  products?: unknown[];
 };
 
 const SAR_ICON = "/currency/sar.svg";
@@ -157,6 +177,14 @@ function getCookie(name: string) {
    🔢 Helpers
 ============================================================ */
 
+function formatEnglishNumber(value: number | string | null | undefined) {
+  const numericValue = Number(value || 0);
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(numericValue) ? numericValue : 0);
+}
+
 function formatEnglishMoney(value: number | string | null | undefined) {
   const numericValue = Number(value || 0);
 
@@ -166,12 +194,25 @@ function formatEnglishMoney(value: number | string | null | undefined) {
   }).format(Number.isFinite(numericValue) ? numericValue : 0);
 }
 
+function formatPercent(value: number | string | null | undefined) {
+  const numericValue = Number(value || 0);
+
+  return `${new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(numericValue) ? numericValue : 0)}%`;
+}
+
 function normalizeNumberInput(value: string) {
-  return value.replace(/[^\d.]/g, "");
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const parts = cleaned.split(".");
+
+  if (parts.length <= 1) return cleaned;
+
+  return `${parts[0]}.${parts.slice(1).join("")}`;
 }
 
 function normalizePercentInput(value: string) {
-  const cleaned = value.replace(/[^\d.]/g, "");
+  const cleaned = normalizeNumberInput(value);
   const numeric = Number(cleaned || 0);
 
   if (!Number.isFinite(numeric)) return "";
@@ -189,6 +230,7 @@ function normalizeApiList(payload: unknown): unknown[] {
     if (Array.isArray(data.results)) return data.results;
     if (Array.isArray(data.items)) return data.items;
     if (Array.isArray(data.providers)) return data.providers;
+    if (Array.isArray(data.products)) return data.products;
     if (Array.isArray(data.data)) return data.data;
 
     if (
@@ -215,6 +257,16 @@ function readProviderName(value: Record<string, unknown>) {
   );
 }
 
+function readProductName(value: Record<string, unknown>) {
+  return String(
+    value.name ??
+      value.display_name ??
+      value.product_name ??
+      value.title ??
+      `Product #${value.id ?? ""}`
+  );
+}
+
 function normalizeProvider(item: unknown): ProviderOption {
   const obj = (item || {}) as Record<string, unknown>;
 
@@ -224,6 +276,20 @@ function normalizeProvider(item: unknown): ProviderOption {
     code: String(obj.provider_code ?? obj.code ?? obj.center_code ?? ""),
     city: String(obj.city ?? ""),
     status: String(obj.status ?? ""),
+  };
+}
+
+function normalizeProduct(item: unknown): ProductOption {
+  const obj = (item || {}) as Record<string, unknown>;
+
+  return {
+    id: (obj.id ?? "") as number | string,
+    name: readProductName(obj),
+    code: String(obj.product_code ?? obj.code ?? obj.slug ?? ""),
+    productType: String(obj.product_type ?? obj.type ?? ""),
+    status: String(obj.status ?? ""),
+    price: String(obj.price ?? "0"),
+    salePrice: String(obj.sale_price ?? obj.salePrice ?? ""),
   };
 }
 
@@ -237,6 +303,17 @@ function buildContractNumber() {
   return `CONT-${year}${month}${day}-${suffix}`;
 }
 
+function newContractProductRow(): ContractProductFormRow {
+  return {
+    localId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    productId: "",
+    isActive: true,
+    specialPrice: "",
+    discountPercentage: "",
+    coverageNotes: "",
+  };
+}
+
 /* ============================================================
    📚 Dictionary
 ============================================================ */
@@ -247,8 +324,8 @@ function dictionary(locale: AppLocale) {
   return {
     title: isArabic ? "إنشاء عقد" : "Create Contract",
     subtitle: isArabic
-      ? "إضافة عقد جديد وربطه بمقدم الخدمة مع بيانات الحالة، المدة، القيمة، وشروط العقد."
-      : "Create a new contract and link it to a provider with status, duration, value, and terms.",
+      ? "إضافة عقد جديد وربطه بمقدم الخدمة والمنتجات مع نسبة الخصم ونسبة النظام."
+      : "Create a new contract and link it to a provider and products with discount and system commission.",
 
     back: isArabic ? "لوحة العقود" : "Contracts Overview",
     list: isArabic ? "قائمة العقود" : "Contracts List",
@@ -267,30 +344,40 @@ function dictionary(locale: AppLocale) {
 
     durationInfo: isArabic ? "مدة العقد" : "Contract Duration",
     durationInfoDesc: isArabic
-      ? "تاريخ بداية ونهاية العقد."
-      : "Contract start and end dates.",
+      ? "تاريخ بداية ونهاية العقد وتاريخ التوقيع."
+      : "Contract start, end, and signing dates.",
 
-    financialInfo: isArabic ? "البيانات المالية" : "Financial Information",
+    financialInfo: isArabic ? "النسب والتسعير" : "Pricing & Percentages",
     financialInfoDesc: isArabic
-      ? "قيمة العقد ونسبة العمولة والعملة."
-      : "Contract value, commission rate, and currency.",
+      ? "آلية التسعير، نسبة الخصم، ونسبة النظام."
+      : "Pricing model, discount percentage, and system commission.",
+
+    contactInfo: isArabic ? "مسؤول الجهة" : "Provider Contact",
+    contactInfoDesc: isArabic
+      ? "بيانات مسؤول مقدم الخدمة داخل العقد."
+      : "Provider contact information inside the contract.",
+
+    productsInfo: isArabic ? "المنتجات المشمولة" : "Covered Products",
+    productsInfoDesc: isArabic
+      ? "ربط المنتجات أو البرامج المشمولة داخل العقد مع أسعار وخصومات خاصة."
+      : "Link covered products or programs with special prices and discounts.",
 
     termsInfo: isArabic ? "الشروط والملاحظات" : "Terms & Notes",
     termsInfoDesc: isArabic
-      ? "شروط الدفع والتجديد والإنهاء والملاحظات الداخلية."
-      : "Payment, renewal, termination terms, and internal notes.",
+      ? "الشروط والأحكام والملاحظات الداخلية."
+      : "Terms, conditions, and internal notes.",
 
     contractNumber: isArabic ? "رقم العقد" : "Contract Number",
     contractNumberPlaceholder: isArabic
-      ? "مثال: CONT-20260427-00001"
-      : "Example: CONT-20260427-00001",
+      ? "مثال: CONT-20260428-00001"
+      : "Example: CONT-20260428-00001",
 
     contractTitle: isArabic ? "اسم العقد" : "Contract Title",
     contractTitlePlaceholder: isArabic
       ? "مثال: عقد خصومات مركز طبي"
       : "Example: Medical Center Discount Contract",
 
-    contractType: isArabic ? "نوع العقد" : "Contract Type",
+    pricingModel: isArabic ? "آلية التسعير" : "Pricing Model",
     status: isArabic ? "الحالة" : "Status",
 
     provider: isArabic ? "مقدم الخدمة" : "Provider",
@@ -304,25 +391,30 @@ function dictionary(locale: AppLocale) {
 
     startDate: isArabic ? "تاريخ البداية" : "Start Date",
     endDate: isArabic ? "تاريخ النهاية" : "End Date",
+    signedAt: isArabic ? "تاريخ التوقيع" : "Signed At",
 
-    contractValue: isArabic ? "قيمة العقد" : "Contract Value",
-    commissionRate: isArabic ? "نسبة العمولة" : "Commission Rate",
-    currency: isArabic ? "العملة" : "Currency",
+    discountPercentage: isArabic ? "نسبة الخصم العامة" : "General Discount",
+    systemCommissionPercentage: isArabic ? "نسبة النظام" : "System Commission",
 
-    paymentTerms: isArabic ? "شروط الدفع" : "Payment Terms",
-    paymentTermsPlaceholder: isArabic
-      ? "اكتب شروط الدفع المتفق عليها..."
-      : "Write agreed payment terms...",
+    providerContactName: isArabic ? "اسم المسؤول" : "Contact Name",
+    providerContactPhone: isArabic ? "جوال المسؤول" : "Contact Phone",
+    providerContactEmail: isArabic ? "بريد المسؤول" : "Contact Email",
 
-    renewalTerms: isArabic ? "شروط التجديد" : "Renewal Terms",
-    renewalTermsPlaceholder: isArabic
-      ? "اكتب شروط التجديد إن وجدت..."
-      : "Write renewal terms if available...",
+    product: isArabic ? "المنتج / البرنامج" : "Product / Program",
+    selectProduct: isArabic ? "اختر المنتج" : "Select Product",
+    loadingProducts: isArabic ? "جاري تحميل المنتجات..." : "Loading products...",
+    noProducts: isArabic ? "لا توجد منتجات متاحة" : "No products available",
+    addProduct: isArabic ? "إضافة منتج" : "Add Product",
+    removeProduct: isArabic ? "حذف" : "Remove",
+    specialPrice: isArabic ? "سعر خاص" : "Special Price",
+    productDiscount: isArabic ? "خصم المنتج" : "Product Discount",
+    coverageNotes: isArabic ? "ملاحظات التغطية" : "Coverage Notes",
+    activeProduct: isArabic ? "نشط" : "Active",
 
-    terminationTerms: isArabic ? "شروط الإنهاء" : "Termination Terms",
-    terminationTermsPlaceholder: isArabic
-      ? "اكتب شروط إنهاء العقد..."
-      : "Write contract termination terms...",
+    termsAndConditions: isArabic ? "الشروط والأحكام" : "Terms & Conditions",
+    termsAndConditionsPlaceholder: isArabic
+      ? "اكتب شروط وأحكام العقد..."
+      : "Write contract terms and conditions...",
 
     notes: isArabic ? "ملاحظات داخلية" : "Internal Notes",
     notesPlaceholder: isArabic
@@ -330,32 +422,30 @@ function dictionary(locale: AppLocale) {
       : "Any internal notes about the contract...",
 
     active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
     draft: isArabic ? "مسودة" : "Draft",
-    pending: isArabic ? "معلق" : "Pending",
     suspended: isArabic ? "موقوف" : "Suspended",
     expired: isArabic ? "منتهي" : "Expired",
     terminated: isArabic ? "منهى" : "Terminated",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
 
-    general: isArabic ? "عام" : "General",
-    medical: isArabic ? "طبي" : "Medical",
-    service: isArabic ? "خدمة" : "Service",
-    partnership: isArabic ? "شراكة" : "Partnership",
-    discount: isArabic ? "خصومات" : "Discount",
-    supply: isArabic ? "توريد" : "Supply",
-    other: isArabic ? "أخرى" : "Other",
-
-    sar: isArabic ? "ريال سعودي" : "Saudi Riyal",
+    fixed: isArabic ? "سعر ثابت" : "Fixed",
+    percentage: isArabic ? "نسبة" : "Percentage",
+    custom: isArabic ? "مخصص" : "Custom",
+    free: isArabic ? "مجاني" : "Free",
 
     required: isArabic ? "هذا الحقل مطلوب" : "This field is required",
     invalidNumber: isArabic ? "القيمة الرقمية غير صحيحة" : "Invalid numeric value",
+    invalidPercent: isArabic
+      ? "النسبة يجب أن تكون بين 0 و 100"
+      : "Percentage must be between 0 and 100",
     invalidDateRange: isArabic
       ? "تاريخ النهاية يجب أن يكون بعد تاريخ البداية"
       : "End date must be after start date",
     selectProviderError: isArabic
       ? "يجب اختيار مقدم الخدمة"
       : "Provider is required",
+    duplicateProduct: isArabic
+      ? "لا يمكن تكرار نفس المنتج داخل العقد"
+      : "The same product cannot be duplicated inside the contract",
 
     createdSuccess: isArabic
       ? "تم إنشاء العقد بنجاح"
@@ -369,16 +459,48 @@ function dictionary(locale: AppLocale) {
     providersError: isArabic
       ? "تعذر تحميل مقدمي الخدمة"
       : "Failed to load providers",
+    productsError: isArabic
+      ? "تعذر تحميل المنتجات"
+      : "Failed to load products",
 
     summaryTitle: isArabic ? "ملخص العقد" : "Contract Summary",
     summaryDesc: isArabic
       ? "مراجعة سريعة قبل حفظ العقد."
       : "Quick review before saving the contract.",
     selectedProvider: isArabic ? "مقدم الخدمة المحدد" : "Selected Provider",
-    contractAmount: isArabic ? "قيمة العقد" : "Contract Amount",
-    commissionPreview: isArabic ? "العمولة التقديرية" : "Estimated Commission",
     contractStatus: isArabic ? "حالة العقد" : "Contract Status",
+    coveredProducts: isArabic ? "المنتجات المشمولة" : "Covered Products",
+    noCoveredProducts: isArabic
+      ? "لم يتم إضافة منتجات بعد"
+      : "No products added yet",
   };
+}
+
+function statusLabel(status: ContractStatus, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<ContractStatus, string> = {
+    DRAFT: t.draft,
+    ACTIVE: t.active,
+    SUSPENDED: t.suspended,
+    EXPIRED: t.expired,
+    TERMINATED: t.terminated,
+  };
+
+  return labels[status];
+}
+
+function pricingModelLabel(pricingModel: PricingModel, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<PricingModel, string> = {
+    FIXED: t.fixed,
+    PERCENTAGE: t.percentage,
+    CUSTOM: t.custom,
+    FREE: t.free,
+  };
+
+  return labels[pricingModel];
 }
 
 /* ============================================================
@@ -406,6 +528,15 @@ function SarAmount({ amount }: { amount: number | string }) {
   );
 }
 
+function PercentValue({ value }: { value: number | string }) {
+  return (
+    <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
+      <Percent className="h-3.5 w-3.5 text-muted-foreground" />
+      {formatPercent(value)}
+    </span>
+  );
+}
+
 /* ============================================================
    🧾 Page
 ============================================================ */
@@ -416,25 +547,32 @@ export default function SystemContractsCreatePage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingProviders, setIsLoadingProviders] = useState(true);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [providers, setProviders] = useState<ProviderOption[]>([]);
+  const [products, setProducts] = useState<ProductOption[]>([]);
   const [errors, setErrors] = useState<ContractFormErrors>({});
 
   const [formData, setFormData] = useState<ContractFormData>({
     contractNumber: buildContractNumber(),
     title: "",
     providerId: "",
-    contractType: "MEDICAL",
     status: "ACTIVE",
+    pricingModel: "CUSTOM",
     startDate: "",
     endDate: "",
-    contractValue: "",
-    commissionRate: "",
-    currency: "SAR",
-    paymentTerms: "",
-    renewalTerms: "",
-    terminationTerms: "",
+    signedAt: "",
+    providerContactName: "",
+    providerContactPhone: "",
+    providerContactEmail: "",
+    discountPercentage: "",
+    systemCommissionPercentage: "",
+    termsAndConditions: "",
     notes: "",
   });
+
+  const [contractProducts, setContractProducts] = useState<
+    ContractProductFormRow[]
+  >([newContractProductRow()]);
 
   const isArabic = locale === "ar";
   const t = dictionary(locale);
@@ -491,23 +629,64 @@ export default function SystemContractsCreatePage() {
     }
   }
 
+  async function loadProducts() {
+    try {
+      setIsLoadingProducts(true);
+
+      const response = await fetch("/api/products/?page_size=500", {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(payload?.message || "Failed to load products.");
+      }
+
+      const items = normalizeApiList(payload)
+        .map(normalizeProduct)
+        .filter((product) => product.id);
+
+      setProducts(items);
+    } catch (error) {
+      console.error("Load products error:", error);
+      toast.error(t.productsError);
+      setProducts([]);
+    } finally {
+      setIsLoadingProducts(false);
+    }
+  }
+
   useEffect(() => {
     loadProviders();
+    loadProducts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedProvider = useMemo(() => {
-    return providers.find((provider) => String(provider.id) === formData.providerId);
+    return providers.find(
+      (provider) => String(provider.id) === formData.providerId
+    );
   }, [providers, formData.providerId]);
 
-  const commissionPreview = useMemo(() => {
-    const amount = Number(formData.contractValue || 0);
-    const rate = Number(formData.commissionRate || 0);
+  const selectedProductRows = useMemo(() => {
+    return contractProducts
+      .filter((row) => row.productId)
+      .map((row) => {
+        const product = products.find(
+          (item) => String(item.id) === row.productId
+        );
 
-    if (!Number.isFinite(amount) || !Number.isFinite(rate)) return 0;
-
-    return (amount * rate) / 100;
-  }, [formData.contractValue, formData.commissionRate]);
+        return {
+          ...row,
+          product,
+        };
+      });
+  }, [contractProducts, products]);
 
   function updateField<K extends keyof ContractFormData>(
     key: K,
@@ -524,9 +703,48 @@ export default function SystemContractsCreatePage() {
     }));
   }
 
+  function updateContractProductRow(
+    localId: string,
+    patch: Partial<ContractProductFormRow>
+  ) {
+    setContractProducts((current) =>
+      current.map((row) => (row.localId === localId ? { ...row, ...patch } : row))
+    );
+
+    setErrors((current) => ({
+      ...current,
+      contractProducts: undefined,
+    }));
+  }
+
+  function addContractProductRow() {
+    setContractProducts((current) => [...current, newContractProductRow()]);
+  }
+
+  function removeContractProductRow(localId: string) {
+    setContractProducts((current) => {
+      if (current.length <= 1) {
+        return [newContractProductRow()];
+      }
+
+      return current.filter((row) => row.localId !== localId);
+    });
+  }
+
+  function isInvalidPercentage(value: string) {
+    if (!value) return false;
+
+    const numeric = Number(value);
+    return !Number.isFinite(numeric) || numeric < 0 || numeric > 100;
+  }
+
   function validate(nextStatus?: ContractStatus) {
     const nextErrors: ContractFormErrors = {};
     const statusToValidate = nextStatus || formData.status;
+
+    if (!formData.contractNumber.trim()) {
+      nextErrors.contractNumber = t.required;
+    }
 
     if (!formData.title.trim()) {
       nextErrors.title = t.required;
@@ -559,15 +777,41 @@ export default function SystemContractsCreatePage() {
       }
     }
 
-    if (formData.contractValue && !Number.isFinite(Number(formData.contractValue))) {
-      nextErrors.contractValue = t.invalidNumber;
+    if (isInvalidPercentage(formData.discountPercentage)) {
+      nextErrors.discountPercentage = t.invalidPercent;
     }
 
-    if (
-      formData.commissionRate &&
-      !Number.isFinite(Number(formData.commissionRate))
-    ) {
-      nextErrors.commissionRate = t.invalidNumber;
+    if (isInvalidPercentage(formData.systemCommissionPercentage)) {
+      nextErrors.systemCommissionPercentage = t.invalidPercent;
+    }
+
+    const selectedProducts = contractProducts
+      .map((row) => row.productId)
+      .filter(Boolean);
+
+    const uniqueProducts = new Set(selectedProducts);
+
+    if (selectedProducts.length !== uniqueProducts.size) {
+      nextErrors.contractProducts = t.duplicateProduct;
+    }
+
+    const hasInvalidProductPercentage = contractProducts.some((row) =>
+      isInvalidPercentage(row.discountPercentage)
+    );
+
+    if (hasInvalidProductPercentage) {
+      nextErrors.contractProducts = t.invalidPercent;
+    }
+
+    const hasInvalidSpecialPrice = contractProducts.some((row) => {
+      if (!row.specialPrice) return false;
+
+      const numeric = Number(row.specialPrice);
+      return !Number.isFinite(numeric) || numeric < 0;
+    });
+
+    if (hasInvalidSpecialPrice) {
+      nextErrors.contractProducts = t.invalidNumber;
     }
 
     setErrors(nextErrors);
@@ -578,29 +822,39 @@ export default function SystemContractsCreatePage() {
   function buildPayload(statusOverride?: ContractStatus) {
     const status = statusOverride || formData.status;
 
+    const filteredProducts = contractProducts
+      .filter((row) => row.productId)
+      .map((row) => ({
+        product_id: Number(row.productId),
+        is_active: row.isActive,
+        special_price: row.specialPrice ? Number(row.specialPrice) : null,
+        discount_percentage: row.discountPercentage
+          ? Number(row.discountPercentage)
+          : 0,
+        coverage_notes: row.coverageNotes.trim(),
+      }));
+
     return {
       contract_number: formData.contractNumber.trim(),
       title: formData.title.trim(),
-      name: formData.title.trim(),
       provider_id: formData.providerId ? Number(formData.providerId) : null,
-      contract_type: formData.contractType,
-      type: formData.contractType,
       status,
+      pricing_model: formData.pricingModel,
       start_date: formData.startDate || null,
       end_date: formData.endDate || null,
-      contract_value: formData.contractValue
-        ? Number(formData.contractValue)
+      signed_at: formData.signedAt || null,
+      provider_contact_name: formData.providerContactName.trim(),
+      provider_contact_phone: formData.providerContactPhone.trim(),
+      provider_contact_email: formData.providerContactEmail.trim(),
+      discount_percentage: formData.discountPercentage
+        ? Number(formData.discountPercentage)
         : 0,
-      value: formData.contractValue ? Number(formData.contractValue) : 0,
-      commission_rate: formData.commissionRate
-        ? Number(formData.commissionRate)
+      system_commission_percentage: formData.systemCommissionPercentage
+        ? Number(formData.systemCommissionPercentage)
         : 0,
-      currency: formData.currency || "SAR",
-      payment_terms: formData.paymentTerms.trim(),
-      renewal_terms: formData.renewalTerms.trim(),
-      termination_terms: formData.terminationTerms.trim(),
+      terms_and_conditions: formData.termsAndConditions.trim(),
       notes: formData.notes.trim(),
-      description: formData.notes.trim(),
+      contract_products: filteredProducts,
     };
   }
 
@@ -701,7 +955,10 @@ export default function SystemContractsCreatePage() {
 
             <div className="flex flex-wrap items-center gap-2">
               <Link href="/system/contracts/list">
-                <Button variant="outline" className="rounded-2xl bg-white/70 dark:bg-white/5">
+                <Button
+                  variant="outline"
+                  className="rounded-2xl bg-white/70 dark:bg-white/5"
+                >
                   <BadgeCheck className="me-2 h-4 w-4" />
                   {t.list}
                 </Button>
@@ -777,24 +1034,23 @@ export default function SystemContractsCreatePage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="contractType">{t.contractType}</Label>
+                  <Label htmlFor="pricingModel">{t.pricingModel}</Label>
                   <select
-                    id="contractType"
-                    value={formData.contractType}
+                    id="pricingModel"
+                    value={formData.pricingModel}
                     onChange={(event) =>
-                      updateField("contractType", event.target.value as ContractType)
+                      updateField(
+                        "pricingModel",
+                        event.target.value as PricingModel
+                      )
                     }
                     className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
                   >
-                    <option value="GENERAL">{t.general}</option>
-                    <option value="MEDICAL">{t.medical}</option>
-                    <option value="SERVICE">{t.service}</option>
-                    <option value="PARTNERSHIP">{t.partnership}</option>
-                    <option value="DISCOUNT">{t.discount}</option>
-                    <option value="SUPPLY">{t.supply}</option>
-                    <option value="OTHER">{t.other}</option>
+                    <option value="CUSTOM">{t.custom}</option>
+                    <option value="PERCENTAGE">{t.percentage}</option>
+                    <option value="FIXED">{t.fixed}</option>
+                    <option value="FREE">{t.free}</option>
                   </select>
-                  <FieldError message={errors.contractType} />
                 </div>
 
                 <div className="space-y-2">
@@ -809,14 +1065,10 @@ export default function SystemContractsCreatePage() {
                   >
                     <option value="ACTIVE">{t.active}</option>
                     <option value="DRAFT">{t.draft}</option>
-                    <option value="PENDING">{t.pending}</option>
-                    <option value="INACTIVE">{t.inactive}</option>
                     <option value="SUSPENDED">{t.suspended}</option>
                     <option value="EXPIRED">{t.expired}</option>
                     <option value="TERMINATED">{t.terminated}</option>
-                    <option value="CANCELLED">{t.cancelled}</option>
                   </select>
-                  <FieldError message={errors.status} />
                 </div>
               </CardContent>
             </Card>
@@ -858,7 +1110,9 @@ export default function SystemContractsCreatePage() {
                   <FieldError message={errors.providerId} />
 
                   {!isLoadingProviders && providers.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">{t.noProviders}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t.noProviders}
+                    </p>
                   ) : null}
                 </div>
               </CardContent>
@@ -874,7 +1128,7 @@ export default function SystemContractsCreatePage() {
                 <CardDescription>{t.durationInfoDesc}</CardDescription>
               </CardHeader>
 
-              <CardContent className="grid gap-5 md:grid-cols-2">
+              <CardContent className="grid gap-5 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="startDate">{t.startDate}</Label>
                   <Input
@@ -900,6 +1154,18 @@ export default function SystemContractsCreatePage() {
                   />
                   <FieldError message={errors.endDate} />
                 </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="signedAt">{t.signedAt}</Label>
+                  <Input
+                    id="signedAt"
+                    type="date"
+                    value={formData.signedAt}
+                    onChange={(event) => updateField("signedAt", event.target.value)}
+                    className="rounded-2xl bg-white/80 dark:bg-white/5"
+                  />
+                  <FieldError message={errors.signedAt} />
+                </div>
               </CardContent>
             </Card>
 
@@ -913,45 +1179,20 @@ export default function SystemContractsCreatePage() {
                 <CardDescription>{t.financialInfoDesc}</CardDescription>
               </CardHeader>
 
-              <CardContent className="grid gap-5 md:grid-cols-3">
+              <CardContent className="grid gap-5 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="contractValue">{t.contractValue}</Label>
+                  <Label htmlFor="discountPercentage">
+                    {t.discountPercentage}
+                  </Label>
                   <div className="relative">
-                    <Image
-                      src={SAR_ICON}
-                      alt="SAR"
-                      width={16}
-                      height={16}
-                      className="absolute start-3 top-1/2 -translate-y-1/2 opacity-70"
-                    />
+                    <Percent className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
-                      id="contractValue"
+                      id="discountPercentage"
                       inputMode="decimal"
-                      value={formData.contractValue}
+                      value={formData.discountPercentage}
                       onChange={(event) =>
                         updateField(
-                          "contractValue",
-                          normalizeNumberInput(event.target.value)
-                        )
-                      }
-                      placeholder="0.00"
-                      className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
-                    />
-                  </div>
-                  <FieldError message={errors.contractValue} />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="commissionRate">{t.commissionRate}</Label>
-                  <div className="relative">
-                    <HandCoins className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="commissionRate"
-                      inputMode="decimal"
-                      value={formData.commissionRate}
-                      onChange={(event) =>
-                        updateField(
-                          "commissionRate",
+                          "discountPercentage",
                           normalizePercentInput(event.target.value)
                         )
                       }
@@ -962,21 +1203,277 @@ export default function SystemContractsCreatePage() {
                       %
                     </span>
                   </div>
-                  <FieldError message={errors.commissionRate} />
+                  <FieldError message={errors.discountPercentage} />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="currency">{t.currency}</Label>
-                  <select
-                    id="currency"
-                    value={formData.currency}
-                    onChange={(event) => updateField("currency", event.target.value)}
-                    className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
-                  >
-                    <option value="SAR">{t.sar}</option>
-                  </select>
-                  <FieldError message={errors.currency} />
+                  <Label htmlFor="systemCommissionPercentage">
+                    {t.systemCommissionPercentage}
+                  </Label>
+                  <div className="relative">
+                    <Image
+                      src={SAR_ICON}
+                      alt="SAR"
+                      width={16}
+                      height={16}
+                      className="absolute start-3 top-1/2 -translate-y-1/2 opacity-70"
+                    />
+                    <Input
+                      id="systemCommissionPercentage"
+                      inputMode="decimal"
+                      value={formData.systemCommissionPercentage}
+                      onChange={(event) =>
+                        updateField(
+                          "systemCommissionPercentage",
+                          normalizePercentInput(event.target.value)
+                        )
+                      }
+                      placeholder="0"
+                      className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
+                    />
+                    <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                      %
+                    </span>
+                  </div>
+                  <FieldError message={errors.systemCommissionPercentage} />
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Contact */}
+            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <UserRound className="h-5 w-5 text-primary" />
+                  {t.contactInfo}
+                </CardTitle>
+                <CardDescription>{t.contactInfoDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="grid gap-5 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="providerContactName">
+                    {t.providerContactName}
+                  </Label>
+                  <div className="relative">
+                    <UserRound className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="providerContactName"
+                      value={formData.providerContactName}
+                      onChange={(event) =>
+                        updateField("providerContactName", event.target.value)
+                      }
+                      className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
+                    />
+                  </div>
+                  <FieldError message={errors.providerContactName} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="providerContactPhone">
+                    {t.providerContactPhone}
+                  </Label>
+                  <div className="relative">
+                    <Phone className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="providerContactPhone"
+                      value={formData.providerContactPhone}
+                      onChange={(event) =>
+                        updateField("providerContactPhone", event.target.value)
+                      }
+                      className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
+                    />
+                  </div>
+                  <FieldError message={errors.providerContactPhone} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="providerContactEmail">
+                    {t.providerContactEmail}
+                  </Label>
+                  <div className="relative">
+                    <Mail className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="providerContactEmail"
+                      type="email"
+                      value={formData.providerContactEmail}
+                      onChange={(event) =>
+                        updateField("providerContactEmail", event.target.value)
+                      }
+                      className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
+                    />
+                  </div>
+                  <FieldError message={errors.providerContactEmail} />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Contract Products */}
+            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
+              <CardHeader>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Package className="h-5 w-5 text-primary" />
+                      {t.productsInfo}
+                    </CardTitle>
+                    <CardDescription>{t.productsInfoDesc}</CardDescription>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-2xl"
+                    onClick={addContractProductRow}
+                  >
+                    <PlusCircle className="me-2 h-4 w-4" />
+                    {t.addProduct}
+                  </Button>
+                </div>
+              </CardHeader>
+
+              <CardContent className="space-y-4">
+                <FieldError message={errors.contractProducts} />
+
+                {contractProducts.map((row, index) => (
+                  <div
+                    key={row.localId}
+                    className="rounded-3xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5"
+                  >
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <Badge
+                        variant="outline"
+                        className="rounded-full bg-white/70 dark:bg-white/5"
+                      >
+                        {t.product} #{formatEnglishNumber(index + 1)}
+                      </Badge>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="rounded-xl text-destructive"
+                        onClick={() => removeContractProductRow(row.localId)}
+                      >
+                        <Trash2 className="me-2 h-4 w-4" />
+                        {t.removeProduct}
+                      </Button>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr_0.7fr_0.5fr]">
+                      <div className="space-y-2">
+                        <Label>{t.product}</Label>
+                        <select
+                          value={row.productId}
+                          onChange={(event) =>
+                            updateContractProductRow(row.localId, {
+                              productId: event.target.value,
+                            })
+                          }
+                          disabled={isLoadingProducts}
+                          className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/5"
+                        >
+                          <option value="">
+                            {isLoadingProducts
+                              ? t.loadingProducts
+                              : t.selectProduct}
+                          </option>
+
+                          {products.map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {product.name}
+                              {product.code ? ` - ${product.code}` : ""}
+                            </option>
+                          ))}
+                        </select>
+
+                        {!isLoadingProducts && products.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            {t.noProducts}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>{t.specialPrice}</Label>
+                        <div className="relative">
+                          <Image
+                            src={SAR_ICON}
+                            alt="SAR"
+                            width={16}
+                            height={16}
+                            className="absolute start-3 top-1/2 -translate-y-1/2 opacity-70"
+                          />
+                          <Input
+                            inputMode="decimal"
+                            value={row.specialPrice}
+                            onChange={(event) =>
+                              updateContractProductRow(row.localId, {
+                                specialPrice: normalizeNumberInput(
+                                  event.target.value
+                                ),
+                              })
+                            }
+                            placeholder="0.00"
+                            className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>{t.productDiscount}</Label>
+                        <div className="relative">
+                          <Percent className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            inputMode="decimal"
+                            value={row.discountPercentage}
+                            onChange={(event) =>
+                              updateContractProductRow(row.localId, {
+                                discountPercentage: normalizePercentInput(
+                                  event.target.value
+                                ),
+                              })
+                            }
+                            placeholder="0"
+                            className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
+                          />
+                          <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                            %
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>{t.activeProduct}</Label>
+                        <select
+                          value={row.isActive ? "true" : "false"}
+                          onChange={(event) =>
+                            updateContractProductRow(row.localId, {
+                              isActive: event.target.value === "true",
+                            })
+                          }
+                          className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
+                        >
+                          <option value="true">{t.active}</option>
+                          <option value="false">{t.suspended}</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-2">
+                      <Label>{t.coverageNotes}</Label>
+                      <Textarea
+                        value={row.coverageNotes}
+                        onChange={(event) =>
+                          updateContractProductRow(row.localId, {
+                            coverageNotes: event.target.value,
+                          })
+                        }
+                        className="min-h-20 rounded-2xl bg-white/80 dark:bg-white/5"
+                      />
+                    </div>
+                  </div>
+                ))}
               </CardContent>
             </Card>
 
@@ -984,52 +1481,26 @@ export default function SystemContractsCreatePage() {
             <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Landmark className="h-5 w-5 text-primary" />
+                  <ShieldCheck className="h-5 w-5 text-primary" />
                   {t.termsInfo}
                 </CardTitle>
                 <CardDescription>{t.termsInfoDesc}</CardDescription>
               </CardHeader>
 
               <CardContent className="grid gap-5">
-                <div className="grid gap-5 lg:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="paymentTerms">{t.paymentTerms}</Label>
-                    <Textarea
-                      id="paymentTerms"
-                      value={formData.paymentTerms}
-                      onChange={(event) =>
-                        updateField("paymentTerms", event.target.value)
-                      }
-                      placeholder={t.paymentTermsPlaceholder}
-                      className="min-h-28 rounded-2xl bg-white/80 dark:bg-white/5"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="renewalTerms">{t.renewalTerms}</Label>
-                    <Textarea
-                      id="renewalTerms"
-                      value={formData.renewalTerms}
-                      onChange={(event) =>
-                        updateField("renewalTerms", event.target.value)
-                      }
-                      placeholder={t.renewalTermsPlaceholder}
-                      className="min-h-28 rounded-2xl bg-white/80 dark:bg-white/5"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="terminationTerms">{t.terminationTerms}</Label>
-                    <Textarea
-                      id="terminationTerms"
-                      value={formData.terminationTerms}
-                      onChange={(event) =>
-                        updateField("terminationTerms", event.target.value)
-                      }
-                      placeholder={t.terminationTermsPlaceholder}
-                      className="min-h-28 rounded-2xl bg-white/80 dark:bg-white/5"
-                    />
-                  </div>
+                <div className="space-y-2">
+                  <Label htmlFor="termsAndConditions">
+                    {t.termsAndConditions}
+                  </Label>
+                  <Textarea
+                    id="termsAndConditions"
+                    value={formData.termsAndConditions}
+                    onChange={(event) =>
+                      updateField("termsAndConditions", event.target.value)
+                    }
+                    placeholder={t.termsAndConditionsPlaceholder}
+                    className="min-h-32 rounded-2xl bg-white/80 dark:bg-white/5"
+                  />
                 </div>
 
                 <div className="space-y-2">
@@ -1059,44 +1530,112 @@ export default function SystemContractsCreatePage() {
 
               <CardContent className="space-y-4">
                 <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                  <p className="text-xs text-muted-foreground">{t.contractTitle}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t.contractTitle}
+                  </p>
                   <p className="mt-1 font-semibold">
                     {formData.title || (isArabic ? "غير محدد" : "Not set")}
                   </p>
                 </div>
 
                 <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                  <p className="text-xs text-muted-foreground">{t.selectedProvider}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t.selectedProvider}
+                  </p>
                   <p className="mt-1 font-semibold">
-                    {selectedProvider?.name || (isArabic ? "غير محدد" : "Not set")}
+                    {selectedProvider?.name ||
+                      (isArabic ? "غير محدد" : "Not set")}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                    <p className="text-xs text-muted-foreground">{t.contractAmount}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t.discountPercentage}
+                    </p>
                     <p className="mt-1 text-sm">
-                      <SarAmount amount={formData.contractValue || 0} />
+                      <PercentValue value={formData.discountPercentage || 0} />
                     </p>
                   </div>
 
                   <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
                     <p className="text-xs text-muted-foreground">
-                      {t.commissionPreview}
+                      {t.systemCommissionPercentage}
                     </p>
                     <p className="mt-1 text-sm">
-                      <SarAmount amount={commissionPreview} />
+                      <PercentValue
+                        value={formData.systemCommissionPercentage || 0}
+                      />
                     </p>
                   </div>
                 </div>
 
                 <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                  <p className="text-xs text-muted-foreground">{t.contractStatus}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t.contractStatus}
+                  </p>
                   <div className="mt-2">
                     <Badge className="rounded-full border-primary/20 bg-primary/10 text-primary hover:bg-primary/10">
-                      {formData.status}
+                      {statusLabel(formData.status, locale)}
                     </Badge>
                   </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
+                  <p className="text-xs text-muted-foreground">
+                    {t.pricingModel}
+                  </p>
+                  <div className="mt-2">
+                    <Badge
+                      variant="outline"
+                      className="rounded-full bg-white/70 dark:bg-white/5"
+                    >
+                      {pricingModelLabel(formData.pricingModel, locale)}
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
+                  <p className="text-xs text-muted-foreground">
+                    {t.coveredProducts}
+                  </p>
+
+                  {selectedProductRows.length === 0 ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {t.noCoveredProducts}
+                    </p>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      {selectedProductRows.slice(0, 5).map((row) => (
+                        <div
+                          key={row.localId}
+                          className="rounded-xl bg-muted/50 px-3 py-2 text-sm"
+                        >
+                          <p className="font-medium">
+                            {row.product?.name || row.productId}
+                          </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                            <span>
+                              {t.productDiscount}:{" "}
+                              {formatPercent(row.discountPercentage || 0)}
+                            </span>
+                            {row.specialPrice ? (
+                              <span>
+                                {t.specialPrice}:{" "}
+                                <SarAmount amount={row.specialPrice} />
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+
+                      {selectedProductRows.length > 5 ? (
+                        <p className="text-xs text-muted-foreground">
+                          +{formatEnglishNumber(selectedProductRows.length - 5)}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-2 pt-2">

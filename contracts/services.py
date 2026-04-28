@@ -6,6 +6,7 @@
 # ✅ Filtering / Pagination
 # ✅ Create / Update Contract
 # ✅ Nested Contract Products Sync
+# ✅ System Commission Percentage
 # ============================================================
 
 from __future__ import annotations
@@ -86,6 +87,12 @@ def parse_decimal(value: Any, default: Decimal | None = None) -> Decimal | None:
         return Decimal(str(value).strip())
     except (InvalidOperation, AttributeError, TypeError, ValueError):
         raise ValidationError(f"Invalid decimal value: {value}")
+
+
+def validate_percentage(value: Decimal, field_name: str) -> Decimal:
+    if value < Decimal("0") or value > Decimal("100"):
+        raise ValidationError(f"{field_name} must be between 0 and 100.")
+    return value
 
 
 # ============================================================
@@ -198,21 +205,30 @@ def _validate_unique_contract_number(contract_number: str, *, exclude_id: int | 
 # ============================================================
 
 def serialize_contract_product(obj: ContractProduct) -> dict[str, Any]:
+    product_data = None
+
+    if obj.product_id:
+        product_data = {
+            "id": obj.product.id,
+            "name": obj.product.name,
+            "code": getattr(obj.product, "code", ""),
+            "slug": getattr(obj.product, "slug", ""),
+            "product_type": getattr(obj.product, "product_type", ""),
+            "status": getattr(obj.product, "status", ""),
+            "price": str(getattr(obj.product, "price", "0")),
+            "sale_price": (
+                str(obj.product.sale_price)
+                if getattr(obj.product, "sale_price", None) is not None
+                else None
+            ),
+            "effective_price": str(getattr(obj.product, "effective_price", getattr(obj.product, "price", "0"))),
+        }
+
     return {
         "id": obj.id,
         "contract_id": obj.contract_id,
         "product_id": obj.product_id,
-        "product": {
-            "id": obj.product.id,
-            "name": obj.product.name,
-            "code": obj.product.code,
-            "slug": obj.product.slug,
-            "product_type": obj.product.product_type,
-            "status": obj.product.status,
-            "price": str(obj.product.price),
-            "sale_price": str(obj.product.sale_price) if obj.product.sale_price is not None else None,
-            "effective_price": str(obj.product.effective_price),
-        } if obj.product_id else None,
+        "product": product_data,
         "is_active": obj.is_active,
         "special_price": str(obj.special_price) if obj.special_price is not None else None,
         "discount_percentage": str(obj.discount_percentage),
@@ -223,16 +239,21 @@ def serialize_contract_product(obj: ContractProduct) -> dict[str, Any]:
 
 
 def serialize_contract(obj: Contract, include_products: bool = True) -> dict[str, Any]:
+    provider_data = None
+
+    if obj.provider_id:
+        provider_data = {
+            "id": obj.provider.id,
+            "name": obj.provider.name,
+            "code": getattr(obj.provider, "code", ""),
+            "provider_type": getattr(obj.provider, "provider_type", ""),
+            "status": getattr(obj.provider, "status", ""),
+        }
+
     data = {
         "id": obj.id,
         "provider_id": obj.provider_id,
-        "provider": {
-            "id": obj.provider.id,
-            "name": obj.provider.name,
-            "code": obj.provider.code,
-            "provider_type": obj.provider.provider_type,
-            "status": obj.provider.status,
-        } if obj.provider_id else None,
+        "provider": provider_data,
         "title": obj.title,
         "contract_number": obj.contract_number,
         "status": obj.status,
@@ -244,6 +265,7 @@ def serialize_contract(obj: Contract, include_products: bool = True) -> dict[str
         "provider_contact_email": obj.provider_contact_email,
         "pricing_model": obj.pricing_model,
         "discount_percentage": str(obj.discount_percentage),
+        "system_commission_percentage": str(obj.system_commission_percentage),
         "notes": obj.notes,
         "terms_and_conditions": obj.terms_and_conditions,
         "created_at": obj.created_at.isoformat() if obj.created_at else None,
@@ -253,7 +275,7 @@ def serialize_contract(obj: Contract, include_products: bool = True) -> dict[str
     if include_products:
         data["contract_products"] = [
             serialize_contract_product(item)
-            for item in obj.contract_products.all().order_by("-created_at", "-id")
+            for item in obj.contract_products.select_related("product").all().order_by("-created_at", "-id")
         ]
 
     return data
@@ -265,11 +287,21 @@ def serialize_contract(obj: Contract, include_products: bool = True) -> dict[str
 
 def create_contract(*, payload: dict[str, Any]) -> Contract:
     provider = _resolve_provider(payload.get("provider_id"))
+
     title = normalize_text(payload.get("title"))
     contract_number = normalize_text(payload.get("contract_number"))
     status = normalize_text(payload.get("status")) or ContractStatus.DRAFT
     pricing_model = normalize_text(payload.get("pricing_model")) or PricingModel.CUSTOM
-    discount_percentage = parse_decimal(payload.get("discount_percentage"), Decimal("0")) or Decimal("0")
+
+    discount_percentage = parse_decimal(
+        payload.get("discount_percentage"),
+        Decimal("0"),
+    ) or Decimal("0")
+
+    system_commission_percentage = parse_decimal(
+        payload.get("system_commission_percentage"),
+        Decimal("0"),
+    ) or Decimal("0")
 
     if not title:
         raise ValidationError("Contract title is required.")
@@ -279,6 +311,10 @@ def create_contract(*, payload: dict[str, Any]) -> Contract:
 
     status = _validate_status(status)
     pricing_model = _validate_pricing_model(pricing_model)
+
+    validate_percentage(discount_percentage, "discount_percentage")
+    validate_percentage(system_commission_percentage, "system_commission_percentage")
+
     _validate_unique_contract_number(contract_number)
 
     contract = Contract(
@@ -294,6 +330,7 @@ def create_contract(*, payload: dict[str, Any]) -> Contract:
         provider_contact_email=normalize_text(payload.get("provider_contact_email")),
         pricing_model=pricing_model,
         discount_percentage=discount_percentage,
+        system_commission_percentage=system_commission_percentage,
         notes=normalize_text(payload.get("notes")),
         terms_and_conditions=normalize_text(payload.get("terms_and_conditions")),
     )
@@ -346,7 +383,16 @@ def update_contract(*, instance: Contract, payload: dict[str, Any]) -> Contract:
         instance.pricing_model = normalize_text(payload.get("pricing_model"))
 
     if "discount_percentage" in payload:
-        instance.discount_percentage = parse_decimal(payload.get("discount_percentage"), Decimal("0")) or Decimal("0")
+        instance.discount_percentage = parse_decimal(
+            payload.get("discount_percentage"),
+            Decimal("0"),
+        ) or Decimal("0")
+
+    if "system_commission_percentage" in payload:
+        instance.system_commission_percentage = parse_decimal(
+            payload.get("system_commission_percentage"),
+            Decimal("0"),
+        ) or Decimal("0")
 
     if "notes" in payload:
         instance.notes = normalize_text(payload.get("notes"))
@@ -362,6 +408,10 @@ def update_contract(*, instance: Contract, payload: dict[str, Any]) -> Contract:
 
     instance.status = _validate_status(instance.status)
     instance.pricing_model = _validate_pricing_model(instance.pricing_model)
+
+    validate_percentage(instance.discount_percentage, "discount_percentage")
+    validate_percentage(instance.system_commission_percentage, "system_commission_percentage")
+
     _validate_unique_contract_number(instance.contract_number, exclude_id=instance.id)
 
     with transaction.atomic():
@@ -389,7 +439,6 @@ def sync_contract_products(*, contract: Contract, items: list[dict[str, Any]]) -
         item.id: item
         for item in contract.contract_products.select_related("product").all()
     }
-    keep_ids: list[int] = []
 
     for raw in items:
         if not isinstance(raw, dict):
@@ -399,12 +448,14 @@ def sync_contract_products(*, contract: Contract, items: list[dict[str, Any]]) -
         product = _resolve_product(raw.get("product_id"))
         is_active = parse_bool(raw.get("is_active"), True)
         special_price = parse_decimal(raw.get("special_price"))
-        discount_percentage = parse_decimal(raw.get("discount_percentage"), Decimal("0")) or Decimal("0")
+        discount_percentage = parse_decimal(
+            raw.get("discount_percentage"),
+            Decimal("0"),
+        ) or Decimal("0")
         coverage_notes = normalize_text(raw.get("coverage_notes"))
         marked_delete = parse_bool(raw.get("delete"), False) or False
 
-        if discount_percentage < Decimal("0") or discount_percentage > Decimal("100"):
-            raise ValidationError("Contract product discount_percentage must be between 0 and 100.")
+        validate_percentage(discount_percentage, "contract product discount_percentage")
 
         if special_price is not None and special_price < Decimal("0"):
             raise ValidationError("Contract product special_price cannot be negative.")
@@ -417,7 +468,9 @@ def sync_contract_products(*, contract: Contract, items: list[dict[str, Any]]) -
 
             item = existing_map.get(contract_product_id)
             if not item:
-                raise ValidationError(f"Contract product id {contract_product_id} does not belong to this contract.")
+                raise ValidationError(
+                    f"Contract product id {contract_product_id} does not belong to this contract."
+                )
 
             if marked_delete:
                 item.delete()
@@ -438,7 +491,6 @@ def sync_contract_products(*, contract: Contract, items: list[dict[str, Any]]) -
             item.coverage_notes = coverage_notes
             item.full_clean()
             item.save()
-            keep_ids.append(item.id)
             continue
 
         if marked_delete:
@@ -447,7 +499,7 @@ def sync_contract_products(*, contract: Contract, items: list[dict[str, Any]]) -
         if ContractProduct.objects.filter(contract=contract, product=product).exists():
             raise ValidationError("This product is already linked to the contract.")
 
-        item = ContractProduct.objects.create(
+        item = ContractProduct(
             contract=contract,
             product=product,
             is_active=True if is_active is None else is_active,
@@ -457,4 +509,3 @@ def sync_contract_products(*, contract: Contract, items: list[dict[str, Any]]) -
         )
         item.full_clean()
         item.save()
-        keep_ids.append(item.id)

@@ -15,6 +15,7 @@ import {
   FileText,
   FilterIcon,
   Loader2,
+  Percent,
   PieChart,
   Printer,
   RefreshCcw,
@@ -49,9 +50,9 @@ import {
    📂 app/system/contracts/reports/page.tsx
    🧾 Primey Care | Contracts Reports
    ------------------------------------------------------------
-   ✅ تقارير العقود بنفس نمط المراكز / العملاء / المندوبين / المنتجات
-   ✅ ربط حقيقي مع /api/contracts/
-   ✅ فلاتر + ملخصات + توزيع الحالات + توزيع مقدمي الخدمة
+   ✅ تقارير العقود
+   ✅ ربط حقيقي مع /api/contracts/reports/
+   ✅ فلاتر + ملخصات + توزيع الحالات + توزيع التسعير + توزيع المراكز
    ✅ تصدير Excel منظم .xlsx فقط
    ✅ طباعة Web PDF للتقرير فقط
    ✅ دعم عربي / إنجليزي عبر primey-locale
@@ -64,28 +65,17 @@ import {
 type AppLocale = "ar" | "en";
 
 type ContractStatus =
-  | "ACTIVE"
-  | "INACTIVE"
   | "DRAFT"
-  | "PENDING"
+  | "ACTIVE"
   | "EXPIRED"
   | "TERMINATED"
-  | "CANCELLED"
   | "SUSPENDED"
   | "UNKNOWN";
 
-type ContractType =
-  | "GENERAL"
-  | "MEDICAL"
-  | "SERVICE"
-  | "PARTNERSHIP"
-  | "DISCOUNT"
-  | "SUPPLY"
-  | "OTHER"
-  | "UNKNOWN";
+type PricingModel = "FIXED" | "PERCENTAGE" | "CUSTOM" | "FREE" | "UNKNOWN";
 
 type StatusFilter = "ALL" | ContractStatus;
-type TypeFilter = "ALL" | ContractType;
+type PricingFilter = "ALL" | PricingModel;
 
 type Contract = {
   id: number | string;
@@ -93,21 +83,66 @@ type Contract = {
   title: string;
   providerName: string;
   providerId: number | string | null;
-  contractType: ContractType;
+  pricingModel: PricingModel;
   status: ContractStatus;
   startDate: string;
   endDate: string;
-  contractValue: number;
-  commissionRate: number;
-  currency: string;
+  signedAt: string;
+  discountPercentage: number;
+  systemCommissionPercentage: number;
   productsCount: number;
   notes: string;
+  termsAndConditions: string;
   createdAt: string;
   updatedAt: string;
   raw: Record<string, unknown>;
 };
 
-type ContractsApiResponse = {
+type ContractsReportSummary = {
+  total_contracts?: number;
+  active_contracts?: number;
+  draft_contracts?: number;
+  suspended_contracts?: number;
+  expired_contracts?: number;
+  terminated_contracts?: number;
+  active_contract_products?: number;
+};
+
+type DistributionRow = {
+  key: string;
+  label: string;
+  total: number;
+};
+
+type ProviderDistributionRow = {
+  provider_id: number | string | null;
+  provider_name: string;
+  total: number;
+};
+
+type ContractsReportsApiResponse = {
+  ok?: boolean;
+  message?: string;
+  summary?: ContractsReportSummary;
+  status_distribution?: Array<{
+    status?: string;
+    label?: string;
+    total?: number;
+  }>;
+  pricing_distribution?: Array<{
+    pricing_model?: string;
+    label?: string;
+    total?: number;
+  }>;
+  provider_distribution?: Array<{
+    provider_id?: number | string | null;
+    provider_name?: string;
+    total?: number;
+  }>;
+  latest_contracts?: unknown[];
+};
+
+type ContractsListApiResponse = {
   ok?: boolean;
   message?: string;
   results?: unknown[];
@@ -161,15 +196,6 @@ function formatEnglishNumber(value: number | string | null | undefined) {
   }).format(Number.isFinite(numericValue) ? numericValue : 0);
 }
 
-function formatEnglishMoney(value: number | string | null | undefined) {
-  const numericValue = Number(value || 0);
-
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(numericValue) ? numericValue : 0);
-}
-
 function formatPercent(value: number | string | null | undefined) {
   const numericValue = Number(value || 0);
 
@@ -219,7 +245,7 @@ function normalizeApiList(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
 
   if (payload && typeof payload === "object") {
-    const data = payload as ContractsApiResponse;
+    const data = payload as ContractsListApiResponse;
 
     if (Array.isArray(data.results)) return data.results;
     if (Array.isArray(data.items)) return data.items;
@@ -241,31 +267,22 @@ function normalizeApiList(payload: unknown): unknown[] {
 function normalizeStatus(value: unknown): ContractStatus {
   const status = String(value || "").toUpperCase();
 
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "INACTIVE") return "INACTIVE";
   if (status === "DRAFT") return "DRAFT";
-  if (status === "PENDING") return "PENDING";
+  if (status === "ACTIVE") return "ACTIVE";
   if (status === "EXPIRED") return "EXPIRED";
   if (status === "TERMINATED") return "TERMINATED";
-  if (status === "CANCELLED") return "CANCELLED";
   if (status === "SUSPENDED") return "SUSPENDED";
-
-  if (value === true) return "ACTIVE";
-  if (value === false) return "INACTIVE";
 
   return "UNKNOWN";
 }
 
-function normalizeContractType(value: unknown): ContractType {
-  const contractType = String(value || "").toUpperCase();
+function normalizePricingModel(value: unknown): PricingModel {
+  const pricingModel = String(value || "").toUpperCase();
 
-  if (contractType === "GENERAL") return "GENERAL";
-  if (contractType === "MEDICAL") return "MEDICAL";
-  if (contractType === "SERVICE") return "SERVICE";
-  if (contractType === "PARTNERSHIP") return "PARTNERSHIP";
-  if (contractType === "DISCOUNT") return "DISCOUNT";
-  if (contractType === "SUPPLY") return "SUPPLY";
-  if (contractType === "OTHER") return "OTHER";
+  if (pricingModel === "FIXED") return "FIXED";
+  if (pricingModel === "PERCENTAGE") return "PERCENTAGE";
+  if (pricingModel === "CUSTOM") return "CUSTOM";
+  if (pricingModel === "FREE") return "FREE";
 
   return "UNKNOWN";
 }
@@ -326,24 +343,21 @@ function normalizeContract(item: unknown): Contract {
       (obj.provider_id as number | string | undefined) ??
       (providerObj?.id as number | string | undefined) ??
       null,
-    contractType: normalizeContractType(
-      obj.contract_type ?? obj.contractType ?? obj.type
-    ),
-    status: normalizeStatus(obj.status ?? obj.is_active),
+    pricingModel: normalizePricingModel(obj.pricing_model ?? obj.pricingModel),
+    status: normalizeStatus(obj.status),
     startDate: String(obj.start_date ?? obj.startDate ?? ""),
     endDate: String(obj.end_date ?? obj.endDate ?? ""),
-    contractValue: Number(
-      obj.contract_value ??
-        obj.contractValue ??
-        obj.total_value ??
-        obj.value ??
-        obj.amount ??
+    signedAt: String(obj.signed_at ?? obj.signedAt ?? ""),
+    discountPercentage: Number(
+      obj.discount_percentage ?? obj.discountPercentage ?? 0
+    ),
+    systemCommissionPercentage: Number(
+      obj.system_commission_percentage ??
+        obj.systemCommissionPercentage ??
+        obj.commission_rate ??
+        obj.commissionRate ??
         0
     ),
-    commissionRate: Number(
-      obj.commission_rate ?? obj.commissionRate ?? obj.rate ?? 0
-    ),
-    currency: String(obj.currency ?? "SAR"),
     productsCount: Number(
       obj.products_count ??
         obj.contract_products_count ??
@@ -352,6 +366,7 @@ function normalizeContract(item: unknown): Contract {
         0
     ),
     notes: String(obj.notes ?? obj.description ?? ""),
+    termsAndConditions: String(obj.terms_and_conditions ?? ""),
     createdAt: String(obj.created_at ?? obj.createdAt ?? ""),
     updatedAt: String(obj.updated_at ?? obj.updatedAt ?? ""),
     raw: obj,
@@ -368,95 +383,80 @@ function dictionary(locale: AppLocale) {
   return {
     pageTitle: isArabic ? "تقارير العقود" : "Contracts Reports",
     pageSubtitle: isArabic
-      ? "تحليل شامل للعقود حسب الحالة، النوع، مقدم الخدمة، القيمة، وتواريخ الانتهاء."
-      : "Comprehensive analysis of contracts by status, type, provider, value, and expiry dates.",
+      ? "تحليل شامل للعقود حسب الحالة، آلية التسعير، مقدمي الخدمة، نسب الخصم، ونسبة النظام."
+      : "Full contracts analysis by status, pricing model, providers, discounts, and system commission.",
 
     back: isArabic ? "رجوع" : "Back",
     list: isArabic ? "قائمة العقود" : "Contracts List",
-    create: isArabic ? "إنشاء عقد" : "Create Contract",
+    createContract: isArabic ? "إنشاء عقد" : "Create Contract",
     refresh: isArabic ? "تحديث" : "Refresh",
     exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
     print: isArabic ? "طباعة Web PDF" : "Print Web PDF",
 
     filters: isArabic ? "الفلاتر" : "Filters",
     searchPlaceholder: isArabic
-      ? "ابحث برقم العقد أو اسم العقد أو مقدم الخدمة..."
+      ? "ابحث برقم العقد أو الاسم أو مقدم الخدمة..."
       : "Search by contract number, title, or provider...",
     allStatuses: isArabic ? "كل الحالات" : "All Statuses",
-    allTypes: isArabic ? "كل الأنواع" : "All Types",
+    allPricingModels: isArabic ? "كل آليات التسعير" : "All Pricing Models",
     fromDate: isArabic ? "من تاريخ" : "From Date",
     toDate: isArabic ? "إلى تاريخ" : "To Date",
     clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
 
     totalContracts: isArabic ? "إجمالي العقود" : "Total Contracts",
     activeContracts: isArabic ? "العقود النشطة" : "Active Contracts",
-    expiringSoon: isArabic ? "قريبة الانتهاء" : "Expiring Soon",
+    draftContracts: isArabic ? "العقود المسودة" : "Draft Contracts",
+    suspendedContracts: isArabic ? "العقود الموقوفة" : "Suspended Contracts",
     expiredContracts: isArabic ? "العقود المنتهية" : "Expired Contracts",
-    totalValue: isArabic ? "إجمالي القيمة" : "Total Value",
-    avgValue: isArabic ? "متوسط قيمة العقد" : "Average Contract Value",
-    estimatedCommission: isArabic ? "العمولة التقديرية" : "Estimated Commission",
+    terminatedContracts: isArabic ? "العقود المنهاة" : "Terminated Contracts",
+    expiringSoon: isArabic ? "قريبة الانتهاء" : "Expiring Soon",
+    activeProducts: isArabic ? "منتجات نشطة بالعقود" : "Active Contract Products",
+
+    avgDiscount: isArabic ? "متوسط الخصم" : "Average Discount",
+    avgSystemCommission: isArabic
+      ? "متوسط نسبة النظام"
+      : "Average System Commission",
 
     statusDistribution: isArabic ? "توزيع الحالات" : "Status Distribution",
-    statusDistributionDesc: isArabic
-      ? "تحليل العقود حسب الحالة التشغيلية."
-      : "Contracts analysis by operational status.",
-
-    typeDistribution: isArabic ? "توزيع الأنواع" : "Type Distribution",
-    typeDistributionDesc: isArabic
-      ? "تحليل العقود حسب نوع العقد."
-      : "Contracts analysis by contract type.",
-
-    providerDistribution: isArabic ? "أعلى مقدمي الخدمة" : "Top Providers",
-    providerDistributionDesc: isArabic
-      ? "مقدمو الخدمة الأكثر ارتباطًا بالعقود."
-      : "Providers with the highest number of contracts.",
-
-    expiringReport: isArabic ? "العقود القريبة من الانتهاء" : "Expiring Contracts",
-    expiringReportDesc: isArabic
-      ? "العقود التي تنتهي خلال 30 يوم."
-      : "Contracts ending within 30 days.",
-
-    detailedReport: isArabic ? "التقرير التفصيلي" : "Detailed Report",
-    detailedReportDesc: isArabic
-      ? "جدول تفصيلي للعقود حسب الفلاتر الحالية."
-      : "Detailed contracts table based on current filters.",
+    pricingDistribution: isArabic ? "توزيع التسعير" : "Pricing Distribution",
+    providerDistribution: isArabic ? "توزيع مقدمي الخدمة" : "Provider Distribution",
+    latestContracts: isArabic ? "آخر العقود" : "Latest Contracts",
 
     contractNumber: isArabic ? "رقم العقد" : "Contract No.",
     title: isArabic ? "العقد" : "Contract",
     providerName: isArabic ? "مقدم الخدمة" : "Provider",
-    contractType: isArabic ? "النوع" : "Type",
+    pricingModel: isArabic ? "آلية التسعير" : "Pricing Model",
     status: isArabic ? "الحالة" : "Status",
     startDate: isArabic ? "تاريخ البداية" : "Start Date",
     endDate: isArabic ? "تاريخ النهاية" : "End Date",
-    daysLeft: isArabic ? "الأيام المتبقية" : "Days Left",
-    contractValue: isArabic ? "القيمة" : "Value",
-    commissionRate: isArabic ? "العمولة" : "Commission",
-    productsCount: isArabic ? "الخدمات/المنتجات" : "Products/Services",
-    results: isArabic ? "نتيجة" : "Results",
+    discountPercentage: isArabic ? "خصم العقد" : "Discount",
+    systemCommissionPercentage: isArabic ? "نسبة النظام" : "System Commission",
+    productsCount: isArabic ? "المنتجات" : "Products",
+    total: isArabic ? "الإجمالي" : "Total",
+    percentage: isArabic ? "النسبة" : "Percentage",
 
     active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
     draft: isArabic ? "مسودة" : "Draft",
-    pending: isArabic ? "معلق" : "Pending",
     expired: isArabic ? "منتهي" : "Expired",
     terminated: isArabic ? "منهى" : "Terminated",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
     suspended: isArabic ? "موقوف" : "Suspended",
     unknown: isArabic ? "غير معروف" : "Unknown",
 
-    general: isArabic ? "عام" : "General",
-    medical: isArabic ? "طبي" : "Medical",
-    service: isArabic ? "خدمة" : "Service",
-    partnership: isArabic ? "شراكة" : "Partnership",
-    discount: isArabic ? "خصومات" : "Discount",
-    supply: isArabic ? "توريد" : "Supply",
-    other: isArabic ? "أخرى" : "Other",
+    fixed: isArabic ? "سعر ثابت" : "Fixed",
+    pricingPercentage: isArabic ? "نسبة" : "Percentage",
+    custom: isArabic ? "مخصص" : "Custom",
+    free: isArabic ? "مجاني" : "Free",
+
+    results: isArabic ? "نتيجة" : "Results",
+    noContracts: isArabic
+      ? "لا توجد عقود مطابقة للفلاتر الحالية."
+      : "No contracts match the current filters.",
+    noData: isArabic ? "لا توجد بيانات متاحة" : "No data available",
 
     loading: isArabic ? "جاري تحميل تقارير العقود..." : "Loading contracts reports...",
-    noData: isArabic ? "لا توجد بيانات مطابقة." : "No matching data found.",
     loadError: isArabic
-      ? "تعذر تحميل بيانات العقود."
-      : "Failed to load contracts data.",
+      ? "تعذر تحميل تقارير العقود."
+      : "Failed to load contracts reports.",
     updatedNow: isArabic ? "تم تحديث تقارير العقود" : "Contracts reports refreshed",
     excelDone: isArabic
       ? "تم تصدير تقرير العقود بنجاح"
@@ -467,10 +467,6 @@ function dictionary(locale: AppLocale) {
     printError: isArabic
       ? "تعذر تجهيز الطباعة"
       : "Failed to prepare print view",
-
-    days: isArabic ? "يوم" : "days",
-    expiredSince: isArabic ? "منتهي منذ" : "Expired since",
-    notSet: isArabic ? "غير محدد" : "Not set",
   };
 }
 
@@ -478,13 +474,10 @@ function statusLabel(status: ContractStatus, locale: AppLocale) {
   const t = dictionary(locale);
 
   const labels: Record<ContractStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
     DRAFT: t.draft,
-    PENDING: t.pending,
+    ACTIVE: t.active,
     EXPIRED: t.expired,
     TERMINATED: t.terminated,
-    CANCELLED: t.cancelled,
     SUSPENDED: t.suspended,
     UNKNOWN: t.unknown,
   };
@@ -492,21 +485,18 @@ function statusLabel(status: ContractStatus, locale: AppLocale) {
   return labels[status] || t.unknown;
 }
 
-function typeLabel(type: ContractType, locale: AppLocale) {
+function pricingModelLabel(pricingModel: PricingModel, locale: AppLocale) {
   const t = dictionary(locale);
 
-  const labels: Record<ContractType, string> = {
-    GENERAL: t.general,
-    MEDICAL: t.medical,
-    SERVICE: t.service,
-    PARTNERSHIP: t.partnership,
-    DISCOUNT: t.discount,
-    SUPPLY: t.supply,
-    OTHER: t.other,
+  const labels: Record<PricingModel, string> = {
+    FIXED: t.fixed,
+    PERCENTAGE: t.pricingPercentage,
+    CUSTOM: t.custom,
+    FREE: t.free,
     UNKNOWN: t.unknown,
   };
 
-  return labels[type] || t.unknown;
+  return labels[pricingModel] || t.unknown;
 }
 
 function statusBadgeClass(status: ContractStatus) {
@@ -514,15 +504,15 @@ function statusBadgeClass(status: ContractStatus) {
     return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   }
 
-  if (status === "DRAFT" || status === "PENDING") {
+  if (status === "DRAFT") {
     return "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   }
 
-  if (status === "EXPIRED" || status === "TERMINATED" || status === "CANCELLED") {
+  if (status === "EXPIRED" || status === "TERMINATED") {
     return "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300";
   }
 
-  if (status === "SUSPENDED" || status === "INACTIVE") {
+  if (status === "SUSPENDED") {
     return "border-slate-500/25 bg-slate-500/10 text-slate-700 dark:text-slate-300";
   }
 
@@ -533,37 +523,25 @@ function statusBadgeClass(status: ContractStatus) {
    🧾 Small Components
 ============================================================ */
 
-function SarAmount({ amount }: { amount: number | string }) {
+function SarIcon() {
   return (
-    <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
-      <Image
-        src={SAR_ICON}
-        alt="SAR"
-        width={14}
-        height={14}
-        className="opacity-80"
-      />
-      {formatEnglishMoney(amount)}
-    </span>
+    <Image
+      src={SAR_ICON}
+      alt="SAR"
+      width={14}
+      height={14}
+      className="opacity-80"
+    />
   );
 }
 
-function metricProgress(value: number, total: number) {
-  if (total <= 0) return 0;
-  return Math.min(100, Math.max(0, (value / total) * 100));
-}
-
-function remainingLabel(value: string, locale: AppLocale) {
-  const t = dictionary(locale);
-  const days = daysUntil(value);
-
-  if (days === null) return t.notSet;
-
-  if (days >= 0) {
-    return `${formatEnglishNumber(days)} ${t.days}`;
-  }
-
-  return `${t.expiredSince} ${formatEnglishNumber(Math.abs(days))} ${t.days}`;
+function PercentValue({ value }: { value: number | string | null | undefined }) {
+  return (
+    <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
+      <Percent className="h-3.5 w-3.5 text-muted-foreground" />
+      {formatPercent(value)}
+    </span>
+  );
 }
 
 /* ============================================================
@@ -575,12 +553,16 @@ export default function SystemContractsReportsPage() {
 
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [summary, setSummary] = useState<ContractsReportSummary | null>(null);
+  const [statusDistribution, setStatusDistribution] = useState<DistributionRow[]>([]);
+  const [pricingDistribution, setPricingDistribution] = useState<DistributionRow[]>([]);
+  const [providerDistribution, setProviderDistribution] = useState<ProviderDistributionRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("ALL");
+  const [pricingFilter, setPricingFilter] = useState<PricingFilter>("ALL");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -607,7 +589,19 @@ export default function SystemContractsReportsPage() {
     };
   }, []);
 
-  async function loadContracts(options?: { silent?: boolean }) {
+  function buildReportQuery() {
+    const params = new URLSearchParams();
+
+    params.set("latest_limit", "50");
+
+    if (searchTerm.trim()) params.set("q", searchTerm.trim());
+    if (statusFilter !== "ALL") params.set("status", statusFilter);
+    if (pricingFilter !== "ALL") params.set("pricing_model", pricingFilter);
+
+    return params.toString();
+  }
+
+  async function loadReports(options?: { silent?: boolean }) {
     try {
       if (options?.silent) {
         setIsRefreshing(true);
@@ -615,7 +609,8 @@ export default function SystemContractsReportsPage() {
         setIsLoading(true);
       }
 
-      const response = await fetch("/api/contracts/?page_size=500", {
+      const query = buildReportQuery();
+      const response = await fetch(`/api/contracts/reports/?${query}`, {
         method: "GET",
         credentials: "include",
         headers: {
@@ -623,14 +618,42 @@ export default function SystemContractsReportsPage() {
         },
       });
 
-      const payload = await response.json().catch(() => null);
+      const payload = (await response.json().catch(() => null)) as
+        | ContractsReportsApiResponse
+        | null;
 
-      if (!response.ok) {
-        throw new Error(payload?.message || "Failed to load contracts.");
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.message || "Failed to load contracts reports.");
       }
 
-      const items = normalizeApiList(payload).map(normalizeContract);
-      setContracts(items);
+      const latestContracts = (payload?.latest_contracts || []).map(normalizeContract);
+
+      setSummary(payload?.summary || null);
+      setContracts(latestContracts);
+
+      setStatusDistribution(
+        (payload?.status_distribution || []).map((item) => ({
+          key: String(item.status || "UNKNOWN"),
+          label: String(item.label || item.status || "UNKNOWN"),
+          total: Number(item.total || 0),
+        }))
+      );
+
+      setPricingDistribution(
+        (payload?.pricing_distribution || []).map((item) => ({
+          key: String(item.pricing_model || "UNKNOWN"),
+          label: String(item.label || item.pricing_model || "UNKNOWN"),
+          total: Number(item.total || 0),
+        }))
+      );
+
+      setProviderDistribution(
+        (payload?.provider_distribution || []).map((item) => ({
+          provider_id: item.provider_id ?? null,
+          provider_name: String(item.provider_name || "-"),
+          total: Number(item.total || 0),
+        }))
+      );
 
       if (options?.silent) {
         toast.success(t.updatedNow);
@@ -639,6 +662,10 @@ export default function SystemContractsReportsPage() {
       console.error("Load contracts reports error:", error);
       toast.error(t.loadError);
       setContracts([]);
+      setSummary(null);
+      setStatusDistribution([]);
+      setPricingDistribution([]);
+      setProviderDistribution([]);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -646,7 +673,7 @@ export default function SystemContractsReportsPage() {
   }
 
   useEffect(() => {
-    loadContracts();
+    loadReports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -659,13 +686,14 @@ export default function SystemContractsReportsPage() {
         contract.contractNumber.toLowerCase().includes(query) ||
         contract.title.toLowerCase().includes(query) ||
         contract.providerName.toLowerCase().includes(query) ||
-        contract.notes.toLowerCase().includes(query);
+        contract.notes.toLowerCase().includes(query) ||
+        contract.termsAndConditions.toLowerCase().includes(query);
 
       const matchesStatus =
         statusFilter === "ALL" || contract.status === statusFilter;
 
-      const matchesType =
-        typeFilter === "ALL" || contract.contractType === typeFilter;
+      const matchesPricing =
+        pricingFilter === "ALL" || contract.pricingModel === pricingFilter;
 
       const start = toComparableDate(contract.startDate);
       const end = toComparableDate(contract.endDate);
@@ -678,14 +706,14 @@ export default function SystemContractsReportsPage() {
       return (
         matchesSearch &&
         matchesStatus &&
-        matchesType &&
+        matchesPricing &&
         matchesDateFrom &&
         matchesDateTo
       );
     });
-  }, [contracts, searchTerm, statusFilter, typeFilter, dateFrom, dateTo]);
+  }, [contracts, searchTerm, statusFilter, pricingFilter, dateFrom, dateTo]);
 
-  const stats = useMemo(() => {
+  const computedStats = useMemo(() => {
     const total = filteredContracts.length;
     const active = filteredContracts.filter((item) => item.status === "ACTIVE").length;
 
@@ -694,167 +722,118 @@ export default function SystemContractsReportsPage() {
       return days !== null && days >= 0 && days <= 30;
     }).length;
 
-    const expired = filteredContracts.filter((item) => {
-      const days = daysUntil(item.endDate);
-      return item.status === "EXPIRED" || (days !== null && days < 0);
-    }).length;
-
-    const totalValue = filteredContracts.reduce(
-      (sum, item) => sum + Number(item.contractValue || 0),
+    const totalDiscount = filteredContracts.reduce(
+      (sum, item) => sum + Number(item.discountPercentage || 0),
       0
     );
 
-    const estimatedCommission = filteredContracts.reduce((sum, item) => {
-      const amount = Number(item.contractValue || 0);
-      const rate = Number(item.commissionRate || 0);
-      return sum + (amount * rate) / 100;
-    }, 0);
-
-    const avgValue = total > 0 ? totalValue / total : 0;
+    const totalCommission = filteredContracts.reduce(
+      (sum, item) => sum + Number(item.systemCommissionPercentage || 0),
+      0
+    );
 
     return {
       total,
       active,
       expiringSoon,
-      expired,
-      totalValue,
-      avgValue,
-      estimatedCommission,
+      avgDiscount: total > 0 ? totalDiscount / total : 0,
+      avgSystemCommission: total > 0 ? totalCommission / total : 0,
     };
   }, [filteredContracts]);
 
-  const statusRows = useMemo(() => {
+  const reportSummary = {
+    totalContracts: summary?.total_contracts ?? computedStats.total,
+    activeContracts: summary?.active_contracts ?? computedStats.active,
+    draftContracts: summary?.draft_contracts ?? 0,
+    suspendedContracts: summary?.suspended_contracts ?? 0,
+    expiredContracts: summary?.expired_contracts ?? 0,
+    terminatedContracts: summary?.terminated_contracts ?? 0,
+    activeProducts: summary?.active_contract_products ?? 0,
+    expiringSoon: computedStats.expiringSoon,
+    avgDiscount: computedStats.avgDiscount,
+    avgSystemCommission: computedStats.avgSystemCommission,
+  };
+
+  const localStatusDistribution = useMemo(() => {
+    if (statusDistribution.length > 0) return statusDistribution;
+
     const statuses: ContractStatus[] = [
       "ACTIVE",
       "DRAFT",
-      "PENDING",
-      "EXPIRED",
-      "INACTIVE",
       "SUSPENDED",
+      "EXPIRED",
       "TERMINATED",
-      "CANCELLED",
-      "UNKNOWN",
     ];
 
     return statuses
-      .map((status) => {
-        const rows = filteredContracts.filter((item) => item.status === status);
-        const value = rows.reduce((sum, item) => sum + item.contractValue, 0);
+      .map((status) => ({
+        key: status,
+        label: statusLabel(status, locale),
+        total: filteredContracts.filter((item) => item.status === status).length,
+      }))
+      .filter((item) => item.total > 0);
+  }, [filteredContracts, locale, statusDistribution]);
 
-        return {
-          status,
-          count: rows.length,
-          value,
-          percentage: metricProgress(rows.length, stats.total),
-        };
-      })
-      .filter((item) => item.count > 0);
-  }, [filteredContracts, stats.total]);
+  const localPricingDistribution = useMemo(() => {
+    if (pricingDistribution.length > 0) return pricingDistribution;
 
-  const typeRows = useMemo(() => {
-    const types: ContractType[] = [
-      "GENERAL",
-      "MEDICAL",
-      "SERVICE",
-      "PARTNERSHIP",
-      "DISCOUNT",
-      "SUPPLY",
-      "OTHER",
-      "UNKNOWN",
-    ];
+    const pricingModels: PricingModel[] = ["CUSTOM", "PERCENTAGE", "FIXED", "FREE"];
 
-    return types
-      .map((type) => {
-        const rows = filteredContracts.filter((item) => item.contractType === type);
-        const value = rows.reduce((sum, item) => sum + item.contractValue, 0);
+    return pricingModels
+      .map((pricingModel) => ({
+        key: pricingModel,
+        label: pricingModelLabel(pricingModel, locale),
+        total: filteredContracts.filter((item) => item.pricingModel === pricingModel).length,
+      }))
+      .filter((item) => item.total > 0);
+  }, [filteredContracts, locale, pricingDistribution]);
 
-        return {
-          type,
-          count: rows.length,
-          value,
-          percentage: metricProgress(rows.length, stats.total),
-        };
-      })
-      .filter((item) => item.count > 0);
-  }, [filteredContracts, stats.total]);
+  const localProviderDistribution = useMemo(() => {
+    if (providerDistribution.length > 0) return providerDistribution;
 
-  const providerRows = useMemo(() => {
-    const providersMap = new Map<
-      string,
-      {
-        providerName: string;
-        count: number;
-        value: number;
-        activeCount: number;
-      }
-    >();
+    const map = new Map<string, ProviderDistributionRow>();
 
     filteredContracts.forEach((contract) => {
-      const key = contract.providerName || "-";
+      const key = String(contract.providerId || contract.providerName || "-");
+      const current = map.get(key);
 
-      const current =
-        providersMap.get(key) ||
-        {
-          providerName: key,
-          count: 0,
-          value: 0,
-          activeCount: 0,
-        };
-
-      current.count += 1;
-      current.value += Number(contract.contractValue || 0);
-
-      if (contract.status === "ACTIVE") {
-        current.activeCount += 1;
+      if (current) {
+        current.total += 1;
+      } else {
+        map.set(key, {
+          provider_id: contract.providerId,
+          provider_name: contract.providerName,
+          total: 1,
+        });
       }
-
-      providersMap.set(key, current);
     });
 
-    return Array.from(providersMap.values())
-      .sort((a, b) => b.count - a.count || b.value - a.value)
-      .slice(0, 8);
-  }, [filteredContracts]);
-
-  const expiringContracts = useMemo(() => {
-    return filteredContracts
-      .filter((item) => {
-        const days = daysUntil(item.endDate);
-        return days !== null && days >= 0 && days <= 30;
-      })
-      .sort((a, b) => toComparableDate(a.endDate) - toComparableDate(b.endDate))
-      .slice(0, 8);
-  }, [filteredContracts]);
-
-  const reportRows = useMemo(() => {
-    return [...filteredContracts].sort((a, b) => {
-      const first = toComparableDate(a.endDate);
-      const second = toComparableDate(b.endDate);
-
-      return first - second;
-    });
-  }, [filteredContracts]);
+    return Array.from(map.values())
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+  }, [filteredContracts, providerDistribution]);
 
   function clearFilters() {
     setSearchTerm("");
     setStatusFilter("ALL");
-    setTypeFilter("ALL");
+    setPricingFilter("ALL");
     setDateFrom("");
     setDateTo("");
   }
 
-  function buildExcelRows(source: Contract[]) {
-    return source.map((contract) => ({
+  function buildExcelRows() {
+    return filteredContracts.map((contract) => ({
       [t.contractNumber]: contract.contractNumber,
       [t.title]: contract.title,
       [t.providerName]: contract.providerName,
-      [t.contractType]: typeLabel(contract.contractType, locale),
+      [t.pricingModel]: pricingModelLabel(contract.pricingModel, locale),
       [t.status]: statusLabel(contract.status, locale),
       [t.startDate]: formatDate(contract.startDate, locale),
       [t.endDate]: formatDate(contract.endDate, locale),
-      [t.daysLeft]: remainingLabel(contract.endDate, locale),
-      [t.contractValue]: formatEnglishMoney(contract.contractValue),
-      [t.commissionRate]: formatPercent(contract.commissionRate),
+      [t.discountPercentage]: formatPercent(contract.discountPercentage),
+      [t.systemCommissionPercentage]: formatPercent(
+        contract.systemCommissionPercentage
+      ),
       [t.productsCount]: formatEnglishNumber(contract.productsCount),
     }));
   }
@@ -863,38 +842,40 @@ export default function SystemContractsReportsPage() {
     try {
       const summaryRows = [
         [t.pageTitle],
-        [t.totalContracts, formatEnglishNumber(stats.total)],
-        [t.activeContracts, formatEnglishNumber(stats.active)],
-        [t.expiringSoon, formatEnglishNumber(stats.expiringSoon)],
-        [t.expiredContracts, formatEnglishNumber(stats.expired)],
-        [t.totalValue, formatEnglishMoney(stats.totalValue), "SAR"],
-        [t.avgValue, formatEnglishMoney(stats.avgValue), "SAR"],
-        [t.estimatedCommission, formatEnglishMoney(stats.estimatedCommission), "SAR"],
+        [t.totalContracts, formatEnglishNumber(reportSummary.totalContracts)],
+        [t.activeContracts, formatEnglishNumber(reportSummary.activeContracts)],
+        [t.draftContracts, formatEnglishNumber(reportSummary.draftContracts)],
+        [t.suspendedContracts, formatEnglishNumber(reportSummary.suspendedContracts)],
+        [t.expiredContracts, formatEnglishNumber(reportSummary.expiredContracts)],
+        [t.terminatedContracts, formatEnglishNumber(reportSummary.terminatedContracts)],
+        [t.activeProducts, formatEnglishNumber(reportSummary.activeProducts)],
+        [t.expiringSoon, formatEnglishNumber(reportSummary.expiringSoon)],
+        [t.avgDiscount, formatPercent(reportSummary.avgDiscount)],
+        [t.avgSystemCommission, formatPercent(reportSummary.avgSystemCommission)],
         [],
+        [t.latestContracts],
       ];
 
       const worksheet = XLSX.utils.aoa_to_sheet(summaryRows);
-
-      XLSX.utils.sheet_add_json(worksheet, buildExcelRows(reportRows), {
-        origin: "A10",
+      XLSX.utils.sheet_add_json(worksheet, buildExcelRows(), {
+        origin: "A14",
         skipHeader: false,
       });
 
       worksheet["!cols"] = [
         { wch: 18 },
-        { wch: 30 },
         { wch: 28 },
+        { wch: 26 },
         { wch: 18 },
         { wch: 16 },
         { wch: 16 },
         { wch: 16 },
-        { wch: 18 },
-        { wch: 18 },
-        { wch: 14 },
+        { wch: 16 },
+        { wch: 20 },
         { wch: 18 },
       ];
 
-      worksheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }];
+      worksheet["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
 
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(
@@ -906,7 +887,7 @@ export default function SystemContractsReportsPage() {
       XLSX.writeFile(workbook, "primey-care-contracts-reports.xlsx");
       toast.success(t.excelDone);
     } catch (error) {
-      console.error("Export contracts reports error:", error);
+      console.error("Export contracts report error:", error);
       toast.error(t.excelError);
     }
   }
@@ -934,9 +915,7 @@ export default function SystemContractsReportsPage() {
             <meta charset="utf-8" />
             <title>${t.pageTitle}</title>
             <style>
-              * {
-                box-sizing: border-box;
-              }
+              * { box-sizing: border-box; }
 
               body {
                 font-family: Arial, sans-serif;
@@ -947,17 +926,17 @@ export default function SystemContractsReportsPage() {
 
               .print-header {
                 display: flex;
+                align-items: center;
                 justify-content: space-between;
-                align-items: flex-start;
                 gap: 16px;
+                margin-bottom: 24px;
                 padding-bottom: 16px;
-                margin-bottom: 20px;
                 border-bottom: 1px solid #e5e7eb;
               }
 
               .print-title {
                 margin: 0;
-                font-size: 24px;
+                font-size: 22px;
                 font-weight: 800;
               }
 
@@ -965,10 +944,9 @@ export default function SystemContractsReportsPage() {
                 margin: 6px 0 0;
                 color: #6b7280;
                 font-size: 13px;
-                line-height: 1.8;
               }
 
-              .print-summary {
+              .print-grid {
                 display: grid;
                 grid-template-columns: repeat(4, 1fr);
                 gap: 12px;
@@ -1010,16 +988,20 @@ export default function SystemContractsReportsPage() {
                 font-weight: 800;
               }
 
-              .section-title {
-                margin: 24px 0 12px;
-                font-size: 16px;
-                font-weight: 800;
+              button, input, select, svg {
+                display: none !important;
+              }
+
+              .rounded-full {
+                border: 1px solid #e5e7eb;
+                border-radius: 999px;
+                padding: 3px 8px;
+                font-size: 11px;
+                font-weight: 700;
               }
 
               @media print {
-                body {
-                  padding: 0;
-                }
+                body { padding: 0; }
               }
             </style>
           </head>
@@ -1032,25 +1014,6 @@ export default function SystemContractsReportsPage() {
               <div>${new Date().toLocaleDateString("en-GB")}</div>
             </div>
 
-            <div class="print-summary">
-              <div class="print-card">
-                <div class="print-card-label">${t.totalContracts}</div>
-                <div class="print-card-value">${formatEnglishNumber(stats.total)}</div>
-              </div>
-              <div class="print-card">
-                <div class="print-card-label">${t.activeContracts}</div>
-                <div class="print-card-value">${formatEnglishNumber(stats.active)}</div>
-              </div>
-              <div class="print-card">
-                <div class="print-card-label">${t.expiringSoon}</div>
-                <div class="print-card-value">${formatEnglishNumber(stats.expiringSoon)}</div>
-              </div>
-              <div class="print-card">
-                <div class="print-card-label">${t.totalValue}</div>
-                <div class="print-card-value">${formatEnglishMoney(stats.totalValue)} SAR</div>
-              </div>
-            </div>
-
             ${printContent}
           </body>
         </html>
@@ -1060,7 +1023,7 @@ export default function SystemContractsReportsPage() {
       printWindow.focus();
       printWindow.print();
     } catch (error) {
-      console.error("Print contracts reports error:", error);
+      console.error("Print contracts report error:", error);
       toast.error(t.printError);
     }
   }
@@ -1088,7 +1051,7 @@ export default function SystemContractsReportsPage() {
 
                 <Badge className="rounded-full border-primary/20 bg-primary/10 px-3 py-1 text-primary hover:bg-primary/10">
                   <BarChart3 className="me-1 h-3.5 w-3.5" />
-                  {isArabic ? "تقارير العقود" : "Contracts Reports"}
+                  {isArabic ? "تقرير العقود" : "Contracts Report"}
                 </Badge>
 
                 <Badge
@@ -1096,7 +1059,7 @@ export default function SystemContractsReportsPage() {
                   className="rounded-full bg-white/60 dark:bg-white/5"
                 >
                   <ShieldCheck className="me-1 h-3.5 w-3.5" />
-                  {isArabic ? "بيانات حقيقية" : "Live Data"}
+                  {isArabic ? "API رسمي" : "Official API"}
                 </Badge>
               </div>
 
@@ -1114,7 +1077,7 @@ export default function SystemContractsReportsPage() {
               <Button
                 variant="outline"
                 className="rounded-2xl bg-white/70 dark:bg-white/5"
-                onClick={() => loadContracts({ silent: true })}
+                onClick={() => loadReports({ silent: true })}
                 disabled={isRefreshing}
               >
                 {isRefreshing ? (
@@ -1167,7 +1130,11 @@ export default function SystemContractsReportsPage() {
                 </CardDescription>
               </div>
 
-              <Button variant="outline" className="rounded-2xl" onClick={clearFilters}>
+              <Button
+                variant="outline"
+                className="rounded-2xl"
+                onClick={clearFilters}
+              >
                 {t.clearFilters}
               </Button>
             </div>
@@ -1187,33 +1154,31 @@ export default function SystemContractsReportsPage() {
 
               <select
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as StatusFilter)
+                }
                 className="h-10 rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
               >
                 <option value="ALL">{t.allStatuses}</option>
                 <option value="ACTIVE">{t.active}</option>
                 <option value="DRAFT">{t.draft}</option>
-                <option value="PENDING">{t.pending}</option>
-                <option value="EXPIRED">{t.expired}</option>
-                <option value="INACTIVE">{t.inactive}</option>
-                <option value="TERMINATED">{t.terminated}</option>
-                <option value="CANCELLED">{t.cancelled}</option>
                 <option value="SUSPENDED">{t.suspended}</option>
+                <option value="EXPIRED">{t.expired}</option>
+                <option value="TERMINATED">{t.terminated}</option>
               </select>
 
               <select
-                value={typeFilter}
-                onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}
+                value={pricingFilter}
+                onChange={(event) =>
+                  setPricingFilter(event.target.value as PricingFilter)
+                }
                 className="h-10 rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
               >
-                <option value="ALL">{t.allTypes}</option>
-                <option value="GENERAL">{t.general}</option>
-                <option value="MEDICAL">{t.medical}</option>
-                <option value="SERVICE">{t.service}</option>
-                <option value="PARTNERSHIP">{t.partnership}</option>
-                <option value="DISCOUNT">{t.discount}</option>
-                <option value="SUPPLY">{t.supply}</option>
-                <option value="OTHER">{t.other}</option>
+                <option value="ALL">{t.allPricingModels}</option>
+                <option value="CUSTOM">{t.custom}</option>
+                <option value="PERCENTAGE">{t.pricingPercentage}</option>
+                <option value="FIXED">{t.fixed}</option>
+                <option value="FREE">{t.free}</option>
               </select>
 
               <Input
@@ -1235,17 +1200,46 @@ export default function SystemContractsReportsPage() {
           </CardContent>
         </Card>
 
-        {/* Printable Area */}
         <div ref={printAreaRef} className="space-y-6">
+          {/* Print Summary */}
+          <div className="print-grid hidden">
+            <div className="print-card">
+              <div className="print-card-label">{t.totalContracts}</div>
+              <div className="print-card-value">
+                {formatEnglishNumber(reportSummary.totalContracts)}
+              </div>
+            </div>
+            <div className="print-card">
+              <div className="print-card-label">{t.activeContracts}</div>
+              <div className="print-card-value">
+                {formatEnglishNumber(reportSummary.activeContracts)}
+              </div>
+            </div>
+            <div className="print-card">
+              <div className="print-card-label">{t.expiringSoon}</div>
+              <div className="print-card-value">
+                {formatEnglishNumber(reportSummary.expiringSoon)}
+              </div>
+            </div>
+            <div className="print-card">
+              <div className="print-card-label">{t.avgSystemCommission}</div>
+              <div className="print-card-value">
+                {formatPercent(reportSummary.avgSystemCommission)}
+              </div>
+            </div>
+          </div>
+
           {/* Stats */}
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
               <CardContent className="p-5">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm text-muted-foreground">{t.totalContracts}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t.totalContracts}
+                    </p>
                     <p className="mt-2 text-3xl font-bold tabular-nums">
-                      {formatEnglishNumber(stats.total)}
+                      {formatEnglishNumber(reportSummary.totalContracts)}
                     </p>
                   </div>
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
@@ -1259,9 +1253,11 @@ export default function SystemContractsReportsPage() {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm text-muted-foreground">{t.activeContracts}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t.activeContracts}
+                    </p>
                     <p className="mt-2 text-3xl font-bold tabular-nums">
-                      {formatEnglishNumber(stats.active)}
+                      {formatEnglishNumber(reportSummary.activeContracts)}
                     </p>
                   </div>
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
@@ -1275,13 +1271,15 @@ export default function SystemContractsReportsPage() {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm text-muted-foreground">{t.expiringSoon}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {t.activeProducts}
+                    </p>
                     <p className="mt-2 text-3xl font-bold tabular-nums">
-                      {formatEnglishNumber(stats.expiringSoon)}
+                      {formatEnglishNumber(reportSummary.activeProducts)}
                     </p>
                   </div>
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-300">
-                    <CalendarRange className="h-5 w-5" />
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-600 dark:text-sky-300">
+                    <Sparkles className="h-5 w-5" />
                   </div>
                 </div>
               </CardContent>
@@ -1291,12 +1289,14 @@ export default function SystemContractsReportsPage() {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm text-muted-foreground">{t.totalValue}</p>
-                    <p className="mt-2 text-2xl font-bold tabular-nums">
-                      <SarAmount amount={stats.totalValue} />
+                    <p className="text-sm text-muted-foreground">
+                      {t.avgSystemCommission}
+                    </p>
+                    <p className="mt-2 text-3xl font-bold tabular-nums">
+                      {formatPercent(reportSummary.avgSystemCommission)}
                     </p>
                   </div>
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-600 dark:text-sky-300">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-300">
                     <Wallet className="h-5 w-5" />
                   </div>
                 </div>
@@ -1304,85 +1304,59 @@ export default function SystemContractsReportsPage() {
             </Card>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardContent className="p-5">
-                <p className="text-sm text-muted-foreground">{t.expiredContracts}</p>
-                <p className="mt-2 text-3xl font-bold tabular-nums">
-                  {formatEnglishNumber(stats.expired)}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardContent className="p-5">
-                <p className="text-sm text-muted-foreground">{t.avgValue}</p>
-                <p className="mt-2 text-2xl font-bold tabular-nums">
-                  <SarAmount amount={stats.avgValue} />
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardContent className="p-5">
-                <p className="text-sm text-muted-foreground">{t.estimatedCommission}</p>
-                <p className="mt-2 text-2xl font-bold tabular-nums">
-                  <SarAmount amount={stats.estimatedCommission} />
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Analysis Cards */}
-          <div className="grid gap-6 xl:grid-cols-2">
+          {/* Distributions */}
+          <div className="grid gap-6 xl:grid-cols-3">
             <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <PieChart className="h-5 w-5 text-primary" />
                   {t.statusDistribution}
                 </CardTitle>
-                <CardDescription>{t.statusDistributionDesc}</CardDescription>
               </CardHeader>
 
               <CardContent className="space-y-4">
                 {isLoading ? (
-                  <div className="flex min-h-40 items-center justify-center text-muted-foreground">
+                  <div className="flex min-h-32 items-center justify-center text-muted-foreground">
                     <Loader2 className="me-2 h-5 w-5 animate-spin" />
                     {t.loading}
                   </div>
-                ) : statusRows.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+                ) : localStatusDistribution.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
                     {t.noData}
                   </div>
                 ) : (
-                  statusRows.map((row) => (
-                    <div key={row.status} className="space-y-2">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <Badge
-                          variant="outline"
-                          className={`rounded-full ${statusBadgeClass(row.status)}`}
-                        >
-                          {statusLabel(row.status, locale)}
-                        </Badge>
+                  localStatusDistribution.map((item) => {
+                    const percentage =
+                      reportSummary.totalContracts > 0
+                        ? (item.total / reportSummary.totalContracts) * 100
+                        : 0;
 
-                        <div className="flex items-center gap-3">
+                    return (
+                      <div key={item.key} className="space-y-2">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <Badge
+                            variant="outline"
+                            className={`rounded-full ${statusBadgeClass(
+                              normalizeStatus(item.key)
+                            )}`}
+                          >
+                            {statusLabel(normalizeStatus(item.key), locale)}
+                          </Badge>
+
                           <span className="font-semibold tabular-nums">
-                            {formatEnglishNumber(row.count)}
-                          </span>
-                          <span className="text-muted-foreground">
-                            {formatEnglishMoney(row.value)} SAR
+                            {formatEnglishNumber(item.total)}
                           </span>
                         </div>
-                      </div>
 
-                      <div className="h-2 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary transition-all"
-                          style={{ width: `${row.percentage}%` }}
-                        />
+                        <div className="h-2 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary"
+                            style={{ width: `${Math.min(percentage, 100)}%` }}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </CardContent>
             </Card>
@@ -1391,48 +1365,75 @@ export default function SystemContractsReportsPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <TrendingUp className="h-5 w-5 text-primary" />
-                  {t.typeDistribution}
+                  {t.pricingDistribution}
                 </CardTitle>
-                <CardDescription>{t.typeDistributionDesc}</CardDescription>
               </CardHeader>
 
               <CardContent className="space-y-4">
-                {isLoading ? (
-                  <div className="flex min-h-40 items-center justify-center text-muted-foreground">
-                    <Loader2 className="me-2 h-5 w-5 animate-spin" />
-                    {t.loading}
-                  </div>
-                ) : typeRows.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+                {localPricingDistribution.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
                     {t.noData}
                   </div>
                 ) : (
-                  typeRows.map((row) => (
-                    <div key={row.type} className="space-y-2">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <Badge
-                          variant="outline"
-                          className="rounded-full bg-white/70 dark:bg-white/5"
-                        >
-                          {typeLabel(row.type, locale)}
-                        </Badge>
+                  localPricingDistribution.map((item) => {
+                    const percentage =
+                      reportSummary.totalContracts > 0
+                        ? (item.total / reportSummary.totalContracts) * 100
+                        : 0;
 
-                        <div className="flex items-center gap-3">
-                          <span className="font-semibold tabular-nums">
-                            {formatEnglishNumber(row.count)}
+                    return (
+                      <div key={item.key} className="space-y-2">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="font-medium">
+                            {pricingModelLabel(
+                              normalizePricingModel(item.key),
+                              locale
+                            )}
                           </span>
-                          <span className="text-muted-foreground">
-                            {formatEnglishMoney(row.value)} SAR
+
+                          <span className="font-semibold tabular-nums">
+                            {formatEnglishNumber(item.total)}
                           </span>
                         </div>
-                      </div>
 
-                      <div className="h-2 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary transition-all"
-                          style={{ width: `${row.percentage}%` }}
-                        />
+                        <div className="h-2 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary"
+                            style={{ width: `${Math.min(percentage, 100)}%` }}
+                          />
+                        </div>
                       </div>
+                    );
+                  })
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Building2 className="h-5 w-5 text-primary" />
+                  {t.providerDistribution}
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent className="space-y-3">
+                {localProviderDistribution.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    {t.noData}
+                  </div>
+                ) : (
+                  localProviderDistribution.slice(0, 8).map((item) => (
+                    <div
+                      key={`${item.provider_id}-${item.provider_name}`}
+                      className="flex items-center justify-between gap-3 rounded-2xl border border-white/20 bg-white/70 px-4 py-3 text-sm dark:border-white/10 dark:bg-white/5"
+                    >
+                      <span className="truncate font-medium">
+                        {item.provider_name || "-"}
+                      </span>
+                      <span className="font-bold tabular-nums">
+                        {formatEnglishNumber(item.total)}
+                      </span>
                     </div>
                   ))
                 )}
@@ -1440,105 +1441,26 @@ export default function SystemContractsReportsPage() {
             </Card>
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-2">
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Building2 className="h-5 w-5 text-primary" />
-                  {t.providerDistribution}
-                </CardTitle>
-                <CardDescription>{t.providerDistributionDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                {providerRows.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-                    {t.noData}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {providerRows.map((provider) => (
-                      <div
-                        key={provider.providerName}
-                        className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="font-semibold">{provider.providerName}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {formatEnglishNumber(provider.activeCount)} {t.activeContracts}
-                            </p>
-                          </div>
-
-                          <div className="text-end">
-                            <p className="font-bold tabular-nums">
-                              {formatEnglishNumber(provider.count)}
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {formatEnglishMoney(provider.value)} SAR
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CalendarRange className="h-5 w-5 text-primary" />
-                  {t.expiringReport}
-                </CardTitle>
-                <CardDescription>{t.expiringReportDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                {expiringContracts.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-                    {t.noData}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {expiringContracts.map((contract) => (
-                      <Link
-                        href={`/system/contracts/${contract.id}`}
-                        key={contract.id}
-                        className="block rounded-2xl border border-white/20 bg-white/70 p-4 transition hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/5"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate font-semibold">{contract.title}</p>
-                            <p className="mt-1 truncate text-xs text-muted-foreground">
-                              {contract.providerName} · {contract.contractNumber}
-                            </p>
-                          </div>
-
-                          <Badge
-                            variant="outline"
-                            className="shrink-0 rounded-full border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                          >
-                            {remainingLabel(contract.endDate, locale)}
-                          </Badge>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Detailed Report */}
+          {/* Latest Contracts */}
           <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileSignature className="h-5 w-5 text-primary" />
-                {t.detailedReport}
-              </CardTitle>
-              <CardDescription>{t.detailedReportDesc}</CardDescription>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileSignature className="h-5 w-5 text-primary" />
+                    {t.latestContracts}
+                  </CardTitle>
+                  <CardDescription>
+                    {formatEnglishNumber(filteredContracts.length)} {t.results}
+                  </CardDescription>
+                </div>
+
+                <Link href="/system/contracts/create">
+                  <Button className="rounded-2xl">
+                    {t.createContract}
+                  </Button>
+                </Link>
+              </div>
             </CardHeader>
 
             <CardContent>
@@ -1549,119 +1471,106 @@ export default function SystemContractsReportsPage() {
                       <TableHead>{t.contractNumber}</TableHead>
                       <TableHead>{t.title}</TableHead>
                       <TableHead>{t.providerName}</TableHead>
-                      <TableHead>{t.contractType}</TableHead>
+                      <TableHead>{t.pricingModel}</TableHead>
                       <TableHead>{t.status}</TableHead>
                       <TableHead>{t.endDate}</TableHead>
-                      <TableHead>{t.daysLeft}</TableHead>
-                      <TableHead>{t.contractValue}</TableHead>
-                      <TableHead>{t.commissionRate}</TableHead>
+                      <TableHead>{t.discountPercentage}</TableHead>
+                      <TableHead>{t.systemCommissionPercentage}</TableHead>
                     </TableRow>
                   </TableHeader>
 
                   <TableBody>
                     {isLoading ? (
                       <TableRow>
-                        <TableCell colSpan={9}>
-                          <div className="flex min-h-52 items-center justify-center text-muted-foreground">
+                        <TableCell colSpan={8}>
+                          <div className="flex min-h-40 items-center justify-center text-muted-foreground">
                             <Loader2 className="me-2 h-5 w-5 animate-spin" />
                             {t.loading}
                           </div>
                         </TableCell>
                       </TableRow>
-                    ) : reportRows.length === 0 ? (
+                    ) : filteredContracts.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9}>
-                          <div className="flex min-h-52 flex-col items-center justify-center gap-3 text-center text-muted-foreground">
+                        <TableCell colSpan={8}>
+                          <div className="flex min-h-40 flex-col items-center justify-center gap-3 text-center text-muted-foreground">
                             <FileSignature className="h-10 w-10 opacity-60" />
-                            <p>{t.noData}</p>
+                            <p>{t.noContracts}</p>
                           </div>
                         </TableCell>
                       </TableRow>
                     ) : (
-                      reportRows.slice(0, 100).map((contract) => (
+                      filteredContracts.slice(0, 20).map((contract) => (
                         <TableRow key={contract.id}>
-                          <TableCell>
-                            <span className="font-semibold tabular-nums">
-                              {contract.contractNumber}
-                            </span>
-                          </TableCell>
-
-                          <TableCell>
+                          <TableCell className="font-semibold tabular-nums">
                             <Link
                               href={`/system/contracts/${contract.id}`}
-                              className="font-semibold hover:text-primary"
+                              className="hover:text-primary"
                             >
-                              {contract.title}
+                              {contract.contractNumber}
                             </Link>
                           </TableCell>
 
-                          <TableCell>{contract.providerName}</TableCell>
+                          <TableCell>
+                            <div className="max-w-64 truncate font-medium">
+                              {contract.title}
+                            </div>
+                          </TableCell>
+
+                          <TableCell>
+                            <div className="flex max-w-52 items-center gap-2 truncate">
+                              <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <span className="truncate">
+                                {contract.providerName}
+                              </span>
+                            </div>
+                          </TableCell>
 
                           <TableCell>
                             <Badge
                               variant="outline"
                               className="rounded-full bg-white/70 dark:bg-white/5"
                             >
-                              {typeLabel(contract.contractType, locale)}
+                              {pricingModelLabel(contract.pricingModel, locale)}
                             </Badge>
                           </TableCell>
 
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className={`rounded-full ${statusBadgeClass(contract.status)}`}
+                              className={`rounded-full ${statusBadgeClass(
+                                contract.status
+                              )}`}
                             >
                               {statusLabel(contract.status, locale)}
                             </Badge>
                           </TableCell>
 
-                          <TableCell>{formatDate(contract.endDate, locale)}</TableCell>
-
-                          <TableCell>{remainingLabel(contract.endDate, locale)}</TableCell>
-
                           <TableCell>
-                            <SarAmount amount={contract.contractValue} />
+                            <div className="flex items-center gap-2 text-sm">
+                              <CalendarRange className="h-4 w-4 text-muted-foreground" />
+                              {formatDate(contract.endDate, locale)}
+                            </div>
                           </TableCell>
 
-                          <TableCell>{formatPercent(contract.commissionRate)}</TableCell>
+                          <TableCell>
+                            <PercentValue value={contract.discountPercentage} />
+                          </TableCell>
+
+                          <TableCell>
+                            <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
+                              <SarIcon />
+                              {formatPercent(contract.systemCommissionPercentage)}
+                            </span>
+                          </TableCell>
                         </TableRow>
                       ))
                     )}
                   </TableBody>
                 </Table>
               </div>
-
-              {reportRows.length > 100 ? (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  {isArabic
-                    ? `تم عرض أول ${formatEnglishNumber(100)} سجل فقط داخل الجدول. ملف Excel يحتوي على جميع النتائج.`
-                    : `Only the first ${formatEnglishNumber(100)} records are shown in the table. Excel contains all results.`}
-                </p>
-              ) : null}
             </CardContent>
           </Card>
         </div>
-
-        <Card className="overflow-hidden rounded-3xl border-white/20 bg-primary text-primary-foreground shadow-lg dark:border-white/10">
-          <CardContent className="p-6">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/15">
-                <Sparkles className="h-6 w-6" />
-              </div>
-
-              <div>
-                <h3 className="font-bold">
-                  {isArabic ? "تقرير عقود موحد" : "Unified Contracts Report"}
-                </h3>
-                <p className="mt-2 text-sm leading-7 text-primary-foreground/80">
-                  {isArabic
-                    ? "تم بناء التقرير ليقرأ من واجهة العقود الرسمية، مع تصدير Excel منظم وطباعة للقسم المطلوب فقط."
-                    : "This report reads from the official contracts API, with organized Excel export and print for the report section only."}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );

@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -13,14 +13,17 @@ import {
   Edit3,
   FileSignature,
   FileText,
-  HandCoins,
-  Landmark,
   Loader2,
+  Mail,
+  Package,
+  Percent,
+  Phone,
   RefreshCcw,
   Save,
   ShieldCheck,
   Sparkles,
   Trash2,
+  UserRound,
   Wallet,
   X,
 } from "lucide-react";
@@ -49,12 +52,13 @@ import { Textarea } from "@/components/ui/textarea";
    📂 app/system/contracts/[id]/page.tsx
    🧾 Primey Care | Contract Detail
    ------------------------------------------------------------
-   ✅ صفحة تفاصيل العقد بنفس نمط المراكز / العملاء / المندوبين / المنتجات
+   ✅ تفاصيل عقد
    ✅ ربط حقيقي مع /api/contracts/<id>/
-   ✅ عرض + تعديل سريع + حذف
+   ✅ تعديل سريع للحقول المدعومة في Backend
+   ✅ إنهاء آمن للعقد بدل الحذف النهائي
+   ✅ دعم status actions
    ✅ دعم عربي / إنجليزي عبر primey-locale
    ✅ الأرقام دائمًا إنجليزية
-   ✅ استخدام UI الداخلي فقط
    ✅ استخدام sonner
    ✅ استخدام رمز SAR الرسمي
    ✅ بدون hardcoded localhost
@@ -63,54 +67,61 @@ import { Textarea } from "@/components/ui/textarea";
 type AppLocale = "ar" | "en";
 
 type ContractStatus =
-  | "ACTIVE"
-  | "INACTIVE"
   | "DRAFT"
-  | "PENDING"
+  | "ACTIVE"
   | "EXPIRED"
   | "TERMINATED"
-  | "CANCELLED"
   | "SUSPENDED"
   | "UNKNOWN";
 
-type ContractType =
-  | "GENERAL"
-  | "MEDICAL"
-  | "SERVICE"
-  | "PARTNERSHIP"
-  | "DISCOUNT"
-  | "SUPPLY"
-  | "OTHER"
-  | "UNKNOWN";
+type EditableContractStatus =
+  | "DRAFT"
+  | "ACTIVE"
+  | "EXPIRED"
+  | "TERMINATED"
+  | "SUSPENDED";
+
+type PricingModel = "FIXED" | "PERCENTAGE" | "CUSTOM" | "FREE" | "UNKNOWN";
+
+type EditablePricingModel = "FIXED" | "PERCENTAGE" | "CUSTOM" | "FREE";
 
 type ContractProduct = {
   id: number | string;
   productId: number | string | null;
   productName: string;
-  serviceName: string;
-  discountRate: number;
-  commissionRate: number;
-  price: number;
-  status: string;
+  productCode: string;
+  productType: string;
+  productStatus: string;
+  productPrice: number;
+  productSalePrice: number | null;
+  productEffectivePrice: number;
+  isActive: boolean;
+  specialPrice: number | null;
+  discountPercentage: number;
+  coverageNotes: string;
 };
 
 type Contract = {
   id: number | string;
+  providerId: number | string | null;
+  providerName: string;
+  providerCode: string;
+  providerType: string;
+  providerStatus: string;
   contractNumber: string;
   title: string;
-  providerName: string;
-  providerId: number | string | null;
-  contractType: ContractType;
   status: ContractStatus;
+  pricingModel: PricingModel;
   startDate: string;
   endDate: string;
-  contractValue: number;
-  commissionRate: number;
-  currency: string;
-  paymentTerms: string;
-  renewalTerms: string;
-  terminationTerms: string;
+  signedAt: string;
+  providerContactName: string;
+  providerContactPhone: string;
+  providerContactEmail: string;
+  discountPercentage: number;
+  systemCommissionPercentage: number;
   notes: string;
+  termsAndConditions: string;
   productsCount: number;
   contractProducts: ContractProduct[];
   createdAt: string;
@@ -121,16 +132,17 @@ type Contract = {
 type ContractFormData = {
   contractNumber: string;
   title: string;
-  contractType: ContractType;
-  status: ContractStatus;
+  status: EditableContractStatus;
+  pricingModel: EditablePricingModel;
   startDate: string;
   endDate: string;
-  contractValue: string;
-  commissionRate: string;
-  currency: string;
-  paymentTerms: string;
-  renewalTerms: string;
-  terminationTerms: string;
+  signedAt: string;
+  providerContactName: string;
+  providerContactPhone: string;
+  providerContactEmail: string;
+  discountPercentage: string;
+  systemCommissionPercentage: string;
+  termsAndConditions: string;
   notes: string;
 };
 
@@ -240,11 +252,16 @@ function formatDateTime(value: string, locale: AppLocale) {
 }
 
 function normalizeNumberInput(value: string) {
-  return value.replace(/[^\d.]/g, "");
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const parts = cleaned.split(".");
+
+  if (parts.length <= 1) return cleaned;
+
+  return `${parts[0]}.${parts.slice(1).join("")}`;
 }
 
 function normalizePercentInput(value: string) {
-  const cleaned = value.replace(/[^\d.]/g, "");
+  const cleaned = normalizeNumberInput(value);
   const numeric = Number(cleaned || 0);
 
   if (!Number.isFinite(numeric)) return "";
@@ -273,33 +290,39 @@ function daysUntil(dateValue: string) {
 function normalizeStatus(value: unknown): ContractStatus {
   const status = String(value || "").toUpperCase();
 
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "INACTIVE") return "INACTIVE";
   if (status === "DRAFT") return "DRAFT";
-  if (status === "PENDING") return "PENDING";
+  if (status === "ACTIVE") return "ACTIVE";
   if (status === "EXPIRED") return "EXPIRED";
   if (status === "TERMINATED") return "TERMINATED";
-  if (status === "CANCELLED") return "CANCELLED";
   if (status === "SUSPENDED") return "SUSPENDED";
-
-  if (value === true) return "ACTIVE";
-  if (value === false) return "INACTIVE";
 
   return "UNKNOWN";
 }
 
-function normalizeContractType(value: unknown): ContractType {
-  const contractType = String(value || "").toUpperCase();
+function toEditableStatus(status: ContractStatus): EditableContractStatus {
+  if (status === "ACTIVE") return "ACTIVE";
+  if (status === "EXPIRED") return "EXPIRED";
+  if (status === "TERMINATED") return "TERMINATED";
+  if (status === "SUSPENDED") return "SUSPENDED";
+  return "DRAFT";
+}
 
-  if (contractType === "GENERAL") return "GENERAL";
-  if (contractType === "MEDICAL") return "MEDICAL";
-  if (contractType === "SERVICE") return "SERVICE";
-  if (contractType === "PARTNERSHIP") return "PARTNERSHIP";
-  if (contractType === "DISCOUNT") return "DISCOUNT";
-  if (contractType === "SUPPLY") return "SUPPLY";
-  if (contractType === "OTHER") return "OTHER";
+function normalizePricingModel(value: unknown): PricingModel {
+  const pricingModel = String(value || "").toUpperCase();
+
+  if (pricingModel === "FIXED") return "FIXED";
+  if (pricingModel === "PERCENTAGE") return "PERCENTAGE";
+  if (pricingModel === "CUSTOM") return "CUSTOM";
+  if (pricingModel === "FREE") return "FREE";
 
   return "UNKNOWN";
+}
+
+function toEditablePricingModel(pricingModel: PricingModel): EditablePricingModel {
+  if (pricingModel === "FIXED") return "FIXED";
+  if (pricingModel === "PERCENTAGE") return "PERCENTAGE";
+  if (pricingModel === "FREE") return "FREE";
+  return "CUSTOM";
 }
 
 function readNestedName(value: unknown): string {
@@ -318,6 +341,18 @@ function readNestedName(value: unknown): string {
   );
 }
 
+function unwrapContractPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload;
+
+  const obj = payload as Record<string, unknown>;
+
+  if (obj.data && typeof obj.data === "object") return obj.data;
+  if (obj.contract && typeof obj.contract === "object") return obj.contract;
+  if (obj.result && typeof obj.result === "object") return obj.result;
+
+  return payload;
+}
+
 function normalizeContractProduct(item: unknown): ContractProduct {
   const obj = (item || {}) as Record<string, unknown>;
   const productObj = obj.product as Record<string, unknown> | undefined;
@@ -329,35 +364,42 @@ function normalizeContractProduct(item: unknown): ContractProduct {
       (productObj?.id as number | string | undefined) ??
       null,
     productName: String(
-      obj.product_name ??
+      productObj?.name ??
+        obj.product_name ??
         obj.name ??
         readNestedName(obj.product) ??
         "-"
     ),
-    serviceName: String(
-      obj.service_name ??
-        obj.service ??
-        obj.item_name ??
-        obj.title ??
-        "-"
+    productCode: String(productObj?.code ?? obj.product_code ?? obj.code ?? ""),
+    productType: String(productObj?.product_type ?? obj.product_type ?? ""),
+    productStatus: String(productObj?.status ?? obj.product_status ?? ""),
+    productPrice: Number(productObj?.price ?? obj.product_price ?? obj.price ?? 0),
+    productSalePrice:
+      productObj?.sale_price !== null &&
+      productObj?.sale_price !== undefined &&
+      productObj?.sale_price !== ""
+        ? Number(productObj.sale_price)
+        : null,
+    productEffectivePrice: Number(
+      productObj?.effective_price ??
+        obj.product_effective_price ??
+        obj.effective_price ??
+        productObj?.price ??
+        obj.price ??
+        0
     ),
-    discountRate: Number(obj.discount_rate ?? obj.discountRate ?? 0),
-    commissionRate: Number(obj.commission_rate ?? obj.commissionRate ?? 0),
-    price: Number(obj.price ?? obj.amount ?? obj.value ?? 0),
-    status: String(obj.status ?? ""),
+    isActive: Boolean(obj.is_active ?? true),
+    specialPrice:
+      obj.special_price !== null &&
+      obj.special_price !== undefined &&
+      obj.special_price !== ""
+        ? Number(obj.special_price)
+        : null,
+    discountPercentage: Number(
+      obj.discount_percentage ?? obj.discountPercentage ?? 0
+    ),
+    coverageNotes: String(obj.coverage_notes ?? ""),
   };
-}
-
-function unwrapContractPayload(payload: unknown): unknown {
-  if (!payload || typeof payload !== "object") return payload;
-
-  const obj = payload as Record<string, unknown>;
-
-  if (obj.data && typeof obj.data === "object") return obj.data;
-  if (obj.contract && typeof obj.contract === "object") return obj.contract;
-  if (obj.result && typeof obj.result === "object") return obj.result;
-
-  return payload;
 }
 
 function normalizeContract(payload: unknown): Contract {
@@ -372,8 +414,24 @@ function normalizeContract(payload: unknown): Contract {
         ? obj.items
         : [];
 
+  const providerName = String(
+    obj.provider_name ??
+      obj.center_name ??
+      obj.providerName ??
+      readNestedName(obj.provider) ??
+      "-"
+  );
+
   return {
     id: (obj.id ?? "-") as number | string,
+    providerId:
+      (obj.provider_id as number | string | undefined) ??
+      (providerObj?.id as number | string | undefined) ??
+      null,
+    providerName,
+    providerCode: String(providerObj?.code ?? obj.provider_code ?? ""),
+    providerType: String(providerObj?.provider_type ?? obj.provider_type ?? ""),
+    providerStatus: String(providerObj?.status ?? obj.provider_status ?? ""),
     contractNumber: String(
       obj.contract_number ??
         obj.contractNumber ??
@@ -389,39 +447,25 @@ function normalizeContract(payload: unknown): Contract {
         obj.contractTitle ??
         "-"
     ),
-    providerName: String(
-      obj.provider_name ??
-        obj.center_name ??
-        obj.providerName ??
-        readNestedName(obj.provider) ??
-        "-"
-    ),
-    providerId:
-      (obj.provider_id as number | string | undefined) ??
-      (providerObj?.id as number | string | undefined) ??
-      null,
-    contractType: normalizeContractType(
-      obj.contract_type ?? obj.contractType ?? obj.type
-    ),
-    status: normalizeStatus(obj.status ?? obj.is_active),
+    status: normalizeStatus(obj.status),
+    pricingModel: normalizePricingModel(obj.pricing_model ?? obj.pricingModel),
     startDate: String(obj.start_date ?? obj.startDate ?? ""),
     endDate: String(obj.end_date ?? obj.endDate ?? ""),
-    contractValue: Number(
-      obj.contract_value ??
-        obj.contractValue ??
-        obj.total_value ??
-        obj.value ??
-        obj.amount ??
+    signedAt: String(obj.signed_at ?? obj.signedAt ?? ""),
+    providerContactName: String(obj.provider_contact_name ?? ""),
+    providerContactPhone: String(obj.provider_contact_phone ?? ""),
+    providerContactEmail: String(obj.provider_contact_email ?? ""),
+    discountPercentage: Number(
+      obj.discount_percentage ?? obj.discountPercentage ?? 0
+    ),
+    systemCommissionPercentage: Number(
+      obj.system_commission_percentage ??
+        obj.systemCommissionPercentage ??
+        obj.commission_rate ??
         0
     ),
-    commissionRate: Number(
-      obj.commission_rate ?? obj.commissionRate ?? obj.rate ?? 0
-    ),
-    currency: String(obj.currency ?? "SAR"),
-    paymentTerms: String(obj.payment_terms ?? obj.paymentTerms ?? ""),
-    renewalTerms: String(obj.renewal_terms ?? obj.renewalTerms ?? ""),
-    terminationTerms: String(obj.termination_terms ?? obj.terminationTerms ?? ""),
-    notes: String(obj.notes ?? obj.description ?? ""),
+    notes: String(obj.notes ?? ""),
+    termsAndConditions: String(obj.terms_and_conditions ?? ""),
     productsCount: Number(
       obj.products_count ??
         obj.contract_products_count ??
@@ -446,8 +490,8 @@ function dictionary(locale: AppLocale) {
   return {
     pageTitle: isArabic ? "تفاصيل العقد" : "Contract Details",
     pageSubtitle: isArabic
-      ? "عرض بيانات العقد، مقدم الخدمة، المدة، القيمة، الشروط، والخدمات المرتبطة."
-      : "View contract data, provider, duration, value, terms, and linked services.",
+      ? "عرض بيانات العقد، مقدم الخدمة، مدة العقد، نسب الخصم، نسبة النظام، والمنتجات المرتبطة."
+      : "View contract data, provider, duration, discounts, system commission, and linked products.",
 
     back: isArabic ? "رجوع" : "Back",
     list: isArabic ? "قائمة العقود" : "Contracts List",
@@ -455,7 +499,9 @@ function dictionary(locale: AppLocale) {
     edit: isArabic ? "تعديل" : "Edit",
     cancelEdit: isArabic ? "إلغاء التعديل" : "Cancel Edit",
     saveChanges: isArabic ? "حفظ التعديلات" : "Save Changes",
-    delete: isArabic ? "حذف العقد" : "Delete Contract",
+    terminate: isArabic ? "إنهاء العقد" : "Terminate Contract",
+    activate: isArabic ? "تفعيل" : "Activate",
+    suspend: isArabic ? "إيقاف" : "Suspend",
 
     overview: isArabic ? "نظرة عامة" : "Overview",
     overviewDesc: isArabic
@@ -468,60 +514,76 @@ function dictionary(locale: AppLocale) {
       : "Provider information linked to this contract.",
 
     durationInfo: isArabic ? "مدة العقد" : "Contract Duration",
-    financialInfo: isArabic ? "البيانات المالية" : "Financial Information",
+    durationDesc: isArabic
+      ? "تاريخ بداية العقد ونهايته وتاريخ التوقيع."
+      : "Contract start, end, and signing dates.",
+
+    financialInfo: isArabic ? "النسب والتسعير" : "Pricing & Percentages",
+    financialDesc: isArabic
+      ? "آلية التسعير، نسبة الخصم، ونسبة النظام."
+      : "Pricing model, discount percentage, and system commission.",
+
+    contactInfo: isArabic ? "مسؤول الجهة" : "Provider Contact",
+    contactDesc: isArabic
+      ? "بيانات مسؤول مقدم الخدمة داخل العقد."
+      : "Provider contact information inside the contract.",
+
     termsInfo: isArabic ? "الشروط والملاحظات" : "Terms & Notes",
-    productsInfo: isArabic ? "الخدمات / المنتجات المرتبطة" : "Linked Services / Products",
+    productsInfo: isArabic ? "المنتجات المشمولة" : "Covered Products",
     productsInfoDesc: isArabic
-      ? "قائمة الخدمات أو المنتجات المرتبطة بهذا العقد إن وجدت."
-      : "Services or products linked to this contract if available.",
+      ? "قائمة المنتجات أو البرامج المرتبطة بهذا العقد."
+      : "Products or programs linked to this contract.",
 
     contractNumber: isArabic ? "رقم العقد" : "Contract Number",
     contractTitle: isArabic ? "اسم العقد" : "Contract Title",
-    contractType: isArabic ? "نوع العقد" : "Contract Type",
     status: isArabic ? "الحالة" : "Status",
+    pricingModel: isArabic ? "آلية التسعير" : "Pricing Model",
     provider: isArabic ? "مقدم الخدمة" : "Provider",
+    providerCode: isArabic ? "كود مقدم الخدمة" : "Provider Code",
+    providerType: isArabic ? "نوع مقدم الخدمة" : "Provider Type",
+    providerStatus: isArabic ? "حالة مقدم الخدمة" : "Provider Status",
+
     startDate: isArabic ? "تاريخ البداية" : "Start Date",
     endDate: isArabic ? "تاريخ النهاية" : "End Date",
+    signedAt: isArabic ? "تاريخ التوقيع" : "Signed At",
     remainingDays: isArabic ? "الأيام المتبقية" : "Remaining Days",
-    contractValue: isArabic ? "قيمة العقد" : "Contract Value",
-    commissionRate: isArabic ? "نسبة العمولة" : "Commission Rate",
-    commissionPreview: isArabic ? "العمولة التقديرية" : "Estimated Commission",
-    currency: isArabic ? "العملة" : "Currency",
-    paymentTerms: isArabic ? "شروط الدفع" : "Payment Terms",
-    renewalTerms: isArabic ? "شروط التجديد" : "Renewal Terms",
-    terminationTerms: isArabic ? "شروط الإنهاء" : "Termination Terms",
+
+    discountPercentage: isArabic ? "نسبة الخصم العامة" : "General Discount",
+    systemCommissionPercentage: isArabic ? "نسبة النظام" : "System Commission",
+
+    providerContactName: isArabic ? "اسم المسؤول" : "Contact Name",
+    providerContactPhone: isArabic ? "جوال المسؤول" : "Contact Phone",
+    providerContactEmail: isArabic ? "بريد المسؤول" : "Contact Email",
+
+    termsAndConditions: isArabic ? "الشروط والأحكام" : "Terms & Conditions",
     notes: isArabic ? "ملاحظات داخلية" : "Internal Notes",
     createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
     updatedAt: isArabic ? "آخر تحديث" : "Updated At",
 
-    product: isArabic ? "المنتج / الخدمة" : "Product / Service",
+    product: isArabic ? "المنتج / البرنامج" : "Product / Program",
+    productCode: isArabic ? "الكود" : "Code",
+    specialPrice: isArabic ? "سعر خاص" : "Special Price",
+    effectivePrice: isArabic ? "السعر الفعلي" : "Effective Price",
     discount: isArabic ? "الخصم" : "Discount",
-    commission: isArabic ? "العمولة" : "Commission",
-    price: isArabic ? "السعر" : "Price",
+    coverageNotes: isArabic ? "ملاحظات التغطية" : "Coverage Notes",
+    productStatus: isArabic ? "الحالة" : "Status",
 
     active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
     draft: isArabic ? "مسودة" : "Draft",
-    pending: isArabic ? "معلق" : "Pending",
     expired: isArabic ? "منتهي" : "Expired",
     terminated: isArabic ? "منهى" : "Terminated",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
     suspended: isArabic ? "موقوف" : "Suspended",
     unknown: isArabic ? "غير معروف" : "Unknown",
 
-    general: isArabic ? "عام" : "General",
-    medical: isArabic ? "طبي" : "Medical",
-    service: isArabic ? "خدمة" : "Service",
-    partnership: isArabic ? "شراكة" : "Partnership",
-    discountType: isArabic ? "خصومات" : "Discount",
-    supply: isArabic ? "توريد" : "Supply",
-    other: isArabic ? "أخرى" : "Other",
+    fixed: isArabic ? "سعر ثابت" : "Fixed",
+    percentage: isArabic ? "نسبة" : "Percentage",
+    custom: isArabic ? "مخصص" : "Custom",
+    free: isArabic ? "مجاني" : "Free",
 
-    sar: isArabic ? "ريال سعودي" : "Saudi Riyal",
     notSet: isArabic ? "غير محدد" : "Not set",
     noProducts: isArabic
-      ? "لا توجد خدمات أو منتجات مرتبطة بهذا العقد."
-      : "No services or products are linked to this contract.",
+      ? "لا توجد منتجات مرتبطة بهذا العقد."
+      : "No products are linked to this contract.",
 
     loading: isArabic ? "جاري تحميل بيانات العقد..." : "Loading contract details...",
     loadError: isArabic
@@ -534,14 +596,20 @@ function dictionary(locale: AppLocale) {
     updateError: isArabic
       ? "تعذر حفظ تعديلات العقد"
       : "Failed to save contract changes",
-    deleteConfirm: isArabic
-      ? "هل أنت متأكد من حذف هذا العقد؟ لا يمكن التراجع عن هذه العملية."
-      : "Are you sure you want to delete this contract? This action cannot be undone.",
-    deleteSuccess: isArabic ? "تم حذف العقد بنجاح" : "Contract deleted successfully",
-    deleteError: isArabic ? "تعذر حذف العقد" : "Failed to delete contract",
+    terminateConfirm: isArabic
+      ? "هل أنت متأكد من إنهاء هذا العقد؟ سيتم تغيير حالته إلى منهى ولن يتم حذفه نهائيًا."
+      : "Are you sure you want to terminate this contract? Its status will be changed to terminated and it will not be permanently deleted.",
+    terminateSuccess: isArabic
+      ? "تم إنهاء العقد بنجاح"
+      : "Contract terminated successfully",
+    terminateError: isArabic ? "تعذر إنهاء العقد" : "Failed to terminate contract",
+    statusSuccess: isArabic ? "تم تحديث حالة العقد" : "Contract status updated",
+    statusError: isArabic ? "تعذر تحديث حالة العقد" : "Failed to update contract status",
 
     required: isArabic ? "هذا الحقل مطلوب" : "This field is required",
-    invalidNumber: isArabic ? "القيمة الرقمية غير صحيحة" : "Invalid numeric value",
+    invalidPercent: isArabic
+      ? "النسبة يجب أن تكون بين 0 و 100"
+      : "Percentage must be between 0 and 100",
     invalidDateRange: isArabic
       ? "تاريخ النهاية يجب أن يكون بعد تاريخ البداية"
       : "End date must be after start date",
@@ -555,13 +623,10 @@ function statusLabel(status: ContractStatus, locale: AppLocale) {
   const t = dictionary(locale);
 
   const labels: Record<ContractStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
     DRAFT: t.draft,
-    PENDING: t.pending,
+    ACTIVE: t.active,
     EXPIRED: t.expired,
     TERMINATED: t.terminated,
-    CANCELLED: t.cancelled,
     SUSPENDED: t.suspended,
     UNKNOWN: t.unknown,
   };
@@ -569,21 +634,18 @@ function statusLabel(status: ContractStatus, locale: AppLocale) {
   return labels[status] || t.unknown;
 }
 
-function typeLabel(type: ContractType, locale: AppLocale) {
+function pricingModelLabel(pricingModel: PricingModel, locale: AppLocale) {
   const t = dictionary(locale);
 
-  const labels: Record<ContractType, string> = {
-    GENERAL: t.general,
-    MEDICAL: t.medical,
-    SERVICE: t.service,
-    PARTNERSHIP: t.partnership,
-    DISCOUNT: t.discountType,
-    SUPPLY: t.supply,
-    OTHER: t.other,
+  const labels: Record<PricingModel, string> = {
+    FIXED: t.fixed,
+    PERCENTAGE: t.percentage,
+    CUSTOM: t.custom,
+    FREE: t.free,
     UNKNOWN: t.unknown,
   };
 
-  return labels[type] || t.unknown;
+  return labels[pricingModel] || t.unknown;
 }
 
 function statusBadgeClass(status: ContractStatus) {
@@ -591,15 +653,15 @@ function statusBadgeClass(status: ContractStatus) {
     return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   }
 
-  if (status === "DRAFT" || status === "PENDING") {
+  if (status === "DRAFT") {
     return "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   }
 
-  if (status === "EXPIRED" || status === "TERMINATED" || status === "CANCELLED") {
+  if (status === "EXPIRED" || status === "TERMINATED") {
     return "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300";
   }
 
-  if (status === "SUSPENDED" || status === "INACTIVE") {
+  if (status === "SUSPENDED") {
     return "border-slate-500/25 bg-slate-500/10 text-slate-700 dark:text-slate-300";
   }
 
@@ -610,7 +672,11 @@ function statusBadgeClass(status: ContractStatus) {
    🧾 Small Components
 ============================================================ */
 
-function SarAmount({ amount }: { amount: number | string }) {
+function SarAmount({ amount }: { amount: number | string | null | undefined }) {
+  if (amount === null || amount === undefined || amount === "") {
+    return <span>-</span>;
+  }
+
   return (
     <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
       <Image
@@ -625,19 +691,22 @@ function SarAmount({ amount }: { amount: number | string }) {
   );
 }
 
+function PercentValue({ value }: { value: number | string | null | undefined }) {
+  return (
+    <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
+      <Percent className="h-3.5 w-3.5 text-muted-foreground" />
+      {formatPercent(value)}
+    </span>
+  );
+}
+
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
 
   return <p className="mt-1 text-xs font-medium text-destructive">{message}</p>;
 }
 
-function InfoRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}) {
+function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
       <p className="text-xs text-muted-foreground">{label}</p>
@@ -664,7 +733,8 @@ export default function SystemContractDetailPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [isTerminating, setIsTerminating] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
   const isArabic = locale === "ar";
   const t = dictionary(locale);
@@ -693,16 +763,19 @@ export default function SystemContractDetailPage() {
     return {
       contractNumber: item.contractNumber || "",
       title: item.title || "",
-      contractType: item.contractType === "UNKNOWN" ? "GENERAL" : item.contractType,
-      status: item.status === "UNKNOWN" ? "DRAFT" : item.status,
+      status: toEditableStatus(item.status),
+      pricingModel: toEditablePricingModel(item.pricingModel),
       startDate: item.startDate || "",
       endDate: item.endDate || "",
-      contractValue: item.contractValue ? String(item.contractValue) : "",
-      commissionRate: item.commissionRate ? String(item.commissionRate) : "",
-      currency: item.currency || "SAR",
-      paymentTerms: item.paymentTerms || "",
-      renewalTerms: item.renewalTerms || "",
-      terminationTerms: item.terminationTerms || "",
+      signedAt: item.signedAt || "",
+      providerContactName: item.providerContactName || "",
+      providerContactPhone: item.providerContactPhone || "",
+      providerContactEmail: item.providerContactEmail || "",
+      discountPercentage: item.discountPercentage ? String(item.discountPercentage) : "",
+      systemCommissionPercentage: item.systemCommissionPercentage
+        ? String(item.systemCommissionPercentage)
+        : "",
+      termsAndConditions: item.termsAndConditions || "",
       notes: item.notes || "",
     };
   }
@@ -759,21 +832,12 @@ export default function SystemContractDetailPage() {
     return daysUntil(contract.endDate);
   }, [contract?.endDate]);
 
-  const commissionPreview = useMemo(() => {
-    if (!contract) return 0;
-    return (Number(contract.contractValue || 0) * Number(contract.commissionRate || 0)) / 100;
-  }, [contract]);
-
-  const editCommissionPreview = useMemo(() => {
-    if (!formData) return 0;
-
-    const amount = Number(formData.contractValue || 0);
-    const rate = Number(formData.commissionRate || 0);
-
-    if (!Number.isFinite(amount) || !Number.isFinite(rate)) return 0;
-
-    return (amount * rate) / 100;
-  }, [formData]);
+  const remainingLabel =
+    remainingDays === null
+      ? t.notSet
+      : remainingDays >= 0
+        ? `${formatEnglishNumber(remainingDays)} ${t.days}`
+        : `${t.expiredSince} ${formatEnglishNumber(Math.abs(remainingDays))} ${t.days}`;
 
   function updateField<K extends keyof ContractFormData>(
     key: K,
@@ -798,6 +862,10 @@ export default function SystemContractDetailPage() {
     if (!formData) return false;
 
     const nextErrors: ContractFormErrors = {};
+
+    if (!formData.contractNumber.trim()) {
+      nextErrors.contractNumber = t.required;
+    }
 
     if (!formData.title.trim()) {
       nextErrors.title = t.required;
@@ -826,12 +894,15 @@ export default function SystemContractDetailPage() {
       }
     }
 
-    if (formData.contractValue && !Number.isFinite(Number(formData.contractValue))) {
-      nextErrors.contractValue = t.invalidNumber;
+    const discount = Number(formData.discountPercentage || 0);
+    const commission = Number(formData.systemCommissionPercentage || 0);
+
+    if (!Number.isFinite(discount) || discount < 0 || discount > 100) {
+      nextErrors.discountPercentage = t.invalidPercent;
     }
 
-    if (formData.commissionRate && !Number.isFinite(Number(formData.commissionRate))) {
-      nextErrors.commissionRate = t.invalidNumber;
+    if (!Number.isFinite(commission) || commission < 0 || commission > 100) {
+      nextErrors.systemCommissionPercentage = t.invalidPercent;
     }
 
     setErrors(nextErrors);
@@ -840,26 +911,28 @@ export default function SystemContractDetailPage() {
   }
 
   function buildUpdatePayload() {
-    if (!formData) return {};
+    if (!formData || !contract) return {};
 
     return {
+      provider_id: contract.providerId,
       contract_number: formData.contractNumber.trim(),
       title: formData.title.trim(),
-      name: formData.title.trim(),
-      contract_type: formData.contractType,
-      type: formData.contractType,
       status: formData.status,
+      pricing_model: formData.pricingModel,
       start_date: formData.startDate || null,
       end_date: formData.endDate || null,
-      contract_value: formData.contractValue ? Number(formData.contractValue) : 0,
-      value: formData.contractValue ? Number(formData.contractValue) : 0,
-      commission_rate: formData.commissionRate ? Number(formData.commissionRate) : 0,
-      currency: formData.currency || "SAR",
-      payment_terms: formData.paymentTerms.trim(),
-      renewal_terms: formData.renewalTerms.trim(),
-      termination_terms: formData.terminationTerms.trim(),
+      signed_at: formData.signedAt || null,
+      provider_contact_name: formData.providerContactName.trim(),
+      provider_contact_phone: formData.providerContactPhone.trim(),
+      provider_contact_email: formData.providerContactEmail.trim(),
+      discount_percentage: formData.discountPercentage
+        ? Number(formData.discountPercentage)
+        : 0,
+      system_commission_percentage: formData.systemCommissionPercentage
+        ? Number(formData.systemCommissionPercentage)
+        : 0,
+      terms_and_conditions: formData.termsAndConditions.trim(),
       notes: formData.notes.trim(),
-      description: formData.notes.trim(),
     };
   }
 
@@ -907,15 +980,12 @@ export default function SystemContractDetailPage() {
     }
   }
 
-  async function handleDelete() {
-    const confirmed = window.confirm(t.deleteConfirm);
-    if (!confirmed) return;
-
+  async function updateContractStatus(action: "activate" | "suspend") {
     try {
-      setIsDeleting(true);
+      setIsUpdatingStatus(true);
 
-      const response = await fetch(`/api/contracts/${contractId}/`, {
-        method: "DELETE",
+      const response = await fetch(`/api/contracts/${contractId}/${action}/`, {
+        method: "POST",
         credentials: "include",
         headers: {
           Accept: "application/json",
@@ -926,17 +996,58 @@ export default function SystemContractDetailPage() {
       const payload = await response.json().catch(() => null);
 
       if (!response.ok || payload?.ok === false) {
-        throw new Error(payload?.message || t.deleteError);
+        throw new Error(payload?.message || t.statusError);
       }
 
-      toast.success(t.deleteSuccess);
-      router.push("/system/contracts/list");
+      const item = normalizeContract(payload);
+      setContract(item);
+      setFormData(contractToFormData(item));
+      setIsEditing(false);
+
+      toast.success(t.statusSuccess);
       router.refresh();
     } catch (error) {
-      console.error("Delete contract error:", error);
-      toast.error(error instanceof Error ? error.message : t.deleteError);
+      console.error("Update contract status error:", error);
+      toast.error(error instanceof Error ? error.message : t.statusError);
     } finally {
-      setIsDeleting(false);
+      setIsUpdatingStatus(false);
+    }
+  }
+
+  async function handleTerminate() {
+    const confirmed = window.confirm(t.terminateConfirm);
+    if (!confirmed) return;
+
+    try {
+      setIsTerminating(true);
+
+      const response = await fetch(`/api/contracts/${contractId}/terminate/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "X-CSRFToken": getCookie("csrftoken"),
+        },
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.message || t.terminateError);
+      }
+
+      const item = normalizeContract(payload);
+      setContract(item);
+      setFormData(contractToFormData(item));
+      setIsEditing(false);
+
+      toast.success(t.terminateSuccess);
+      router.refresh();
+    } catch (error) {
+      console.error("Terminate contract error:", error);
+      toast.error(error instanceof Error ? error.message : t.terminateError);
+    } finally {
+      setIsTerminating(false);
     }
   }
 
@@ -982,13 +1093,6 @@ export default function SystemContractDetailPage() {
       </div>
     );
   }
-
-  const remainingLabel =
-    remainingDays === null
-      ? t.notSet
-      : remainingDays >= 0
-        ? `${formatEnglishNumber(remainingDays)} ${t.days}`
-        : `${t.expiredSince} ${formatEnglishNumber(Math.abs(remainingDays))} ${t.days}`;
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -1039,7 +1143,7 @@ export default function SystemContractDetailPage() {
                 variant="outline"
                 className="rounded-2xl bg-white/70 dark:bg-white/5"
                 onClick={() => loadContract({ silent: true })}
-                disabled={isRefreshing || isSaving || isDeleting}
+                disabled={isRefreshing || isSaving || isTerminating || isUpdatingStatus}
               >
                 {isRefreshing ? (
                   <Loader2 className="me-2 h-4 w-4 animate-spin" />
@@ -1048,6 +1152,36 @@ export default function SystemContractDetailPage() {
                 )}
                 {t.refresh}
               </Button>
+
+              {contract.status !== "ACTIVE" ? (
+                <Button
+                  variant="outline"
+                  className="rounded-2xl bg-white/70 dark:bg-white/5"
+                  onClick={() => updateContractStatus("activate")}
+                  disabled={isUpdatingStatus || isSaving || isTerminating}
+                >
+                  {isUpdatingStatus ? (
+                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="me-2 h-4 w-4" />
+                  )}
+                  {t.activate}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="rounded-2xl bg-white/70 dark:bg-white/5"
+                  onClick={() => updateContractStatus("suspend")}
+                  disabled={isUpdatingStatus || isSaving || isTerminating}
+                >
+                  {isUpdatingStatus ? (
+                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="me-2 h-4 w-4" />
+                  )}
+                  {t.suspend}
+                </Button>
+              )}
 
               {isEditing ? (
                 <>
@@ -1078,7 +1212,7 @@ export default function SystemContractDetailPage() {
                 <Button
                   className="rounded-2xl shadow-lg"
                   onClick={() => setIsEditing(true)}
-                  disabled={isDeleting}
+                  disabled={isTerminating}
                 >
                   <Edit3 className="me-2 h-4 w-4" />
                   {t.edit}
@@ -1088,15 +1222,15 @@ export default function SystemContractDetailPage() {
               <Button
                 variant="destructive"
                 className="rounded-2xl"
-                onClick={handleDelete}
-                disabled={isDeleting || isSaving}
+                onClick={handleTerminate}
+                disabled={isTerminating || isSaving || contract.status === "TERMINATED"}
               >
-                {isDeleting ? (
+                {isTerminating ? (
                   <Loader2 className="me-2 h-4 w-4 animate-spin" />
                 ) : (
                   <Trash2 className="me-2 h-4 w-4" />
                 )}
-                {t.delete}
+                {t.terminate}
               </Button>
             </div>
           </div>
@@ -1108,13 +1242,15 @@ export default function SystemContractDetailPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.contractValue}</p>
-                  <p className="mt-2 text-2xl font-bold tabular-nums">
-                    <SarAmount amount={contract.contractValue} />
+                  <p className="text-sm text-muted-foreground">
+                    {t.discountPercentage}
+                  </p>
+                  <p className="mt-2 text-3xl font-bold tabular-nums">
+                    {formatPercent(contract.discountPercentage)}
                   </p>
                 </div>
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                  <Wallet className="h-5 w-5" />
+                  <Percent className="h-5 w-5" />
                 </div>
               </div>
             </CardContent>
@@ -1124,13 +1260,15 @@ export default function SystemContractDetailPage() {
             <CardContent className="p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">{t.commissionRate}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {t.systemCommissionPercentage}
+                  </p>
                   <p className="mt-2 text-3xl font-bold tabular-nums">
-                    {formatPercent(contract.commissionRate)}
+                    {formatPercent(contract.systemCommissionPercentage)}
                   </p>
                 </div>
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
-                  <HandCoins className="h-5 w-5" />
+                  <Wallet className="h-5 w-5" />
                 </div>
               </div>
             </CardContent>
@@ -1162,7 +1300,7 @@ export default function SystemContractDetailPage() {
                   </p>
                 </div>
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-600 dark:text-sky-300">
-                  <Sparkles className="h-5 w-5" />
+                  <Package className="h-5 w-5" />
                 </div>
               </div>
             </CardContent>
@@ -1209,22 +1347,22 @@ export default function SystemContractDetailPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="contractType">{t.contractType}</Label>
+                      <Label htmlFor="pricingModel">{t.pricingModel}</Label>
                       <select
-                        id="contractType"
-                        value={formData.contractType}
+                        id="pricingModel"
+                        value={formData.pricingModel}
                         onChange={(event) =>
-                          updateField("contractType", event.target.value as ContractType)
+                          updateField(
+                            "pricingModel",
+                            event.target.value as EditablePricingModel
+                          )
                         }
                         className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
                       >
-                        <option value="GENERAL">{t.general}</option>
-                        <option value="MEDICAL">{t.medical}</option>
-                        <option value="SERVICE">{t.service}</option>
-                        <option value="PARTNERSHIP">{t.partnership}</option>
-                        <option value="DISCOUNT">{t.discountType}</option>
-                        <option value="SUPPLY">{t.supply}</option>
-                        <option value="OTHER">{t.other}</option>
+                        <option value="CUSTOM">{t.custom}</option>
+                        <option value="PERCENTAGE">{t.percentage}</option>
+                        <option value="FIXED">{t.fixed}</option>
+                        <option value="FREE">{t.free}</option>
                       </select>
                     </div>
 
@@ -1234,18 +1372,18 @@ export default function SystemContractDetailPage() {
                         id="status"
                         value={formData.status}
                         onChange={(event) =>
-                          updateField("status", event.target.value as ContractStatus)
+                          updateField(
+                            "status",
+                            event.target.value as EditableContractStatus
+                          )
                         }
                         className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
                       >
                         <option value="ACTIVE">{t.active}</option>
                         <option value="DRAFT">{t.draft}</option>
-                        <option value="PENDING">{t.pending}</option>
-                        <option value="INACTIVE">{t.inactive}</option>
                         <option value="SUSPENDED">{t.suspended}</option>
                         <option value="EXPIRED">{t.expired}</option>
                         <option value="TERMINATED">{t.terminated}</option>
-                        <option value="CANCELLED">{t.cancelled}</option>
                       </select>
                     </div>
                   </div>
@@ -1254,8 +1392,8 @@ export default function SystemContractDetailPage() {
                     <InfoRow label={t.contractNumber} value={contract.contractNumber} />
                     <InfoRow label={t.contractTitle} value={contract.title} />
                     <InfoRow
-                      label={t.contractType}
-                      value={typeLabel(contract.contractType, locale)}
+                      label={t.pricingModel}
+                      value={pricingModelLabel(contract.pricingModel, locale)}
                     />
                     <InfoRow
                       label={t.status}
@@ -1273,148 +1411,239 @@ export default function SystemContractDetailPage() {
               </CardContent>
             </Card>
 
-            {/* Duration + Financial */}
-            <div className="grid gap-6 lg:grid-cols-2">
-              <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <CalendarRange className="h-5 w-5 text-primary" />
-                    {t.durationInfo}
-                  </CardTitle>
-                </CardHeader>
+            {/* Duration */}
+            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CalendarRange className="h-5 w-5 text-primary" />
+                  {t.durationInfo}
+                </CardTitle>
+                <CardDescription>{t.durationDesc}</CardDescription>
+              </CardHeader>
 
-                <CardContent>
-                  {isEditing ? (
-                    <div className="grid gap-5">
-                      <div className="space-y-2">
-                        <Label htmlFor="startDate">{t.startDate}</Label>
+              <CardContent>
+                {isEditing ? (
+                  <div className="grid gap-5 md:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="startDate">{t.startDate}</Label>
+                      <Input
+                        id="startDate"
+                        type="date"
+                        value={formData.startDate}
+                        onChange={(event) =>
+                          updateField("startDate", event.target.value)
+                        }
+                        className="rounded-2xl bg-white/80 dark:bg-white/5"
+                      />
+                      <FieldError message={errors.startDate} />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="endDate">{t.endDate}</Label>
+                      <Input
+                        id="endDate"
+                        type="date"
+                        value={formData.endDate}
+                        onChange={(event) => updateField("endDate", event.target.value)}
+                        className="rounded-2xl bg-white/80 dark:bg-white/5"
+                      />
+                      <FieldError message={errors.endDate} />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="signedAt">{t.signedAt}</Label>
+                      <Input
+                        id="signedAt"
+                        type="date"
+                        value={formData.signedAt}
+                        onChange={(event) => updateField("signedAt", event.target.value)}
+                        className="rounded-2xl bg-white/80 dark:bg-white/5"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <InfoRow label={t.startDate} value={formatDate(contract.startDate, locale)} />
+                    <InfoRow label={t.endDate} value={formatDate(contract.endDate, locale)} />
+                    <InfoRow label={t.signedAt} value={formatDate(contract.signedAt, locale)} />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Financial */}
+            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Wallet className="h-5 w-5 text-primary" />
+                  {t.financialInfo}
+                </CardTitle>
+                <CardDescription>{t.financialDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent>
+                {isEditing ? (
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="discountPercentage">
+                        {t.discountPercentage}
+                      </Label>
+                      <div className="relative">
+                        <Percent className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
-                          id="startDate"
-                          type="date"
-                          value={formData.startDate}
+                          id="discountPercentage"
+                          inputMode="decimal"
+                          value={formData.discountPercentage}
                           onChange={(event) =>
-                            updateField("startDate", event.target.value)
+                            updateField(
+                              "discountPercentage",
+                              normalizePercentInput(event.target.value)
+                            )
                           }
-                          className="rounded-2xl bg-white/80 dark:bg-white/5"
+                          className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
                         />
-                        <FieldError message={errors.startDate} />
+                        <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                          %
+                        </span>
                       </div>
+                      <FieldError message={errors.discountPercentage} />
+                    </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="endDate">{t.endDate}</Label>
+                    <div className="space-y-2">
+                      <Label htmlFor="systemCommissionPercentage">
+                        {t.systemCommissionPercentage}
+                      </Label>
+                      <div className="relative">
+                        <Image
+                          src={SAR_ICON}
+                          alt="SAR"
+                          width={16}
+                          height={16}
+                          className="absolute start-3 top-1/2 -translate-y-1/2 opacity-70"
+                        />
                         <Input
-                          id="endDate"
-                          type="date"
-                          value={formData.endDate}
+                          id="systemCommissionPercentage"
+                          inputMode="decimal"
+                          value={formData.systemCommissionPercentage}
                           onChange={(event) =>
-                            updateField("endDate", event.target.value)
+                            updateField(
+                              "systemCommissionPercentage",
+                              normalizePercentInput(event.target.value)
+                            )
                           }
-                          className="rounded-2xl bg-white/80 dark:bg-white/5"
+                          className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
                         />
-                        <FieldError message={errors.endDate} />
+                        <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                          %
+                        </span>
+                      </div>
+                      <FieldError message={errors.systemCommissionPercentage} />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <InfoRow
+                      label={t.discountPercentage}
+                      value={<PercentValue value={contract.discountPercentage} />}
+                    />
+                    <InfoRow
+                      label={t.systemCommissionPercentage}
+                      value={<PercentValue value={contract.systemCommissionPercentage} />}
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Contact */}
+            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <UserRound className="h-5 w-5 text-primary" />
+                  {t.contactInfo}
+                </CardTitle>
+                <CardDescription>{t.contactDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent>
+                {isEditing ? (
+                  <div className="grid gap-5 md:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="providerContactName">
+                        {t.providerContactName}
+                      </Label>
+                      <div className="relative">
+                        <UserRound className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          id="providerContactName"
+                          value={formData.providerContactName}
+                          onChange={(event) =>
+                            updateField("providerContactName", event.target.value)
+                          }
+                          className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
+                        />
                       </div>
                     </div>
-                  ) : (
-                    <div className="grid gap-4">
-                      <InfoRow label={t.startDate} value={formatDate(contract.startDate, locale)} />
-                      <InfoRow label={t.endDate} value={formatDate(contract.endDate, locale)} />
-                      <InfoRow label={t.remainingDays} value={remainingLabel} />
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
 
-              <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Wallet className="h-5 w-5 text-primary" />
-                    {t.financialInfo}
-                  </CardTitle>
-                </CardHeader>
-
-                <CardContent>
-                  {isEditing ? (
-                    <div className="grid gap-5">
-                      <div className="space-y-2">
-                        <Label htmlFor="contractValue">{t.contractValue}</Label>
-                        <div className="relative">
-                          <Image
-                            src={SAR_ICON}
-                            alt="SAR"
-                            width={16}
-                            height={16}
-                            className="absolute start-3 top-1/2 -translate-y-1/2 opacity-70"
-                          />
-                          <Input
-                            id="contractValue"
-                            inputMode="decimal"
-                            value={formData.contractValue}
-                            onChange={(event) =>
-                              updateField(
-                                "contractValue",
-                                normalizeNumberInput(event.target.value)
-                              )
-                            }
-                            className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
-                          />
-                        </div>
-                        <FieldError message={errors.contractValue} />
+                    <div className="space-y-2">
+                      <Label htmlFor="providerContactPhone">
+                        {t.providerContactPhone}
+                      </Label>
+                      <div className="relative">
+                        <Phone className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          id="providerContactPhone"
+                          value={formData.providerContactPhone}
+                          onChange={(event) =>
+                            updateField("providerContactPhone", event.target.value)
+                          }
+                          className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
+                        />
                       </div>
+                    </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="commissionRate">{t.commissionRate}</Label>
-                        <div className="relative">
-                          <HandCoins className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          <Input
-                            id="commissionRate"
-                            inputMode="decimal"
-                            value={formData.commissionRate}
-                            onChange={(event) =>
-                              updateField(
-                                "commissionRate",
-                                normalizePercentInput(event.target.value)
-                              )
-                            }
-                            className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
-                          />
-                          <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                            %
-                          </span>
-                        </div>
-                        <FieldError message={errors.commissionRate} />
+                    <div className="space-y-2">
+                      <Label htmlFor="providerContactEmail">
+                        {t.providerContactEmail}
+                      </Label>
+                      <div className="relative">
+                        <Mail className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          id="providerContactEmail"
+                          type="email"
+                          value={formData.providerContactEmail}
+                          onChange={(event) =>
+                            updateField("providerContactEmail", event.target.value)
+                          }
+                          className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
+                        />
                       </div>
-
-                      <InfoRow
-                        label={t.commissionPreview}
-                        value={<SarAmount amount={editCommissionPreview} />}
-                      />
                     </div>
-                  ) : (
-                    <div className="grid gap-4">
-                      <InfoRow
-                        label={t.contractValue}
-                        value={<SarAmount amount={contract.contractValue} />}
-                      />
-                      <InfoRow
-                        label={t.commissionRate}
-                        value={formatPercent(contract.commissionRate)}
-                      />
-                      <InfoRow
-                        label={t.commissionPreview}
-                        value={<SarAmount amount={commissionPreview} />}
-                      />
-                      <InfoRow label={t.currency} value={contract.currency || "SAR"} />
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <InfoRow
+                      label={t.providerContactName}
+                      value={contract.providerContactName || t.notSet}
+                    />
+                    <InfoRow
+                      label={t.providerContactPhone}
+                      value={contract.providerContactPhone || t.notSet}
+                    />
+                    <InfoRow
+                      label={t.providerContactEmail}
+                      value={contract.providerContactEmail || t.notSet}
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Terms */}
             <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Landmark className="h-5 w-5 text-primary" />
+                  <ShieldCheck className="h-5 w-5 text-primary" />
                   {t.termsInfo}
                 </CardTitle>
               </CardHeader>
@@ -1422,42 +1651,18 @@ export default function SystemContractDetailPage() {
               <CardContent>
                 {isEditing ? (
                   <div className="grid gap-5">
-                    <div className="grid gap-5 lg:grid-cols-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="paymentTerms">{t.paymentTerms}</Label>
-                        <Textarea
-                          id="paymentTerms"
-                          value={formData.paymentTerms}
-                          onChange={(event) =>
-                            updateField("paymentTerms", event.target.value)
-                          }
-                          className="min-h-28 rounded-2xl bg-white/80 dark:bg-white/5"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="renewalTerms">{t.renewalTerms}</Label>
-                        <Textarea
-                          id="renewalTerms"
-                          value={formData.renewalTerms}
-                          onChange={(event) =>
-                            updateField("renewalTerms", event.target.value)
-                          }
-                          className="min-h-28 rounded-2xl bg-white/80 dark:bg-white/5"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="terminationTerms">{t.terminationTerms}</Label>
-                        <Textarea
-                          id="terminationTerms"
-                          value={formData.terminationTerms}
-                          onChange={(event) =>
-                            updateField("terminationTerms", event.target.value)
-                          }
-                          className="min-h-28 rounded-2xl bg-white/80 dark:bg-white/5"
-                        />
-                      </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="termsAndConditions">
+                        {t.termsAndConditions}
+                      </Label>
+                      <Textarea
+                        id="termsAndConditions"
+                        value={formData.termsAndConditions}
+                        onChange={(event) =>
+                          updateField("termsAndConditions", event.target.value)
+                        }
+                        className="min-h-32 rounded-2xl bg-white/80 dark:bg-white/5"
+                      />
                     </div>
 
                     <div className="space-y-2">
@@ -1472,11 +1677,9 @@ export default function SystemContractDetailPage() {
                   </div>
                 ) : (
                   <div className="grid gap-4">
-                    <InfoRow label={t.paymentTerms} value={contract.paymentTerms || t.notSet} />
-                    <InfoRow label={t.renewalTerms} value={contract.renewalTerms || t.notSet} />
                     <InfoRow
-                      label={t.terminationTerms}
-                      value={contract.terminationTerms || t.notSet}
+                      label={t.termsAndConditions}
+                      value={contract.termsAndConditions || t.notSet}
                     />
                     <InfoRow label={t.notes} value={contract.notes || t.notSet} />
                   </div>
@@ -1508,25 +1711,47 @@ export default function SystemContractDetailPage() {
                           <TableRow key={item.id}>
                             <TableCell>
                               <div>
-                                <p className="font-semibold">
-                                  {item.productName || item.serviceName}
-                                </p>
+                                <p className="font-semibold">{item.productName}</p>
                                 <p className="mt-1 text-xs text-muted-foreground">
-                                  {item.serviceName}
+                                  {item.productCode || item.productType || "-"}
                                 </p>
                               </div>
                             </TableCell>
+
                             <TableCell>
-                              <p className="text-xs text-muted-foreground">{t.discount}</p>
-                              <p className="font-semibold">{formatPercent(item.discountRate)}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {t.discount}
+                              </p>
+                              <p className="font-semibold">
+                                {formatPercent(item.discountPercentage)}
+                              </p>
                             </TableCell>
+
                             <TableCell>
-                              <p className="text-xs text-muted-foreground">{t.commission}</p>
-                              <p className="font-semibold">{formatPercent(item.commissionRate)}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {t.specialPrice}
+                              </p>
+                              <SarAmount amount={item.specialPrice} />
                             </TableCell>
+
                             <TableCell>
-                              <p className="text-xs text-muted-foreground">{t.price}</p>
-                              <SarAmount amount={item.price} />
+                              <p className="text-xs text-muted-foreground">
+                                {t.effectivePrice}
+                              </p>
+                              <SarAmount amount={item.productEffectivePrice} />
+                            </TableCell>
+
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`rounded-full ${
+                                  item.isActive
+                                    ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                                    : "border-slate-500/25 bg-slate-500/10 text-slate-700 dark:text-slate-300"
+                                }`}
+                              >
+                                {item.isActive ? t.active : t.suspended}
+                              </Badge>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1551,32 +1776,42 @@ export default function SystemContractDetailPage() {
 
               <CardContent className="space-y-4">
                 <InfoRow label={t.provider} value={contract.providerName || t.notSet} />
-                <InfoRow label={t.contractNumber} value={contract.contractNumber} />
                 <InfoRow
-                  label={t.status}
-                  value={
-                    <Badge
-                      variant="outline"
-                      className={`rounded-full ${statusBadgeClass(contract.status)}`}
-                    >
-                      {statusLabel(contract.status, locale)}
-                    </Badge>
-                  }
+                  label={t.providerCode}
+                  value={contract.providerCode || t.notSet}
                 />
+                <InfoRow
+                  label={t.providerType}
+                  value={contract.providerType || t.notSet}
+                />
+                <InfoRow
+                  label={t.providerStatus}
+                  value={contract.providerStatus || t.notSet}
+                />
+
+                {contract.providerId ? (
+                  <Link href={`/system/providers/${contract.providerId}`}>
+                    <Button variant="outline" className="w-full rounded-2xl">
+                      <Building2 className="me-2 h-4 w-4" />
+                      {isArabic ? "عرض مقدم الخدمة" : "View Provider"}
+                    </Button>
+                  </Link>
+                ) : null}
               </CardContent>
             </Card>
 
             <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
-                  {isArabic ? "سجل النظام" : "System Record"}
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  {isArabic ? "تتبع السجل" : "Record Tracking"}
                 </CardTitle>
               </CardHeader>
 
               <CardContent className="space-y-4">
                 <InfoRow label={t.createdAt} value={formatDateTime(contract.createdAt, locale)} />
                 <InfoRow label={t.updatedAt} value={formatDateTime(contract.updatedAt, locale)} />
+                <InfoRow label={t.remainingDays} value={remainingLabel} />
               </CardContent>
             </Card>
 
@@ -1584,38 +1819,22 @@ export default function SystemContractDetailPage() {
               <CardContent className="p-6">
                 <div className="flex items-start gap-4">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/15">
-                    <CheckCircle2 className="h-6 w-6" />
+                    <BadgeCheck className="h-6 w-6" />
                   </div>
 
                   <div>
                     <h3 className="font-bold">
-                      {isArabic ? "تفاصيل عقد مرتبطة" : "Connected Contract Details"}
+                      {isArabic ? "عقد مربوط بالنظام" : "System-linked Contract"}
                     </h3>
                     <p className="mt-2 text-sm leading-7 text-primary-foreground/80">
                       {isArabic
-                        ? "هذه الصفحة مرتبطة مباشرة بواجهة العقود الرسمية وتدعم العرض والتعديل والحذف."
-                        : "This page is directly connected to the official contracts API and supports view, edit, and delete."}
+                        ? "هذه الصفحة تعرض العقد حسب Backend الجديد مع دعم نسبة الخصم، نسبة النظام، والمنتجات المشمولة."
+                        : "This page displays the contract using the new backend fields with discount, system commission, and covered products."}
                     </p>
                   </div>
                 </div>
               </CardContent>
             </Card>
-
-            <div className="flex flex-col gap-2">
-              <Link href="/system/contracts/list">
-                <Button variant="outline" className="w-full justify-start rounded-2xl">
-                  <ArrowLeft className="me-2 h-4 w-4" />
-                  {t.list}
-                </Button>
-              </Link>
-
-              <Link href="/system/contracts/reports">
-                <Button variant="outline" className="w-full justify-start rounded-2xl">
-                  <BadgeCheck className="me-2 h-4 w-4" />
-                  {isArabic ? "تقارير العقود" : "Contracts Reports"}
-                </Button>
-              </Link>
-            </div>
           </div>
         </div>
       </div>
