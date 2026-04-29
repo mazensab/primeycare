@@ -2,15 +2,12 @@
 # 📂 invoices/models.py
 # 🧠 Primey Care | Invoices Module
 # ------------------------------------------------------------
-# ✅ هذا الموديول يمثل طبقة الفواتير
-# ✅ يربط الفاتورة مع:
-#    - الطلب
-#    - العميل
-#    - عناصر الطلب
-#    - المدفوعات
-# ✅ يحتفظ بلقطة مالية رسمية قابلة للتوسع
-# ✅ جاهز لاحقًا للربط مع:
-#    - PDF invoices
+# ✅ طبقة الفواتير الرسمية
+# ✅ ربط الفاتورة مع الطلب والعميل وعناصر الطلب والمدفوعات
+# ✅ احتساب الإجماليات والضريبة والمتبقي
+# ✅ دعم دورة الحالات: DRAFT / ISSUED / PARTIALLY_PAID / PAID
+# ✅ جاهز للربط مع:
+#    - Web PDF
 #    - الإشعارات
 #    - القيود المحاسبية
 #    - التسويات
@@ -20,11 +17,26 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 from customers.models import Customer
 from order_items.models import OrderItem
 from orders.models import Order
 from payments.models import Payment
+
+
+MONEY_ZERO = Decimal("0.00")
+MONEY_QUANT = Decimal("0.01")
+
+
+def money(value) -> Decimal:
+    try:
+        return Decimal(str(value or MONEY_ZERO)).quantize(
+            MONEY_QUANT,
+            rounding=ROUND_HALF_UP,
+        )
+    except Exception:
+        return MONEY_ZERO
 
 
 class InvoiceStatus(models.TextChoices):
@@ -104,19 +116,19 @@ class Invoice(models.Model):
     subtotal = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="الإجمالي قبل الخصم والضريبة",
     )
     discount_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="إجمالي الخصم",
     )
     taxable_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="المبلغ الخاضع للضريبة",
     )
     tax_rate = models.DecimalField(
@@ -128,25 +140,25 @@ class Invoice(models.Model):
     tax_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="قيمة الضريبة",
     )
     total_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="الإجمالي النهائي",
     )
     paid_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="المبلغ المدفوع",
     )
     due_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="المبلغ المتبقي",
     )
     currency = models.CharField(
@@ -197,6 +209,26 @@ class Invoice(models.Model):
     def __str__(self):
         return f"{self.invoice_number} - {self.customer}"
 
+    @property
+    def is_editable(self) -> bool:
+        return self.status == InvoiceStatus.DRAFT
+
+    @property
+    def is_issued(self) -> bool:
+        return self.status in {
+            InvoiceStatus.ISSUED,
+            InvoiceStatus.PARTIALLY_PAID,
+            InvoiceStatus.PAID,
+        }
+
+    @property
+    def is_paid(self) -> bool:
+        return self.status == InvoiceStatus.PAID
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self.status == InvoiceStatus.CANCELLED
+
     def clean(self):
         super().clean()
 
@@ -216,6 +248,7 @@ class Invoice(models.Model):
             "paid_amount",
             "due_amount",
         ]
+
         for field_name in money_fields:
             value = getattr(self, field_name)
             if value is not None and value < 0:
@@ -234,91 +267,137 @@ class Invoice(models.Model):
                 {"paid_amount": "المبلغ المدفوع لا يمكن أن يكون أكبر من إجمالي الفاتورة."}
             )
 
+        if self.status == InvoiceStatus.CANCELLED and self.paid_amount > MONEY_ZERO:
+            raise ValidationError(
+                {"status": "لا يمكن إلغاء فاتورة عليها مبالغ مدفوعة. استخدم آلية الاسترداد أو التسوية."}
+            )
+
     def save(self, *args, **kwargs):
+        self.recalculate_totals()
+        self.refresh_payment_snapshot()
+        self.sync_status()
         self.full_clean()
-        self._recalculate_from_order()
-        self._sync_payment_snapshot()
-        self._sync_status()
         super().save(*args, **kwargs)
 
-    def _recalculate_from_order(self):
-        items = self.order.items.all()
+    def recalculate_totals(self):
+        """
+        احتساب إجماليات الفاتورة من عناصر الطلب.
+        ملاحظة:
+        - عناصر الفاتورة للاحتفاظ بلقطة العرض.
+        - المصدر المالي الأساسي هنا هو عناصر الطلب حتى لا يحدث اختلاف بين الطلب والفاتورة.
+        """
+        if not self.order_id:
+            return
 
-        subtotal = Decimal("0.00")
-        discount_total = Decimal("0.00")
+        subtotal = MONEY_ZERO
+        discount_total = MONEY_ZERO
 
-        for item in items:
-            line_subtotal = Decimal(item.unit_price or Decimal("0.00")) * Decimal(item.quantity or 1)
-            line_net_total = Decimal(item.total_amount or Decimal("0.00"))
-            line_discount = line_subtotal - line_net_total
+        items_qs = self.order.items.all()
 
-            if line_discount < 0:
-                line_discount = Decimal("0.00")
+        for item in items_qs:
+            quantity = Decimal(str(getattr(item, "quantity", 1) or 1))
+            unit_price = money(getattr(item, "unit_price", MONEY_ZERO))
+            total_amount = money(getattr(item, "total_amount", MONEY_ZERO))
+
+            line_subtotal = money(unit_price * quantity)
+            line_discount = money(line_subtotal - total_amount)
+
+            if line_discount < MONEY_ZERO:
+                line_discount = MONEY_ZERO
 
             subtotal += line_subtotal
             discount_total += line_discount
 
-        taxable_amount = subtotal - discount_total
-        if taxable_amount < 0:
-            taxable_amount = Decimal("0.00")
+        taxable_amount = money(subtotal - discount_total)
+        if taxable_amount < MONEY_ZERO:
+            taxable_amount = MONEY_ZERO
 
-        tax_rate = Decimal(self.tax_rate or Decimal("0.00"))
-        tax_amount = (taxable_amount * tax_rate / Decimal("100")).quantize(
-            Decimal("0.01"),
-            rounding=ROUND_HALF_UP,
-        )
-        total_amount = (taxable_amount + tax_amount).quantize(
-            Decimal("0.01"),
-            rounding=ROUND_HALF_UP,
-        )
+        tax_rate = Decimal(str(self.tax_rate or MONEY_ZERO))
+        tax_amount = money(taxable_amount * tax_rate / Decimal("100"))
+        total_amount = money(taxable_amount + tax_amount)
 
-        self.subtotal = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        self.discount_amount = discount_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        self.taxable_amount = taxable_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        self.tax_amount = tax_amount
-        self.total_amount = total_amount
+        self.subtotal = money(subtotal)
+        self.discount_amount = money(discount_total)
+        self.taxable_amount = money(taxable_amount)
+        self.tax_amount = money(tax_amount)
+        self.total_amount = money(total_amount)
 
-    def _sync_payment_snapshot(self):
-        payments_total = (
-            self.order.payments.aggregate(total=models.Sum("paid_amount")).get("total")
-            or Decimal("0.00")
-        )
-        self.paid_amount = Decimal(payments_total).quantize(
-            Decimal("0.01"),
-            rounding=ROUND_HALF_UP,
-        )
-
-        due_amount = Decimal(self.total_amount or Decimal("0.00")) - Decimal(self.paid_amount or Decimal("0.00"))
-        if due_amount < 0:
-            due_amount = Decimal("0.00")
-
-        self.due_amount = due_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    def _sync_status(self):
-        if self.status == InvoiceStatus.CANCELLED:
+    def refresh_payment_snapshot(self):
+        if not self.order_id:
+            self.paid_amount = MONEY_ZERO
+            self.due_amount = money(self.total_amount)
             return
 
-        total = Decimal(self.total_amount or Decimal("0.00"))
-        paid = Decimal(self.paid_amount or Decimal("0.00"))
+        payments_total = (
+            self.order.payments.aggregate(total=models.Sum("paid_amount")).get("total")
+            or MONEY_ZERO
+        )
 
-        if paid <= Decimal("0.00"):
-            if self.status != InvoiceStatus.DRAFT:
-                self.status = InvoiceStatus.ISSUED
+        self.paid_amount = money(payments_total)
+
+        due_amount = money(self.total_amount - self.paid_amount)
+        if due_amount < MONEY_ZERO:
+            due_amount = MONEY_ZERO
+
+        self.due_amount = money(due_amount)
+
+    def sync_status(self):
+        """
+        مزامنة الحالة المالية بدون تحويل المسودة إلى مصدرة تلقائيًا.
+        الإصدار الرسمي يتم من services.issue_invoice.
+        """
+        if self.status in {
+            InvoiceStatus.CANCELLED,
+            InvoiceStatus.REFUNDED,
+        }:
+            return
+
+        total = money(self.total_amount)
+        paid = money(self.paid_amount)
+
+        if self.status == InvoiceStatus.DRAFT:
+            return
+
+        if total <= MONEY_ZERO:
+            return
+
+        if paid <= MONEY_ZERO:
+            self.status = InvoiceStatus.ISSUED
             return
 
         if paid < total:
             self.status = InvoiceStatus.PARTIALLY_PAID
             return
 
-        if paid >= total and total > Decimal("0.00"):
+        if paid >= total:
             self.status = InvoiceStatus.PAID
             return
 
+    def mark_issued(self):
+        if self.status == InvoiceStatus.CANCELLED:
+            raise ValidationError("لا يمكن إصدار فاتورة ملغاة.")
+
+        if self.total_amount <= MONEY_ZERO:
+            self.recalculate_totals()
+
+        if self.total_amount <= MONEY_ZERO:
+            raise ValidationError("لا يمكن إصدار فاتورة بإجمالي صفر أو أقل.")
+
+        self.status = InvoiceStatus.ISSUED
+        if not self.issue_date:
+            self.issue_date = timezone.localdate()
+
+    def cancel(self):
+        if self.paid_amount > MONEY_ZERO:
+            raise ValidationError("لا يمكن إلغاء فاتورة عليها مبلغ مدفوع.")
+
+        if self.status == InvoiceStatus.PAID:
+            raise ValidationError("لا يمكن إلغاء فاتورة مدفوعة.")
+
+        self.status = InvoiceStatus.CANCELLED
+
 
 class InvoiceItem(models.Model):
-    # ========================================================
-    # 📦 عناصر الفاتورة
-    # ========================================================
     invoice = models.ForeignKey(
         Invoice,
         on_delete=models.CASCADE,
@@ -345,19 +424,19 @@ class InvoiceItem(models.Model):
     unit_price = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="سعر الوحدة",
     )
     discount_amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="الخصم",
     )
     line_total = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="الإجمالي",
     )
     sort_order = models.PositiveIntegerField(
@@ -399,32 +478,30 @@ class InvoiceItem(models.Model):
             if value is not None and value < 0:
                 raise ValidationError({field_name: "القيمة لا يمكن أن تكون سالبة."})
 
-        if self.order_item_id and self.order_item.order_id != self.invoice.order_id:
-            raise ValidationError(
-                {"order_item": "عنصر الطلب المحدد لا ينتمي إلى نفس الطلب المرتبط بالفاتورة."}
-            )
+        if self.order_item_id and self.invoice_id:
+            if self.order_item.order_id != self.invoice.order_id:
+                raise ValidationError(
+                    {"order_item": "عنصر الطلب المحدد لا ينتمي إلى نفس الطلب المرتبط بالفاتورة."}
+                )
 
     def save(self, *args, **kwargs):
+        self.recalculate_line_total()
         self.full_clean()
-        self._recalculate_line_total()
         super().save(*args, **kwargs)
 
-    def _recalculate_line_total(self):
-        quantity = Decimal(self.quantity or 1)
-        unit_price = Decimal(self.unit_price or Decimal("0.00"))
-        discount_amount = Decimal(self.discount_amount or Decimal("0.00"))
+    def recalculate_line_total(self):
+        quantity = Decimal(str(self.quantity or 1))
+        unit_price = money(self.unit_price)
+        discount_amount = money(self.discount_amount)
 
-        total = (unit_price * quantity) - discount_amount
-        if total < 0:
-            total = Decimal("0.00")
+        total = money((unit_price * quantity) - discount_amount)
+        if total < MONEY_ZERO:
+            total = MONEY_ZERO
 
-        self.line_total = total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        self.line_total = money(total)
 
 
 class InvoicePayment(models.Model):
-    # ========================================================
-    # 💳 ربط المدفوعات بالفاتورة
-    # ========================================================
     invoice = models.ForeignKey(
         Invoice,
         on_delete=models.CASCADE,
@@ -440,7 +517,7 @@ class InvoicePayment(models.Model):
     amount_applied = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=Decimal("0.00"),
+        default=MONEY_ZERO,
         verbose_name="المبلغ المربوط",
     )
     applied_at = models.DateTimeField(
@@ -474,12 +551,30 @@ class InvoicePayment(models.Model):
                 {"amount_applied": "المبلغ المربوط لا يمكن أن يكون سالبًا."}
             )
 
-        if self.payment.order_id != self.invoice.order_id:
-            raise ValidationError(
-                {"payment": "الدفعة المحددة لا تنتمي إلى نفس الطلب المرتبط بالفاتورة."}
-            )
+        if self.invoice_id and self.payment_id:
+            if self.payment.order_id != self.invoice.order_id:
+                raise ValidationError(
+                    {"payment": "الدفعة المحددة لا تنتمي إلى نفس الطلب المرتبط بالفاتورة."}
+                )
 
-        if self.amount_applied > self.payment.paid_amount:
+        if self.payment_id and self.amount_applied > self.payment.paid_amount:
             raise ValidationError(
                 {"amount_applied": "المبلغ المربوط لا يمكن أن يكون أكبر من المبلغ المدفوع."}
             )
+
+    def save(self, *args, **kwargs):
+        self.amount_applied = money(self.amount_applied)
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+        invoice = self.invoice
+        invoice.refresh_payment_snapshot()
+        invoice.sync_status()
+        invoice.save(
+            update_fields=[
+                "paid_amount",
+                "due_amount",
+                "status",
+                "updated_at",
+            ]
+        )

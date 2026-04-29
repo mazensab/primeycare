@@ -5,6 +5,7 @@
 # ✅ إدارة الفواتير
 # ✅ عناصر الفاتورة
 # ✅ ربط الدفعات بالفواتير
+# ✅ عرض مالي واضح داخل لوحة Django Admin
 # ============================================================
 
 from django.contrib import admin
@@ -25,6 +26,7 @@ class InvoiceItemInline(admin.TabularInline):
         "sort_order",
     )
     readonly_fields = ("line_total",)
+    autocomplete_fields = ("order_item",)
 
 
 class InvoicePaymentInline(admin.TabularInline):
@@ -37,6 +39,7 @@ class InvoicePaymentInline(admin.TabularInline):
         "notes",
     )
     readonly_fields = ("applied_at",)
+    autocomplete_fields = ("payment",)
 
 
 @admin.register(Invoice)
@@ -85,7 +88,12 @@ class InvoiceAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+    autocomplete_fields = (
+        "order",
+        "customer",
+    )
     ordering = ("-created_at",)
+    date_hierarchy = "created_at"
     inlines = [InvoiceItemInline, InvoicePaymentInline]
 
 
@@ -104,7 +112,6 @@ class InvoiceItemAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = (
-        "invoice",
         "created_at",
     )
     search_fields = (
@@ -116,6 +123,10 @@ class InvoiceItemAdmin(admin.ModelAdmin):
         "line_total",
         "created_at",
         "updated_at",
+    )
+    autocomplete_fields = (
+        "invoice",
+        "order_item",
     )
     ordering = ("invoice", "sort_order", "id")
 
@@ -139,5 +150,9 @@ class InvoicePaymentAdmin(admin.ModelAdmin):
     )
     readonly_fields = (
         "applied_at",
+    )
+    autocomplete_fields = (
+        "invoice",
+        "payment",
     )
     ordering = ("-applied_at",)

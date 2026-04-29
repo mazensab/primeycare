@@ -26,7 +26,6 @@ import {
   ShieldCheck,
   Wallet,
   XCircle,
-  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -57,14 +56,16 @@ type AppLocale = "ar" | "en";
 type SortDirection = "asc" | "desc";
 
 type SortKey =
-  | "number"
+  | "invoice_number"
   | "status"
-  | "invoice_date"
-  | "customer_id"
-  | "order_id"
+  | "issue_date"
+  | "customer"
+  | "order"
   | "subtotal"
   | "tax_amount"
-  | "total_amount";
+  | "total_amount"
+  | "paid_amount"
+  | "due_amount";
 
 type InvoiceStatus =
   | "ALL"
@@ -76,23 +77,77 @@ type InvoiceStatus =
   | "CANCELLED"
   | "REFUNDED";
 
+type ApiCustomer = {
+  id?: number | null;
+  name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+
+type ApiOrder = {
+  id?: number | null;
+  order_number?: string | null;
+  status?: string | null;
+  payment_status?: string | null;
+  fulfillment_status?: string | null;
+  total_amount?: string | number | null;
+};
+
 type ApiInvoice = {
   id: number;
+  invoice_number?: string | null;
   number?: string | null;
+  invoice_type?: string | null;
   status?: string | null;
+  issue_date?: string | null;
+  due_date?: string | null;
   invoice_date?: string | null;
   customer_id?: number | null;
   order_id?: number | null;
+  customer?: ApiCustomer | null;
+  order?: ApiOrder | null;
   subtotal?: string | number | null;
+  discount_amount?: string | number | null;
+  taxable_amount?: string | number | null;
+  tax_rate?: string | number | null;
   tax_amount?: string | number | null;
   total_amount?: string | number | null;
+  paid_amount?: string | number | null;
+  due_amount?: string | number | null;
+  currency?: string | null;
+  notes?: string | null;
+  internal_notes?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type ApiSummary = {
+  subtotal?: string | number | null;
+  discount_amount?: string | number | null;
+  tax_amount?: string | number | null;
+  total_amount?: string | number | null;
+  paid_amount?: string | number | null;
+  due_amount?: string | number | null;
+  currency?: string | null;
 };
 
 type InvoicesApiResponse = {
   ok?: boolean;
   count?: number;
+  total_count?: number;
+  page?: number;
+  page_size?: number;
+  has_next?: boolean;
+  has_previous?: boolean;
+  summary?: ApiSummary;
   results?: ApiInvoice[];
   message?: string;
+};
+
+type IssueInvoiceApiResponse = {
+  ok?: boolean;
+  message?: string;
+  invoice?: ApiInvoice;
 };
 
 type ColumnKey =
@@ -101,10 +156,12 @@ type ColumnKey =
   | "customer"
   | "order"
   | "status"
-  | "invoiceDate"
+  | "issueDate"
   | "subtotal"
   | "tax"
   | "total"
+  | "paid"
+  | "due"
   | "actions";
 
 type ColumnConfig = {
@@ -179,10 +236,12 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { key: "customer", labelAr: "العميل", labelEn: "Customer", visible: true },
   { key: "order", labelAr: "الطلب", labelEn: "Order", visible: true },
   { key: "status", labelAr: "الحالة", labelEn: "Status", visible: true },
-  { key: "invoiceDate", labelAr: "التاريخ", labelEn: "Date", visible: true },
+  { key: "issueDate", labelAr: "تاريخ الإصدار", labelEn: "Issue Date", visible: true },
   { key: "subtotal", labelAr: "قبل الضريبة", labelEn: "Subtotal", visible: true },
   { key: "tax", labelAr: "الضريبة", labelEn: "Tax", visible: true },
   { key: "total", labelAr: "الإجمالي", labelEn: "Total", visible: true },
+  { key: "paid", labelAr: "المدفوع", labelEn: "Paid", visible: true },
+  { key: "due", labelAr: "المتبقي", labelEn: "Due", visible: true },
   { key: "actions", labelAr: "الإجراءات", labelEn: "Actions", visible: true },
 ];
 
@@ -248,6 +307,22 @@ function formatDate(value: string | null | undefined, locale: AppLocale): string
   }).format(date);
 }
 
+function getInvoiceNumber(invoice: ApiInvoice): string {
+  return invoice.invoice_number || invoice.number || `INV-${invoice.id}`;
+}
+
+function getInvoiceDate(invoice: ApiInvoice): string | null | undefined {
+  return invoice.issue_date || invoice.invoice_date || invoice.created_at;
+}
+
+function getCustomerLabel(invoice: ApiInvoice, fallback: string): string {
+  return invoice.customer?.name || (invoice.customer_id ? `#${invoice.customer_id}` : fallback);
+}
+
+function getOrderLabel(invoice: ApiInvoice, fallback: string): string {
+  return invoice.order?.order_number || (invoice.order_id ? `#${invoice.order_id}` : fallback);
+}
+
 function getStatusLabel(status: string | null | undefined, locale: AppLocale): string {
   const key = String(status || "DRAFT").toUpperCase();
   const meta = STATUS_META[key];
@@ -271,12 +346,26 @@ function escapeHtml(value: unknown): string {
     .replaceAll("'", "&#039;");
 }
 
+function getCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length !== 2) return "";
+
+  return parts.pop()?.split(";").shift() || "";
+}
+
 /* =====================================================
-   API HELPER
+   API HELPERS
 ===================================================== */
 
-async function fetchInvoices(): Promise<ApiInvoice[]> {
-  const response = await fetch("/api/invoices/?limit=200", {
+async function fetchInvoices(): Promise<{
+  invoices: ApiInvoice[];
+  summary: ApiSummary | null;
+  totalCount: number;
+}> {
+  const response = await fetch("/api/invoices/?page_size=200", {
     method: "GET",
     credentials: "include",
     headers: {
@@ -291,7 +380,36 @@ async function fetchInvoices(): Promise<ApiInvoice[]> {
     throw new Error(data?.message || "Failed to load invoices.");
   }
 
-  return Array.isArray(data.results) ? data.results : [];
+  return {
+    invoices: Array.isArray(data.results) ? data.results : [],
+    summary: data.summary || null,
+    totalCount: Number(data.total_count || data.count || 0),
+  };
+}
+
+async function issueInvoiceRequest(invoiceId: number): Promise<IssueInvoiceApiResponse> {
+  const csrfToken = getCookie("csrftoken");
+
+  const response = await fetch(`/api/invoices/${invoiceId}/issue/`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body: JSON.stringify({
+      auto_post_accounting: true,
+    }),
+  });
+
+  const data = (await response.json().catch(() => null)) as IssueInvoiceApiResponse | null;
+
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.message || "Failed to issue invoice.");
+  }
+
+  return data;
 }
 
 /* =====================================================
@@ -301,8 +419,11 @@ async function fetchInvoices(): Promise<ApiInvoice[]> {
 export default function SystemInvoicesListPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [invoices, setInvoices] = useState<ApiInvoice[]>([]);
+  const [apiSummary, setApiSummary] = useState<ApiSummary | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [issuingId, setIssuingId] = useState<number | null>(null);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus>("ALL");
@@ -312,7 +433,7 @@ export default function SystemInvoicesListPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [columns, setColumns] = useState<ColumnConfig[]>(DEFAULT_COLUMNS);
 
-  const [sortKey, setSortKey] = useState<SortKey>("invoice_date");
+  const [sortKey, setSortKey] = useState<SortKey>("issue_date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
@@ -334,7 +455,6 @@ export default function SystemInvoicesListPage() {
         ? "ابحث برقم الفاتورة أو العميل أو الطلب أو الحالة..."
         : "Search by invoice number, customer, order, or status...",
       filters: isAr ? "الفلاتر" : "Filters",
-      status: isAr ? "الحالة" : "Status",
       allStatuses: isAr ? "كل الحالات" : "All Statuses",
       from: isAr ? "من تاريخ" : "From",
       to: isAr ? "إلى تاريخ" : "To",
@@ -347,13 +467,17 @@ export default function SystemInvoicesListPage() {
       invoice: isAr ? "الفاتورة" : "Invoice",
       customer: isAr ? "العميل" : "Customer",
       order: isAr ? "الطلب" : "Order",
-      invoiceDate: isAr ? "تاريخ الفاتورة" : "Invoice Date",
+      issueDate: isAr ? "تاريخ الإصدار" : "Issue Date",
+      status: isAr ? "الحالة" : "Status",
       subtotal: isAr ? "قبل الضريبة" : "Subtotal",
       tax: isAr ? "الضريبة" : "Tax",
       total: isAr ? "الإجمالي" : "Total",
+      paid: isAr ? "المدفوع" : "Paid",
+      due: isAr ? "المتبقي" : "Due",
       actions: isAr ? "الإجراءات" : "Actions",
       details: isAr ? "عرض" : "View",
       issue: isAr ? "إصدار" : "Issue",
+      issuing: isAr ? "جاري الإصدار" : "Issuing",
       empty: isAr ? "لا توجد فواتير مطابقة للفلاتر الحالية." : "No invoices match current filters.",
       loading: isAr ? "جاري تحميل الفواتير..." : "Loading invoices...",
       totalInvoices: isAr ? "إجمالي الفواتير" : "Total Invoices",
@@ -362,6 +486,7 @@ export default function SystemInvoicesListPage() {
       openInvoices: isAr ? "تحتاج متابعة" : "Need Follow-up",
       totalAmount: isAr ? "إجمالي المبالغ" : "Total Amount",
       taxAmount: isAr ? "إجمالي الضريبة" : "Tax Total",
+      dueAmount: isAr ? "إجمالي المتبقي" : "Due Total",
       page: isAr ? "صفحة" : "Page",
       of: isAr ? "من" : "of",
       rowsPerPage: isAr ? "عدد الصفوف" : "Rows",
@@ -371,7 +496,8 @@ export default function SystemInvoicesListPage() {
       printTitle: isAr ? "قائمة الفواتير" : "Invoices List",
       refreshSuccess: isAr ? "تم تحديث قائمة الفواتير بنجاح" : "Invoices list refreshed successfully",
       loadError: isAr ? "تعذر تحميل قائمة الفواتير" : "Failed to load invoices list",
-      all: isAr ? "الكل" : "All",
+      issueSuccess: isAr ? "تم إصدار الفاتورة بنجاح" : "Invoice issued successfully",
+      issueError: isAr ? "تعذر إصدار الفاتورة" : "Failed to issue invoice",
     }),
     [isAr]
   );
@@ -390,7 +516,10 @@ export default function SystemInvoicesListPage() {
       if (mode === "refresh") setRefreshing(true);
 
       const data = await fetchInvoices();
-      setInvoices(data);
+
+      setInvoices(data.invoices);
+      setApiSummary(data.summary);
+      setTotalCount(data.totalCount);
 
       if (mode === "refresh") {
         toast.success(t.refreshSuccess);
@@ -401,6 +530,20 @@ export default function SystemInvoicesListPage() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handleIssueInvoice = async (invoiceId: number) => {
+    try {
+      setIssuingId(invoiceId);
+      await issueInvoiceRequest(invoiceId);
+      toast.success(t.issueSuccess);
+      await loadInvoices("refresh");
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : t.issueError);
+    } finally {
+      setIssuingId(null);
     }
   };
 
@@ -433,7 +576,7 @@ export default function SystemInvoicesListPage() {
   }, []);
 
   const stats = useMemo(() => {
-    const totalInvoices = invoices.length;
+    const totalInvoices = totalCount || invoices.length;
 
     const paidInvoices = invoices.filter(
       (invoice) => String(invoice.status || "").toUpperCase() === "PAID"
@@ -448,15 +591,20 @@ export default function SystemInvoicesListPage() {
       return ["DRAFT", "ISSUED", "PARTIALLY_PAID", "OVERDUE"].includes(status);
     }).length;
 
-    const totalAmount = invoices.reduce(
-      (sum, invoice) => sum + toNumber(invoice.total_amount),
-      0
-    );
+    const totalAmount =
+      apiSummary?.total_amount !== undefined && apiSummary?.total_amount !== null
+        ? toNumber(apiSummary.total_amount)
+        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.total_amount), 0);
 
-    const taxAmount = invoices.reduce(
-      (sum, invoice) => sum + toNumber(invoice.tax_amount),
-      0
-    );
+    const taxAmount =
+      apiSummary?.tax_amount !== undefined && apiSummary?.tax_amount !== null
+        ? toNumber(apiSummary.tax_amount)
+        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.tax_amount), 0);
+
+    const dueAmount =
+      apiSummary?.due_amount !== undefined && apiSummary?.due_amount !== null
+        ? toNumber(apiSummary.due_amount)
+        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.due_amount), 0);
 
     return {
       totalInvoices,
@@ -465,8 +613,9 @@ export default function SystemInvoicesListPage() {
       openInvoices,
       totalAmount,
       taxAmount,
+      dueAmount,
     };
-  }, [invoices]);
+  }, [apiSummary, invoices, totalCount]);
 
   const filteredInvoices = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -477,7 +626,8 @@ export default function SystemInvoicesListPage() {
       if (statusFilter !== "ALL" && status !== statusFilter) return false;
 
       if (dateFrom || dateTo) {
-        const invoiceDate = invoice.invoice_date ? new Date(invoice.invoice_date) : null;
+        const rawDate = getInvoiceDate(invoice);
+        const invoiceDate = rawDate ? new Date(rawDate) : null;
 
         if (!invoiceDate || Number.isNaN(invoiceDate.getTime())) return false;
 
@@ -497,15 +647,22 @@ export default function SystemInvoicesListPage() {
 
       const haystack = [
         invoice.id,
-        invoice.number,
+        getInvoiceNumber(invoice),
         invoice.status,
         getStatusLabel(invoice.status, "ar"),
         getStatusLabel(invoice.status, "en"),
+        invoice.customer?.name,
+        invoice.customer?.phone,
+        invoice.customer?.email,
         invoice.customer_id,
+        invoice.order?.order_number,
+        invoice.order?.status,
         invoice.order_id,
         invoice.subtotal,
         invoice.tax_amount,
         invoice.total_amount,
+        invoice.paid_amount,
+        invoice.due_amount,
       ]
         .filter(Boolean)
         .join(" ")
@@ -522,9 +679,9 @@ export default function SystemInvoicesListPage() {
       let left: string | number = "";
       let right: string | number = "";
 
-      if (sortKey === "number") {
-        left = a.number || `INV-${a.id}`;
-        right = b.number || `INV-${b.id}`;
+      if (sortKey === "invoice_number") {
+        left = getInvoiceNumber(a);
+        right = getInvoiceNumber(b);
       }
 
       if (sortKey === "status") {
@@ -532,19 +689,19 @@ export default function SystemInvoicesListPage() {
         right = b.status || "";
       }
 
-      if (sortKey === "invoice_date") {
-        left = a.invoice_date ? new Date(a.invoice_date).getTime() : 0;
-        right = b.invoice_date ? new Date(b.invoice_date).getTime() : 0;
+      if (sortKey === "issue_date") {
+        left = getInvoiceDate(a) ? new Date(getInvoiceDate(a) as string).getTime() : 0;
+        right = getInvoiceDate(b) ? new Date(getInvoiceDate(b) as string).getTime() : 0;
       }
 
-      if (sortKey === "customer_id") {
-        left = a.customer_id || 0;
-        right = b.customer_id || 0;
+      if (sortKey === "customer") {
+        left = getCustomerLabel(a, "");
+        right = getCustomerLabel(b, "");
       }
 
-      if (sortKey === "order_id") {
-        left = a.order_id || 0;
-        right = b.order_id || 0;
+      if (sortKey === "order") {
+        left = getOrderLabel(a, "");
+        right = getOrderLabel(b, "");
       }
 
       if (sortKey === "subtotal") {
@@ -560,6 +717,16 @@ export default function SystemInvoicesListPage() {
       if (sortKey === "total_amount") {
         left = toNumber(a.total_amount);
         right = toNumber(b.total_amount);
+      }
+
+      if (sortKey === "paid_amount") {
+        left = toNumber(a.paid_amount);
+        right = toNumber(b.paid_amount);
+      }
+
+      if (sortKey === "due_amount") {
+        left = toNumber(a.due_amount);
+        right = toNumber(b.due_amount);
       }
 
       if (typeof left === "number" && typeof right === "number") {
@@ -655,14 +822,16 @@ export default function SystemInvoicesListPage() {
   const buildExportTableRows = (rows: ApiInvoice[]) => {
     return rows
       .map((invoice) => {
-        const number = invoice.number || `INV-${invoice.id}`;
-        const customer = invoice.customer_id ? `#${invoice.customer_id}` : t.notAvailable;
-        const order = invoice.order_id ? `#${invoice.order_id}` : t.notAvailable;
+        const number = getInvoiceNumber(invoice);
+        const customer = getCustomerLabel(invoice, t.notAvailable);
+        const order = getOrderLabel(invoice, t.notAvailable);
         const status = getStatusLabel(invoice.status, locale);
-        const date = formatDate(invoice.invoice_date, locale);
+        const date = formatDate(getInvoiceDate(invoice), locale);
         const subtotal = formatMoney(toNumber(invoice.subtotal));
         const tax = formatMoney(toNumber(invoice.tax_amount));
         const total = formatMoney(toNumber(invoice.total_amount));
+        const paid = formatMoney(toNumber(invoice.paid_amount));
+        const due = formatMoney(toNumber(invoice.due_amount));
 
         return `
           <tr>
@@ -674,6 +843,8 @@ export default function SystemInvoicesListPage() {
             <td>${escapeHtml(subtotal)}</td>
             <td>${escapeHtml(tax)}</td>
             <td>${escapeHtml(total)}</td>
+            <td>${escapeHtml(paid)}</td>
+            <td>${escapeHtml(due)}</td>
           </tr>
         `;
       })
@@ -739,10 +910,12 @@ export default function SystemInvoicesListPage() {
                 <th>${escapeHtml(t.customer)}</th>
                 <th>${escapeHtml(t.order)}</th>
                 <th>${escapeHtml(t.status)}</th>
-                <th>${escapeHtml(t.invoiceDate)}</th>
+                <th>${escapeHtml(t.issueDate)}</th>
                 <th>${escapeHtml(t.subtotal)}</th>
                 <th>${escapeHtml(t.tax)}</th>
                 <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.due)}</th>
               </tr>
             </thead>
             <tbody>
@@ -905,8 +1078,10 @@ export default function SystemInvoicesListPage() {
               )}</div>
             </div>
             <div class="card">
-              <div class="card-label">${escapeHtml(t.selected)}</div>
-              <div class="card-value">${escapeHtml(formatNumber(selectedIds.length))}</div>
+              <div class="card-label">${escapeHtml(t.dueAmount)}</div>
+              <div class="card-value">${escapeHtml(
+                formatMoney(exportRows.reduce((sum, invoice) => sum + toNumber(invoice.due_amount), 0))
+              )}</div>
             </div>
           </div>
 
@@ -917,10 +1092,12 @@ export default function SystemInvoicesListPage() {
                 <th>${escapeHtml(t.customer)}</th>
                 <th>${escapeHtml(t.order)}</th>
                 <th>${escapeHtml(t.status)}</th>
-                <th>${escapeHtml(t.invoiceDate)}</th>
+                <th>${escapeHtml(t.issueDate)}</th>
                 <th>${escapeHtml(t.subtotal)}</th>
                 <th>${escapeHtml(t.tax)}</th>
                 <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.due)}</th>
               </tr>
             </thead>
             <tbody>
@@ -968,9 +1145,6 @@ export default function SystemInvoicesListPage() {
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        {/* =====================================================
-            HERO
-        ===================================================== */}
         <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm">
           <div className="pointer-events-none absolute -top-24 end-12 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
@@ -1024,9 +1198,6 @@ export default function SystemInvoicesListPage() {
           </div>
         </section>
 
-        {/* =====================================================
-            STATS
-        ===================================================== */}
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {statCards.map((card) => {
             const Icon = card.icon;
@@ -1054,9 +1225,6 @@ export default function SystemInvoicesListPage() {
           })}
         </section>
 
-        {/* =====================================================
-            FILTERS
-        ===================================================== */}
         <Card className="rounded-[1.5rem]">
           <CardHeader className="gap-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1185,9 +1353,6 @@ export default function SystemInvoicesListPage() {
           </CardHeader>
         </Card>
 
-        {/* =====================================================
-            TABLE
-        ===================================================== */}
         <Card className="rounded-[1.5rem]">
           <CardContent className="p-0">
             {loading ? (
@@ -1204,7 +1369,7 @@ export default function SystemInvoicesListPage() {
               <>
                 <div id="invoices-table-section" className="overflow-hidden rounded-[1.5rem]">
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[980px] text-sm">
+                    <table className="w-full min-w-[1180px] text-sm">
                       <thead className="border-b bg-muted/50 text-xs text-muted-foreground">
                         <tr>
                           {hasColumn("select") ? (
@@ -1220,7 +1385,7 @@ export default function SystemInvoicesListPage() {
                           {hasColumn("number") ? (
                             <SortableTh
                               label={t.invoice}
-                              sortKey="number"
+                              sortKey="invoice_number"
                               activeKey={sortKey}
                               direction={sortDirection}
                               onSort={toggleSort}
@@ -1230,7 +1395,7 @@ export default function SystemInvoicesListPage() {
                           {hasColumn("customer") ? (
                             <SortableTh
                               label={t.customer}
-                              sortKey="customer_id"
+                              sortKey="customer"
                               activeKey={sortKey}
                               direction={sortDirection}
                               onSort={toggleSort}
@@ -1240,7 +1405,7 @@ export default function SystemInvoicesListPage() {
                           {hasColumn("order") ? (
                             <SortableTh
                               label={t.order}
-                              sortKey="order_id"
+                              sortKey="order"
                               activeKey={sortKey}
                               direction={sortDirection}
                               onSort={toggleSort}
@@ -1257,10 +1422,10 @@ export default function SystemInvoicesListPage() {
                             />
                           ) : null}
 
-                          {hasColumn("invoiceDate") ? (
+                          {hasColumn("issueDate") ? (
                             <SortableTh
-                              label={t.invoiceDate}
-                              sortKey="invoice_date"
+                              label={t.issueDate}
+                              sortKey="issue_date"
                               activeKey={sortKey}
                               direction={sortDirection}
                               onSort={toggleSort}
@@ -1297,28 +1462,47 @@ export default function SystemInvoicesListPage() {
                             />
                           ) : null}
 
+                          {hasColumn("paid") ? (
+                            <SortableTh
+                              label={t.paid}
+                              sortKey="paid_amount"
+                              activeKey={sortKey}
+                              direction={sortDirection}
+                              onSort={toggleSort}
+                            />
+                          ) : null}
+
+                          {hasColumn("due") ? (
+                            <SortableTh
+                              label={t.due}
+                              sortKey="due_amount"
+                              activeKey={sortKey}
+                              direction={sortDirection}
+                              onSort={toggleSort}
+                            />
+                          ) : null}
+
                           {hasColumn("actions") ? (
-                            <th className="px-4 py-3 text-end font-medium">{t.actions}</th>
+                            <th className="px-4 py-3 text-end font-medium">
+                              {t.actions}
+                            </th>
                           ) : null}
                         </tr>
                       </thead>
 
                       <tbody className="divide-y">
                         {paginatedInvoices.map((invoice) => {
-                          const isSelected = selectedIds.includes(invoice.id);
                           const status = String(invoice.status || "DRAFT").toUpperCase();
+                          const checked = selectedIds.includes(invoice.id);
+                          const canIssue = status === "DRAFT";
+                          const isIssuing = issuingId === invoice.id;
 
                           return (
-                            <tr
-                              key={invoice.id}
-                              className={`transition hover:bg-muted/30 ${
-                                isSelected ? "bg-primary/5" : "bg-card"
-                              }`}
-                            >
+                            <tr key={invoice.id} className="bg-card transition hover:bg-muted/30">
                               {hasColumn("select") ? (
                                 <td className="px-4 py-3">
                                   <Checkbox
-                                    checked={isSelected}
+                                    checked={checked}
                                     onCheckedChange={() => toggleInvoiceSelection(invoice.id)}
                                     aria-label={`Select invoice ${invoice.id}`}
                                   />
@@ -1333,7 +1517,7 @@ export default function SystemInvoicesListPage() {
                                     </div>
                                     <div>
                                       <p className="font-semibold">
-                                        {invoice.number || `INV-${invoice.id}`}
+                                        {getInvoiceNumber(invoice)}
                                       </p>
                                       <p className="text-xs text-muted-foreground">
                                         ID: {invoice.id}
@@ -1345,13 +1529,16 @@ export default function SystemInvoicesListPage() {
 
                               {hasColumn("customer") ? (
                                 <td className="px-4 py-3">
-                                  {invoice.customer_id ? (
-                                    <Badge variant="secondary" className="rounded-full">
-                                      #{invoice.customer_id}
-                                    </Badge>
-                                  ) : (
-                                    <span className="text-muted-foreground">{t.notAvailable}</span>
-                                  )}
+                                  <div className="space-y-1">
+                                    <p className="font-medium">
+                                      {getCustomerLabel(invoice, t.notAvailable)}
+                                    </p>
+                                    {invoice.customer?.phone ? (
+                                      <p className="text-xs text-muted-foreground">
+                                        {invoice.customer.phone}
+                                      </p>
+                                    ) : null}
+                                  </div>
                                 </td>
                               ) : null}
 
@@ -1359,7 +1546,7 @@ export default function SystemInvoicesListPage() {
                                 <td className="px-4 py-3">
                                   {invoice.order_id ? (
                                     <Badge variant="outline" className="rounded-full">
-                                      #{invoice.order_id}
+                                      {getOrderLabel(invoice, t.notAvailable)}
                                     </Badge>
                                   ) : (
                                     <span className="text-muted-foreground">{t.notAvailable}</span>
@@ -1378,11 +1565,11 @@ export default function SystemInvoicesListPage() {
                                 </td>
                               ) : null}
 
-                              {hasColumn("invoiceDate") ? (
+                              {hasColumn("issueDate") ? (
                                 <td className="px-4 py-3">
                                   <div className="flex items-center gap-2 text-muted-foreground">
                                     <CalendarDays className="h-4 w-4" />
-                                    {formatDate(invoice.invoice_date, locale)}
+                                    {formatDate(getInvoiceDate(invoice), locale)}
                                   </div>
                                 </td>
                               ) : null}
@@ -1405,20 +1592,36 @@ export default function SystemInvoicesListPage() {
                                 </td>
                               ) : null}
 
+                              {hasColumn("paid") ? (
+                                <td className="px-4 py-3">
+                                  <MoneyValue value={toNumber(invoice.paid_amount)} />
+                                </td>
+                              ) : null}
+
+                              {hasColumn("due") ? (
+                                <td className="px-4 py-3">
+                                  <MoneyValue value={toNumber(invoice.due_amount)} strong />
+                                </td>
+                              ) : null}
+
                               {hasColumn("actions") ? (
                                 <td className="px-4 py-3">
                                   <div className="flex justify-end gap-2">
-                                    {status === "DRAFT" ? (
+                                    {canIssue ? (
                                       <Button
-                                        asChild
+                                        type="button"
                                         variant="secondary"
                                         size="sm"
                                         className="rounded-xl"
+                                        onClick={() => handleIssueInvoice(invoice.id)}
+                                        disabled={isIssuing}
                                       >
-                                        <Link href={`/system/invoices/${invoice.id}`}>
+                                        {isIssuing ? (
+                                          <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                                        ) : (
                                           <BadgeCheck className="me-2 h-4 w-4" />
-                                          {t.issue}
-                                        </Link>
+                                        )}
+                                        {isIssuing ? t.issuing : t.issue}
                                       </Button>
                                     ) : null}
 
@@ -1444,9 +1647,6 @@ export default function SystemInvoicesListPage() {
                   </div>
                 </div>
 
-                {/* =====================================================
-                    PAGINATION
-                ===================================================== */}
                 <div className="flex flex-col gap-3 border-t p-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
                     <span>

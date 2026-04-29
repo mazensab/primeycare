@@ -52,23 +52,87 @@ type InvoiceStatus =
   | "CANCELLED"
   | "REFUNDED";
 
+type ApiCustomer = {
+  id?: number | null;
+  name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+
+type ApiOrder = {
+  id?: number | null;
+  order_number?: string | null;
+  status?: string | null;
+  payment_status?: string | null;
+  fulfillment_status?: string | null;
+  total_amount?: string | number | null;
+};
+
 type ApiInvoice = {
   id: number;
+  invoice_number?: string | null;
   number?: string | null;
+  invoice_type?: string | null;
   status?: string | null;
+  issue_date?: string | null;
+  due_date?: string | null;
   invoice_date?: string | null;
   customer_id?: number | null;
   order_id?: number | null;
+  customer?: ApiCustomer | null;
+  order?: ApiOrder | null;
   subtotal?: string | number | null;
+  discount_amount?: string | number | null;
+  taxable_amount?: string | number | null;
+  tax_rate?: string | number | null;
   tax_amount?: string | number | null;
   total_amount?: string | number | null;
+  paid_amount?: string | number | null;
+  due_amount?: string | number | null;
+  currency?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type ApiSummary = {
+  count?: number | null;
+  subtotal?: string | number | null;
+  discount_amount?: string | number | null;
+  taxable_amount?: string | number | null;
+  tax_amount?: string | number | null;
+  total_amount?: string | number | null;
+  paid_amount?: string | number | null;
+  due_amount?: string | number | null;
+  currency?: string | null;
 };
 
 type InvoicesApiResponse = {
   ok?: boolean;
   count?: number;
+  total_count?: number;
+  summary?: ApiSummary;
   results?: ApiInvoice[];
   message?: string;
+};
+
+type ReportGroupRow = {
+  status?: string;
+  invoice_type?: string;
+  count?: number;
+  subtotal?: string | number | null;
+  tax_amount?: string | number | null;
+  total_amount?: string | number | null;
+  paid_amount?: string | number | null;
+  due_amount?: string | number | null;
+};
+
+type ReportsApiResponse = {
+  ok?: boolean;
+  message?: string;
+  summary?: ApiSummary;
+  by_status?: ReportGroupRow[];
+  by_type?: ReportGroupRow[];
+  recent?: ApiInvoice[];
 };
 
 type StatusMeta = {
@@ -84,7 +148,18 @@ type StatusReportRow = {
   subtotal: number;
   tax: number;
   total: number;
+  paid: number;
+  due: number;
   percentage: number;
+};
+
+type TypeReportRow = {
+  invoiceType: string;
+  label: string;
+  count: number;
+  total: number;
+  tax: number;
+  due: number;
 };
 
 type CustomerReportRow = {
@@ -92,6 +167,8 @@ type CustomerReportRow = {
   count: number;
   tax: number;
   total: number;
+  paid: number;
+  due: number;
 };
 
 type MonthlyReportRow = {
@@ -99,6 +176,8 @@ type MonthlyReportRow = {
   count: number;
   tax: number;
   total: number;
+  paid: number;
+  due: number;
 };
 
 /* =====================================================
@@ -150,6 +229,14 @@ const STATUS_META: Record<string, StatusMeta> = {
     className:
       "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900/60 dark:bg-purple-950/40 dark:text-purple-300",
   },
+};
+
+const INVOICE_TYPE_LABELS: Record<string, { ar: string; en: string }> = {
+  SALES: { ar: "فاتورة مبيعات", en: "Sales Invoice" },
+  TAX: { ar: "فاتورة ضريبية", en: "Tax Invoice" },
+  SIMPLIFIED: { ar: "فاتورة مبسطة", en: "Simplified Invoice" },
+  CREDIT_NOTE: { ar: "إشعار دائن", en: "Credit Note" },
+  DEBIT_NOTE: { ar: "إشعار مدين", en: "Debit Note" },
 };
 
 /* =====================================================
@@ -214,6 +301,18 @@ function formatDate(value: string | null | undefined, locale: AppLocale): string
   }).format(date);
 }
 
+function getInvoiceDate(invoice: ApiInvoice): string | null | undefined {
+  return invoice.issue_date || invoice.invoice_date || invoice.created_at;
+}
+
+function getInvoiceNumber(invoice: ApiInvoice): string {
+  return invoice.invoice_number || invoice.number || `INV-${invoice.id}`;
+}
+
+function getCustomerLabel(invoice: ApiInvoice, fallback: string): string {
+  return invoice.customer?.name || (invoice.customer_id ? `#${invoice.customer_id}` : fallback);
+}
+
 function getStatusLabel(status: string | null | undefined, locale: AppLocale): string {
   const key = String(status || "DRAFT").toUpperCase();
   const meta = STATUS_META[key];
@@ -228,6 +327,15 @@ function getStatusClassName(status: string | null | undefined): string {
   return STATUS_META[key]?.className || STATUS_META.DRAFT.className;
 }
 
+function getInvoiceTypeLabel(type: string | null | undefined, locale: AppLocale): string {
+  const key = String(type || "SALES").toUpperCase();
+  const meta = INVOICE_TYPE_LABELS[key];
+
+  if (!meta) return type || (locale === "ar" ? "غير محدد" : "Unknown");
+
+  return locale === "ar" ? meta.ar : meta.en;
+}
+
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -237,21 +345,42 @@ function escapeHtml(value: unknown): string {
     .replaceAll("'", "&#039;");
 }
 
-function getMonthKey(value: string | null | undefined): string {
-  if (!value) return "بدون تاريخ";
+function getMonthKey(value: string | null | undefined, locale: AppLocale): string {
+  if (!value) return locale === "ar" ? "بدون تاريخ" : "No date";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "بدون تاريخ";
+  if (Number.isNaN(date.getTime())) return locale === "ar" ? "بدون تاريخ" : "No date";
 
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function buildQueryString({
+  statusFilter,
+  dateFrom,
+  dateTo,
+}: {
+  statusFilter: InvoiceStatus;
+  dateFrom: string;
+  dateTo: string;
+}) {
+  const params = new URLSearchParams();
+
+  if (statusFilter !== "ALL") params.set("status", statusFilter);
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+
+  return params.toString();
+}
+
 /* =====================================================
-   API HELPER
+   API HELPERS
 ===================================================== */
 
-async function fetchInvoices(): Promise<ApiInvoice[]> {
-  const response = await fetch("/api/invoices/?limit=200", {
+async function fetchInvoices(): Promise<{
+  invoices: ApiInvoice[];
+  summary: ApiSummary | null;
+}> {
+  const response = await fetch("/api/invoices/?page_size=200", {
     method: "GET",
     credentials: "include",
     headers: {
@@ -266,7 +395,31 @@ async function fetchInvoices(): Promise<ApiInvoice[]> {
     throw new Error(data?.message || "Failed to load invoices reports.");
   }
 
-  return Array.isArray(data.results) ? data.results : [];
+  return {
+    invoices: Array.isArray(data.results) ? data.results : [],
+    summary: data.summary || null,
+  };
+}
+
+async function fetchInvoiceReports(queryString: string): Promise<ReportsApiResponse | null> {
+  const url = queryString ? `/api/invoices/reports/?${queryString}` : "/api/invoices/reports/";
+
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+
+  const data = (await response.json().catch(() => null)) as ReportsApiResponse | null;
+
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.message || "Failed to load invoice reports.");
+  }
+
+  return data;
 }
 
 /* =====================================================
@@ -276,6 +429,8 @@ async function fetchInvoices(): Promise<ApiInvoice[]> {
 export default function SystemInvoicesReportsPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [invoices, setInvoices] = useState<ApiInvoice[]>([]);
+  const [apiSummary, setApiSummary] = useState<ApiSummary | null>(null);
+  const [reportsData, setReportsData] = useState<ReportsApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -290,8 +445,8 @@ export default function SystemInvoicesReportsPage() {
       badge: isAr ? "تقارير الفواتير" : "Invoices Reports",
       title: isAr ? "تقارير الفواتير" : "Invoices Reports",
       subtitle: isAr
-        ? "تحليل الفواتير حسب الحالة، الفترة، الضريبة، العملاء، والإجماليات المالية."
-        : "Analyze invoices by status, period, tax, customers, and financial totals.",
+        ? "تحليل الفواتير حسب الحالة، الفترة، الضريبة، العملاء، والتحصيل والمتبقي."
+        : "Analyze invoices by status, period, tax, customers, paid amounts, and dues.",
       dashboard: isAr ? "لوحة الفواتير" : "Invoices Dashboard",
       list: isAr ? "قائمة الفواتير" : "Invoices List",
       create: isAr ? "إنشاء فاتورة" : "Create Invoice",
@@ -309,6 +464,8 @@ export default function SystemInvoicesReportsPage() {
       print: isAr ? "طباعة Web PDF" : "Print Web PDF",
       totalInvoices: isAr ? "إجمالي الفواتير" : "Total Invoices",
       totalAmount: isAr ? "إجمالي الفواتير" : "Invoices Total",
+      paidAmount: isAr ? "إجمالي المدفوع" : "Paid Total",
+      dueAmount: isAr ? "إجمالي المتبقي" : "Due Total",
       taxAmount: isAr ? "إجمالي الضريبة" : "Tax Total",
       averageInvoice: isAr ? "متوسط الفاتورة" : "Average Invoice",
       paidInvoices: isAr ? "فواتير مدفوعة" : "Paid Invoices",
@@ -317,12 +474,12 @@ export default function SystemInvoicesReportsPage() {
       cancelledInvoices: isAr ? "فواتير ملغاة" : "Cancelled Invoices",
       statusReport: isAr ? "تقرير الحالات" : "Status Report",
       statusReportDesc: isAr
-        ? "توزيع الفواتير حسب الحالة مع الإجماليات."
-        : "Invoice distribution by status with totals.",
-      taxReport: isAr ? "تقرير الضريبة" : "Tax Report",
+        ? "توزيع الفواتير حسب الحالة مع الإجماليات والمدفوع والمتبقي."
+        : "Invoice distribution by status with totals, paid, and due amounts.",
+      taxReport: isAr ? "تقرير الضريبة والتحصيل" : "Tax & Collection Report",
       taxReportDesc: isAr
-        ? "ملخص ضريبة القيمة المضافة بناءً على الفواتير الحالية."
-        : "VAT summary based on current invoices.",
+        ? "ملخص ضريبة القيمة المضافة والتحصيل بناءً على الفواتير الحالية."
+        : "VAT and collection summary based on current invoices.",
       customerReport: isAr ? "ملخص حسب العميل" : "Customer Summary",
       customerReportDesc: isAr
         ? "أعلى العملاء حسب قيمة الفواتير."
@@ -331,13 +488,26 @@ export default function SystemInvoicesReportsPage() {
       monthlyReportDesc: isAr
         ? "تجميع الفواتير حسب الشهر."
         : "Invoices grouped by month.",
+      typeReport: isAr ? "ملخص حسب نوع الفاتورة" : "Invoice Type Summary",
+      typeReportDesc: isAr
+        ? "توزيع الفواتير حسب نوعها."
+        : "Invoice distribution by invoice type.",
+      recentInvoices: isAr ? "آخر الفواتير" : "Recent Invoices",
+      recentInvoicesDesc: isAr
+        ? "آخر الفواتير المسجلة ضمن النظام."
+        : "Latest invoices registered in the system.",
+      invoice: isAr ? "الفاتورة" : "Invoice",
+      invoiceType: isAr ? "نوع الفاتورة" : "Invoice Type",
       count: isAr ? "العدد" : "Count",
       subtotal: isAr ? "قبل الضريبة" : "Subtotal",
       tax: isAr ? "الضريبة" : "Tax",
       total: isAr ? "الإجمالي" : "Total",
+      paid: isAr ? "المدفوع" : "Paid",
+      due: isAr ? "المتبقي" : "Due",
       percentage: isAr ? "النسبة" : "Percentage",
       customer: isAr ? "العميل" : "Customer",
       month: isAr ? "الشهر" : "Month",
+      issueDate: isAr ? "تاريخ الإصدار" : "Issue Date",
       loading: isAr ? "جاري تحميل تقارير الفواتير..." : "Loading invoice reports...",
       empty: isAr ? "لا توجد بيانات مطابقة للتقرير الحالي." : "No data matches current report.",
       loadError: isAr ? "تعذر تحميل تقارير الفواتير" : "Failed to load invoice reports",
@@ -346,18 +516,31 @@ export default function SystemInvoicesReportsPage() {
       noDataExport: isAr ? "لا توجد بيانات للتصدير" : "No data to export",
       noDataPrint: isAr ? "لا توجد بيانات للطباعة" : "No data to print",
       printTitle: isAr ? "تقرير الفواتير" : "Invoices Report",
+      noRows: isAr ? "لا توجد بيانات" : "No data",
+      notAvailable: isAr ? "غير متاح" : "N/A",
       sar: isAr ? "ريال" : "SAR",
     }),
     [isAr]
   );
 
-  const loadInvoices = async (mode: "initial" | "refresh" = "initial") => {
+  const reportQueryString = useMemo(
+    () => buildQueryString({ statusFilter, dateFrom, dateTo }),
+    [dateFrom, dateTo, statusFilter]
+  );
+
+  const loadReports = async (mode: "initial" | "refresh" = "initial") => {
     try {
       if (mode === "initial") setLoading(true);
       if (mode === "refresh") setRefreshing(true);
 
-      const data = await fetchInvoices();
-      setInvoices(data);
+      const [listData, reportData] = await Promise.all([
+        fetchInvoices(),
+        fetchInvoiceReports(reportQueryString),
+      ]);
+
+      setInvoices(listData.invoices);
+      setApiSummary(listData.summary);
+      setReportsData(reportData);
 
       if (mode === "refresh") {
         toast.success(t.refreshSuccess);
@@ -395,9 +578,14 @@ export default function SystemInvoicesReportsPage() {
   }, []);
 
   useEffect(() => {
-    loadInvoices("initial");
+    loadReports("initial");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    loadReports("refresh");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportQueryString]);
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter((invoice) => {
@@ -406,7 +594,7 @@ export default function SystemInvoicesReportsPage() {
       if (statusFilter !== "ALL" && status !== statusFilter) return false;
 
       if (dateFrom || dateTo) {
-        const invoiceDate = invoice.invoice_date ? new Date(invoice.invoice_date) : null;
+        const invoiceDate = getInvoiceDate(invoice) ? new Date(getInvoiceDate(invoice) as string) : null;
 
         if (!invoiceDate || Number.isNaN(invoiceDate.getTime())) return false;
 
@@ -427,22 +615,35 @@ export default function SystemInvoicesReportsPage() {
   }, [dateFrom, dateTo, invoices, statusFilter]);
 
   const stats = useMemo(() => {
-    const totalInvoices = filteredInvoices.length;
+    const summary = reportsData?.summary || null;
 
-    const totalAmount = filteredInvoices.reduce(
-      (sum, invoice) => sum + toNumber(invoice.total_amount),
-      0
-    );
+    const totalInvoices =
+      typeof summary?.count === "number" ? summary.count : filteredInvoices.length;
 
-    const subtotal = filteredInvoices.reduce(
-      (sum, invoice) => sum + toNumber(invoice.subtotal),
-      0
-    );
+    const subtotal =
+      summary?.subtotal !== undefined && summary?.subtotal !== null
+        ? toNumber(summary.subtotal)
+        : filteredInvoices.reduce((sum, invoice) => sum + toNumber(invoice.subtotal), 0);
 
-    const taxAmount = filteredInvoices.reduce(
-      (sum, invoice) => sum + toNumber(invoice.tax_amount),
-      0
-    );
+    const taxAmount =
+      summary?.tax_amount !== undefined && summary?.tax_amount !== null
+        ? toNumber(summary.tax_amount)
+        : filteredInvoices.reduce((sum, invoice) => sum + toNumber(invoice.tax_amount), 0);
+
+    const totalAmount =
+      summary?.total_amount !== undefined && summary?.total_amount !== null
+        ? toNumber(summary.total_amount)
+        : filteredInvoices.reduce((sum, invoice) => sum + toNumber(invoice.total_amount), 0);
+
+    const paidAmount =
+      summary?.paid_amount !== undefined && summary?.paid_amount !== null
+        ? toNumber(summary.paid_amount)
+        : filteredInvoices.reduce((sum, invoice) => sum + toNumber(invoice.paid_amount), 0);
+
+    const dueAmount =
+      summary?.due_amount !== undefined && summary?.due_amount !== null
+        ? toNumber(summary.due_amount)
+        : filteredInvoices.reduce((sum, invoice) => sum + toNumber(invoice.due_amount), 0);
 
     const paidInvoices = filteredInvoices.filter(
       (invoice) => String(invoice.status || "").toUpperCase() === "PAID"
@@ -466,15 +667,44 @@ export default function SystemInvoicesReportsPage() {
       subtotal,
       taxAmount,
       totalAmount,
+      paidAmount,
+      dueAmount,
       paidInvoices,
       issuedInvoices,
       cancelledInvoices,
       openInvoices,
       averageInvoice: totalInvoices > 0 ? totalAmount / totalInvoices : 0,
     };
-  }, [filteredInvoices]);
+  }, [filteredInvoices, reportsData]);
 
   const statusRows = useMemo<StatusReportRow[]>(() => {
+    const apiRows = Array.isArray(reportsData?.by_status) ? reportsData.by_status : [];
+
+    if (apiRows.length > 0) {
+      const totalCount = Math.max(
+        apiRows.reduce((sum, row) => sum + Number(row.count || 0), 0),
+        1
+      );
+
+      return apiRows
+        .map((row) => {
+          const status = String(row.status || "DRAFT").toUpperCase();
+
+          return {
+            status,
+            label: getStatusLabel(status, locale),
+            count: Number(row.count || 0),
+            subtotal: toNumber(row.subtotal),
+            tax: toNumber(row.tax_amount),
+            total: toNumber(row.total_amount),
+            paid: toNumber(row.paid_amount),
+            due: toNumber(row.due_amount),
+            percentage: Math.round((Number(row.count || 0) / totalCount) * 100),
+          };
+        })
+        .filter((row) => row.count > 0);
+    }
+
     const totalCount = Math.max(filteredInvoices.length, 1);
 
     return Object.keys(STATUS_META)
@@ -483,28 +713,73 @@ export default function SystemInvoicesReportsPage() {
           (invoice) => String(invoice.status || "DRAFT").toUpperCase() === status
         );
 
-        const subtotal = rows.reduce((sum, item) => sum + toNumber(item.subtotal), 0);
-        const tax = rows.reduce((sum, item) => sum + toNumber(item.tax_amount), 0);
-        const total = rows.reduce((sum, item) => sum + toNumber(item.total_amount), 0);
-
         return {
           status,
           label: getStatusLabel(status, locale),
           count: rows.length,
-          subtotal,
-          tax,
-          total,
+          subtotal: rows.reduce((sum, item) => sum + toNumber(item.subtotal), 0),
+          tax: rows.reduce((sum, item) => sum + toNumber(item.tax_amount), 0),
+          total: rows.reduce((sum, item) => sum + toNumber(item.total_amount), 0),
+          paid: rows.reduce((sum, item) => sum + toNumber(item.paid_amount), 0),
+          due: rows.reduce((sum, item) => sum + toNumber(item.due_amount), 0),
           percentage: Math.round((rows.length / totalCount) * 100),
         };
       })
       .filter((row) => row.count > 0);
-  }, [filteredInvoices, locale]);
+  }, [filteredInvoices, locale, reportsData]);
+
+  const typeRows = useMemo<TypeReportRow[]>(() => {
+    const apiRows = Array.isArray(reportsData?.by_type) ? reportsData.by_type : [];
+
+    if (apiRows.length > 0) {
+      return apiRows
+        .map((row) => {
+          const invoiceType = String(row.invoice_type || "SALES").toUpperCase();
+
+          return {
+            invoiceType,
+            label: getInvoiceTypeLabel(invoiceType, locale),
+            count: Number(row.count || 0),
+            total: toNumber(row.total_amount),
+            tax: toNumber(row.tax_amount),
+            due: toNumber(row.due_amount),
+          };
+        })
+        .filter((row) => row.count > 0);
+    }
+
+    const map = new Map<string, TypeReportRow>();
+
+    filteredInvoices.forEach((invoice) => {
+      const invoiceType = String(invoice.invoice_type || "SALES").toUpperCase();
+      const existing =
+        map.get(invoiceType) ||
+        ({
+          invoiceType,
+          label: getInvoiceTypeLabel(invoiceType, locale),
+          count: 0,
+          total: 0,
+          tax: 0,
+          due: 0,
+        } satisfies TypeReportRow);
+
+      existing.count += 1;
+      existing.total += toNumber(invoice.total_amount);
+      existing.tax += toNumber(invoice.tax_amount);
+      existing.due += toNumber(invoice.due_amount);
+
+      map.set(invoiceType, existing);
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [filteredInvoices, locale, reportsData]);
 
   const customerRows = useMemo<CustomerReportRow[]>(() => {
     const map = new Map<string, CustomerReportRow>();
 
     filteredInvoices.forEach((invoice) => {
-      const customerKey = invoice.customer_id ? `#${invoice.customer_id}` : isAr ? "غير محدد" : "N/A";
+      const customerKey = getCustomerLabel(invoice, isAr ? "غير محدد" : "N/A");
+
       const existing =
         map.get(customerKey) ||
         ({
@@ -512,11 +787,15 @@ export default function SystemInvoicesReportsPage() {
           count: 0,
           tax: 0,
           total: 0,
+          paid: 0,
+          due: 0,
         } satisfies CustomerReportRow);
 
       existing.count += 1;
       existing.tax += toNumber(invoice.tax_amount);
       existing.total += toNumber(invoice.total_amount);
+      existing.paid += toNumber(invoice.paid_amount);
+      existing.due += toNumber(invoice.due_amount);
 
       map.set(customerKey, existing);
     });
@@ -530,7 +809,7 @@ export default function SystemInvoicesReportsPage() {
     const map = new Map<string, MonthlyReportRow>();
 
     filteredInvoices.forEach((invoice) => {
-      const monthKey = getMonthKey(invoice.invoice_date);
+      const monthKey = getMonthKey(getInvoiceDate(invoice), locale);
       const existing =
         map.get(monthKey) ||
         ({
@@ -538,17 +817,29 @@ export default function SystemInvoicesReportsPage() {
           count: 0,
           tax: 0,
           total: 0,
+          paid: 0,
+          due: 0,
         } satisfies MonthlyReportRow);
 
       existing.count += 1;
       existing.tax += toNumber(invoice.tax_amount);
       existing.total += toNumber(invoice.total_amount);
+      existing.paid += toNumber(invoice.paid_amount);
+      existing.due += toNumber(invoice.due_amount);
 
       map.set(monthKey, existing);
     });
 
     return Array.from(map.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-  }, [filteredInvoices]);
+  }, [filteredInvoices, locale]);
+
+  const recentInvoices = useMemo(() => {
+    const source = Array.isArray(reportsData?.recent) && reportsData.recent.length > 0
+      ? reportsData.recent
+      : filteredInvoices;
+
+    return source.slice(0, 8);
+  }, [filteredInvoices, reportsData]);
 
   const clearFilters = () => {
     setStatusFilter("ALL");
@@ -556,8 +847,8 @@ export default function SystemInvoicesReportsPage() {
     setDateTo("");
   };
 
-  const buildStatusRowsHtml = () => {
-    return statusRows
+  const buildStatusRowsHtml = () =>
+    statusRows
       .map(
         (row) => `
           <tr>
@@ -566,15 +857,16 @@ export default function SystemInvoicesReportsPage() {
             <td>${escapeHtml(formatMoney(row.subtotal))}</td>
             <td>${escapeHtml(formatMoney(row.tax))}</td>
             <td>${escapeHtml(formatMoney(row.total))}</td>
+            <td>${escapeHtml(formatMoney(row.paid))}</td>
+            <td>${escapeHtml(formatMoney(row.due))}</td>
             <td>${escapeHtml(formatNumber(row.percentage))}%</td>
           </tr>
         `
       )
       .join("");
-  };
 
-  const buildCustomerRowsHtml = () => {
-    return customerRows
+  const buildCustomerRowsHtml = () =>
+    customerRows
       .map(
         (row) => `
           <tr>
@@ -582,14 +874,15 @@ export default function SystemInvoicesReportsPage() {
             <td>${escapeHtml(formatNumber(row.count))}</td>
             <td>${escapeHtml(formatMoney(row.tax))}</td>
             <td>${escapeHtml(formatMoney(row.total))}</td>
+            <td>${escapeHtml(formatMoney(row.paid))}</td>
+            <td>${escapeHtml(formatMoney(row.due))}</td>
           </tr>
         `
       )
       .join("");
-  };
 
-  const buildMonthlyRowsHtml = () => {
-    return monthlyRows
+  const buildMonthlyRowsHtml = () =>
+    monthlyRows
       .map(
         (row) => `
           <tr>
@@ -597,11 +890,27 @@ export default function SystemInvoicesReportsPage() {
             <td>${escapeHtml(formatNumber(row.count))}</td>
             <td>${escapeHtml(formatMoney(row.tax))}</td>
             <td>${escapeHtml(formatMoney(row.total))}</td>
+            <td>${escapeHtml(formatMoney(row.paid))}</td>
+            <td>${escapeHtml(formatMoney(row.due))}</td>
           </tr>
         `
       )
       .join("");
-  };
+
+  const buildTypeRowsHtml = () =>
+    typeRows
+      .map(
+        (row) => `
+          <tr>
+            <td>${escapeHtml(row.label)}</td>
+            <td>${escapeHtml(formatNumber(row.count))}</td>
+            <td>${escapeHtml(formatMoney(row.tax))}</td>
+            <td>${escapeHtml(formatMoney(row.total))}</td>
+            <td>${escapeHtml(formatMoney(row.due))}</td>
+          </tr>
+        `
+      )
+      .join("");
 
   const exportExcel = () => {
     if (filteredInvoices.length === 0) {
@@ -619,25 +928,10 @@ export default function SystemInvoicesReportsPage() {
         <head>
           <meta charset="UTF-8" />
           <style>
-            body {
-              font-family: Arial, sans-serif;
-              direction: ${isAr ? "rtl" : "ltr"};
-            }
-            h1, h2 {
-              margin: 0 0 10px;
-            }
-            .meta {
-              color: #475569;
-              margin-bottom: 20px;
-            }
-            .summary {
-              margin-bottom: 24px;
-            }
-            table {
-              border-collapse: collapse;
-              width: 100%;
-              margin-bottom: 28px;
-            }
+            body { font-family: Arial, sans-serif; direction: ${isAr ? "rtl" : "ltr"}; }
+            h1, h2 { margin: 0 0 10px; }
+            .meta { color: #475569; margin-bottom: 20px; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 28px; }
             th {
               background: #f1f5f9;
               color: #0f172a;
@@ -658,12 +952,14 @@ export default function SystemInvoicesReportsPage() {
           <div class="meta">${escapeHtml(generatedAt)}</div>
 
           <h2>${escapeHtml(isAr ? "الملخص المالي" : "Financial Summary")}</h2>
-          <table class="summary">
+          <table>
             <tbody>
               <tr><th>${escapeHtml(t.totalInvoices)}</th><td>${escapeHtml(formatNumber(stats.totalInvoices))}</td></tr>
               <tr><th>${escapeHtml(t.subtotal)}</th><td>${escapeHtml(formatMoney(stats.subtotal))}</td></tr>
               <tr><th>${escapeHtml(t.taxAmount)}</th><td>${escapeHtml(formatMoney(stats.taxAmount))}</td></tr>
               <tr><th>${escapeHtml(t.totalAmount)}</th><td>${escapeHtml(formatMoney(stats.totalAmount))}</td></tr>
+              <tr><th>${escapeHtml(t.paidAmount)}</th><td>${escapeHtml(formatMoney(stats.paidAmount))}</td></tr>
+              <tr><th>${escapeHtml(t.dueAmount)}</th><td>${escapeHtml(formatMoney(stats.dueAmount))}</td></tr>
               <tr><th>${escapeHtml(t.averageInvoice)}</th><td>${escapeHtml(formatMoney(stats.averageInvoice))}</td></tr>
             </tbody>
           </table>
@@ -677,12 +973,12 @@ export default function SystemInvoicesReportsPage() {
                 <th>${escapeHtml(t.subtotal)}</th>
                 <th>${escapeHtml(t.tax)}</th>
                 <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.due)}</th>
                 <th>${escapeHtml(t.percentage)}</th>
               </tr>
             </thead>
-            <tbody>
-              ${buildStatusRowsHtml()}
-            </tbody>
+            <tbody>${buildStatusRowsHtml()}</tbody>
           </table>
 
           <h2>${escapeHtml(t.customerReport)}</h2>
@@ -693,11 +989,11 @@ export default function SystemInvoicesReportsPage() {
                 <th>${escapeHtml(t.count)}</th>
                 <th>${escapeHtml(t.tax)}</th>
                 <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.due)}</th>
               </tr>
             </thead>
-            <tbody>
-              ${buildCustomerRowsHtml()}
-            </tbody>
+            <tbody>${buildCustomerRowsHtml()}</tbody>
           </table>
 
           <h2>${escapeHtml(t.monthlyReport)}</h2>
@@ -708,11 +1004,25 @@ export default function SystemInvoicesReportsPage() {
                 <th>${escapeHtml(t.count)}</th>
                 <th>${escapeHtml(t.tax)}</th>
                 <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.due)}</th>
               </tr>
             </thead>
-            <tbody>
-              ${buildMonthlyRowsHtml()}
-            </tbody>
+            <tbody>${buildMonthlyRowsHtml()}</tbody>
+          </table>
+
+          <h2>${escapeHtml(t.typeReport)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.invoiceType)}</th>
+                <th>${escapeHtml(t.count)}</th>
+                <th>${escapeHtml(t.tax)}</th>
+                <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.due)}</th>
+              </tr>
+            </thead>
+            <tbody>${buildTypeRowsHtml()}</tbody>
           </table>
         </body>
       </html>
@@ -761,9 +1071,7 @@ export default function SystemInvoicesReportsPage() {
           <meta charset="utf-8" />
           <title>${escapeHtml(t.printTitle)}</title>
           <style>
-            * {
-              box-sizing: border-box;
-            }
+            * { box-sizing: border-box; }
             body {
               margin: 0;
               padding: 32px;
@@ -781,16 +1089,8 @@ export default function SystemInvoicesReportsPage() {
               border-bottom: 2px solid #e2e8f0;
               padding-bottom: 16px;
             }
-            .title {
-              font-size: 26px;
-              font-weight: 800;
-              margin: 0 0 8px;
-            }
-            .subtitle {
-              margin: 0;
-              color: #475569;
-              font-size: 13px;
-            }
+            .title { font-size: 26px; font-weight: 800; margin: 0 0 8px; }
+            .subtitle { margin: 0; color: #475569; font-size: 13px; }
             .summary {
               display: grid;
               grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -803,19 +1103,9 @@ export default function SystemInvoicesReportsPage() {
               padding: 12px;
               background: #f8fafc;
             }
-            .card-label {
-              color: #64748b;
-              font-size: 12px;
-              margin-bottom: 6px;
-            }
-            .card-value {
-              font-size: 18px;
-              font-weight: 800;
-            }
-            h2 {
-              font-size: 18px;
-              margin: 28px 0 12px;
-            }
+            .card-label { color: #64748b; font-size: 12px; margin-bottom: 6px; }
+            .card-value { font-size: 18px; font-weight: 800; }
+            h2 { font-size: 18px; margin: 28px 0 12px; }
             table {
               width: 100%;
               border-collapse: collapse;
@@ -833,16 +1123,10 @@ export default function SystemInvoicesReportsPage() {
               padding: 10px;
               text-align: ${isAr ? "right" : "left"};
             }
-            tr:nth-child(even) td {
-              background: #f8fafc;
-            }
+            tr:nth-child(even) td { background: #f8fafc; }
             @media print {
-              body {
-                padding: 18px;
-              }
-              .no-print {
-                display: none;
-              }
+              body { padding: 18px; }
+              .no-print { display: none; }
             }
           </style>
         </head>
@@ -865,12 +1149,12 @@ export default function SystemInvoicesReportsPage() {
               <div class="card-value">${escapeHtml(formatMoney(stats.totalAmount))}</div>
             </div>
             <div class="card">
-              <div class="card-label">${escapeHtml(t.taxAmount)}</div>
-              <div class="card-value">${escapeHtml(formatMoney(stats.taxAmount))}</div>
+              <div class="card-label">${escapeHtml(t.paidAmount)}</div>
+              <div class="card-value">${escapeHtml(formatMoney(stats.paidAmount))}</div>
             </div>
             <div class="card">
-              <div class="card-label">${escapeHtml(t.averageInvoice)}</div>
-              <div class="card-value">${escapeHtml(formatMoney(stats.averageInvoice))}</div>
+              <div class="card-label">${escapeHtml(t.dueAmount)}</div>
+              <div class="card-value">${escapeHtml(formatMoney(stats.dueAmount))}</div>
             </div>
           </div>
 
@@ -883,12 +1167,12 @@ export default function SystemInvoicesReportsPage() {
                 <th>${escapeHtml(t.subtotal)}</th>
                 <th>${escapeHtml(t.tax)}</th>
                 <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.due)}</th>
                 <th>${escapeHtml(t.percentage)}</th>
               </tr>
             </thead>
-            <tbody>
-              ${buildStatusRowsHtml()}
-            </tbody>
+            <tbody>${buildStatusRowsHtml()}</tbody>
           </table>
 
           <h2>${escapeHtml(t.customerReport)}</h2>
@@ -899,11 +1183,11 @@ export default function SystemInvoicesReportsPage() {
                 <th>${escapeHtml(t.count)}</th>
                 <th>${escapeHtml(t.tax)}</th>
                 <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.due)}</th>
               </tr>
             </thead>
-            <tbody>
-              ${buildCustomerRowsHtml()}
-            </tbody>
+            <tbody>${buildCustomerRowsHtml()}</tbody>
           </table>
 
           <h2>${escapeHtml(t.monthlyReport)}</h2>
@@ -914,11 +1198,25 @@ export default function SystemInvoicesReportsPage() {
                 <th>${escapeHtml(t.count)}</th>
                 <th>${escapeHtml(t.tax)}</th>
                 <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.due)}</th>
               </tr>
             </thead>
-            <tbody>
-              ${buildMonthlyRowsHtml()}
-            </tbody>
+            <tbody>${buildMonthlyRowsHtml()}</tbody>
+          </table>
+
+          <h2>${escapeHtml(t.typeReport)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.invoiceType)}</th>
+                <th>${escapeHtml(t.count)}</th>
+                <th>${escapeHtml(t.tax)}</th>
+                <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.due)}</th>
+              </tr>
+            </thead>
+            <tbody>${buildTypeRowsHtml()}</tbody>
           </table>
         </body>
       </html>
@@ -945,17 +1243,17 @@ export default function SystemInvoicesReportsPage() {
       money: true,
     },
     {
-      title: t.taxAmount,
-      value: formatMoney(stats.taxAmount),
-      description: isAr ? "إجمالي ضريبة القيمة المضافة" : "Total VAT amount",
-      icon: ShieldCheck,
+      title: t.paidAmount,
+      value: formatMoney(stats.paidAmount),
+      description: isAr ? "إجمالي ما تم تحصيله" : "Total collected amount",
+      icon: CheckCircle2,
       money: true,
     },
     {
-      title: t.averageInvoice,
-      value: formatMoney(stats.averageInvoice),
-      description: isAr ? "متوسط قيمة الفاتورة" : "Average invoice value",
-      icon: TrendingUp,
+      title: t.dueAmount,
+      value: formatMoney(stats.dueAmount),
+      description: isAr ? "إجمالي المبالغ المتبقية" : "Total outstanding due",
+      icon: Clock3,
       money: true,
     },
   ];
@@ -963,9 +1261,6 @@ export default function SystemInvoicesReportsPage() {
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        {/* =====================================================
-            HERO
-        ===================================================== */}
         <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm">
           <div className="pointer-events-none absolute -top-24 end-12 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
@@ -1019,9 +1314,6 @@ export default function SystemInvoicesReportsPage() {
           </div>
         </section>
 
-        {/* =====================================================
-            FILTERS
-        ===================================================== */}
         <Card className="rounded-[1.5rem]">
           <CardHeader className="gap-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1038,7 +1330,7 @@ export default function SystemInvoicesReportsPage() {
                   type="button"
                   variant="outline"
                   className="rounded-2xl"
-                  onClick={() => loadInvoices("refresh")}
+                  onClick={() => loadReports("refresh")}
                   disabled={refreshing}
                 >
                   {refreshing ? (
@@ -1130,18 +1422,12 @@ export default function SystemInvoicesReportsPage() {
           </Card>
         ) : (
           <>
-            {/* =====================================================
-                STATS
-            ===================================================== */}
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {statCards.map((card) => (
                 <ReportStatCard key={card.title} {...card} />
               ))}
             </section>
 
-            {/* =====================================================
-                STATUS SUMMARY
-            ===================================================== */}
             <section className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
               <Card className="rounded-[1.5rem]">
                 <CardHeader>
@@ -1155,7 +1441,7 @@ export default function SystemInvoicesReportsPage() {
                 <CardContent>
                   <div className="overflow-hidden rounded-3xl border">
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[760px] text-sm">
+                      <table className="w-full min-w-[980px] text-sm">
                         <thead className="border-b bg-muted/50 text-xs text-muted-foreground">
                           <tr>
                             <th className="px-4 py-3 text-start font-medium">{t.status}</th>
@@ -1163,6 +1449,8 @@ export default function SystemInvoicesReportsPage() {
                             <th className="px-4 py-3 text-start font-medium">{t.subtotal}</th>
                             <th className="px-4 py-3 text-start font-medium">{t.tax}</th>
                             <th className="px-4 py-3 text-start font-medium">{t.total}</th>
+                            <th className="px-4 py-3 text-start font-medium">{t.paid}</th>
+                            <th className="px-4 py-3 text-start font-medium">{t.due}</th>
                             <th className="px-4 py-3 text-start font-medium">{t.percentage}</th>
                           </tr>
                         </thead>
@@ -1189,6 +1477,12 @@ export default function SystemInvoicesReportsPage() {
                               </td>
                               <td className="px-4 py-3">
                                 <MoneyValue value={row.total} strong />
+                              </td>
+                              <td className="px-4 py-3">
+                                <MoneyValue value={row.paid} />
+                              </td>
+                              <td className="px-4 py-3">
+                                <MoneyValue value={row.due} strong />
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex min-w-36 items-center gap-3">
@@ -1225,23 +1519,8 @@ export default function SystemInvoicesReportsPage() {
                   <TaxLine label={t.subtotal} value={stats.subtotal} />
                   <TaxLine label={t.taxAmount} value={stats.taxAmount} />
                   <TaxLine label={t.totalAmount} value={stats.totalAmount} strong />
-
-                  <div className="rounded-3xl border bg-muted/20 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold">{t.paidInvoices}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {isAr ? "فواتير مكتملة السداد" : "Fully paid invoices"}
-                        </p>
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
-                      >
-                        {formatNumber(stats.paidInvoices)}
-                      </Badge>
-                    </div>
-                  </div>
+                  <TaxLine label={t.paidAmount} value={stats.paidAmount} />
+                  <TaxLine label={t.dueAmount} value={stats.dueAmount} strong />
 
                   <div className="rounded-3xl border bg-muted/20 p-4">
                     <div className="flex items-center justify-between gap-3">
@@ -1263,9 +1542,6 @@ export default function SystemInvoicesReportsPage() {
               </Card>
             </section>
 
-            {/* =====================================================
-                CUSTOMER + MONTHLY
-            ===================================================== */}
             <section className="grid gap-6 xl:grid-cols-2">
               <Card className="rounded-[1.5rem]">
                 <CardHeader>
@@ -1278,12 +1554,16 @@ export default function SystemInvoicesReportsPage() {
 
                 <CardContent>
                   <SimpleReportTable
-                    headers={[t.customer, t.count, t.tax, t.total]}
+                    emptyText={t.noRows}
+                    headers={[t.customer, t.count, t.tax, t.total, t.paid, t.due]}
+                    moneyColumns={[2, 3, 4, 5]}
                     rows={customerRows.map((row) => [
                       row.customerKey,
                       formatNumber(row.count),
                       formatMoney(row.tax),
                       formatMoney(row.total),
+                      formatMoney(row.paid),
+                      formatMoney(row.due),
                     ])}
                   />
                 </CardContent>
@@ -1300,12 +1580,69 @@ export default function SystemInvoicesReportsPage() {
 
                 <CardContent>
                   <SimpleReportTable
-                    headers={[t.month, t.count, t.tax, t.total]}
+                    emptyText={t.noRows}
+                    headers={[t.month, t.count, t.tax, t.total, t.paid, t.due]}
+                    moneyColumns={[2, 3, 4, 5]}
                     rows={monthlyRows.map((row) => [
                       row.monthKey,
                       formatNumber(row.count),
                       formatMoney(row.tax),
                       formatMoney(row.total),
+                      formatMoney(row.paid),
+                      formatMoney(row.due),
+                    ])}
+                  />
+                </CardContent>
+              </Card>
+            </section>
+
+            <section className="grid gap-6 xl:grid-cols-2">
+              <Card className="rounded-[1.5rem]">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ReceiptText className="h-5 w-5 text-primary" />
+                    {t.typeReport}
+                  </CardTitle>
+                  <CardDescription>{t.typeReportDesc}</CardDescription>
+                </CardHeader>
+
+                <CardContent>
+                  <SimpleReportTable
+                    emptyText={t.noRows}
+                    headers={[t.invoiceType, t.count, t.tax, t.total, t.due]}
+                    moneyColumns={[2, 3, 4]}
+                    rows={typeRows.map((row) => [
+                      row.label,
+                      formatNumber(row.count),
+                      formatMoney(row.tax),
+                      formatMoney(row.total),
+                      formatMoney(row.due),
+                    ])}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-[1.5rem]">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                    {t.recentInvoices}
+                  </CardTitle>
+                  <CardDescription>{t.recentInvoicesDesc}</CardDescription>
+                </CardHeader>
+
+                <CardContent>
+                  <SimpleReportTable
+                    emptyText={t.noRows}
+                    headers={[t.invoice, t.customer, t.status, t.issueDate, t.total, t.due]}
+                    moneyColumns={[4, 5]}
+                    rows={recentInvoices.map((invoice) => [
+                      getInvoiceNumber(invoice),
+                      getCustomerLabel(invoice, t.notAvailable),
+                      getStatusLabel(invoice.status, locale),
+                      formatDate(getInvoiceDate(invoice), locale),
+                      formatMoney(toNumber(invoice.total_amount)),
+                      formatMoney(toNumber(invoice.due_amount)),
                     ])}
                   />
                 </CardContent>
@@ -1399,14 +1736,18 @@ function TaxLine({
 function SimpleReportTable({
   headers,
   rows,
+  emptyText,
+  moneyColumns = [],
 }: {
   headers: string[];
   rows: string[][];
+  emptyText: string;
+  moneyColumns?: number[];
 }) {
   return (
     <div className="overflow-hidden rounded-3xl border">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm">
+        <table className="w-full min-w-[620px] text-sm">
           <thead className="border-b bg-muted/50 text-xs text-muted-foreground">
             <tr>
               {headers.map((header) => (
@@ -1424,7 +1765,7 @@ function SimpleReportTable({
                   colSpan={headers.length}
                   className="px-4 py-10 text-center text-muted-foreground"
                 >
-                  لا توجد بيانات
+                  {emptyText}
                 </td>
               </tr>
             ) : (
@@ -1435,7 +1776,7 @@ function SimpleReportTable({
                       key={`${cell}-${cellIndex}`}
                       className={`px-4 py-3 ${cellIndex === row.length - 1 ? "font-bold" : ""}`}
                     >
-                      {cellIndex >= 2 ? (
+                      {moneyColumns.includes(cellIndex) ? (
                         <span className="inline-flex items-center gap-1.5">
                           <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
                           {cell}

@@ -41,21 +41,69 @@ import { Input } from "@/components/ui/input";
 
 type AppLocale = "ar" | "en";
 
+type ApiCustomer = {
+  id?: number | null;
+  name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+
+type ApiOrder = {
+  id?: number | null;
+  order_number?: string | null;
+  status?: string | null;
+  payment_status?: string | null;
+  fulfillment_status?: string | null;
+  total_amount?: string | number | null;
+};
+
 type ApiInvoice = {
   id: number;
+  invoice_number?: string | null;
   number?: string | null;
+  invoice_type?: string | null;
   status?: string | null;
+  issue_date?: string | null;
+  due_date?: string | null;
   invoice_date?: string | null;
   customer_id?: number | null;
   order_id?: number | null;
+  customer?: ApiCustomer | null;
+  order?: ApiOrder | null;
   subtotal?: string | number | null;
+  discount_amount?: string | number | null;
+  taxable_amount?: string | number | null;
+  tax_rate?: string | number | null;
   tax_amount?: string | number | null;
   total_amount?: string | number | null;
+  paid_amount?: string | number | null;
+  due_amount?: string | number | null;
+  currency?: string | null;
+  notes?: string | null;
+  internal_notes?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type ApiSummary = {
+  subtotal?: string | number | null;
+  discount_amount?: string | number | null;
+  tax_amount?: string | number | null;
+  total_amount?: string | number | null;
+  paid_amount?: string | number | null;
+  due_amount?: string | number | null;
+  currency?: string | null;
 };
 
 type InvoicesApiResponse = {
   ok?: boolean;
   count?: number;
+  total_count?: number;
+  page?: number;
+  page_size?: number;
+  has_next?: boolean;
+  has_previous?: boolean;
+  summary?: ApiSummary;
   results?: ApiInvoice[];
   message?: string;
 };
@@ -179,6 +227,22 @@ function formatDate(value: string | null | undefined, locale: AppLocale): string
   }).format(date);
 }
 
+function getInvoiceNumber(invoice: ApiInvoice): string {
+  return invoice.invoice_number || invoice.number || `INV-${invoice.id}`;
+}
+
+function getInvoiceDate(invoice: ApiInvoice): string | null | undefined {
+  return invoice.issue_date || invoice.invoice_date || invoice.created_at;
+}
+
+function getCustomerName(invoice: ApiInvoice, fallback: string): string {
+  return invoice.customer?.name || (invoice.customer_id ? `#${invoice.customer_id}` : fallback);
+}
+
+function getOrderNumber(invoice: ApiInvoice, fallback: string): string {
+  return invoice.order?.order_number || (invoice.order_id ? `#${invoice.order_id}` : fallback);
+}
+
 function getStatusLabel(status: string | null | undefined, locale: AppLocale) {
   const key = String(status || "DRAFT").toUpperCase();
   const meta = STATUS_META[key];
@@ -197,8 +261,12 @@ function getStatusClassName(status: string | null | undefined) {
    API HELPER
 ===================================================== */
 
-async function fetchInvoices(): Promise<ApiInvoice[]> {
-  const response = await fetch("/api/invoices/?limit=200", {
+async function fetchInvoices(): Promise<{
+  invoices: ApiInvoice[];
+  summary: ApiSummary | null;
+  totalCount: number;
+}> {
+  const response = await fetch("/api/invoices/?page_size=200", {
     method: "GET",
     credentials: "include",
     headers: {
@@ -213,7 +281,11 @@ async function fetchInvoices(): Promise<ApiInvoice[]> {
     throw new Error(data?.message || "Failed to load invoices.");
   }
 
-  return Array.isArray(data.results) ? data.results : [];
+  return {
+    invoices: Array.isArray(data.results) ? data.results : [],
+    summary: data.summary || null,
+    totalCount: Number(data.total_count || data.count || 0),
+  };
 }
 
 /* =====================================================
@@ -223,6 +295,8 @@ async function fetchInvoices(): Promise<ApiInvoice[]> {
 export default function SystemInvoicesPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [invoices, setInvoices] = useState<ApiInvoice[]>([]);
+  const [apiSummary, setApiSummary] = useState<ApiSummary | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
@@ -260,6 +334,8 @@ export default function SystemInvoicesPage() {
       totalAmount: isAr ? "إجمالي الفواتير" : "Invoices Total",
       taxAmount: isAr ? "إجمالي الضريبة" : "Tax Total",
       draftInvoices: isAr ? "المسودات" : "Drafts",
+      dueAmount: isAr ? "المتبقي" : "Due Amount",
+      paidAmount: isAr ? "المدفوع" : "Paid Amount",
       activity: isAr ? "الحركة المالية" : "Financial Activity",
       activityDesc: isAr
         ? "قراءة سريعة لحالة الفواتير حسب المرحلة."
@@ -286,7 +362,10 @@ export default function SystemInvoicesPage() {
       if (mode === "refresh") setRefreshing(true);
 
       const data = await fetchInvoices();
-      setInvoices(data);
+
+      setInvoices(data.invoices);
+      setApiSummary(data.summary);
+      setTotalCount(data.totalCount);
 
       if (mode === "refresh") {
         toast.success(isAr ? "تم تحديث بيانات الفواتير بنجاح" : "Invoices refreshed successfully");
@@ -335,11 +414,19 @@ export default function SystemInvoicesPage() {
 
     return invoices.filter((invoice) => {
       const haystack = [
-        invoice.number,
+        getInvoiceNumber(invoice),
         invoice.status,
+        invoice.invoice_type,
+        invoice.customer?.name,
+        invoice.customer?.phone,
+        invoice.customer?.email,
         invoice.customer_id,
+        invoice.order?.order_number,
+        invoice.order?.status,
         invoice.order_id,
         invoice.total_amount,
+        invoice.paid_amount,
+        invoice.due_amount,
       ]
         .filter(Boolean)
         .join(" ")
@@ -350,7 +437,7 @@ export default function SystemInvoicesPage() {
   }, [invoices, search]);
 
   const stats = useMemo(() => {
-    const totalInvoices = invoices.length;
+    const totalInvoices = totalCount || invoices.length;
 
     const issuedInvoices = invoices.filter(
       (invoice) => String(invoice.status || "").toUpperCase() === "ISSUED"
@@ -369,15 +456,25 @@ export default function SystemInvoicesPage() {
       return ["DRAFT", "ISSUED", "PARTIALLY_PAID", "OVERDUE"].includes(status);
     }).length;
 
-    const totalAmount = invoices.reduce(
-      (sum, invoice) => sum + toNumber(invoice.total_amount),
-      0
-    );
+    const totalAmount =
+      apiSummary?.total_amount !== undefined && apiSummary?.total_amount !== null
+        ? toNumber(apiSummary.total_amount)
+        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.total_amount), 0);
 
-    const taxAmount = invoices.reduce(
-      (sum, invoice) => sum + toNumber(invoice.tax_amount),
-      0
-    );
+    const taxAmount =
+      apiSummary?.tax_amount !== undefined && apiSummary?.tax_amount !== null
+        ? toNumber(apiSummary.tax_amount)
+        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.tax_amount), 0);
+
+    const paidAmount =
+      apiSummary?.paid_amount !== undefined && apiSummary?.paid_amount !== null
+        ? toNumber(apiSummary.paid_amount)
+        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.paid_amount), 0);
+
+    const dueAmount =
+      apiSummary?.due_amount !== undefined && apiSummary?.due_amount !== null
+        ? toNumber(apiSummary.due_amount)
+        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.due_amount), 0);
 
     return {
       totalInvoices,
@@ -387,8 +484,10 @@ export default function SystemInvoicesPage() {
       openInvoices,
       totalAmount,
       taxAmount,
+      paidAmount,
+      dueAmount,
     };
-  }, [invoices]);
+  }, [apiSummary, invoices, totalCount]);
 
   const latestInvoices = useMemo(() => filteredInvoices.slice(0, 8), [filteredInvoices]);
 
@@ -514,6 +613,7 @@ export default function SystemInvoicesPage() {
                 </CardTitle>
                 <CardDescription>{t.overviewDesc}</CardDescription>
               </CardHeader>
+
               <CardContent className="space-y-4">
                 <div className="flex items-end justify-between gap-4">
                   <div>
@@ -546,6 +646,22 @@ export default function SystemInvoicesPage() {
                     <div className="mt-1 flex items-center gap-1.5">
                       <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
                       <p className="font-semibold">{formatMoney(stats.taxAmount)}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">{t.dueAmount}</p>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
+                      <p className="font-semibold">{formatMoney(stats.dueAmount)}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border bg-muted/30 p-3">
+                    <p className="text-xs text-muted-foreground">{t.paidAmount}</p>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
+                      <p className="font-semibold">{formatMoney(stats.paidAmount)}</p>
                     </div>
                   </div>
 
@@ -647,9 +763,7 @@ export default function SystemInvoicesPage() {
                                   <ReceiptText className="h-4 w-4" />
                                 </div>
                                 <div>
-                                  <p className="font-medium">
-                                    {invoice.number || `INV-${invoice.id}`}
-                                  </p>
+                                  <p className="font-medium">{getInvoiceNumber(invoice)}</p>
                                   <p className="text-xs text-muted-foreground">
                                     ID: {invoice.id}
                                   </p>
@@ -658,11 +772,11 @@ export default function SystemInvoicesPage() {
                             </td>
 
                             <td className="px-4 py-3">
-                              {invoice.customer_id ? `#${invoice.customer_id}` : t.notAvailable}
+                              {getCustomerName(invoice, t.notAvailable)}
                             </td>
 
                             <td className="px-4 py-3">
-                              {invoice.order_id ? `#${invoice.order_id}` : t.notAvailable}
+                              {getOrderNumber(invoice, t.notAvailable)}
                             </td>
 
                             <td className="px-4 py-3">
@@ -677,7 +791,7 @@ export default function SystemInvoicesPage() {
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2 text-muted-foreground">
                                 <CalendarDays className="h-4 w-4" />
-                                {formatDate(invoice.invoice_date, locale)}
+                                {formatDate(getInvoiceDate(invoice), locale)}
                               </div>
                             </td>
 
@@ -784,7 +898,7 @@ export default function SystemInvoicesPage() {
                   href="/system/invoices/create"
                   icon={Plus}
                   title={t.create}
-                  description={isAr ? "إنشاء فاتورة جديدة" : "Create a new invoice"}
+                  description={isAr ? "إنشاء فاتورة جديدة من طلب" : "Create a new invoice from an order"}
                 />
                 <QuickLink
                   href="/system/invoices/reports"

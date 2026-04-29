@@ -2,16 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useMemo, useState, type ComponentType } from "react";
 import {
   ArrowLeft,
-  BadgeCheck,
   BarChart3,
-  CalendarDays,
   CheckCircle2,
   FileText,
   Loader2,
-  Plus,
   ReceiptText,
   RefreshCcw,
   Save,
@@ -48,23 +46,35 @@ type InvoiceType =
   | "CREDIT_NOTE"
   | "DEBIT_NOTE";
 
+type ApiOrderCustomer = {
+  id?: number | null;
+  name?: string | null;
+  full_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+
 type ApiOrder = {
   id: number;
   number?: string | null;
   order_number?: string | null;
   reference?: string | null;
   status?: string | null;
+  payment_status?: string | null;
+  fulfillment_status?: string | null;
   customer_id?: number | null;
   customer_name?: string | null;
-  customer?: {
-    id?: number;
-    name?: string | null;
-    full_name?: string | null;
-  } | null;
+  customer?: ApiOrderCustomer | null;
   total_amount?: string | number | null;
   subtotal?: string | number | null;
   tax_amount?: string | number | null;
   discount_amount?: string | number | null;
+  invoice_id?: number | null;
+  invoice?: {
+    id?: number | null;
+    invoice_number?: string | null;
+    status?: string | null;
+  } | null;
   created_at?: string | null;
   order_date?: string | null;
 };
@@ -72,6 +82,7 @@ type ApiOrder = {
 type OrdersApiResponse = {
   ok?: boolean;
   count?: number;
+  total_count?: number;
   results?: ApiOrder[];
   orders?: ApiOrder[];
   message?: string;
@@ -85,19 +96,34 @@ type CreateInvoicePayload = {
   tax_rate: string;
   notes: string;
   internal_notes: string;
-  auto_issue: boolean;
+  sync_items: boolean;
+  issue_immediately: boolean;
   auto_post_accounting: boolean;
+};
+
+type CreatedInvoice = {
+  id?: number;
+  number?: string;
+  invoice_number?: string;
+  status?: string;
+  order_id?: number;
+  customer_id?: number;
+  total_amount?: string | number | null;
 };
 
 type CreateInvoiceResponse = {
   ok?: boolean;
   message?: string;
-  invoice?: {
-    id?: number;
-    number?: string;
-    invoice_number?: string;
-    status?: string;
-  };
+  created?: boolean;
+  invoice?: CreatedInvoice;
+};
+
+type InvoiceTypeOption = {
+  value: InvoiceType;
+  labelAr: string;
+  labelEn: string;
+  descriptionAr: string;
+  descriptionEn: string;
 };
 
 /* =====================================================
@@ -106,13 +132,7 @@ type CreateInvoiceResponse = {
 
 const SAR_ICON_PATH = "/currency/sar.svg";
 
-const INVOICE_TYPES: Array<{
-  value: InvoiceType;
-  labelAr: string;
-  labelEn: string;
-  descriptionAr: string;
-  descriptionEn: string;
-}> = [
+const INVOICE_TYPES: InvoiceTypeOption[] = [
   {
     value: "SALES",
     labelAr: "فاتورة مبيعات",
@@ -227,18 +247,13 @@ function getCookie(name: string): string {
 
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
+  if (parts.length !== 2) return "";
 
-  return "";
+  return parts.pop()?.split(";").shift() || "";
 }
 
 function resolveOrderNumber(order: ApiOrder): string {
-  return (
-    order.number ||
-    order.order_number ||
-    order.reference ||
-    `ORD-${order.id}`
-  );
+  return order.number || order.order_number || order.reference || `ORD-${order.id}`;
 }
 
 function resolveCustomerName(order: ApiOrder, fallback: string): string {
@@ -254,12 +269,16 @@ function resolveOrderTotal(order: ApiOrder): number {
   return toNumber(order.total_amount);
 }
 
+function orderHasInvoice(order: ApiOrder): boolean {
+  return Boolean(order.invoice_id || order.invoice?.id);
+}
+
 /* =====================================================
    API HELPERS
 ===================================================== */
 
 async function fetchOrders(): Promise<ApiOrder[]> {
-  const response = await fetch("/api/orders/?limit=200", {
+  const response = await fetch("/api/orders/?page_size=200&limit=200", {
     method: "GET",
     credentials: "include",
     headers: {
@@ -308,6 +327,8 @@ async function createInvoice(payload: CreateInvoicePayload): Promise<CreateInvoi
 ===================================================== */
 
 export default function SystemInvoiceCreatePage() {
+  const router = useRouter();
+
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [orders, setOrders] = useState<ApiOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
@@ -323,7 +344,8 @@ export default function SystemInvoiceCreatePage() {
   const [taxRate, setTaxRate] = useState("15.00");
   const [notes, setNotes] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
-  const [autoIssue, setAutoIssue] = useState(true);
+  const [syncItems, setSyncItems] = useState(true);
+  const [issueImmediately, setIssueImmediately] = useState(true);
   const [autoPostAccounting, setAutoPostAccounting] = useState(true);
 
   const isAr = locale === "ar";
@@ -364,7 +386,8 @@ export default function SystemInvoiceCreatePage() {
       internalNotesPlaceholder: isAr
         ? "ملاحظات داخلية لا تظهر للعميل..."
         : "Internal notes not shown to the customer...",
-      autoIssue: isAr ? "إصدار الفاتورة مباشرة" : "Issue invoice immediately",
+      syncItems: isAr ? "مزامنة عناصر الطلب" : "Sync order items",
+      issueImmediately: isAr ? "إصدار الفاتورة مباشرة" : "Issue invoice immediately",
       autoPostAccounting: isAr
         ? "ترحيل محاسبي تلقائي"
         : "Automatic accounting posting",
@@ -389,9 +412,8 @@ export default function SystemInvoiceCreatePage() {
         : "Due date must be after or equal to issue date",
       taxRateError: isAr ? "نسبة الضريبة غير صحيحة" : "Invalid tax rate",
       createSuccess: isAr ? "تم إنشاء الفاتورة بنجاح" : "Invoice created successfully",
-      createApiMissing: isAr
-        ? "واجهة إنشاء الفاتورة غير مفعّلة في الباكند حاليًا. الصفحة جاهزة وتحتاج إضافة API الإنشاء."
-        : "Invoice create API is not active in backend yet. The page is ready and needs the create API.",
+      existingInvoice: isAr ? "له فاتورة مسبقًا" : "Already invoiced",
+      createError: isAr ? "تعذر إنشاء الفاتورة" : "Failed to create invoice",
       sar: isAr ? "ريال" : "SAR",
     }),
     [isAr]
@@ -405,17 +427,23 @@ export default function SystemInvoiceCreatePage() {
   const filteredOrders = useMemo(() => {
     const keyword = search.trim().toLowerCase();
 
-    if (!keyword) return orders;
+    const source = orders.filter((order) => !orderHasInvoice(order));
 
-    return orders.filter((order) => {
+    if (!keyword) return source;
+
+    return source.filter((order) => {
       const haystack = [
         order.id,
         resolveOrderNumber(order),
         order.status,
+        order.payment_status,
+        order.fulfillment_status,
         order.customer_id,
         order.customer_name,
         order.customer?.name,
         order.customer?.full_name,
+        order.customer?.phone,
+        order.customer?.email,
         order.total_amount,
       ]
         .filter(Boolean)
@@ -543,7 +571,8 @@ export default function SystemInvoiceCreatePage() {
         tax_rate: taxRate || "15.00",
         notes,
         internal_notes: internalNotes,
-        auto_issue: autoIssue,
+        sync_items: syncItems,
+        issue_immediately: issueImmediately,
         auto_post_accounting: autoPostAccounting,
       };
 
@@ -553,13 +582,13 @@ export default function SystemInvoiceCreatePage() {
 
       const invoiceId = result.invoice?.id;
       if (invoiceId) {
-        window.location.href = `/system/invoices/${invoiceId}`;
+        router.push(`/system/invoices/${invoiceId}`);
       } else {
-        window.location.href = "/system/invoices/list";
+        router.push("/system/invoices/list");
       }
     } catch (error) {
       console.error(error);
-      toast.error(t.createApiMissing);
+      toast.error(error instanceof Error ? error.message : t.createError);
     } finally {
       setSaving(false);
     }
@@ -568,9 +597,6 @@ export default function SystemInvoiceCreatePage() {
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        {/* =====================================================
-            HERO
-        ===================================================== */}
         <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm">
           <div className="pointer-events-none absolute -top-24 end-12 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
@@ -625,9 +651,6 @@ export default function SystemInvoiceCreatePage() {
         </section>
 
         <form onSubmit={handleSubmit} className="grid gap-6 xl:grid-cols-[1.35fr_0.85fr]">
-          {/* =====================================================
-              LEFT SIDE
-          ===================================================== */}
           <div className="space-y-6">
             <Card className="rounded-[1.5rem]">
               <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
@@ -748,37 +771,60 @@ export default function SystemInvoiceCreatePage() {
                 <CardDescription>{t.invoiceDataDesc}</CardDescription>
               </CardHeader>
 
-              <CardContent className="grid gap-5">
-                <div className="grid gap-3">
-                  <Label htmlFor="invoice_type">{t.invoiceType}</Label>
-                  <select
-                    id="invoice_type"
-                    value={invoiceType}
-                    onChange={(event) => setInvoiceType(event.target.value as InvoiceType)}
-                    className="h-11 rounded-2xl border border-input bg-background px-3 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                  >
-                    {INVOICE_TYPES.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {isAr ? item.labelAr : item.labelEn}
-                      </option>
-                    ))}
-                  </select>
+              <CardContent className="space-y-5">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {INVOICE_TYPES.map((item) => {
+                    const active = invoiceType === item.value;
 
-                  <div className="rounded-3xl border bg-muted/20 p-4">
-                    <div className="flex items-start gap-3">
-                      <BadgeCheck className="mt-0.5 h-5 w-5 text-primary" />
-                      <div>
-                        <p className="text-sm font-semibold">
-                          {isAr ? selectedInvoiceType.labelAr : selectedInvoiceType.labelEn}
-                        </p>
-                        <p className="mt-1 text-xs leading-6 text-muted-foreground">
-                          {isAr
-                            ? selectedInvoiceType.descriptionAr
-                            : selectedInvoiceType.descriptionEn}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => setInvoiceType(item.value)}
+                        className={`rounded-3xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-sm ${
+                          active
+                            ? "border-primary bg-primary/5"
+                            : "bg-card hover:bg-muted/30"
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div
+                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
+                              active
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-primary/10 text-primary"
+                            }`}
+                          >
+                            {active ? (
+                              <CheckCircle2 className="h-5 w-5" />
+                            ) : (
+                              <ReceiptText className="h-5 w-5" />
+                            )}
+                          </div>
+
+                          <div>
+                            <p className="text-sm font-semibold">
+                              {isAr ? item.labelAr : item.labelEn}
+                            </p>
+                            <p className="mt-1 text-xs leading-6 text-muted-foreground">
+                              {isAr ? item.descriptionAr : item.descriptionEn}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="rounded-3xl border bg-muted/20 p-4">
+                  <p className="text-sm font-semibold">
+                    {isAr ? selectedInvoiceType.labelAr : selectedInvoiceType.labelEn}
+                  </p>
+                  <p className="mt-1 text-xs leading-6 text-muted-foreground">
+                    {isAr
+                      ? selectedInvoiceType.descriptionAr
+                      : selectedInvoiceType.descriptionEn}
+                  </p>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-3">
@@ -841,11 +887,23 @@ export default function SystemInvoiceCreatePage() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-3">
                   <ToggleCard
-                    checked={autoIssue}
-                    onChange={setAutoIssue}
-                    title={t.autoIssue}
+                    checked={syncItems}
+                    onChange={setSyncItems}
+                    title={t.syncItems}
+                    description={
+                      isAr
+                        ? "يتم إنشاء عناصر الفاتورة من عناصر الطلب تلقائيًا."
+                        : "Creates invoice items from order items automatically."
+                    }
+                    icon={ShoppingCart}
+                  />
+
+                  <ToggleCard
+                    checked={issueImmediately}
+                    onChange={setIssueImmediately}
+                    title={t.issueImmediately}
                     description={
                       isAr
                         ? "يتم تحويل الفاتورة من مسودة إلى مصدرة مباشرة."
@@ -870,9 +928,6 @@ export default function SystemInvoiceCreatePage() {
             </Card>
           </div>
 
-          {/* =====================================================
-              RIGHT SIDE
-          ===================================================== */}
           <aside className="space-y-6">
             <Card className="sticky top-6 rounded-[1.5rem]">
               <CardHeader>
@@ -993,16 +1048,14 @@ function ToggleCard({
   onChange: (value: boolean) => void;
   title: string;
   description: string;
-  icon: typeof FileText;
+  icon: ComponentType<{ className?: string }>;
 }) {
   return (
     <button
       type="button"
       onClick={() => onChange(!checked)}
       className={`rounded-3xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-sm ${
-        checked
-          ? "border-primary bg-primary/5"
-          : "bg-card hover:bg-muted/30"
+        checked ? "border-primary bg-primary/5" : "bg-card hover:bg-muted/30"
       }`}
     >
       <div className="flex items-start gap-3">

@@ -1,11 +1,10 @@
 # ============================================================
-# 📂 api/invoices/issue.py
-# 🧠 Issue Invoice API — Primey Care
+# 📂 api/invoices/cancel.py
+# 🧠 Cancel Invoice API — Primey Care
 # ------------------------------------------------------------
-# ✅ إصدار فاتورة
-# ✅ ربط مع services.issue_invoice
-# ✅ رسائل أخطاء واضحة
-# ✅ لا يحول الفاتورة إلى PAID أثناء الإصدار
+# ✅ إلغاء آمن للفاتورة
+# ✅ لا يحذف الفاتورة
+# ✅ يمنع إلغاء الفواتير المدفوعة
 # ============================================================
 
 from __future__ import annotations
@@ -21,10 +20,9 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 
 from invoices.services import (
-    InvoicePostingError,
     InvoiceServiceError,
     InvoiceValidationError,
-    issue_invoice,
+    cancel_invoice,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +39,16 @@ def _json_success(data: dict[str, Any], status: int = 200) -> JsonResponse:
     payload = {"ok": True}
     payload.update(data)
     return JsonResponse(payload, status=status)
+
+
+def _parse_json_body(request) -> dict[str, Any]:
+    if not request.body:
+        return {}
+
+    try:
+        return json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return {}
 
 
 def _resolve_invoice_model():
@@ -62,29 +70,6 @@ def _extract_company_id(request) -> int | None:
         return None
 
 
-def _parse_json_body(request) -> dict[str, Any]:
-    if not request.body:
-        return {}
-
-    try:
-        return json.loads(request.body.decode("utf-8"))
-    except json.JSONDecodeError:
-        return {}
-
-
-def _parse_bool(value: Any, default: bool = True) -> bool:
-    if value is None:
-        return default
-
-    if isinstance(value, bool):
-        return value
-
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-    return bool(value)
-
-
 def _decimal_to_str(value) -> str:
     try:
         return str(Decimal(str(value or "0.00")).quantize(Decimal("0.01")))
@@ -98,15 +83,8 @@ def _serialize_invoice(invoice) -> dict[str, Any]:
         "invoice_number": getattr(invoice, "invoice_number", None) or f"INV-{invoice.pk}",
         "number": getattr(invoice, "invoice_number", None) or f"INV-{invoice.pk}",
         "status": getattr(invoice, "status", None),
-        "issue_date": (
-            getattr(invoice, "issue_date", None).isoformat()
-            if getattr(invoice, "issue_date", None)
-            else None
-        ),
         "order_id": getattr(invoice, "order_id", None),
         "customer_id": getattr(invoice, "customer_id", None),
-        "subtotal": _decimal_to_str(getattr(invoice, "subtotal", None)),
-        "tax_amount": _decimal_to_str(getattr(invoice, "tax_amount", None)),
         "total_amount": _decimal_to_str(getattr(invoice, "total_amount", None)),
         "paid_amount": _decimal_to_str(getattr(invoice, "paid_amount", None)),
         "due_amount": _decimal_to_str(getattr(invoice, "due_amount", None)),
@@ -116,7 +94,7 @@ def _serialize_invoice(invoice) -> dict[str, Any]:
 
 @login_required
 @require_POST
-def issue_invoice_api(request, invoice_id: int):
+def cancel_invoice_api(request, invoice_id: int):
     try:
         Invoice = _resolve_invoice_model()
         company_id = _extract_company_id(request)
@@ -132,28 +110,23 @@ def issue_invoice_api(request, invoice_id: int):
         if not invoice:
             return _json_error("الفاتورة غير موجودة.", status=404)
 
-        auto_post_accounting = _parse_bool(body.get("auto_post_accounting"), default=True)
+        reason = str(body.get("reason") or "").strip()
 
-        result = issue_invoice(
+        result = cancel_invoice(
             invoice=invoice,
             actor=request.user,
-            auto_post_accounting=auto_post_accounting,
+            reason=reason,
         )
 
         result.invoice.refresh_from_db()
 
         return _json_success(
             {
-                "message": "تم إصدار الفاتورة بنجاح.",
+                "message": result.message,
                 "invoice": _serialize_invoice(result.invoice),
                 "transition": {
                     "status_before": result.status_before,
                     "status_after": result.status_after,
-                },
-                "accounting": {
-                    "requested": result.accounting_post_requested,
-                    "dispatched": result.accounting_post_dispatched,
-                    "message": result.accounting_post_message,
                 },
             }
         )
@@ -161,12 +134,9 @@ def issue_invoice_api(request, invoice_id: int):
     except InvoiceValidationError as exc:
         return _json_error(str(exc), status=400)
 
-    except InvoicePostingError as exc:
-        return _json_error(str(exc), status=409)
-
     except InvoiceServiceError as exc:
         return _json_error(str(exc), status=400)
 
     except Exception as exc:
-        logger.exception("Failed to issue invoice %s: %s", invoice_id, exc)
-        return _json_error("تعذر إصدار الفاتورة.", status=500)
+        logger.exception("Failed to cancel invoice %s: %s", invoice_id, exc)
+        return _json_error("تعذر إلغاء الفاتورة.", status=500)
