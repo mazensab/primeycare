@@ -5,23 +5,21 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
-  Banknote,
   BarChart3,
   CalendarDays,
-  CheckCircle2,
   CreditCard,
   Download,
   FileText,
-  FilterIcon,
   Loader2,
   PieChart,
   Printer,
   ReceiptText,
   RefreshCcw,
+  Search,
   ShieldCheck,
+  Sparkles,
   TrendingUp,
   Wallet,
-  XCircle,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -43,46 +41,53 @@ import { Input } from "@/components/ui/input";
 
 type AppLocale = "ar" | "en";
 
-type PaymentStatus =
-  | "ALL"
-  | "PENDING"
-  | "PROCESSING"
-  | "PAID"
-  | "PARTIALLY_PAID"
-  | "FAILED"
-  | "CANCELLED"
-  | "REFUNDED"
-  | "PARTIALLY_REFUNDED";
-
-type PaymentMethod =
-  | "ALL"
-  | "CASH"
-  | "BANK_TRANSFER"
-  | "CREDIT_CARD"
-  | "DEBIT_CARD"
-  | "WALLET"
-  | "APPLE_PAY"
-  | "STC_PAY"
-  | "TAMARA"
-  | "TABBY"
-  | "OTHER";
-
-type ApiPayment = {
-  id: number;
-  reference?: string | null;
+type ReportGroupRow = {
   status?: string | null;
   payment_method?: string | null;
-  invoice_id?: number | null;
-  customer_id?: number | null;
+  provider?: string | null;
+  count?: number | null;
   amount?: string | number | null;
-  payment_date?: string | null;
+  paid_amount?: string | number | null;
+  refunded_amount?: string | number | null;
 };
 
-type PaymentsApiResponse = {
+type LatestPayment = {
+  id: number;
+  payment_number?: string | null;
+  status?: string | null;
+  payment_method?: string | null;
+  provider?: string | null;
+  amount?: string | number | null;
+  paid_amount?: string | number | null;
+  refunded_amount?: string | number | null;
+  currency?: string | null;
+  invoice_id?: number | null;
+  order_id?: number | null;
+  customer_id?: number | null;
+  customer_name?: string | null;
+  created_at?: string | null;
+  paid_at?: string | null;
+};
+
+type PaymentsReportSummary = {
+  total_count?: number | null;
+  total_amount?: string | number | null;
+  total_paid_amount?: string | number | null;
+  total_refunded_amount?: string | number | null;
+  posted_treasury_count?: number | null;
+  posted_accounting_count?: number | null;
+  pending_treasury_count?: number | null;
+  pending_accounting_count?: number | null;
+};
+
+type PaymentsReportsResponse = {
   ok?: boolean;
-  count?: number;
-  results?: ApiPayment[];
   message?: string;
+  summary?: PaymentsReportSummary;
+  by_status?: ReportGroupRow[];
+  by_method?: ReportGroupRow[];
+  by_provider?: ReportGroupRow[];
+  latest?: LatestPayment[];
 };
 
 type StatusMeta = {
@@ -96,32 +101,9 @@ type MethodMeta = {
   labelEn: string;
 };
 
-type StatusReportRow = {
-  status: string;
-  label: string;
-  count: number;
-  total: number;
-  percentage: number;
-};
-
-type MethodReportRow = {
-  method: string;
-  label: string;
-  count: number;
-  total: number;
-  percentage: number;
-};
-
-type CustomerReportRow = {
-  customerKey: string;
-  count: number;
-  total: number;
-};
-
-type MonthlyReportRow = {
-  monthKey: string;
-  count: number;
-  total: number;
+type ProviderMeta = {
+  labelAr: string;
+  labelEn: string;
 };
 
 /* =====================================================
@@ -191,6 +173,17 @@ const METHOD_META: Record<string, MethodMeta> = {
   STC_PAY: { labelAr: "STC Pay", labelEn: "STC Pay" },
   TAMARA: { labelAr: "تمارا", labelEn: "Tamara" },
   TABBY: { labelAr: "تابي", labelEn: "Tabby" },
+  GATEWAY: { labelAr: "بوابة دفع", labelEn: "Gateway" },
+  OTHER: { labelAr: "أخرى", labelEn: "Other" },
+};
+
+const PROVIDER_META: Record<string, ProviderMeta> = {
+  INTERNAL: { labelAr: "داخلي", labelEn: "Internal" },
+  TAP: { labelAr: "Tap", labelEn: "Tap" },
+  TAMARA: { labelAr: "Tamara", labelEn: "Tamara" },
+  TABBY: { labelAr: "Tabby", labelEn: "Tabby" },
+  MANUAL: { labelAr: "يدوي", labelEn: "Manual" },
+  BANK: { labelAr: "بنك", labelEn: "Bank" },
   OTHER: { labelAr: "أخرى", labelEn: "Other" },
 };
 
@@ -236,11 +229,24 @@ function formatNumber(value: number): string {
   }).format(value || 0);
 }
 
-function formatMoney(value: number): string {
+function formatMoney(value: string | number | null | undefined): string {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value || 0);
+  }).format(toNumber(value));
+}
+
+function formatDate(value: string | null | undefined, locale: AppLocale): string {
+  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return locale === "ar" ? "غير محدد" : "Not set";
+
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 function getStatusLabel(status: string | null | undefined, locale: AppLocale): string {
@@ -266,13 +272,17 @@ function getMethodLabel(method: string | null | undefined, locale: AppLocale): s
   return locale === "ar" ? meta.labelAr : meta.labelEn;
 }
 
-function getMonthKey(value: string | null | undefined): string {
-  if (!value) return "No Date";
+function getProviderLabel(provider: string | null | undefined, locale: AppLocale): string {
+  const key = String(provider || "INTERNAL").toUpperCase();
+  const meta = PROVIDER_META[key];
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "No Date";
+  if (!meta) return provider || (locale === "ar" ? "غير محدد" : "Unknown");
 
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  return locale === "ar" ? meta.labelAr : meta.labelEn;
+}
+
+function getLatestPaymentReference(payment: LatestPayment): string {
+  return payment.payment_number || `PAY-${payment.id}`;
 }
 
 function escapeHtml(value: unknown): string {
@@ -284,27 +294,27 @@ function escapeHtml(value: unknown): string {
     .replaceAll("'", "&#039;");
 }
 
-function isPaidStatus(status: string | null | undefined): boolean {
-  const key = String(status || "").toUpperCase();
-  return key === "PAID" || key === "PARTIALLY_PAID";
-}
-
-function isPendingStatus(status: string | null | undefined): boolean {
-  const key = String(status || "").toUpperCase();
-  return key === "PENDING" || key === "PROCESSING";
-}
-
-function isRefundedStatus(status: string | null | undefined): boolean {
-  const key = String(status || "").toUpperCase();
-  return key === "REFUNDED" || key === "PARTIALLY_REFUNDED";
-}
-
 /* =====================================================
-   API HELPER
+   API
 ===================================================== */
 
-async function fetchPayments(): Promise<ApiPayment[]> {
-  const response = await fetch("/api/payments/?limit=200", {
+async function fetchPaymentReports(params: {
+  dateFrom?: string;
+  dateTo?: string;
+  status?: string;
+  search?: string;
+}): Promise<PaymentsReportsResponse> {
+  const searchParams = new URLSearchParams();
+
+  if (params.dateFrom) searchParams.set("date_from", params.dateFrom);
+  if (params.dateTo) searchParams.set("date_to", params.dateTo);
+  if (params.status && params.status !== "ALL") searchParams.set("status", params.status);
+
+  const url = `/api/payments/reports/${
+    searchParams.toString() ? `?${searchParams.toString()}` : ""
+  }`;
+
+  const response = await fetch(url, {
     method: "GET",
     credentials: "include",
     headers: {
@@ -313,13 +323,13 @@ async function fetchPayments(): Promise<ApiPayment[]> {
     cache: "no-store",
   });
 
-  const data = (await response.json().catch(() => null)) as PaymentsApiResponse | null;
+  const data = (await response.json().catch(() => null)) as PaymentsReportsResponse | null;
 
   if (!response.ok || !data?.ok) {
     throw new Error(data?.message || "Failed to load payment reports.");
   }
 
-  return Array.isArray(data.results) ? data.results : [];
+  return data;
 }
 
 /* =====================================================
@@ -328,12 +338,12 @@ async function fetchPayments(): Promise<ApiPayment[]> {
 
 export default function SystemPaymentsReportsPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [payments, setPayments] = useState<ApiPayment[]>([]);
+  const [data, setData] = useState<PaymentsReportsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [statusFilter, setStatusFilter] = useState<PaymentStatus>("ALL");
-  const [methodFilter, setMethodFilter] = useState<PaymentMethod>("ALL");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -344,77 +354,142 @@ export default function SystemPaymentsReportsPage() {
       badge: isAr ? "تقارير المدفوعات" : "Payments Reports",
       title: isAr ? "تقارير المدفوعات" : "Payments Reports",
       subtitle: isAr
-        ? "تحليل المدفوعات حسب الحالة، طريقة الدفع، الفترة، العملاء، وإجماليات التحصيل."
-        : "Analyze payments by status, method, period, customers, and collection totals.",
+        ? "تحليل المدفوعات حسب الحالة، طريقة الدفع، المزود، وحالة الربط مع الخزينة والمحاسبة."
+        : "Analyze payments by status, method, provider, and posting status to treasury and accounting.",
       dashboard: isAr ? "لوحة المدفوعات" : "Payments Dashboard",
       list: isAr ? "قائمة المدفوعات" : "Payments List",
       create: isAr ? "تسجيل دفعة" : "Create Payment",
       refresh: isAr ? "تحديث" : "Refresh",
+      exportExcel: isAr ? "تصدير Excel" : "Export Excel",
+      print: isAr ? "طباعة Web PDF" : "Print Web PDF",
       filters: isAr ? "فلاتر التقرير" : "Report Filters",
-      filtersDesc: isAr
-        ? "اختر الحالة والطريقة والفترة لتحديث مؤشرات التقرير."
-        : "Choose status, method, and date range to update report indicators.",
+      searchPlaceholder: isAr
+        ? "ابحث في آخر المدفوعات برقم الدفعة أو العميل أو الفاتورة..."
+        : "Search latest payments by reference, customer, or invoice...",
       status: isAr ? "الحالة" : "Status",
-      method: isAr ? "طريقة الدفع" : "Method",
       allStatuses: isAr ? "كل الحالات" : "All Statuses",
-      allMethods: isAr ? "كل الطرق" : "All Methods",
       from: isAr ? "من تاريخ" : "From",
       to: isAr ? "إلى تاريخ" : "To",
       clear: isAr ? "مسح الفلاتر" : "Clear Filters",
-      exportExcel: isAr ? "تصدير Excel" : "Export Excel",
-      print: isAr ? "طباعة Web PDF" : "Print Web PDF",
       totalPayments: isAr ? "إجمالي المدفوعات" : "Total Payments",
-      collectedAmount: isAr ? "إجمالي التحصيل" : "Collected Total",
-      pendingAmount: isAr ? "المبالغ المعلقة" : "Pending Amount",
-      failedAmount: isAr ? "المبالغ الفاشلة" : "Failed Amount",
-      refundedAmount: isAr ? "المبالغ المستردة" : "Refunded Amount",
-      averagePayment: isAr ? "متوسط الدفعة" : "Average Payment",
-      paidPayments: isAr ? "مدفوعات مؤكدة" : "Confirmed Payments",
-      pendingPayments: isAr ? "مدفوعات معلقة" : "Pending Payments",
-      failedPayments: isAr ? "مدفوعات فاشلة" : "Failed Payments",
-      refundedPayments: isAr ? "مدفوعات مستردة" : "Refunded Payments",
-      statusReport: isAr ? "تقرير الحالات" : "Status Report",
-      statusReportDesc: isAr
-        ? "توزيع المدفوعات حسب الحالة مع الإجماليات."
-        : "Payment distribution by status with totals.",
-      methodReport: isAr ? "تقرير طرق الدفع" : "Payment Methods Report",
-      methodReportDesc: isAr
-        ? "توزيع التحصيل حسب طريقة الدفع."
-        : "Collection distribution by payment method.",
-      customerReport: isAr ? "ملخص حسب العميل" : "Customer Summary",
-      customerReportDesc: isAr
-        ? "أعلى العملاء حسب قيمة المدفوعات."
-        : "Top customers by payment value.",
-      monthlyReport: isAr ? "ملخص شهري" : "Monthly Summary",
-      monthlyReportDesc: isAr
-        ? "تجميع المدفوعات حسب الشهر."
-        : "Payments grouped by month.",
-      count: isAr ? "العدد" : "Count",
-      total: isAr ? "الإجمالي" : "Total",
-      percentage: isAr ? "النسبة" : "Percentage",
+      totalAmount: isAr ? "إجمالي العمليات" : "Total Amount",
+      paidAmount: isAr ? "إجمالي المدفوع" : "Paid Amount",
+      refundedAmount: isAr ? "إجمالي المسترد" : "Refunded Amount",
+      treasuryPosted: isAr ? "مرحلة للخزينة" : "Treasury Posted",
+      accountingPosted: isAr ? "مرحلة محاسبيًا" : "Accounting Posted",
+      treasuryPending: isAr ? "غير مرحلة للخزينة" : "Treasury Pending",
+      accountingPending: isAr ? "غير مرحلة محاسبيًا" : "Accounting Pending",
+      byStatus: isAr ? "حسب الحالة" : "By Status",
+      byStatusDesc: isAr
+        ? "توزيع المدفوعات حسب الحالة التشغيلية."
+        : "Payments distribution by operational status.",
+      byMethod: isAr ? "حسب طريقة الدفع" : "By Payment Method",
+      byMethodDesc: isAr
+        ? "تحليل المدفوعات حسب طريقة التحصيل."
+        : "Payments analysis by collection method.",
+      byProvider: isAr ? "حسب مزود الدفع" : "By Provider",
+      byProviderDesc: isAr
+        ? "تحليل المدفوعات حسب مزود الدفع."
+        : "Payments analysis by payment provider.",
+      latest: isAr ? "آخر المدفوعات" : "Latest Payments",
+      latestDesc: isAr
+        ? "آخر العمليات الظاهرة في التقرير."
+        : "Latest transactions included in this report.",
+      payment: isAr ? "الدفعة" : "Payment",
       customer: isAr ? "العميل" : "Customer",
-      month: isAr ? "الشهر" : "Month",
-      loading: isAr ? "جاري تحميل تقارير المدفوعات..." : "Loading payment reports...",
-      empty: isAr ? "لا توجد بيانات مطابقة للتقرير الحالي." : "No data matches current report.",
-      loadError: isAr ? "تعذر تحميل تقارير المدفوعات" : "Failed to load payment reports",
-      refreshSuccess: isAr ? "تم تحديث تقارير المدفوعات بنجاح" : "Payment reports refreshed successfully",
-      exportSuccess: isAr ? "تم تصدير تقرير المدفوعات بنجاح" : "Payment report exported successfully",
-      noDataExport: isAr ? "لا توجد بيانات للتصدير" : "No data to export",
-      noDataPrint: isAr ? "لا توجد بيانات للطباعة" : "No data to print",
+      invoice: isAr ? "الفاتورة" : "Invoice",
+      method: isAr ? "الطريقة" : "Method",
+      provider: isAr ? "المزود" : "Provider",
+      amount: isAr ? "المبلغ" : "Amount",
+      date: isAr ? "التاريخ" : "Date",
+      count: isAr ? "العدد" : "Count",
+      paid: isAr ? "مدفوع" : "Paid",
+      refunded: isAr ? "مسترد" : "Refunded",
+      empty: isAr ? "لا توجد بيانات مطابقة حاليًا." : "No matching data found.",
+      loading: isAr ? "جاري تحميل تقرير المدفوعات..." : "Loading payments report...",
+      loadError: isAr ? "تعذر تحميل تقرير المدفوعات" : "Failed to load payments report",
+      refreshSuccess: isAr ? "تم تحديث التقرير بنجاح" : "Report refreshed successfully",
+      exportSuccess: isAr ? "تم تصدير التقرير بنجاح" : "Report exported successfully",
       printTitle: isAr ? "تقرير المدفوعات" : "Payments Report",
-      noData: isAr ? "لا توجد بيانات" : "No data",
+      generatedAt: isAr ? "تاريخ الإنشاء" : "Generated At",
+      notAvailable: isAr ? "غير متاح" : "N/A",
       sar: isAr ? "ريال" : "SAR",
     }),
     [isAr]
   );
 
-  const loadPayments = async (mode: "initial" | "refresh" = "initial") => {
+  const summary = data?.summary || {};
+
+  const latestPayments = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    const rows = data?.latest || [];
+
+    if (!keyword) return rows;
+
+    return rows.filter((payment) => {
+      const haystack = [
+        payment.id,
+        payment.payment_number,
+        payment.status,
+        getStatusLabel(payment.status, "ar"),
+        getStatusLabel(payment.status, "en"),
+        payment.payment_method,
+        getMethodLabel(payment.payment_method, "ar"),
+        getMethodLabel(payment.payment_method, "en"),
+        payment.provider,
+        payment.customer_id,
+        payment.customer_name,
+        payment.invoice_id,
+        payment.order_id,
+        payment.amount,
+        payment.paid_amount,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(keyword);
+    });
+  }, [data?.latest, search]);
+
+  const paidRate = useMemo(() => {
+    const total = Number(summary.total_count || 0);
+    const statusRows = data?.by_status || [];
+    const paidRow = statusRows.find((row) => String(row.status || "").toUpperCase() === "PAID");
+    const paidCount = Number(paidRow?.count || 0);
+
+    if (!total) return 0;
+    return Math.round((paidCount / total) * 100);
+  }, [data?.by_status, summary.total_count]);
+
+  const treasuryRate = useMemo(() => {
+    const total = Number(summary.total_count || 0);
+    const posted = Number(summary.posted_treasury_count || 0);
+
+    if (!total) return 0;
+    return Math.round((posted / total) * 100);
+  }, [summary.posted_treasury_count, summary.total_count]);
+
+  const accountingRate = useMemo(() => {
+    const total = Number(summary.total_count || 0);
+    const posted = Number(summary.posted_accounting_count || 0);
+
+    if (!total) return 0;
+    return Math.round((posted / total) * 100);
+  }, [summary.posted_accounting_count, summary.total_count]);
+
+  const loadReports = async (mode: "initial" | "refresh" = "initial") => {
     try {
       if (mode === "initial") setLoading(true);
       if (mode === "refresh") setRefreshing(true);
 
-      const data = await fetchPayments();
-      setPayments(data);
+      const report = await fetchPaymentReports({
+        dateFrom,
+        dateTo,
+        status: statusFilter,
+      });
+
+      setData(report);
 
       if (mode === "refresh") {
         toast.success(t.refreshSuccess);
@@ -452,423 +527,112 @@ export default function SystemPaymentsReportsPage() {
   }, []);
 
   useEffect(() => {
-    loadPayments("initial");
+    loadReports("initial");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filteredPayments = useMemo(() => {
-    return payments.filter((payment) => {
-      const status = String(payment.status || "PENDING").toUpperCase();
-      const method = String(payment.payment_method || "OTHER").toUpperCase();
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      loadReports("refresh");
+    }, 350);
 
-      if (statusFilter !== "ALL" && status !== statusFilter) return false;
-      if (methodFilter !== "ALL" && method !== methodFilter) return false;
-
-      if (dateFrom || dateTo) {
-        const paymentDate = payment.payment_date ? new Date(payment.payment_date) : null;
-
-        if (!paymentDate || Number.isNaN(paymentDate.getTime())) return false;
-
-        if (dateFrom) {
-          const fromDate = new Date(dateFrom);
-          if (paymentDate < fromDate) return false;
-        }
-
-        if (dateTo) {
-          const toDate = new Date(dateTo);
-          toDate.setHours(23, 59, 59, 999);
-          if (paymentDate > toDate) return false;
-        }
-      }
-
-      return true;
-    });
-  }, [dateFrom, dateTo, methodFilter, payments, statusFilter]);
-
-  const stats = useMemo(() => {
-    const totalPayments = filteredPayments.length;
-
-    const collectedAmount = filteredPayments.reduce((sum, payment) => {
-      if (isPaidStatus(payment.status)) return sum + toNumber(payment.amount);
-      return sum;
-    }, 0);
-
-    const pendingAmount = filteredPayments.reduce((sum, payment) => {
-      if (isPendingStatus(payment.status)) return sum + toNumber(payment.amount);
-      return sum;
-    }, 0);
-
-    const failedAmount = filteredPayments.reduce((sum, payment) => {
-      if (String(payment.status || "").toUpperCase() === "FAILED") {
-        return sum + toNumber(payment.amount);
-      }
-
-      return sum;
-    }, 0);
-
-    const refundedAmount = filteredPayments.reduce((sum, payment) => {
-      if (isRefundedStatus(payment.status)) return sum + toNumber(payment.amount);
-      return sum;
-    }, 0);
-
-    const paidPayments = filteredPayments.filter((payment) =>
-      isPaidStatus(payment.status)
-    ).length;
-
-    const pendingPayments = filteredPayments.filter((payment) =>
-      isPendingStatus(payment.status)
-    ).length;
-
-    const failedPayments = filteredPayments.filter(
-      (payment) => String(payment.status || "").toUpperCase() === "FAILED"
-    ).length;
-
-    const refundedPayments = filteredPayments.filter((payment) =>
-      isRefundedStatus(payment.status)
-    ).length;
-
-    return {
-      totalPayments,
-      collectedAmount,
-      pendingAmount,
-      failedAmount,
-      refundedAmount,
-      paidPayments,
-      pendingPayments,
-      failedPayments,
-      refundedPayments,
-      averagePayment: paidPayments > 0 ? collectedAmount / paidPayments : 0,
-    };
-  }, [filteredPayments]);
-
-  const statusRows = useMemo<StatusReportRow[]>(() => {
-    const totalCount = Math.max(filteredPayments.length, 1);
-
-    return Object.keys(STATUS_META)
-      .map((status) => {
-        const rows = filteredPayments.filter(
-          (payment) => String(payment.status || "PENDING").toUpperCase() === status
-        );
-
-        const total = rows.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
-
-        return {
-          status,
-          label: getStatusLabel(status, locale),
-          count: rows.length,
-          total,
-          percentage: Math.round((rows.length / totalCount) * 100),
-        };
-      })
-      .filter((row) => row.count > 0);
-  }, [filteredPayments, locale]);
-
-  const methodRows = useMemo<MethodReportRow[]>(() => {
-    const totalAmount = Math.max(
-      filteredPayments.reduce((sum, payment) => sum + toNumber(payment.amount), 0),
-      1
-    );
-
-    return Object.keys(METHOD_META)
-      .map((method) => {
-        const rows = filteredPayments.filter(
-          (payment) => String(payment.payment_method || "OTHER").toUpperCase() === method
-        );
-
-        const total = rows.reduce((sum, payment) => sum + toNumber(payment.amount), 0);
-
-        return {
-          method,
-          label: getMethodLabel(method, locale),
-          count: rows.length,
-          total,
-          percentage: Math.round((total / totalAmount) * 100),
-        };
-      })
-      .filter((row) => row.count > 0)
-      .sort((a, b) => b.total - a.total);
-  }, [filteredPayments, locale]);
-
-  const customerRows = useMemo<CustomerReportRow[]>(() => {
-    const map = new Map<string, CustomerReportRow>();
-
-    filteredPayments.forEach((payment) => {
-      const customerKey = payment.customer_id ? `#${payment.customer_id}` : isAr ? "غير محدد" : "N/A";
-      const existing =
-        map.get(customerKey) ||
-        ({
-          customerKey,
-          count: 0,
-          total: 0,
-        } satisfies CustomerReportRow);
-
-      existing.count += 1;
-      existing.total += toNumber(payment.amount);
-
-      map.set(customerKey, existing);
-    });
-
-    return Array.from(map.values())
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 8);
-  }, [filteredPayments, isAr]);
-
-  const monthlyRows = useMemo<MonthlyReportRow[]>(() => {
-    const map = new Map<string, MonthlyReportRow>();
-
-    filteredPayments.forEach((payment) => {
-      const monthKey = getMonthKey(payment.payment_date);
-      const existing =
-        map.get(monthKey) ||
-        ({
-          monthKey,
-          count: 0,
-          total: 0,
-        } satisfies MonthlyReportRow);
-
-      existing.count += 1;
-      existing.total += toNumber(payment.amount);
-
-      map.set(monthKey, existing);
-    });
-
-    return Array.from(map.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-  }, [filteredPayments]);
+    return () => window.clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo, statusFilter]);
 
   const clearFilters = () => {
+    setSearch("");
     setStatusFilter("ALL");
-    setMethodFilter("ALL");
     setDateFrom("");
     setDateTo("");
   };
 
-  const buildStatusRowsHtml = () => {
-    return statusRows
+  const buildExportRows = () => {
+    const statusRows = data?.by_status || [];
+    const methodRows = data?.by_method || [];
+    const providerRows = data?.by_provider || [];
+    const latestRows = latestPayments || [];
+
+    const statusHtml = statusRows
       .map(
         (row) => `
           <tr>
-            <td>${escapeHtml(row.label)}</td>
-            <td>${escapeHtml(formatNumber(row.count))}</td>
-            <td>${escapeHtml(formatMoney(row.total))}</td>
-            <td>${escapeHtml(formatNumber(row.percentage))}%</td>
+            <td>${escapeHtml(getStatusLabel(row.status, locale))}</td>
+            <td>${escapeHtml(formatNumber(Number(row.count || 0)))}</td>
+            <td>${escapeHtml(formatMoney(row.amount))}</td>
+            <td>${escapeHtml(formatMoney(row.paid_amount))}</td>
+            <td>${escapeHtml(formatMoney(row.refunded_amount))}</td>
           </tr>
         `
       )
       .join("");
-  };
 
-  const buildMethodRowsHtml = () => {
-    return methodRows
+    const methodHtml = methodRows
       .map(
         (row) => `
           <tr>
-            <td>${escapeHtml(row.label)}</td>
-            <td>${escapeHtml(formatNumber(row.count))}</td>
-            <td>${escapeHtml(formatMoney(row.total))}</td>
-            <td>${escapeHtml(formatNumber(row.percentage))}%</td>
+            <td>${escapeHtml(getMethodLabel(row.payment_method, locale))}</td>
+            <td>${escapeHtml(formatNumber(Number(row.count || 0)))}</td>
+            <td>${escapeHtml(formatMoney(row.amount))}</td>
+            <td>${escapeHtml(formatMoney(row.paid_amount))}</td>
+            <td>${escapeHtml(formatMoney(row.refunded_amount))}</td>
           </tr>
         `
       )
       .join("");
-  };
 
-  const buildCustomerRowsHtml = () => {
-    return customerRows
+    const providerHtml = providerRows
       .map(
         (row) => `
           <tr>
-            <td>${escapeHtml(row.customerKey)}</td>
-            <td>${escapeHtml(formatNumber(row.count))}</td>
-            <td>${escapeHtml(formatMoney(row.total))}</td>
+            <td>${escapeHtml(getProviderLabel(row.provider, locale))}</td>
+            <td>${escapeHtml(formatNumber(Number(row.count || 0)))}</td>
+            <td>${escapeHtml(formatMoney(row.amount))}</td>
+            <td>${escapeHtml(formatMoney(row.paid_amount))}</td>
+            <td>${escapeHtml(formatMoney(row.refunded_amount))}</td>
           </tr>
         `
       )
       .join("");
-  };
 
-  const buildMonthlyRowsHtml = () => {
-    return monthlyRows
+    const latestHtml = latestRows
       .map(
-        (row) => `
+        (payment) => `
           <tr>
-            <td>${escapeHtml(row.monthKey)}</td>
-            <td>${escapeHtml(formatNumber(row.count))}</td>
-            <td>${escapeHtml(formatMoney(row.total))}</td>
+            <td>${escapeHtml(getLatestPaymentReference(payment))}</td>
+            <td>${escapeHtml(payment.customer_name || (payment.customer_id ? `#${payment.customer_id}` : t.notAvailable))}</td>
+            <td>${escapeHtml(payment.invoice_id ? `#${payment.invoice_id}` : t.notAvailable)}</td>
+            <td>${escapeHtml(getStatusLabel(payment.status, locale))}</td>
+            <td>${escapeHtml(getMethodLabel(payment.payment_method, locale))}</td>
+            <td>${escapeHtml(getProviderLabel(payment.provider, locale))}</td>
+            <td>${escapeHtml(formatMoney(payment.paid_amount || payment.amount))}</td>
+            <td>${escapeHtml(formatDate(payment.paid_at || payment.created_at, locale))}</td>
           </tr>
         `
       )
       .join("");
+
+    return {
+      statusHtml,
+      methodHtml,
+      providerHtml,
+      latestHtml,
+    };
   };
 
-  const exportExcel = () => {
-    if (filteredPayments.length === 0) {
-      toast.error(t.noDataExport);
-      return;
-    }
-
+  const createReportHtml = (forPrint = false) => {
     const generatedAt = new Intl.DateTimeFormat("en-GB", {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(new Date());
 
-    const html = `
-      <html dir="${isAr ? "rtl" : "ltr"}" lang="${locale}">
-        <head>
-          <meta charset="UTF-8" />
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              direction: ${isAr ? "rtl" : "ltr"};
-            }
-            h1, h2 {
-              margin: 0 0 10px;
-            }
-            .meta {
-              color: #475569;
-              margin-bottom: 20px;
-            }
-            .summary {
-              margin-bottom: 24px;
-            }
-            table {
-              border-collapse: collapse;
-              width: 100%;
-              margin-bottom: 28px;
-            }
-            th {
-              background: #f1f5f9;
-              color: #0f172a;
-              font-weight: 700;
-              border: 1px solid #cbd5e1;
-              padding: 10px;
-              text-align: ${isAr ? "right" : "left"};
-            }
-            td {
-              border: 1px solid #cbd5e1;
-              padding: 10px;
-              text-align: ${isAr ? "right" : "left"};
-            }
-          </style>
-        </head>
-        <body>
-          <h1>${escapeHtml(t.printTitle)}</h1>
-          <div class="meta">${escapeHtml(generatedAt)}</div>
+    const rows = buildExportRows();
 
-          <h2>${escapeHtml(isAr ? "الملخص المالي" : "Financial Summary")}</h2>
-          <table class="summary">
-            <tbody>
-              <tr><th>${escapeHtml(t.totalPayments)}</th><td>${escapeHtml(formatNumber(stats.totalPayments))}</td></tr>
-              <tr><th>${escapeHtml(t.collectedAmount)}</th><td>${escapeHtml(formatMoney(stats.collectedAmount))}</td></tr>
-              <tr><th>${escapeHtml(t.pendingAmount)}</th><td>${escapeHtml(formatMoney(stats.pendingAmount))}</td></tr>
-              <tr><th>${escapeHtml(t.failedAmount)}</th><td>${escapeHtml(formatMoney(stats.failedAmount))}</td></tr>
-              <tr><th>${escapeHtml(t.refundedAmount)}</th><td>${escapeHtml(formatMoney(stats.refundedAmount))}</td></tr>
-              <tr><th>${escapeHtml(t.averagePayment)}</th><td>${escapeHtml(formatMoney(stats.averagePayment))}</td></tr>
-            </tbody>
-          </table>
-
-          <h2>${escapeHtml(t.statusReport)}</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>${escapeHtml(t.status)}</th>
-                <th>${escapeHtml(t.count)}</th>
-                <th>${escapeHtml(t.total)}</th>
-                <th>${escapeHtml(t.percentage)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${buildStatusRowsHtml()}
-            </tbody>
-          </table>
-
-          <h2>${escapeHtml(t.methodReport)}</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>${escapeHtml(t.method)}</th>
-                <th>${escapeHtml(t.count)}</th>
-                <th>${escapeHtml(t.total)}</th>
-                <th>${escapeHtml(t.percentage)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${buildMethodRowsHtml()}
-            </tbody>
-          </table>
-
-          <h2>${escapeHtml(t.customerReport)}</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>${escapeHtml(t.customer)}</th>
-                <th>${escapeHtml(t.count)}</th>
-                <th>${escapeHtml(t.total)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${buildCustomerRowsHtml()}
-            </tbody>
-          </table>
-
-          <h2>${escapeHtml(t.monthlyReport)}</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>${escapeHtml(t.month)}</th>
-                <th>${escapeHtml(t.count)}</th>
-                <th>${escapeHtml(t.total)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${buildMonthlyRowsHtml()}
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `;
-
-    const blob = new Blob(["\ufeff", html], {
-      type: "application/vnd.ms-excel;charset=utf-8;",
-    });
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const dateStamp = new Date().toISOString().slice(0, 10);
-
-    link.href = url;
-    link.download = `primey-care-payments-report-${dateStamp}.xls`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    toast.success(t.exportSuccess);
-  };
-
-  const printReport = () => {
-    if (filteredPayments.length === 0) {
-      toast.error(t.noDataPrint);
-      return;
-    }
-
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
-
-    if (!printWindow) {
-      toast.error(isAr ? "تعذر فتح نافذة الطباعة" : "Unable to open print window");
-      return;
-    }
-
-    const generatedAt = new Intl.DateTimeFormat("en-GB", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date());
-
-    const html = `
+    return `
       <!doctype html>
       <html lang="${locale}" dir="${isAr ? "rtl" : "ltr"}">
         <head>
           <meta charset="utf-8" />
-          <title>${escapeHtml(t.printTitle)}</title>
           <style>
             * {
               box-sizing: border-box;
@@ -877,8 +641,8 @@ export default function SystemPaymentsReportsPage() {
               margin: 0;
               padding: 32px;
               font-family: Arial, sans-serif;
-              color: #0f172a;
               direction: ${isAr ? "rtl" : "ltr"};
+              color: #0f172a;
               background: #ffffff;
             }
             .header {
@@ -891,7 +655,7 @@ export default function SystemPaymentsReportsPage() {
               padding-bottom: 16px;
             }
             .title {
-              font-size: 26px;
+              font-size: 24px;
               font-weight: 800;
               margin: 0 0 8px;
             }
@@ -929,21 +693,26 @@ export default function SystemPaymentsReportsPage() {
               width: 100%;
               border-collapse: collapse;
               font-size: 12px;
-              margin-bottom: 22px;
+              margin-bottom: 20px;
             }
             th {
               background: #f1f5f9;
               border: 1px solid #cbd5e1;
               padding: 10px;
               text-align: ${isAr ? "right" : "left"};
+              white-space: nowrap;
             }
             td {
               border: 1px solid #cbd5e1;
               padding: 10px;
               text-align: ${isAr ? "right" : "left"};
+              vertical-align: top;
             }
             tr:nth-child(even) td {
               background: #f8fafc;
+            }
+            .no-print {
+              margin-bottom: 20px;
             }
             @media print {
               body {
@@ -956,96 +725,149 @@ export default function SystemPaymentsReportsPage() {
           </style>
         </head>
         <body>
+          ${
+            forPrint
+              ? `<button class="no-print" onclick="window.print()">${escapeHtml(t.print)}</button>`
+              : ""
+          }
+
           <div class="header">
             <div>
               <h1 class="title">${escapeHtml(t.printTitle)}</h1>
-              <p class="subtitle">${escapeHtml(generatedAt)}</p>
+              <p class="subtitle">${escapeHtml(t.generatedAt)}: ${escapeHtml(generatedAt)}</p>
             </div>
-            <button class="no-print" onclick="window.print()">${escapeHtml(t.print)}</button>
+            <div>
+              <p class="subtitle">${escapeHtml(t.status)}: ${
+                statusFilter === "ALL"
+                  ? escapeHtml(t.allStatuses)
+                  : escapeHtml(getStatusLabel(statusFilter, locale))
+              }</p>
+            </div>
           </div>
 
           <div class="summary">
             <div class="card">
               <div class="card-label">${escapeHtml(t.totalPayments)}</div>
-              <div class="card-value">${escapeHtml(formatNumber(stats.totalPayments))}</div>
+              <div class="card-value">${escapeHtml(formatNumber(Number(summary.total_count || 0)))}</div>
             </div>
             <div class="card">
-              <div class="card-label">${escapeHtml(t.collectedAmount)}</div>
-              <div class="card-value">${escapeHtml(formatMoney(stats.collectedAmount))}</div>
+              <div class="card-label">${escapeHtml(t.totalAmount)}</div>
+              <div class="card-value">${escapeHtml(formatMoney(summary.total_amount))}</div>
             </div>
             <div class="card">
-              <div class="card-label">${escapeHtml(t.pendingAmount)}</div>
-              <div class="card-value">${escapeHtml(formatMoney(stats.pendingAmount))}</div>
+              <div class="card-label">${escapeHtml(t.paidAmount)}</div>
+              <div class="card-value">${escapeHtml(formatMoney(summary.total_paid_amount))}</div>
             </div>
             <div class="card">
-              <div class="card-label">${escapeHtml(t.averagePayment)}</div>
-              <div class="card-value">${escapeHtml(formatMoney(stats.averagePayment))}</div>
+              <div class="card-label">${escapeHtml(t.refundedAmount)}</div>
+              <div class="card-value">${escapeHtml(formatMoney(summary.total_refunded_amount))}</div>
             </div>
           </div>
 
-          <h2>${escapeHtml(t.statusReport)}</h2>
+          <h2>${escapeHtml(t.byStatus)}</h2>
           <table>
             <thead>
               <tr>
                 <th>${escapeHtml(t.status)}</th>
                 <th>${escapeHtml(t.count)}</th>
-                <th>${escapeHtml(t.total)}</th>
-                <th>${escapeHtml(t.percentage)}</th>
+                <th>${escapeHtml(t.amount)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.refunded)}</th>
               </tr>
             </thead>
-            <tbody>
-              ${buildStatusRowsHtml()}
-            </tbody>
+            <tbody>${rows.statusHtml}</tbody>
           </table>
 
-          <h2>${escapeHtml(t.methodReport)}</h2>
+          <h2>${escapeHtml(t.byMethod)}</h2>
           <table>
             <thead>
               <tr>
                 <th>${escapeHtml(t.method)}</th>
                 <th>${escapeHtml(t.count)}</th>
-                <th>${escapeHtml(t.total)}</th>
-                <th>${escapeHtml(t.percentage)}</th>
+                <th>${escapeHtml(t.amount)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.refunded)}</th>
               </tr>
             </thead>
-            <tbody>
-              ${buildMethodRowsHtml()}
-            </tbody>
+            <tbody>${rows.methodHtml}</tbody>
           </table>
 
-          <h2>${escapeHtml(t.customerReport)}</h2>
+          <h2>${escapeHtml(t.byProvider)}</h2>
           <table>
             <thead>
               <tr>
+                <th>${escapeHtml(t.provider)}</th>
+                <th>${escapeHtml(t.count)}</th>
+                <th>${escapeHtml(t.amount)}</th>
+                <th>${escapeHtml(t.paid)}</th>
+                <th>${escapeHtml(t.refunded)}</th>
+              </tr>
+            </thead>
+            <tbody>${rows.providerHtml}</tbody>
+          </table>
+
+          <h2>${escapeHtml(t.latest)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.payment)}</th>
                 <th>${escapeHtml(t.customer)}</th>
-                <th>${escapeHtml(t.count)}</th>
-                <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.invoice)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.method)}</th>
+                <th>${escapeHtml(t.provider)}</th>
+                <th>${escapeHtml(t.amount)}</th>
+                <th>${escapeHtml(t.date)}</th>
               </tr>
             </thead>
-            <tbody>
-              ${buildCustomerRowsHtml()}
-            </tbody>
-          </table>
-
-          <h2>${escapeHtml(t.monthlyReport)}</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>${escapeHtml(t.month)}</th>
-                <th>${escapeHtml(t.count)}</th>
-                <th>${escapeHtml(t.total)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${buildMonthlyRowsHtml()}
-            </tbody>
+            <tbody>${rows.latestHtml}</tbody>
           </table>
         </body>
       </html>
     `;
+  };
+
+  const exportExcel = () => {
+    if (!data) {
+      toast.error(isAr ? "لا توجد بيانات للتصدير" : "No data to export");
+      return;
+    }
+
+    const html = createReportHtml(false);
+
+    const blob = new Blob(["\ufeff", html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const dateStamp = new Date().toISOString().slice(0, 10);
+
+    link.href = url;
+    link.download = `primey-care-payments-report-${dateStamp}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast.success(t.exportSuccess);
+  };
+
+  const printReport = () => {
+    if (!data) {
+      toast.error(isAr ? "لا توجد بيانات للطباعة" : "No data to print");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(isAr ? "تعذر فتح نافذة الطباعة" : "Unable to open print window");
+      return;
+    }
 
     printWindow.document.open();
-    printWindow.document.write(html);
+    printWindow.document.write(createReportHtml(true));
     printWindow.document.close();
     printWindow.focus();
   };
@@ -1053,39 +875,34 @@ export default function SystemPaymentsReportsPage() {
   const statCards = [
     {
       title: t.totalPayments,
-      value: formatNumber(stats.totalPayments),
-      description: isAr ? "عدد المدفوعات ضمن الفلتر" : "Payments within current filter",
+      value: formatNumber(Number(summary.total_count || 0)),
       icon: ReceiptText,
+      description: isAr ? "عدد عمليات الدفع" : "Payment transactions count",
     },
     {
-      title: t.collectedAmount,
-      value: formatMoney(stats.collectedAmount),
-      description: t.sar,
+      title: t.paidAmount,
+      value: formatMoney(summary.total_paid_amount),
       icon: Wallet,
+      description: t.sar,
       money: true,
     },
     {
-      title: t.pendingAmount,
-      value: formatMoney(stats.pendingAmount),
-      description: isAr ? "مبالغ تحتاج تأكيد" : "Amounts requiring confirmation",
+      title: t.treasuryPosted,
+      value: formatNumber(Number(summary.posted_treasury_count || 0)),
       icon: ShieldCheck,
-      money: true,
+      description: `${formatNumber(treasuryRate)}%`,
     },
     {
-      title: t.averagePayment,
-      value: formatMoney(stats.averagePayment),
-      description: isAr ? "متوسط الدفعات المؤكدة" : "Average confirmed payment",
-      icon: TrendingUp,
-      money: true,
+      title: t.accountingPosted,
+      value: formatNumber(Number(summary.posted_accounting_count || 0)),
+      icon: BarChart3,
+      description: `${formatNumber(accountingRate)}%`,
     },
   ];
 
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        {/* =====================================================
-            HERO
-        ===================================================== */}
         <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm">
           <div className="pointer-events-none absolute -top-24 end-12 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
@@ -1096,7 +913,7 @@ export default function SystemPaymentsReportsPage() {
                 variant="outline"
                 className="w-fit rounded-full border-primary/20 bg-primary/5 px-3 py-1 text-primary"
               >
-                <BarChart3 className="me-2 h-3.5 w-3.5" />
+                <Sparkles className="me-2 h-3.5 w-3.5" />
                 {t.badge}
               </Badge>
 
@@ -1139,18 +956,19 @@ export default function SystemPaymentsReportsPage() {
           </div>
         </section>
 
-        {/* =====================================================
-            FILTERS
-        ===================================================== */}
         <Card className="rounded-[1.5rem]">
           <CardHeader className="gap-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <CardTitle className="flex items-center gap-2">
-                  <FilterIcon className="h-5 w-5 text-primary" />
+                  <Search className="h-5 w-5 text-primary" />
                   {t.filters}
                 </CardTitle>
-                <CardDescription>{t.filtersDesc}</CardDescription>
+                <CardDescription>
+                  {isAr
+                    ? "غيّر الفلاتر وسيتم تحديث التقرير تلقائيًا."
+                    : "Change filters and the report updates automatically."}
+                </CardDescription>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -1158,7 +976,7 @@ export default function SystemPaymentsReportsPage() {
                   type="button"
                   variant="outline"
                   className="rounded-2xl"
-                  onClick={() => loadPayments("refresh")}
+                  onClick={() => loadReports("refresh")}
                   disabled={refreshing}
                 >
                   {refreshing ? (
@@ -1191,29 +1009,27 @@ export default function SystemPaymentsReportsPage() {
               </div>
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+            <div className="grid gap-3 lg:grid-cols-[1.4fr_0.8fr_0.8fr_0.8fr_auto]">
+              <div className="relative">
+                <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={t.searchPlaceholder}
+                  className="rounded-2xl ps-9"
+                />
+              </div>
+
               <select
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as PaymentStatus)}
+                onChange={(event) => setStatusFilter(event.target.value)}
                 className="h-10 rounded-2xl border border-input bg-background px-3 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                aria-label={t.status}
               >
                 <option value="ALL">{t.allStatuses}</option>
                 {Object.keys(STATUS_META).map((status) => (
                   <option key={status} value={status}>
                     {getStatusLabel(status, locale)}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={methodFilter}
-                onChange={(event) => setMethodFilter(event.target.value as PaymentMethod)}
-                className="h-10 rounded-2xl border border-input bg-background px-3 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
-              >
-                <option value="ALL">{t.allMethods}</option>
-                {Object.keys(METHOD_META).map((method) => (
-                  <option key={method} value={method}>
-                    {getMethodLabel(method, locale)}
                   </option>
                 ))}
               </select>
@@ -1234,13 +1050,7 @@ export default function SystemPaymentsReportsPage() {
                 aria-label={t.to}
               />
 
-              <Button
-                type="button"
-                variant="ghost"
-                className="rounded-2xl"
-                onClick={clearFilters}
-              >
-                <XCircle className="me-2 h-4 w-4" />
+              <Button type="button" variant="ghost" className="rounded-2xl" onClick={clearFilters}>
                 {t.clear}
               </Button>
             </div>
@@ -1254,79 +1064,207 @@ export default function SystemPaymentsReportsPage() {
               <p className="text-sm">{t.loading}</p>
             </CardContent>
           </Card>
-        ) : filteredPayments.length === 0 ? (
-          <Card className="rounded-[1.5rem]">
-            <CardContent className="flex min-h-96 flex-col items-center justify-center gap-3 text-center">
-              <CreditCard className="h-12 w-12 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">{t.empty}</p>
-            </CardContent>
-          </Card>
         ) : (
           <>
-            {/* =====================================================
-                STATS
-            ===================================================== */}
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {statCards.map((card) => (
-                <ReportStatCard key={card.title} {...card} />
+                <StatCard key={card.title} {...card} />
               ))}
             </section>
 
-            {/* =====================================================
-                STATUS + METHOD
-            ===================================================== */}
-            <section className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+            <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
               <Card className="rounded-[1.5rem]">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <PieChart className="h-5 w-5 text-primary" />
-                    {t.statusReport}
+                    {t.byStatus}
                   </CardTitle>
-                  <CardDescription>{t.statusReportDesc}</CardDescription>
+                  <CardDescription>{t.byStatusDesc}</CardDescription>
                 </CardHeader>
 
                 <CardContent>
+                  <ReportGroup
+                    rows={data?.by_status || []}
+                    type="status"
+                    locale={locale}
+                    empty={t.empty}
+                    totalCount={Number(summary.total_count || 0)}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-[1.5rem]">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                    {isAr ? "مؤشرات الترحيل" : "Posting Indicators"}
+                  </CardTitle>
+                  <CardDescription>
+                    {isAr
+                      ? "نسبة ربط المدفوعات مع الخزينة والمحاسبة."
+                      : "Payment linkage ratio with treasury and accounting."}
+                  </CardDescription>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  <ProgressCard
+                    title={t.paidAmount}
+                    value={paidRate}
+                    description={isAr ? "نسبة المدفوعات المؤكدة" : "Confirmed payments ratio"}
+                  />
+                  <ProgressCard
+                    title={t.treasuryPosted}
+                    value={treasuryRate}
+                    description={isAr ? "مرحل إلى الخزينة" : "Posted to treasury"}
+                  />
+                  <ProgressCard
+                    title={t.accountingPosted}
+                    value={accountingRate}
+                    description={isAr ? "مرحل محاسبيًا" : "Posted to accounting"}
+                  />
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <MiniMetric
+                      title={t.treasuryPending}
+                      value={formatNumber(Number(summary.pending_treasury_count || 0))}
+                      icon={Wallet}
+                    />
+                    <MiniMetric
+                      title={t.accountingPending}
+                      value={formatNumber(Number(summary.pending_accounting_count || 0))}
+                      icon={BarChart3}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+
+            <section className="grid gap-6 xl:grid-cols-2">
+              <Card className="rounded-[1.5rem]">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CreditCard className="h-5 w-5 text-primary" />
+                    {t.byMethod}
+                  </CardTitle>
+                  <CardDescription>{t.byMethodDesc}</CardDescription>
+                </CardHeader>
+
+                <CardContent>
+                  <ReportGroup
+                    rows={data?.by_method || []}
+                    type="method"
+                    locale={locale}
+                    empty={t.empty}
+                    totalCount={Number(summary.total_count || 0)}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-[1.5rem]">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ShieldCheck className="h-5 w-5 text-primary" />
+                    {t.byProvider}
+                  </CardTitle>
+                  <CardDescription>{t.byProviderDesc}</CardDescription>
+                </CardHeader>
+
+                <CardContent>
+                  <ReportGroup
+                    rows={data?.by_provider || []}
+                    type="provider"
+                    locale={locale}
+                    empty={t.empty}
+                    totalCount={Number(summary.total_count || 0)}
+                  />
+                </CardContent>
+              </Card>
+            </section>
+
+            <Card className="rounded-[1.5rem]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ReceiptText className="h-5 w-5 text-primary" />
+                  {t.latest}
+                </CardTitle>
+                <CardDescription>{t.latestDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent>
+                {latestPayments.length === 0 ? (
+                  <div className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
+                    <CreditCard className="h-10 w-10 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">{t.empty}</p>
+                  </div>
+                ) : (
                   <div className="overflow-hidden rounded-3xl border">
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[680px] text-sm">
-                        <thead className="border-b bg-muted/50 text-xs text-muted-foreground">
+                      <table className="w-full min-w-[980px] text-sm">
+                        <thead className="bg-muted/50 text-xs text-muted-foreground">
                           <tr>
+                            <th className="px-4 py-3 text-start font-medium">{t.payment}</th>
+                            <th className="px-4 py-3 text-start font-medium">{t.customer}</th>
+                            <th className="px-4 py-3 text-start font-medium">{t.invoice}</th>
                             <th className="px-4 py-3 text-start font-medium">{t.status}</th>
-                            <th className="px-4 py-3 text-start font-medium">{t.count}</th>
-                            <th className="px-4 py-3 text-start font-medium">{t.total}</th>
-                            <th className="px-4 py-3 text-start font-medium">{t.percentage}</th>
+                            <th className="px-4 py-3 text-start font-medium">{t.method}</th>
+                            <th className="px-4 py-3 text-start font-medium">{t.provider}</th>
+                            <th className="px-4 py-3 text-start font-medium">{t.date}</th>
+                            <th className="px-4 py-3 text-start font-medium">{t.amount}</th>
                           </tr>
                         </thead>
 
                         <tbody className="divide-y">
-                          {statusRows.map((row) => (
-                            <tr key={row.status} className="bg-card hover:bg-muted/30">
+                          {latestPayments.map((payment) => (
+                            <tr key={payment.id} className="bg-card transition hover:bg-muted/30">
+                              <td className="px-4 py-3">
+                                <Link
+                                  href={`/system/payments/${payment.id}`}
+                                  className="font-semibold text-primary hover:underline"
+                                >
+                                  {getLatestPaymentReference(payment)}
+                                </Link>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  ID: {payment.id}
+                                </p>
+                              </td>
+
+                              <td className="px-4 py-3">
+                                {payment.customer_name ||
+                                  (payment.customer_id ? `#${payment.customer_id}` : t.notAvailable)}
+                              </td>
+
+                              <td className="px-4 py-3">
+                                {payment.invoice_id ? `#${payment.invoice_id}` : t.notAvailable}
+                              </td>
+
                               <td className="px-4 py-3">
                                 <Badge
                                   variant="outline"
-                                  className={`rounded-full ${getStatusClassName(row.status)}`}
+                                  className={`rounded-full ${getStatusClassName(payment.status)}`}
                                 >
-                                  {row.label}
+                                  {getStatusLabel(payment.status, locale)}
                                 </Badge>
                               </td>
-                              <td className="px-4 py-3 font-semibold">
-                                {formatNumber(row.count)}
-                              </td>
+
                               <td className="px-4 py-3">
-                                <MoneyValue value={row.total} strong />
+                                <Badge variant="secondary" className="rounded-full">
+                                  {getMethodLabel(payment.payment_method, locale)}
+                                </Badge>
                               </td>
+
                               <td className="px-4 py-3">
-                                <div className="flex min-w-36 items-center gap-3">
-                                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                                    <div
-                                      className="h-full rounded-full bg-primary"
-                                      style={{ width: `${Math.min(row.percentage, 100)}%` }}
-                                    />
-                                  </div>
-                                  <span className="text-xs font-semibold">
-                                    {formatNumber(row.percentage)}%
-                                  </span>
+                                {getProviderLabel(payment.provider, locale)}
+                              </td>
+
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                  <CalendarDays className="h-4 w-4" />
+                                  {formatDate(payment.paid_at || payment.created_at, locale)}
                                 </div>
+                              </td>
+
+                              <td className="px-4 py-3">
+                                <MoneyValue value={payment.paid_amount || payment.amount} />
                               </td>
                             </tr>
                           ))}
@@ -1334,148 +1272,9 @@ export default function SystemPaymentsReportsPage() {
                       </table>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-[1.5rem]">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Banknote className="h-5 w-5 text-primary" />
-                    {t.methodReport}
-                  </CardTitle>
-                  <CardDescription>{t.methodReportDesc}</CardDescription>
-                </CardHeader>
-
-                <CardContent className="space-y-3">
-                  {methodRows.map((row) => (
-                    <div key={row.method} className="rounded-3xl border bg-card p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                            <CreditCard className="h-4 w-4" />
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold">{row.label}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {formatNumber(row.count)} {t.totalPayments}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="text-end">
-                          <MoneyValue value={row.total} strong />
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {formatNumber(row.percentage)}%
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-primary"
-                          style={{ width: `${Math.min(row.percentage, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            </section>
-
-            {/* =====================================================
-                FINANCIAL + CUSTOMER + MONTHLY
-            ===================================================== */}
-            <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
-              <Card className="rounded-[1.5rem]">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <ShieldCheck className="h-5 w-5 text-primary" />
-                    {isAr ? "ملخص التحصيل" : "Collection Summary"}
-                  </CardTitle>
-                  <CardDescription>
-                    {isAr
-                      ? "تفصيل سريع لحالات التحصيل الرئيسية."
-                      : "Quick breakdown of core collection statuses."}
-                  </CardDescription>
-                </CardHeader>
-
-                <CardContent className="space-y-4">
-                  <TaxLine label={t.collectedAmount} value={stats.collectedAmount} strong />
-                  <TaxLine label={t.pendingAmount} value={stats.pendingAmount} />
-                  <TaxLine label={t.failedAmount} value={stats.failedAmount} />
-                  <TaxLine label={t.refundedAmount} value={stats.refundedAmount} />
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <SmallCountCard
-                      title={t.paidPayments}
-                      value={stats.paidPayments}
-                      icon={CheckCircle2}
-                    />
-                    <SmallCountCard
-                      title={t.pendingPayments}
-                      value={stats.pendingPayments}
-                      icon={ShieldCheck}
-                    />
-                    <SmallCountCard
-                      title={t.failedPayments}
-                      value={stats.failedPayments}
-                      icon={XCircle}
-                    />
-                    <SmallCountCard
-                      title={t.refundedPayments}
-                      value={stats.refundedPayments}
-                      icon={ReceiptText}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-
-              <div className="grid gap-6">
-                <Card className="rounded-[1.5rem]">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Wallet className="h-5 w-5 text-primary" />
-                      {t.customerReport}
-                    </CardTitle>
-                    <CardDescription>{t.customerReportDesc}</CardDescription>
-                  </CardHeader>
-
-                  <CardContent>
-                    <SimpleReportTable
-                      emptyLabel={t.noData}
-                      headers={[t.customer, t.count, t.total]}
-                      rows={customerRows.map((row) => [
-                        row.customerKey,
-                        formatNumber(row.count),
-                        formatMoney(row.total),
-                      ])}
-                    />
-                  </CardContent>
-                </Card>
-
-                <Card className="rounded-[1.5rem]">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <CalendarDays className="h-5 w-5 text-primary" />
-                      {t.monthlyReport}
-                    </CardTitle>
-                    <CardDescription>{t.monthlyReportDesc}</CardDescription>
-                  </CardHeader>
-
-                  <CardContent>
-                    <SimpleReportTable
-                      emptyLabel={t.noData}
-                      headers={[t.month, t.count, t.total]}
-                      rows={monthlyRows.map((row) => [
-                        row.monthKey,
-                        formatNumber(row.count),
-                        formatMoney(row.total),
-                      ])}
-                    />
-                  </CardContent>
-                </Card>
-              </div>
-            </section>
+                )}
+              </CardContent>
+            </Card>
           </>
         )}
       </div>
@@ -1487,7 +1286,7 @@ export default function SystemPaymentsReportsPage() {
    SMALL COMPONENTS
 ===================================================== */
 
-function ReportStatCard({
+function StatCard({
   title,
   value,
   description,
@@ -1522,52 +1321,124 @@ function ReportStatCard({
   );
 }
 
-function MoneyValue({
-  value,
-  strong = false,
-}: {
-  value: number;
-  strong?: boolean;
-}) {
+function MoneyValue({ value }: { value: string | number | null | undefined }) {
   return (
-    <div className={`flex items-center gap-1.5 ${strong ? "font-bold" : "font-medium"}`}>
+    <div className="flex items-center gap-1.5 font-semibold">
       <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
-      <span>{formatMoney(value)}</span>
+      {formatMoney(value)}
     </div>
   );
 }
 
-function TaxLine({
-  label,
-  value,
-  strong = false,
+function ReportGroup({
+  rows,
+  type,
+  locale,
+  empty,
+  totalCount,
 }: {
-  label: string;
+  rows: ReportGroupRow[];
+  type: "status" | "method" | "provider";
+  locale: AppLocale;
+  empty: string;
+  totalCount: number;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
+        <BarChart3 className="h-10 w-10 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">{empty}</p>
+      </div>
+    );
+  }
+
+  const getLabel = (row: ReportGroupRow) => {
+    if (type === "status") return getStatusLabel(row.status, locale);
+    if (type === "method") return getMethodLabel(row.payment_method, locale);
+    return getProviderLabel(row.provider, locale);
+  };
+
+  const getBadgeClassName = (row: ReportGroupRow) => {
+    if (type === "status") return getStatusClassName(row.status);
+    return "border-primary/20 bg-primary/5 text-primary";
+  };
+
+  return (
+    <div className="space-y-3">
+      {rows.map((row, index) => {
+        const count = Number(row.count || 0);
+        const percentage = totalCount > 0 ? Math.round((count / totalCount) * 100) : 0;
+
+        return (
+          <div key={`${type}-${index}`} className="rounded-3xl border bg-card p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-2">
+                <Badge variant="outline" className={`rounded-full ${getBadgeClassName(row)}`}>
+                  {getLabel(row)}
+                </Badge>
+                <p className="text-xs text-muted-foreground">
+                  {formatNumber(count)} {locale === "ar" ? "عملية" : "transactions"} •{" "}
+                  {formatNumber(percentage)}%
+                </p>
+              </div>
+
+              <div className="grid gap-1 text-sm sm:text-end">
+                <MoneyValue value={row.paid_amount || row.amount} />
+                <p className="text-xs text-muted-foreground">
+                  {locale === "ar" ? "مسترد" : "Refunded"}: {formatMoney(row.refunded_amount)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${Math.max(0, Math.min(percentage, 100))}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProgressCard({
+  title,
+  value,
+  description,
+}: {
+  title: string;
   value: number;
-  strong?: boolean;
+  description: string;
 }) {
   return (
-    <div
-      className={`flex items-center justify-between gap-3 rounded-3xl border p-4 ${
-        strong ? "border-primary/20 bg-primary/5" : "bg-card"
-      }`}
-    >
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <div className={`flex items-center gap-1.5 ${strong ? "text-lg font-bold" : "font-semibold"}`}>
-        <Image src={SAR_ICON_PATH} alt="SAR" width={strong ? 17 : 14} height={strong ? 17 : 14} />
-        {formatMoney(value)}
+    <div className="rounded-3xl border bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold">{title}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        </div>
+        <p className="text-2xl font-bold">{formatNumber(value)}%</p>
+      </div>
+
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-all"
+          style={{ width: `${Math.max(0, Math.min(value, 100))}%` }}
+        />
       </div>
     </div>
   );
 }
 
-function SmallCountCard({
+function MiniMetric({
   title,
   value,
   icon: Icon,
 }: {
   title: string;
-  value: number;
+  value: string;
   icon: LucideIcon;
 }) {
   return (
@@ -1575,72 +1446,12 @@ function SmallCountCard({
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-xs text-muted-foreground">{title}</p>
-          <p className="mt-1 text-lg font-bold">{formatNumber(value)}</p>
+          <p className="mt-1 text-2xl font-bold">{value}</p>
         </div>
-        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
           <Icon className="h-4 w-4" />
         </div>
-      </div>
-    </div>
-  );
-}
-
-function SimpleReportTable({
-  headers,
-  rows,
-  emptyLabel,
-}: {
-  headers: string[];
-  rows: string[][];
-  emptyLabel: string;
-}) {
-  return (
-    <div className="overflow-hidden rounded-3xl border">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm">
-          <thead className="border-b bg-muted/50 text-xs text-muted-foreground">
-            <tr>
-              {headers.map((header) => (
-                <th key={header} className="px-4 py-3 text-start font-medium">
-                  {header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-
-          <tbody className="divide-y">
-            {rows.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={headers.length}
-                  className="px-4 py-10 text-center text-muted-foreground"
-                >
-                  {emptyLabel}
-                </td>
-              </tr>
-            ) : (
-              rows.map((row, rowIndex) => (
-                <tr key={`${row.join("-")}-${rowIndex}`} className="bg-card hover:bg-muted/30">
-                  {row.map((cell, cellIndex) => (
-                    <td
-                      key={`${cell}-${cellIndex}`}
-                      className={`px-4 py-3 ${cellIndex === row.length - 1 ? "font-bold" : ""}`}
-                    >
-                      {cellIndex === row.length - 1 ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
-                          {cell}
-                        </span>
-                      ) : (
-                        cell
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
       </div>
     </div>
   );

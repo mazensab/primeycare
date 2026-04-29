@@ -5,13 +5,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
-  ArrowUpDown,
   BadgeCheck,
   BarChart3,
   CalendarDays,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   ColumnsIcon,
   CreditCard,
   Download,
@@ -58,13 +55,14 @@ type AppLocale = "ar" | "en";
 type SortDirection = "asc" | "desc";
 
 type SortKey =
-  | "reference"
+  | "payment_number"
   | "status"
   | "payment_method"
-  | "payment_date"
+  | "paid_at"
   | "customer_id"
   | "invoice_id"
-  | "amount";
+  | "amount"
+  | "paid_amount";
 
 type PaymentStatus =
   | "ALL"
@@ -88,22 +86,47 @@ type PaymentMethod =
   | "STC_PAY"
   | "TAMARA"
   | "TABBY"
+  | "GATEWAY"
   | "OTHER";
 
 type ApiPayment = {
   id: number;
+  payment_number?: string | null;
   reference?: string | null;
   status?: string | null;
   payment_method?: string | null;
+  provider?: string | null;
+  currency?: string | null;
   invoice_id?: number | null;
+  order_id?: number | null;
   customer_id?: number | null;
+  customer_name?: string | null;
   amount?: string | number | null;
+  paid_amount?: string | number | null;
+  refunded_amount?: string | number | null;
+  remaining_amount?: string | number | null;
+  net_collected_amount?: string | number | null;
   payment_date?: string | null;
+  initiated_at?: string | null;
+  paid_at?: string | null;
+  refunded_at?: string | null;
+  cancelled_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  external_reference?: string | null;
+  transaction_id?: string | null;
+  treasury_movement_reference?: string | null;
+  accounting_entry_reference?: string | null;
+  is_treasury_posted?: boolean | null;
+  is_accounting_posted?: boolean | null;
+  notes?: string | null;
+  failure_reason?: string | null;
 };
 
 type PaymentsApiResponse = {
   ok?: boolean;
   count?: number;
+  total_count?: number;
   results?: ApiPayment[];
   message?: string;
 };
@@ -113,6 +136,7 @@ type ConfirmPaymentResponse = {
   message?: string;
   payment?: {
     id?: number;
+    status?: string;
     status_before?: string;
     status_after?: string;
   };
@@ -120,12 +144,13 @@ type ConfirmPaymentResponse = {
 
 type ColumnKey =
   | "select"
-  | "reference"
+  | "payment"
   | "customer"
   | "invoice"
   | "method"
   | "status"
-  | "paymentDate"
+  | "posting"
+  | "paidAt"
   | "amount"
   | "actions";
 
@@ -216,17 +241,19 @@ const METHOD_META: Record<string, MethodMeta> = {
   STC_PAY: { labelAr: "STC Pay", labelEn: "STC Pay" },
   TAMARA: { labelAr: "تمارا", labelEn: "Tamara" },
   TABBY: { labelAr: "تابي", labelEn: "Tabby" },
+  GATEWAY: { labelAr: "بوابة دفع", labelEn: "Gateway" },
   OTHER: { labelAr: "أخرى", labelEn: "Other" },
 };
 
 const DEFAULT_COLUMNS: ColumnConfig[] = [
   { key: "select", labelAr: "تحديد", labelEn: "Select", visible: true },
-  { key: "reference", labelAr: "الدفعة", labelEn: "Payment", visible: true },
+  { key: "payment", labelAr: "الدفعة", labelEn: "Payment", visible: true },
   { key: "customer", labelAr: "العميل", labelEn: "Customer", visible: true },
   { key: "invoice", labelAr: "الفاتورة", labelEn: "Invoice", visible: true },
   { key: "method", labelAr: "الطريقة", labelEn: "Method", visible: true },
   { key: "status", labelAr: "الحالة", labelEn: "Status", visible: true },
-  { key: "paymentDate", labelAr: "تاريخ الدفع", labelEn: "Payment Date", visible: true },
+  { key: "posting", labelAr: "الترحيل", labelEn: "Posting", visible: true },
+  { key: "paidAt", labelAr: "تاريخ الدفع", labelEn: "Paid At", visible: true },
   { key: "amount", labelAr: "المبلغ", labelEn: "Amount", visible: true },
   { key: "actions", labelAr: "الإجراءات", labelEn: "Actions", visible: true },
 ];
@@ -293,6 +320,28 @@ function formatDate(value: string | null | undefined, locale: AppLocale): string
   }).format(date);
 }
 
+function getPaymentReference(payment: ApiPayment): string {
+  return payment.payment_number || payment.reference || `PAY-${payment.id}`;
+}
+
+function getPaymentDate(payment: ApiPayment): string | null {
+  return (
+    payment.paid_at ||
+    payment.payment_date ||
+    payment.created_at ||
+    payment.initiated_at ||
+    null
+  );
+}
+
+function getPaidValue(payment: ApiPayment): number {
+  return toNumber(
+    payment.net_collected_amount ??
+      payment.paid_amount ??
+      payment.amount
+  );
+}
+
 function getStatusLabel(status: string | null | undefined, locale: AppLocale): string {
   const key = String(status || "PENDING").toUpperCase();
   const meta = STATUS_META[key];
@@ -314,6 +363,21 @@ function getMethodLabel(method: string | null | undefined, locale: AppLocale): s
   if (!meta) return method || (locale === "ar" ? "غير محدد" : "Unknown");
 
   return locale === "ar" ? meta.labelAr : meta.labelEn;
+}
+
+function isConfirmableStatus(status: string | null | undefined): boolean {
+  const current = String(status || "").toUpperCase();
+  return current === "PENDING" || current === "PROCESSING";
+}
+
+function isPaidStatus(status: string | null | undefined): boolean {
+  const current = String(status || "").toUpperCase();
+  return current === "PAID" || current === "PARTIALLY_PAID";
+}
+
+function isPendingStatus(status: string | null | undefined): boolean {
+  const current = String(status || "").toUpperCase();
+  return current === "PENDING" || current === "PROCESSING";
 }
 
 function getCookie(name: string): string {
@@ -404,7 +468,7 @@ export default function SystemPaymentsListPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [columns, setColumns] = useState<ColumnConfig[]>(DEFAULT_COLUMNS);
 
-  const [sortKey, setSortKey] = useState<SortKey>("payment_date");
+  const [sortKey, setSortKey] = useState<SortKey>("paid_at");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
@@ -416,8 +480,8 @@ export default function SystemPaymentsListPage() {
       badge: isAr ? "قائمة المدفوعات" : "Payments List",
       title: isAr ? "قائمة المدفوعات" : "Payments List",
       subtitle: isAr
-        ? "استعراض المدفوعات، البحث، الفلترة، التأكيد، التصدير والطباعة بنفس الهوية الرسمية للنظام."
-        : "Browse payments with search, filters, confirmation, export, and print using the official system identity.",
+        ? "استعراض المدفوعات، البحث، الفلترة، التأكيد، التصدير والطباعة مع ربط الفواتير والخزينة والمحاسبة."
+        : "Browse payments with search, filters, confirmation, export, and print with invoice, treasury, and accounting links.",
       back: isAr ? "لوحة المدفوعات" : "Payments Dashboard",
       create: isAr ? "تسجيل دفعة" : "Create Payment",
       reports: isAr ? "التقارير" : "Reports",
@@ -441,9 +505,14 @@ export default function SystemPaymentsListPage() {
       payment: isAr ? "الدفعة" : "Payment",
       customer: isAr ? "العميل" : "Customer",
       invoice: isAr ? "الفاتورة" : "Invoice",
+      order: isAr ? "الطلب" : "Order",
       paymentDate: isAr ? "تاريخ الدفع" : "Payment Date",
       amount: isAr ? "المبلغ" : "Amount",
+      paidAmount: isAr ? "المدفوع" : "Paid Amount",
       actions: isAr ? "الإجراءات" : "Actions",
+      posting: isAr ? "الترحيل" : "Posting",
+      treasury: isAr ? "خزينة" : "Treasury",
+      accounting: isAr ? "محاسبة" : "Accounting",
       details: isAr ? "عرض" : "View",
       confirm: isAr ? "تأكيد" : "Confirm",
       confirming: isAr ? "جاري التأكيد..." : "Confirming...",
@@ -529,32 +598,26 @@ export default function SystemPaymentsListPage() {
   const stats = useMemo(() => {
     const totalPayments = payments.length;
 
-    const paidPayments = payments.filter((payment) => {
-      const status = String(payment.status || "").toUpperCase();
-      return status === "PAID" || status === "PARTIALLY_PAID";
-    }).length;
+    const paidPayments = payments.filter((payment) => isPaidStatus(payment.status)).length;
 
-    const pendingPayments = payments.filter((payment) => {
-      const status = String(payment.status || "").toUpperCase();
-      return status === "PENDING" || status === "PROCESSING";
-    }).length;
+    const pendingPayments = payments.filter((payment) =>
+      isPendingStatus(payment.status)
+    ).length;
 
     const failedPayments = payments.filter(
       (payment) => String(payment.status || "").toUpperCase() === "FAILED"
     ).length;
 
     const collectedAmount = payments.reduce((sum, payment) => {
-      const status = String(payment.status || "").toUpperCase();
-      if (status === "PAID" || status === "PARTIALLY_PAID") {
-        return sum + toNumber(payment.amount);
+      if (isPaidStatus(payment.status)) {
+        return sum + getPaidValue(payment);
       }
       return sum;
     }, 0);
 
     const pendingAmount = payments.reduce((sum, payment) => {
-      const status = String(payment.status || "").toUpperCase();
-      if (status === "PENDING" || status === "PROCESSING") {
-        return sum + toNumber(payment.amount);
+      if (isPendingStatus(payment.status)) {
+        return sum + toNumber(payment.remaining_amount ?? payment.amount);
       }
       return sum;
     }, 0);
@@ -580,7 +643,8 @@ export default function SystemPaymentsListPage() {
       if (methodFilter !== "ALL" && method !== methodFilter) return false;
 
       if (dateFrom || dateTo) {
-        const paymentDate = payment.payment_date ? new Date(payment.payment_date) : null;
+        const paymentDateValue = getPaymentDate(payment);
+        const paymentDate = paymentDateValue ? new Date(paymentDateValue) : null;
 
         if (!paymentDate || Number.isNaN(paymentDate.getTime())) return false;
 
@@ -600,16 +664,24 @@ export default function SystemPaymentsListPage() {
 
       const haystack = [
         payment.id,
-        payment.reference,
+        getPaymentReference(payment),
         payment.status,
         getStatusLabel(payment.status, "ar"),
         getStatusLabel(payment.status, "en"),
         payment.payment_method,
         getMethodLabel(payment.payment_method, "ar"),
         getMethodLabel(payment.payment_method, "en"),
+        payment.provider,
         payment.customer_id,
+        payment.customer_name,
         payment.invoice_id,
+        payment.order_id,
         payment.amount,
+        payment.paid_amount,
+        payment.external_reference,
+        payment.transaction_id,
+        payment.treasury_movement_reference,
+        payment.accounting_entry_reference,
       ]
         .filter(Boolean)
         .join(" ")
@@ -626,9 +698,9 @@ export default function SystemPaymentsListPage() {
       let left: string | number = "";
       let right: string | number = "";
 
-      if (sortKey === "reference") {
-        left = a.reference || `PAY-${a.id}`;
-        right = b.reference || `PAY-${b.id}`;
+      if (sortKey === "payment_number") {
+        left = getPaymentReference(a);
+        right = getPaymentReference(b);
       }
 
       if (sortKey === "status") {
@@ -641,9 +713,9 @@ export default function SystemPaymentsListPage() {
         right = b.payment_method || "";
       }
 
-      if (sortKey === "payment_date") {
-        left = a.payment_date ? new Date(a.payment_date).getTime() : 0;
-        right = b.payment_date ? new Date(b.payment_date).getTime() : 0;
+      if (sortKey === "paid_at") {
+        left = getPaymentDate(a) ? new Date(getPaymentDate(a) || "").getTime() : 0;
+        right = getPaymentDate(b) ? new Date(getPaymentDate(b) || "").getTime() : 0;
       }
 
       if (sortKey === "customer_id") {
@@ -659,6 +731,11 @@ export default function SystemPaymentsListPage() {
       if (sortKey === "amount") {
         left = toNumber(a.amount);
         right = toNumber(b.amount);
+      }
+
+      if (sortKey === "paid_amount") {
+        left = getPaidValue(a);
+        right = getPaidValue(b);
       }
 
       if (typeof left === "number" && typeof right === "number") {
@@ -770,13 +847,18 @@ export default function SystemPaymentsListPage() {
   const buildExportTableRows = (rows: ApiPayment[]) => {
     return rows
       .map((payment) => {
-        const reference = payment.reference || `PAY-${payment.id}`;
-        const customer = payment.customer_id ? `#${payment.customer_id}` : t.notAvailable;
+        const reference = getPaymentReference(payment);
+        const customer =
+          payment.customer_name ||
+          (payment.customer_id ? `#${payment.customer_id}` : t.notAvailable);
         const invoice = payment.invoice_id ? `#${payment.invoice_id}` : t.notAvailable;
         const method = getMethodLabel(payment.payment_method, locale);
         const status = getStatusLabel(payment.status, locale);
-        const date = formatDate(payment.payment_date, locale);
+        const date = formatDate(getPaymentDate(payment), locale);
         const amount = formatMoney(toNumber(payment.amount));
+        const paidAmount = formatMoney(getPaidValue(payment));
+        const treasury = payment.is_treasury_posted ? t.treasury : "-";
+        const accounting = payment.is_accounting_posted ? t.accounting : "-";
 
         return `
           <tr>
@@ -785,8 +867,10 @@ export default function SystemPaymentsListPage() {
             <td>${escapeHtml(invoice)}</td>
             <td>${escapeHtml(method)}</td>
             <td>${escapeHtml(status)}</td>
+            <td>${escapeHtml(`${treasury} / ${accounting}`)}</td>
             <td>${escapeHtml(date)}</td>
             <td>${escapeHtml(amount)}</td>
+            <td>${escapeHtml(paidAmount)}</td>
           </tr>
         `;
       })
@@ -853,8 +937,10 @@ export default function SystemPaymentsListPage() {
                 <th>${escapeHtml(t.invoice)}</th>
                 <th>${escapeHtml(t.method)}</th>
                 <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.posting)}</th>
                 <th>${escapeHtml(t.paymentDate)}</th>
                 <th>${escapeHtml(t.amount)}</th>
+                <th>${escapeHtml(t.paidAmount)}</th>
               </tr>
             </thead>
             <tbody>
@@ -902,7 +988,7 @@ export default function SystemPaymentsListPage() {
     }).format(new Date());
 
     const printTotal = exportRows.reduce(
-      (sum, payment) => sum + toNumber(payment.amount),
+      (sum, payment) => sum + getPaidValue(payment),
       0
     );
 
@@ -1010,7 +1096,7 @@ export default function SystemPaymentsListPage() {
               <div class="card-value">${escapeHtml(formatNumber(exportRows.length))}</div>
             </div>
             <div class="card">
-              <div class="card-label">${escapeHtml(t.amount)}</div>
+              <div class="card-label">${escapeHtml(t.collectedAmount)}</div>
               <div class="card-value">${escapeHtml(formatMoney(printTotal))}</div>
             </div>
             <div class="card">
@@ -1033,8 +1119,10 @@ export default function SystemPaymentsListPage() {
                 <th>${escapeHtml(t.invoice)}</th>
                 <th>${escapeHtml(t.method)}</th>
                 <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.posting)}</th>
                 <th>${escapeHtml(t.paymentDate)}</th>
                 <th>${escapeHtml(t.amount)}</th>
+                <th>${escapeHtml(t.paidAmount)}</th>
               </tr>
             </thead>
             <tbody>
@@ -1082,9 +1170,6 @@ export default function SystemPaymentsListPage() {
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        {/* =====================================================
-            HERO
-        ===================================================== */}
         <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm">
           <div className="pointer-events-none absolute -top-24 end-12 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
@@ -1138,9 +1223,6 @@ export default function SystemPaymentsListPage() {
           </div>
         </section>
 
-        {/* =====================================================
-            STATS
-        ===================================================== */}
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {statCards.map((card) => {
             const Icon = card.icon;
@@ -1168,9 +1250,6 @@ export default function SystemPaymentsListPage() {
           })}
         </section>
 
-        {/* =====================================================
-            FILTERS
-        ===================================================== */}
         <Card className="rounded-[1.5rem]">
           <CardHeader className="gap-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1310,330 +1389,364 @@ export default function SystemPaymentsListPage() {
               </Button>
             </div>
           </CardHeader>
-        </Card>
 
-        {/* =====================================================
-            TABLE
-        ===================================================== */}
-        <Card className="rounded-[1.5rem]">
-          <CardContent className="p-0">
+          <CardContent>
             {loading ? (
-              <div className="flex min-h-96 flex-col items-center justify-center gap-3 text-muted-foreground">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <div className="flex min-h-72 flex-col items-center justify-center gap-3 text-muted-foreground">
+                <Loader2 className="h-7 w-7 animate-spin text-primary" />
                 <p className="text-sm">{t.loading}</p>
               </div>
-            ) : sortedPayments.length === 0 ? (
-              <div className="flex min-h-96 flex-col items-center justify-center gap-3 p-8 text-center">
-                <CreditCard className="h-12 w-12 text-muted-foreground" />
+            ) : paginatedPayments.length === 0 ? (
+              <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
+                <CreditCard className="h-10 w-10 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">{t.empty}</p>
               </div>
             ) : (
-              <>
-                <div id="payments-table-section" className="overflow-hidden rounded-[1.5rem]">
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[980px] text-sm">
-                      <thead className="border-b bg-muted/50 text-xs text-muted-foreground">
-                        <tr>
-                          {hasColumn("select") ? (
-                            <th className="w-12 px-4 py-3 text-start font-medium">
-                              <Checkbox
-                                checked={pageSelected}
-                                onCheckedChange={togglePageSelection}
-                                aria-label="Select page"
-                              />
-                            </th>
-                          ) : null}
-
-                          {hasColumn("reference") ? (
-                            <SortableTh
-                              label={t.payment}
-                              sortKey="reference"
-                              activeKey={sortKey}
-                              direction={sortDirection}
-                              onSort={toggleSort}
+              <div className="overflow-hidden rounded-3xl border">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1180px] text-sm">
+                    <thead className="bg-muted/50 text-xs text-muted-foreground">
+                      <tr>
+                        {hasColumn("select") ? (
+                          <th className="px-4 py-3 text-start font-medium">
+                            <Checkbox
+                              checked={pageSelected}
+                              onCheckedChange={togglePageSelection}
+                              aria-label="Select page payments"
                             />
-                          ) : null}
+                          </th>
+                        ) : null}
 
-                          {hasColumn("customer") ? (
-                            <SortableTh
-                              label={t.customer}
-                              sortKey="customer_id"
-                              activeKey={sortKey}
-                              direction={sortDirection}
-                              onSort={toggleSort}
-                            />
-                          ) : null}
+                        {hasColumn("payment") ? (
+                          <SortableTh
+                            label={t.payment}
+                            sortKey="payment_number"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={toggleSort}
+                          />
+                        ) : null}
 
-                          {hasColumn("invoice") ? (
-                            <SortableTh
-                              label={t.invoice}
-                              sortKey="invoice_id"
-                              activeKey={sortKey}
-                              direction={sortDirection}
-                              onSort={toggleSort}
-                            />
-                          ) : null}
+                        {hasColumn("customer") ? (
+                          <SortableTh
+                            label={t.customer}
+                            sortKey="customer_id"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={toggleSort}
+                          />
+                        ) : null}
 
-                          {hasColumn("method") ? (
-                            <SortableTh
-                              label={t.method}
-                              sortKey="payment_method"
-                              activeKey={sortKey}
-                              direction={sortDirection}
-                              onSort={toggleSort}
-                            />
-                          ) : null}
+                        {hasColumn("invoice") ? (
+                          <SortableTh
+                            label={t.invoice}
+                            sortKey="invoice_id"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={toggleSort}
+                          />
+                        ) : null}
 
-                          {hasColumn("status") ? (
-                            <SortableTh
-                              label={t.status}
-                              sortKey="status"
-                              activeKey={sortKey}
-                              direction={sortDirection}
-                              onSort={toggleSort}
-                            />
-                          ) : null}
+                        {hasColumn("method") ? (
+                          <SortableTh
+                            label={t.method}
+                            sortKey="payment_method"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={toggleSort}
+                          />
+                        ) : null}
 
-                          {hasColumn("paymentDate") ? (
-                            <SortableTh
-                              label={t.paymentDate}
-                              sortKey="payment_date"
-                              activeKey={sortKey}
-                              direction={sortDirection}
-                              onSort={toggleSort}
-                            />
-                          ) : null}
+                        {hasColumn("status") ? (
+                          <SortableTh
+                            label={t.status}
+                            sortKey="status"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={toggleSort}
+                          />
+                        ) : null}
 
-                          {hasColumn("amount") ? (
-                            <SortableTh
-                              label={t.amount}
-                              sortKey="amount"
-                              activeKey={sortKey}
-                              direction={sortDirection}
-                              onSort={toggleSort}
-                            />
-                          ) : null}
+                        {hasColumn("posting") ? (
+                          <th className="px-4 py-3 text-start font-medium">
+                            {t.posting}
+                          </th>
+                        ) : null}
 
-                          {hasColumn("actions") ? (
-                            <th className="px-4 py-3 text-end font-medium">{t.actions}</th>
-                          ) : null}
-                        </tr>
-                      </thead>
+                        {hasColumn("paidAt") ? (
+                          <SortableTh
+                            label={t.paymentDate}
+                            sortKey="paid_at"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={toggleSort}
+                          />
+                        ) : null}
 
-                      <tbody className="divide-y">
-                        {paginatedPayments.map((payment) => {
-                          const isSelected = selectedIds.includes(payment.id);
-                          const status = String(payment.status || "PENDING").toUpperCase();
-                          const canConfirm = ["PENDING", "PROCESSING"].includes(status);
-                          const isConfirming = confirmingId === payment.id;
+                        {hasColumn("amount") ? (
+                          <SortableTh
+                            label={t.paidAmount}
+                            sortKey="paid_amount"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={toggleSort}
+                          />
+                        ) : null}
 
-                          return (
-                            <tr
-                              key={payment.id}
-                              className={`transition hover:bg-muted/30 ${
-                                isSelected ? "bg-primary/5" : "bg-card"
-                              }`}
-                            >
-                              {hasColumn("select") ? (
-                                <td className="px-4 py-3">
-                                  <Checkbox
-                                    checked={isSelected}
-                                    onCheckedChange={() => togglePaymentSelection(payment.id)}
-                                    aria-label={`Select payment ${payment.id}`}
-                                  />
-                                </td>
-                              ) : null}
+                        {hasColumn("actions") ? (
+                          <th className="px-4 py-3 text-end font-medium">
+                            {t.actions}
+                          </th>
+                        ) : null}
+                      </tr>
+                    </thead>
 
-                              {hasColumn("reference") ? (
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center gap-3">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                                      <CreditCard className="h-4 w-4" />
-                                    </div>
-                                    <div>
-                                      <p className="font-semibold">
-                                        {payment.reference || `PAY-${payment.id}`}
-                                      </p>
-                                      <p className="text-xs text-muted-foreground">
-                                        ID: {payment.id}
-                                      </p>
-                                    </div>
+                    <tbody className="divide-y">
+                      {paginatedPayments.map((payment) => {
+                        const isSelected = selectedIds.includes(payment.id);
+                        const status = String(payment.status || "PENDING").toUpperCase();
+                        const canConfirm = isConfirmableStatus(status);
+                        const isConfirming = confirmingId === payment.id;
+
+                        return (
+                          <tr
+                            key={payment.id}
+                            className={`transition hover:bg-muted/30 ${
+                              isSelected ? "bg-primary/5" : "bg-card"
+                            }`}
+                          >
+                            {hasColumn("select") ? (
+                              <td className="px-4 py-3">
+                                <Checkbox
+                                  checked={isSelected}
+                                  onCheckedChange={() => togglePaymentSelection(payment.id)}
+                                  aria-label={`Select payment ${payment.id}`}
+                                />
+                              </td>
+                            ) : null}
+
+                            {hasColumn("payment") ? (
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                                    <CreditCard className="h-4 w-4" />
                                   </div>
-                                </td>
-                              ) : null}
+                                  <div>
+                                    <p className="font-semibold">
+                                      {getPaymentReference(payment)}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      ID: {payment.id}
+                                      {payment.order_id ? ` • ${t.order} #${payment.order_id}` : ""}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+                            ) : null}
 
-                              {hasColumn("customer") ? (
-                                <td className="px-4 py-3">
-                                  {payment.customer_id ? (
-                                    <Badge variant="secondary" className="rounded-full">
-                                      #{payment.customer_id}
-                                    </Badge>
-                                  ) : (
-                                    <span className="text-muted-foreground">{t.notAvailable}</span>
-                                  )}
-                                </td>
-                              ) : null}
+                            {hasColumn("customer") ? (
+                              <td className="px-4 py-3">
+                                {payment.customer_name || payment.customer_id ? (
+                                  <div className="space-y-1">
+                                    <p className="font-medium">
+                                      {payment.customer_name ||
+                                        `#${payment.customer_id}`}
+                                    </p>
+                                    {payment.customer_id ? (
+                                      <p className="text-xs text-muted-foreground">
+                                        #{payment.customer_id}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    {t.notAvailable}
+                                  </span>
+                                )}
+                              </td>
+                            ) : null}
 
-                              {hasColumn("invoice") ? (
-                                <td className="px-4 py-3">
-                                  {payment.invoice_id ? (
-                                    <Badge variant="outline" className="rounded-full">
-                                      #{payment.invoice_id}
-                                    </Badge>
-                                  ) : (
-                                    <span className="text-muted-foreground">{t.notAvailable}</span>
-                                  )}
-                                </td>
-                              ) : null}
+                            {hasColumn("invoice") ? (
+                              <td className="px-4 py-3">
+                                {payment.invoice_id ? (
+                                  <Badge variant="outline" className="rounded-full">
+                                    #{payment.invoice_id}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    {t.notAvailable}
+                                  </span>
+                                )}
+                              </td>
+                            ) : null}
 
-                              {hasColumn("method") ? (
-                                <td className="px-4 py-3">
+                            {hasColumn("method") ? (
+                              <td className="px-4 py-3">
+                                <div className="space-y-1">
                                   <Badge variant="secondary" className="rounded-full">
                                     {getMethodLabel(payment.payment_method, locale)}
                                   </Badge>
-                                </td>
-                              ) : null}
+                                  {payment.provider ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      {payment.provider}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </td>
+                            ) : null}
 
-                              {hasColumn("status") ? (
-                                <td className="px-4 py-3">
+                            {hasColumn("status") ? (
+                              <td className="px-4 py-3">
+                                <Badge
+                                  variant="outline"
+                                  className={`rounded-full ${getStatusClassName(status)}`}
+                                >
+                                  {getStatusLabel(status, locale)}
+                                </Badge>
+                              </td>
+                            ) : null}
+
+                            {hasColumn("posting") ? (
+                              <td className="px-4 py-3">
+                                <div className="flex flex-wrap gap-1.5">
                                   <Badge
                                     variant="outline"
-                                    className={`rounded-full ${getStatusClassName(status)}`}
+                                    className={
+                                      payment.is_treasury_posted
+                                        ? "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                        : "rounded-full border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+                                    }
                                   >
-                                    {getStatusLabel(status, locale)}
+                                    {t.treasury}
                                   </Badge>
-                                </td>
-                              ) : null}
 
-                              {hasColumn("paymentDate") ? (
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center gap-2 text-muted-foreground">
-                                    <CalendarDays className="h-4 w-4" />
-                                    {formatDate(payment.payment_date, locale)}
-                                  </div>
-                                </td>
-                              ) : null}
+                                  <Badge
+                                    variant="outline"
+                                    className={
+                                      payment.is_accounting_posted
+                                        ? "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                        : "rounded-full border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+                                    }
+                                  >
+                                    {t.accounting}
+                                  </Badge>
+                                </div>
+                              </td>
+                            ) : null}
 
-                              {hasColumn("amount") ? (
-                                <td className="px-4 py-3">
-                                  <MoneyValue value={toNumber(payment.amount)} strong />
-                                </td>
-                              ) : null}
+                            {hasColumn("paidAt") ? (
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                  <CalendarDays className="h-4 w-4" />
+                                  {formatDate(getPaymentDate(payment), locale)}
+                                </div>
+                              </td>
+                            ) : null}
 
-                              {hasColumn("actions") ? (
-                                <td className="px-4 py-3">
-                                  <div className="flex justify-end gap-2">
-                                    {canConfirm ? (
-                                      <Button
-                                        type="button"
-                                        variant="secondary"
-                                        size="sm"
-                                        className="rounded-xl"
-                                        disabled={isConfirming}
-                                        onClick={() => handleConfirmPayment(payment.id)}
-                                      >
-                                        {isConfirming ? (
-                                          <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                                        ) : (
-                                          <BadgeCheck className="me-2 h-4 w-4" />
-                                        )}
-                                        {isConfirming ? t.confirming : t.confirm}
-                                      </Button>
-                                    ) : null}
+                            {hasColumn("amount") ? (
+                              <td className="px-4 py-3">
+                                <div className="space-y-1">
+                                  <MoneyValue value={getPaidValue(payment)} strong />
+                                  <p className="text-xs text-muted-foreground">
+                                    {t.amount}: {formatMoney(toNumber(payment.amount))}
+                                  </p>
+                                </div>
+                              </td>
+                            ) : null}
 
+                            {hasColumn("actions") ? (
+                              <td className="px-4 py-3">
+                                <div className="flex justify-end gap-2">
+                                  {canConfirm ? (
                                     <Button
-                                      asChild
-                                      variant="ghost"
+                                      type="button"
+                                      variant="secondary"
                                       size="sm"
                                       className="rounded-xl"
+                                      disabled={isConfirming}
+                                      onClick={() => handleConfirmPayment(payment.id)}
                                     >
-                                      <Link href={`/system/payments/${payment.id}`}>
-                                        <Eye className="me-2 h-4 w-4" />
-                                        {t.details}
-                                      </Link>
+                                      {isConfirming ? (
+                                        <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <BadgeCheck className="me-2 h-4 w-4" />
+                                      )}
+                                      {isConfirming ? t.confirming : t.confirm}
                                     </Button>
-                                  </div>
-                                </td>
-                              ) : null}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                                  ) : null}
+
+                                  <Button
+                                    asChild
+                                    variant="ghost"
+                                    size="sm"
+                                    className="rounded-xl"
+                                  >
+                                    <Link href={`/system/payments/${payment.id}`}>
+                                      <Eye className="me-2 h-4 w-4" />
+                                      {t.details}
+                                    </Link>
+                                  </Button>
+                                </div>
+                              </td>
+                            ) : null}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-
-                {/* =====================================================
-                    PAGINATION
-                ===================================================== */}
-                <div className="flex flex-col gap-3 border-t p-4 md:flex-row md:items-center md:justify-between">
-                  <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                    <span>
-                      {t.page} {formatNumber(currentPage)} {t.of}{" "}
-                      {formatNumber(totalPages)}
-                    </span>
-                    <span>•</span>
-                    <span>
-                      {formatNumber(sortedPayments.length)} {t.payments}
-                    </span>
-                    {selectedIds.length > 0 ? (
-                      <>
-                        <span>•</span>
-                        <span>
-                          {formatNumber(selectedIds.length)} {t.selected}
-                        </span>
-                      </>
-                    ) : null}
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      value={pageSize}
-                      onChange={(event) => setPageSize(Number(event.target.value))}
-                      className="h-9 rounded-xl border border-input bg-background px-3 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                    >
-                      {PAGE_SIZE_OPTIONS.map((size) => (
-                        <option key={size} value={size}>
-                          {t.rowsPerPage}: {size}
-                        </option>
-                      ))}
-                    </select>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl"
-                      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                      disabled={currentPage <= 1}
-                    >
-                      {isAr ? (
-                        <ChevronRight className="h-4 w-4" />
-                      ) : (
-                        <ChevronLeft className="h-4 w-4" />
-                      )}
-                    </Button>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl"
-                      onClick={() =>
-                        setCurrentPage((page) => Math.min(totalPages, page + 1))
-                      }
-                      disabled={currentPage >= totalPages}
-                    >
-                      {isAr ? (
-                        <ChevronLeft className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </>
+              </div>
             )}
+
+            <div className="mt-4 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>
+                  {t.page} {formatNumber(currentPage)} {t.of}{" "}
+                  {formatNumber(totalPages)}
+                </span>
+                <span>•</span>
+                <span>
+                  {formatNumber(sortedPayments.length)} {t.payments}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={pageSize}
+                  onChange={(event) => setPageSize(Number(event.target.value))}
+                  className="h-10 rounded-2xl border border-input bg-background px-3 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  aria-label={t.rowsPerPage}
+                >
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {t.rowsPerPage}: {size}
+                    </option>
+                  ))}
+                </select>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-2xl"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((current) => Math.max(1, current - 1))}
+                >
+                  {isAr ? "السابق" : "Previous"}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-2xl"
+                  disabled={currentPage >= totalPages}
+                  onClick={() =>
+                    setCurrentPage((current) => Math.min(totalPages, current + 1))
+                  }
+                >
+                  {isAr ? "التالي" : "Next"}
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -1658,21 +1771,19 @@ function SortableTh({
   direction: SortDirection;
   onSort: (key: SortKey) => void;
 }) {
-  const active = activeKey === sortKey;
+  const isActive = activeKey === sortKey;
 
   return (
     <th className="px-4 py-3 text-start font-medium">
       <button
         type="button"
+        className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground transition hover:text-foreground"
         onClick={() => onSort(sortKey)}
-        className="inline-flex items-center gap-2 rounded-lg text-start transition hover:text-foreground"
       >
-        <span>{label}</span>
-        <ArrowUpDown
-          className={`h-3.5 w-3.5 ${
-            active ? "text-primary" : "text-muted-foreground"
-          } ${active && direction === "desc" ? "rotate-180" : ""}`}
-        />
+        {label}
+        <span className={isActive ? "text-primary" : "text-muted-foreground/60"}>
+          {isActive ? (direction === "asc" ? "↑" : "↓") : "↕"}
+        </span>
       </button>
     </th>
   );
@@ -1686,7 +1797,11 @@ function MoneyValue({
   strong?: boolean;
 }) {
   return (
-    <div className={`flex items-center gap-1.5 ${strong ? "font-bold" : "font-medium"}`}>
+    <div
+      className={`flex items-center gap-1.5 ${
+        strong ? "font-semibold" : "font-medium"
+      }`}
+    >
       <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
       <span>{formatMoney(value)}</span>
     </div>

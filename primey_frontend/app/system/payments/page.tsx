@@ -7,7 +7,6 @@ import {
   Activity,
   ArrowDownUp,
   ArrowLeft,
-  BadgeCheck,
   Banknote,
   BarChart3,
   CalendarDays,
@@ -47,18 +46,42 @@ type AppLocale = "ar" | "en";
 
 type ApiPayment = {
   id: number;
+  payment_number?: string | null;
   reference?: string | null;
   status?: string | null;
   payment_method?: string | null;
+  provider?: string | null;
+  currency?: string | null;
   invoice_id?: number | null;
+  order_id?: number | null;
   customer_id?: number | null;
+  customer_name?: string | null;
   amount?: string | number | null;
+  paid_amount?: string | number | null;
+  refunded_amount?: string | number | null;
+  remaining_amount?: string | number | null;
+  net_collected_amount?: string | number | null;
   payment_date?: string | null;
+  initiated_at?: string | null;
+  paid_at?: string | null;
+  refunded_at?: string | null;
+  cancelled_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  external_reference?: string | null;
+  transaction_id?: string | null;
+  treasury_movement_reference?: string | null;
+  accounting_entry_reference?: string | null;
+  is_treasury_posted?: boolean | null;
+  is_accounting_posted?: boolean | null;
+  notes?: string | null;
+  failure_reason?: string | null;
 };
 
 type PaymentsApiResponse = {
   ok?: boolean;
   count?: number;
+  total_count?: number;
   results?: ApiPayment[];
   message?: string;
 };
@@ -141,6 +164,7 @@ const METHOD_META: Record<string, MethodMeta> = {
   STC_PAY: { labelAr: "STC Pay", labelEn: "STC Pay" },
   TAMARA: { labelAr: "تمارا", labelEn: "Tamara" },
   TABBY: { labelAr: "تابي", labelEn: "Tabby" },
+  GATEWAY: { labelAr: "بوابة دفع", labelEn: "Gateway" },
   OTHER: { labelAr: "أخرى", labelEn: "Other" },
 };
 
@@ -206,6 +230,20 @@ function formatDate(value: string | null | undefined, locale: AppLocale): string
   }).format(date);
 }
 
+function getPaymentDate(payment: ApiPayment): string | null {
+  return (
+    payment.paid_at ||
+    payment.payment_date ||
+    payment.created_at ||
+    payment.initiated_at ||
+    null
+  );
+}
+
+function getPaymentReference(payment: ApiPayment): string {
+  return payment.payment_number || payment.reference || `PAY-${payment.id}`;
+}
+
 function getStatusLabel(status: string | null | undefined, locale: AppLocale): string {
   const key = String(status || "PENDING").toUpperCase();
   const meta = STATUS_META[key];
@@ -227,6 +265,21 @@ function getMethodLabel(method: string | null | undefined, locale: AppLocale): s
   if (!meta) return method || (locale === "ar" ? "غير محدد" : "Unknown");
 
   return locale === "ar" ? meta.labelAr : meta.labelEn;
+}
+
+function isPaidStatus(status: string | null | undefined): boolean {
+  const current = String(status || "").toUpperCase();
+  return current === "PAID" || current === "PARTIALLY_PAID";
+}
+
+function isPendingStatus(status: string | null | undefined): boolean {
+  const current = String(status || "").toUpperCase();
+  return current === "PENDING" || current === "PROCESSING";
+}
+
+function isRefundedStatus(status: string | null | undefined): boolean {
+  const current = String(status || "").toUpperCase();
+  return current === "REFUNDED" || current === "PARTIALLY_REFUNDED";
 }
 
 /* =====================================================
@@ -270,15 +323,14 @@ export default function SystemPaymentsPage() {
       badge: isAr ? "وحدة المدفوعات" : "Payments Module",
       title: isAr ? "إدارة المدفوعات" : "Payments Management",
       subtitle: isAr
-        ? "لوحة تشغيلية لمتابعة التحصيل، طرق الدفع، حالات العمليات، وربط المدفوعات بالفواتير والعملاء."
-        : "Operational dashboard for collections, payment methods, transaction statuses, and payment links to invoices and customers.",
+        ? "لوحة تشغيلية لمتابعة التحصيل، طرق الدفع، حالات العمليات، وربط المدفوعات بالفواتير والخزينة والمحاسبة."
+        : "Operational dashboard for collections, payment methods, transaction statuses, and payment links to invoices, treasury, and accounting.",
       refresh: isAr ? "تحديث" : "Refresh",
       create: isAr ? "تسجيل دفعة" : "Create Payment",
       list: isAr ? "قائمة المدفوعات" : "Payments List",
       reports: isAr ? "تقارير المدفوعات" : "Payments Reports",
       invoices: isAr ? "الفواتير" : "Invoices",
       details: isAr ? "التفاصيل" : "Details",
-      confirm: isAr ? "تأكيد" : "Confirm",
       search: isAr
         ? "ابحث برقم الدفعة أو العميل أو الفاتورة أو طريقة الدفع..."
         : "Search by payment, customer, invoice, or method...",
@@ -286,7 +338,6 @@ export default function SystemPaymentsPage() {
       latestDesc: isAr
         ? "آخر العمليات المسجلة من واجهة المدفوعات."
         : "Latest records from the payments API.",
-      overview: isAr ? "ملخص المدفوعات" : "Payments Overview",
       overviewDesc: isAr
         ? "مؤشرات مباشرة مبنية على المدفوعات الحالية."
         : "Live indicators based on current payments.",
@@ -300,6 +351,8 @@ export default function SystemPaymentsPage() {
       totalAmount: isAr ? "إجمالي التحصيل" : "Collected Total",
       pendingAmount: isAr ? "مبالغ معلقة" : "Pending Amount",
       failedAmount: isAr ? "مبالغ فاشلة" : "Failed Amount",
+      treasuryPosted: isAr ? "مرحلة للخزينة" : "Treasury Posted",
+      accountingPosted: isAr ? "مرحلة محاسبيًا" : "Accounting Posted",
       activity: isAr ? "الحركة المالية" : "Financial Activity",
       activityDesc: isAr
         ? "قراءة سريعة لحالة المدفوعات حسب المرحلة."
@@ -319,6 +372,7 @@ export default function SystemPaymentsPage() {
       status: isAr ? "الحالة" : "Status",
       date: isAr ? "التاريخ" : "Date",
       amount: isAr ? "المبلغ" : "Amount",
+      posted: isAr ? "مرحل" : "Posted",
       notAvailable: isAr ? "غير متاح" : "N/A",
       sar: isAr ? "ريال" : "SAR",
       refreshSuccess: isAr ? "تم تحديث بيانات المدفوعات بنجاح" : "Payments refreshed successfully",
@@ -383,16 +437,24 @@ export default function SystemPaymentsPage() {
     return payments.filter((payment) => {
       const haystack = [
         payment.id,
-        payment.reference,
+        getPaymentReference(payment),
         payment.status,
         getStatusLabel(payment.status, "ar"),
         getStatusLabel(payment.status, "en"),
         payment.payment_method,
         getMethodLabel(payment.payment_method, "ar"),
         getMethodLabel(payment.payment_method, "en"),
+        payment.provider,
         payment.customer_id,
+        payment.customer_name,
         payment.invoice_id,
+        payment.order_id,
         payment.amount,
+        payment.paid_amount,
+        payment.external_reference,
+        payment.transaction_id,
+        payment.treasury_movement_reference,
+        payment.accounting_entry_reference,
       ]
         .filter(Boolean)
         .join(" ")
@@ -405,38 +467,35 @@ export default function SystemPaymentsPage() {
   const stats = useMemo(() => {
     const totalPayments = payments.length;
 
-    const paidPayments = payments.filter((payment) => {
-      const status = String(payment.status || "").toUpperCase();
-      return status === "PAID" || status === "PARTIALLY_PAID";
-    }).length;
+    const paidPayments = payments.filter((payment) => isPaidStatus(payment.status)).length;
 
-    const pendingPayments = payments.filter((payment) => {
-      const status = String(payment.status || "").toUpperCase();
-      return status === "PENDING" || status === "PROCESSING";
-    }).length;
+    const pendingPayments = payments.filter((payment) => isPendingStatus(payment.status)).length;
 
     const failedPayments = payments.filter(
       (payment) => String(payment.status || "").toUpperCase() === "FAILED"
     ).length;
 
-    const refundedPayments = payments.filter((payment) => {
-      const status = String(payment.status || "").toUpperCase();
-      return status === "REFUNDED" || status === "PARTIALLY_REFUNDED";
-    }).length;
+    const refundedPayments = payments.filter((payment) =>
+      isRefundedStatus(payment.status)
+    ).length;
+
+    const treasuryPosted = payments.filter((payment) => payment.is_treasury_posted).length;
+
+    const accountingPosted = payments.filter((payment) => payment.is_accounting_posted).length;
 
     const totalAmount = payments.reduce((sum, payment) => {
-      const status = String(payment.status || "").toUpperCase();
-      if (status === "PAID" || status === "PARTIALLY_PAID") {
-        return sum + toNumber(payment.amount);
+      if (isPaidStatus(payment.status) || isRefundedStatus(payment.status)) {
+        return sum + toNumber(payment.net_collected_amount ?? payment.paid_amount ?? payment.amount);
       }
+
       return sum;
     }, 0);
 
     const pendingAmount = payments.reduce((sum, payment) => {
-      const status = String(payment.status || "").toUpperCase();
-      if (status === "PENDING" || status === "PROCESSING") {
-        return sum + toNumber(payment.amount);
+      if (isPendingStatus(payment.status)) {
+        return sum + toNumber(payment.remaining_amount ?? payment.amount);
       }
+
       return sum;
     }, 0);
 
@@ -452,6 +511,8 @@ export default function SystemPaymentsPage() {
       pendingPayments,
       failedPayments,
       refundedPayments,
+      treasuryPosted,
+      accountingPosted,
       totalAmount,
       pendingAmount,
       failedAmount,
@@ -483,7 +544,7 @@ export default function SystemPaymentsPage() {
       const existing = map.get(method) || { method, count: 0, total: 0 };
 
       existing.count += 1;
-      existing.total += toNumber(payment.amount);
+      existing.total += toNumber(payment.net_collected_amount ?? payment.paid_amount ?? payment.amount);
 
       map.set(method, existing);
     });
@@ -713,7 +774,7 @@ export default function SystemPaymentsPage() {
               ) : (
                 <div className="overflow-hidden rounded-3xl border">
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[860px] text-sm">
+                    <table className="w-full min-w-[980px] text-sm">
                       <thead className="bg-muted/50 text-xs text-muted-foreground">
                         <tr>
                           <th className="px-4 py-3 text-start font-medium">{t.payment}</th>
@@ -721,6 +782,7 @@ export default function SystemPaymentsPage() {
                           <th className="px-4 py-3 text-start font-medium">{t.invoice}</th>
                           <th className="px-4 py-3 text-start font-medium">{t.method}</th>
                           <th className="px-4 py-3 text-start font-medium">{t.status}</th>
+                          <th className="px-4 py-3 text-start font-medium">{t.posted}</th>
                           <th className="px-4 py-3 text-start font-medium">{t.date}</th>
                           <th className="px-4 py-3 text-start font-medium">{t.amount}</th>
                           <th className="px-4 py-3 text-end font-medium">{t.details}</th>
@@ -740,7 +802,7 @@ export default function SystemPaymentsPage() {
                                   </div>
                                   <div>
                                     <p className="font-medium">
-                                      {payment.reference || `PAY-${payment.id}`}
+                                      {getPaymentReference(payment)}
                                     </p>
                                     <p className="text-xs text-muted-foreground">
                                       ID: {payment.id}
@@ -750,7 +812,8 @@ export default function SystemPaymentsPage() {
                               </td>
 
                               <td className="px-4 py-3">
-                                {payment.customer_id ? `#${payment.customer_id}` : t.notAvailable}
+                                {payment.customer_name ||
+                                  (payment.customer_id ? `#${payment.customer_id}` : t.notAvailable)}
                               </td>
 
                               <td className="px-4 py-3">
@@ -773,9 +836,35 @@ export default function SystemPaymentsPage() {
                               </td>
 
                               <td className="px-4 py-3">
+                                <div className="flex flex-wrap gap-1.5">
+                                  <Badge
+                                    variant="outline"
+                                    className={
+                                      payment.is_treasury_posted
+                                        ? "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                        : "rounded-full border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+                                    }
+                                  >
+                                    {isAr ? "خزينة" : "Treasury"}
+                                  </Badge>
+
+                                  <Badge
+                                    variant="outline"
+                                    className={
+                                      payment.is_accounting_posted
+                                        ? "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                        : "rounded-full border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+                                    }
+                                  >
+                                    {isAr ? "محاسبة" : "Accounting"}
+                                  </Badge>
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-3">
                                 <div className="flex items-center gap-2 text-muted-foreground">
                                   <CalendarDays className="h-4 w-4" />
-                                  {formatDate(payment.payment_date, locale)}
+                                  {formatDate(getPaymentDate(payment), locale)}
                                 </div>
                               </td>
 
@@ -787,7 +876,13 @@ export default function SystemPaymentsPage() {
                                     width={14}
                                     height={14}
                                   />
-                                  {formatMoney(toNumber(payment.amount))}
+                                  {formatMoney(
+                                    toNumber(
+                                      payment.net_collected_amount ??
+                                        payment.paid_amount ??
+                                        payment.amount
+                                    )
+                                  )}
                                 </div>
                               </td>
 
@@ -848,6 +943,26 @@ export default function SystemPaymentsPage() {
                   count={stats.failedPayments}
                   icon={XCircle}
                 />
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-3xl border bg-muted/20 p-4">
+                    <p className="text-sm font-medium">{t.treasuryPosted}</p>
+                    <p className="mt-2 text-2xl font-bold">{formatNumber(stats.treasuryPosted)}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {isAr ? "دفعات تم ربطها بالخزينة" : "Payments linked to treasury"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-3xl border bg-muted/20 p-4">
+                    <p className="text-sm font-medium">{t.accountingPosted}</p>
+                    <p className="mt-2 text-2xl font-bold">
+                      {formatNumber(stats.accountingPosted)}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {isAr ? "دفعات تم ترحيلها محاسبيًا" : "Payments posted to accounting"}
+                    </p>
+                  </div>
+                </div>
 
                 <div className="rounded-3xl border bg-muted/20 p-4">
                   <div className="flex items-center justify-between gap-3">
