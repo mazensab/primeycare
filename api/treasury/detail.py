@@ -7,7 +7,7 @@
 # ✅ تعطيل حساب خزينة بدل الحذف الخطير
 # ✅ تفاصيل حركة خزينة
 # ✅ تعديل حركة خزينة مسودة
-# ✅ إلغاء حركة خزينة مسودة
+# ✅ إلغاء حركة خزينة رسميًا مع عكس الأثر إن كانت مؤكدة
 # ✅ تأكيد حركة خزينة
 # ✅ كشف حساب خزينة / بنك
 # ============================================================
@@ -36,6 +36,7 @@ from treasury.models import (
 )
 from treasury.services import (
     build_treasury_statement_payload,
+    cancel_treasury_transaction,
     confirm_treasury_transaction,
 )
 
@@ -213,7 +214,6 @@ def treasury_account_detail(request: HttpRequest, account_id: int) -> JsonRespon
 
     try:
         payload = _read_json_body(request)
-
         protected_balance = _has_confirmed_transactions(account)
 
         with transaction.atomic():
@@ -348,43 +348,11 @@ def treasury_transaction_detail(request: HttpRequest, transaction_id: int) -> Js
         )
 
     if request.method == "DELETE":
-        try:
-            if txn.status == TreasuryTransactionStatus.CONFIRMED:
-                return _json_response(
-                    success=False,
-                    message="لا يمكن حذف حركة مؤكدة لأنها أثرت على الرصيد.",
-                    errors={"status": "الحركة مؤكدة."},
-                    status=400,
-                )
-
-            if txn.status == TreasuryTransactionStatus.CANCELLED:
-                return _json_response(
-                    success=True,
-                    message="الحركة ملغاة مسبقًا.",
-                    data=serialize_treasury_transaction(txn),
-                )
-
-            txn.status = TreasuryTransactionStatus.CANCELLED
-            txn.save(update_fields=["status", "updated_at"])
-            txn.refresh_from_db()
-
-            return _json_response(
-                success=True,
-                message="تم إلغاء حركة الخزينة بنجاح.",
-                data=serialize_treasury_transaction(txn),
-            )
-
-        except Exception as exc:
-            return _json_response(
-                success=False,
-                message="حدث خطأ غير متوقع أثناء إلغاء حركة الخزينة.",
-                errors=str(exc),
-                status=500,
-            )
+        return treasury_transaction_cancel(request, transaction_id)
 
     try:
         if txn.status == TreasuryTransactionStatus.CONFIRMED:
-            raise ValidationError("لا يمكن تعديل حركة خزينة مؤكدة.")
+            raise ValidationError("لا يمكن تعديل حركة خزينة مؤكدة. أنشئ حركة تسوية بدل تعديل الأصل.")
 
         if txn.status == TreasuryTransactionStatus.CANCELLED:
             raise ValidationError("لا يمكن تعديل حركة خزينة ملغاة.")
@@ -418,6 +386,9 @@ def treasury_transaction_detail(request: HttpRequest, transaction_id: int) -> Js
 
             if status_value == TreasuryTransactionStatus.CONFIRMED:
                 return treasury_transaction_confirm(request, txn.pk)
+
+            if status_value == TreasuryTransactionStatus.CANCELLED:
+                return treasury_transaction_cancel(request, txn.pk)
 
             txn.status = status_value
 
@@ -531,6 +502,47 @@ def treasury_transaction_confirm(request: HttpRequest, transaction_id: int) -> J
 
 
 # ============================================================
+# Cancel Transaction
+# ============================================================
+
+@require_http_methods(["POST"])
+def treasury_transaction_cancel(request: HttpRequest, transaction_id: int) -> JsonResponse:
+    txn = get_object_or_404(
+        TreasuryTransaction.objects.select_related(
+            "treasury_account",
+            "treasury_account__ledger_account",
+            "destination_account",
+            "destination_account__ledger_account",
+        ),
+        pk=transaction_id,
+    )
+
+    try:
+        cancelled_txn = cancel_treasury_transaction(txn)
+
+        return _json_response(
+            success=True,
+            message="تم إلغاء حركة الخزينة بنجاح.",
+            data=serialize_treasury_transaction(cancelled_txn),
+        )
+
+    except ValidationError as exc:
+        return _json_response(
+            success=False,
+            message="تعذر إلغاء حركة الخزينة.",
+            errors=_serialize_validation_error(exc),
+            status=400,
+        )
+    except Exception as exc:
+        return _json_response(
+            success=False,
+            message="حدث خطأ غير متوقع أثناء إلغاء حركة الخزينة.",
+            errors=str(exc),
+            status=500,
+        )
+
+
+# ============================================================
 # Treasury Account Statement
 # ============================================================
 
@@ -542,8 +554,11 @@ def treasury_account_statement(request: HttpRequest, account_id: int) -> JsonRes
     )
 
     try:
-        date_from = parse_date(request.GET.get("date_from", "").strip()) if request.GET.get("date_from") else None
-        date_to = parse_date(request.GET.get("date_to", "").strip()) if request.GET.get("date_to") else None
+        date_from_raw = request.GET.get("date_from", "").strip()
+        date_to_raw = request.GET.get("date_to", "").strip()
+
+        date_from = parse_date(date_from_raw) if date_from_raw else None
+        date_to = parse_date(date_to_raw) if date_to_raw else None
 
         include_draft = _to_bool(request.GET.get("include_draft"), default=True)
         include_cancelled = _to_bool(request.GET.get("include_cancelled"), default=False)

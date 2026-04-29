@@ -7,7 +7,7 @@ import * as XLSX from "xlsx";
 import {
   ArrowLeft,
   Banknote,
-  CreditCard,
+  CheckCircle2,
   Download,
   Eye,
   FileText,
@@ -17,7 +17,9 @@ import {
   Printer,
   RefreshCcw,
   Search,
+  ShieldCheck,
   Wallet,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -52,31 +54,48 @@ import {
 import { PERMISSIONS } from "@/lib/permissions";
 
 type AppLocale = "ar" | "en";
+type AccountStatusFilter = "ALL" | "ACTIVE" | "INACTIVE" | "SUSPENDED" | "CLOSED";
 
-type TreasuryAccountStatus =
-  | "ACTIVE"
-  | "INACTIVE"
-  | "SUSPENDED"
-  | "CLOSED"
-  | string;
+type ApiEnvelope<T> = {
+  success?: boolean;
+  message?: string;
+  data?: T;
+  errors?: unknown;
+};
+
+type PaginatedPayload<T> = {
+  items?: T[];
+  pagination?: {
+    page?: number;
+    page_size?: number;
+    total_pages?: number;
+    total_items?: number;
+    has_next?: boolean;
+    has_previous?: boolean;
+  };
+  summary?: Record<string, unknown>;
+  choices?: Record<string, unknown>;
+};
+
+type LedgerAccount = {
+  id?: number | string;
+  code?: string;
+  name?: string;
+  name_ar?: string;
+  name_en?: string;
+  is_group?: boolean;
+};
 
 type TreasuryCashbox = {
   id: number | string;
   name: string;
   code: string;
-  account_type: "CASHBOX" | string;
+  account_type: string;
   account_type_label?: string;
-  status: TreasuryAccountStatus;
+  status: string;
   status_label?: string;
+  ledger_account?: LedgerAccount | null;
   ledger_account_id?: number | string | null;
-  ledger_account?: {
-    id?: number | string;
-    code?: string;
-    name?: string;
-    name_ar?: string;
-    name_en?: string;
-    is_group?: boolean;
-  } | null;
   opening_balance: string;
   current_balance: string;
   currency: string;
@@ -85,6 +104,8 @@ type TreasuryCashbox = {
   created_at?: string | null;
   updated_at?: string | null;
 };
+
+const SAR_ICON = "/currency/sar.svg";
 
 function readLocale(): AppLocale {
   try {
@@ -112,29 +133,60 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
-function toArray(payload: unknown): unknown[] {
-  const data = payload as {
-    data?: unknown[] | { items?: unknown[] };
-    items?: unknown[];
-    results?: unknown[];
-  };
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
 
-  if (Array.isArray(payload)) return payload;
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
 
-  if (
-    data?.data &&
-    typeof data.data === "object" &&
-    !Array.isArray(data.data) &&
-    Array.isArray(data.data.items)
-  ) {
-    return data.data.items;
+  if (parts.length === 2) {
+    return parts.pop()?.split(";").shift() || "";
   }
 
-  if (Array.isArray(data?.items)) return data.items;
-  if (Array.isArray(data?.results)) return data.results;
-  if (Array.isArray(data?.data)) return data.data;
+  return "";
+}
+
+function toArray<T>(payload: unknown): T[] {
+  const envelope = payload as ApiEnvelope<PaginatedPayload<T> | T[]>;
+  const direct = payload as {
+    items?: T[];
+    results?: T[];
+    data?: T[] | PaginatedPayload<T>;
+  };
+
+  if (Array.isArray(payload)) return payload as T[];
+
+  if (Array.isArray(envelope?.data)) return envelope.data as T[];
+
+  if (
+    envelope?.data &&
+    typeof envelope.data === "object" &&
+    !Array.isArray(envelope.data) &&
+    Array.isArray((envelope.data as PaginatedPayload<T>).items)
+  ) {
+    return ((envelope.data as PaginatedPayload<T>).items || []) as T[];
+  }
+
+  if (Array.isArray(direct.items)) return direct.items;
+  if (Array.isArray(direct.results)) return direct.results;
 
   return [];
+}
+
+function getPayloadSummary(payload: unknown): Record<string, unknown> {
+  const envelope = payload as ApiEnvelope<PaginatedPayload<unknown>>;
+  const direct = payload as PaginatedPayload<unknown>;
+
+  if (
+    envelope?.data &&
+    typeof envelope.data === "object" &&
+    !Array.isArray(envelope.data) &&
+    (envelope.data as PaginatedPayload<unknown>).summary
+  ) {
+    return (envelope.data as PaginatedPayload<unknown>).summary || {};
+  }
+
+  return direct.summary || {};
 }
 
 function normalizeCashbox(item: unknown): TreasuryCashbox {
@@ -148,41 +200,43 @@ function normalizeCashbox(item: unknown): TreasuryCashbox {
     account_type_label: row.account_type_label
       ? String(row.account_type_label)
       : undefined,
-    status: String(row.status || "ACTIVE"),
+    status: String(row.status || ""),
     status_label: row.status_label ? String(row.status_label) : undefined,
-    ledger_account_id:
-      row.ledger_account_id === undefined || row.ledger_account_id === null
-        ? null
-        : (row.ledger_account_id as number | string),
     ledger_account:
       row.ledger_account && typeof row.ledger_account === "object"
-        ? (row.ledger_account as TreasuryCashbox["ledger_account"])
+        ? (row.ledger_account as LedgerAccount)
         : null,
+    ledger_account_id: row.ledger_account_id as number | string | null | undefined,
     opening_balance: String(row.opening_balance || "0.00"),
     current_balance: String(row.current_balance || "0.00"),
     currency: String(row.currency || "SAR"),
-    description: row.description ? String(row.description) : undefined,
+    description: row.description ? String(row.description) : "",
     is_default: Boolean(row.is_default),
     created_at: row.created_at ? String(row.created_at) : null,
     updated_at: row.updated_at ? String(row.updated_at) : null,
   };
 }
 
-function money(value: string | number | null | undefined) {
-  const number = Number(value || 0);
+function toNumber(value: unknown): number {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
+function money(value: string | number | null | undefined) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(Number.isFinite(number) ? number : 0);
+  }).format(toNumber(value));
 }
 
 function formatNumber(value: string | number | null | undefined) {
-  const number = Number(value || 0);
-
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(Number.isFinite(number) ? number : 0);
+  }).format(toNumber(value));
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function dateOnly(value?: string | null) {
@@ -204,248 +258,241 @@ function dictionary(locale: AppLocale) {
   return {
     title: ar ? "الصناديق النقدية" : "Cashboxes",
     subtitle: ar
-      ? "إدارة الصناديق النقدية وأرصدة الكاش والحركات المرتبطة بها."
-      : "Manage cashboxes, cash balances, and linked treasury transactions.",
-    back: ar ? "الخزينة" : "Treasury",
-    allAccounts: ar ? "حسابات الخزينة" : "Treasury Accounts",
-    transactions: ar ? "الحركات المالية" : "Transactions",
-    createAccount: ar ? "إنشاء صندوق" : "Create Cashbox",
-    createTransaction: ar ? "إضافة حركة" : "Create Transaction",
+      ? "إدارة ومتابعة الصناديق النقدية وأرصدة الكاش المرتبطة بالخزينة."
+      : "Manage and monitor cashboxes and cash balances linked to treasury.",
+    badge: ar ? "CASHBOX" : "CASHBOX",
+    back: ar ? "الرجوع للخزينة" : "Back to Treasury",
     refresh: ar ? "تحديث" : "Refresh",
-    export: ar ? "تصدير Excel" : "Export Excel",
-    print: ar ? "طباعة" : "Print",
-    search: ar
-      ? "ابحث باسم الصندوق أو الكود أو الوصف..."
-      : "Search by cashbox name, code, or description...",
-    loading: ar ? "جاري تحميل الصناديق النقدية..." : "Loading cashboxes...",
-    noData: ar ? "لا توجد صناديق نقدية." : "No cashboxes found.",
-    apiError: ar ? "تعذر تحميل الصناديق النقدية." : "Unable to load cashboxes.",
-    refreshed: ar ? "تم تحديث الصناديق النقدية" : "Cashboxes refreshed",
-    exported: ar
-      ? "تم تصدير الصناديق النقدية Excel"
-      : "Cashboxes exported to Excel",
-    actions: ar ? "الإجراءات" : "Actions",
-    details: ar ? "عرض التفاصيل" : "View Details",
-    statement: ar ? "كشف الحساب" : "Statement",
-    defaultAccount: ar ? "افتراضي" : "Default",
-    totalBalance: ar ? "إجمالي أرصدة الصناديق" : "Total Cashbox Balance",
-    activeCashboxes: ar ? "الصناديق النشطة" : "Active Cashboxes",
-    inactiveCashboxes: ar ? "غير النشطة" : "Inactive Cashboxes",
-    defaultCashboxes: ar ? "الصناديق الافتراضية" : "Default Cashboxes",
-    selected: ar ? "صفوف محددة" : "selected rows",
+    create: ar ? "إنشاء صندوق" : "Create Cashbox",
+    search: ar ? "بحث باسم الصندوق أو الكود أو الوصف" : "Search by cashbox name, code, or description",
+    status: ar ? "الحالة" : "Status",
     all: ar ? "الكل" : "All",
-    table: {
-      cashbox: ar ? "الصندوق" : "Cashbox",
-      code: ar ? "الكود" : "Code",
-      openingBalance: ar ? "الرصيد الافتتاحي" : "Opening Balance",
-      currentBalance: ar ? "الرصيد الحالي" : "Current Balance",
-      status: ar ? "الحالة" : "Status",
-      ledgerAccount: ar ? "الحساب المحاسبي" : "Ledger Account",
-      createdAt: ar ? "تاريخ الإنشاء" : "Created At",
-      description: ar ? "الوصف" : "Description",
-    },
-    statuses: {
-      ALL: ar ? "الكل" : "All",
-      ACTIVE: ar ? "نشط" : "Active",
-      INACTIVE: ar ? "غير نشط" : "Inactive",
-      SUSPENDED: ar ? "موقوف" : "Suspended",
-      CLOSED: ar ? "مغلق" : "Closed",
-    },
+    active: ar ? "نشط" : "Active",
+    inactive: ar ? "غير نشط" : "Inactive",
+    suspended: ar ? "موقوف" : "Suspended",
+    closed: ar ? "مغلق" : "Closed",
+    exportExcel: ar ? "تصدير Excel" : "Export Excel",
+    print: ar ? "طباعة Web PDF" : "Web PDF Print",
+    totalCashboxes: ar ? "إجمالي الصناديق" : "Total Cashboxes",
+    activeCashboxes: ar ? "الصناديق النشطة" : "Active Cashboxes",
+    defaultCashboxes: ar ? "الصناديق الافتراضية" : "Default Cashboxes",
+    totalBalance: ar ? "إجمالي أرصدة الكاش" : "Total Cash Balance",
+    openingBalance: ar ? "إجمالي الرصيد الافتتاحي" : "Total Opening Balance",
+    listTitle: ar ? "قائمة الصناديق النقدية" : "Cashboxes List",
+    listDescription: ar
+      ? "الصناديق هي حسابات خزينة من نوع CASHBOX وتستخدم للمدفوعات النقدية والتحصيل المباشر."
+      : "Cashboxes are treasury accounts of type CASHBOX used for cash receipts and direct collection.",
+    name: ar ? "اسم الصندوق" : "Cashbox Name",
+    code: ar ? "الكود" : "Code",
+    currentBalance: ar ? "الرصيد الحالي" : "Current Balance",
+    ledgerAccount: ar ? "الحساب المحاسبي" : "Ledger Account",
+    defaultAccount: ar ? "افتراضي" : "Default",
+    createdAt: ar ? "تاريخ الإنشاء" : "Created At",
+    actions: ar ? "الإجراءات" : "Actions",
+    menu: ar ? "خيارات الصندوق" : "Cashbox Options",
+    view: ar ? "عرض التفاصيل" : "View Details",
+    statement: ar ? "كشف الحساب" : "Statement",
+    deactivate: ar ? "تعطيل الصندوق" : "Deactivate Cashbox",
+    noData: ar ? "لا توجد صناديق مطابقة." : "No matching cashboxes.",
+    loading: ar ? "جاري تحميل الصناديق..." : "Loading cashboxes...",
+    apiError: ar ? "تعذر تحميل الصناديق النقدية." : "Unable to load cashboxes.",
+    refreshed: ar ? "تم تحديث الصناديق النقدية." : "Cashboxes refreshed.",
+    exported: ar ? "تم تصدير ملف Excel." : "Excel file exported.",
+    actionSuccess: ar ? "تم تحديث حالة الصندوق بنجاح." : "Cashbox status updated successfully.",
+    actionError: ar ? "تعذر تنفيذ العملية." : "Unable to complete action.",
   };
 }
 
-function statusBadge(status: string, t: ReturnType<typeof dictionary>) {
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const method = init?.method || "GET";
+  const headers = new Headers(init?.headers || {});
+
+  headers.set("Accept", "application/json");
+
+  if (method !== "GET") {
+    headers.set("Content-Type", "application/json");
+    headers.set("X-CSRFToken", getCookie("csrftoken"));
+  }
+
+  const response = await fetch(url, {
+    ...init,
+    method,
+    credentials: "include",
+    headers,
+    cache: "no-store",
+  });
+
+  const payload = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
+
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.message || `HTTP ${response.status}`);
+  }
+
+  return payload as T;
+}
+
+function statusBadgeClass(status: string) {
   if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50">
-        {t.statuses.ACTIVE}
-      </Badge>
-    );
-  }
-
-  if (status === "SUSPENDED") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50">
-        {t.statuses.SUSPENDED}
-      </Badge>
-    );
-  }
-
-  if (status === "CLOSED") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
-        {t.statuses.CLOSED}
-      </Badge>
-    );
+    return "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300";
   }
 
   if (status === "INACTIVE") {
-    return (
-      <Badge variant="secondary" className="rounded-full px-3 py-1">
-        {t.statuses.INACTIVE}
-      </Badge>
-    );
+    return "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300";
   }
 
-  return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {status || "-"}
-    </Badge>
-  );
-}
+  if (status === "SUSPENDED") {
+    return "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-50 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300";
+  }
 
-function ledgerName(account: TreasuryCashbox) {
-  if (!account.ledger_account) return "-";
-
-  const ledger = account.ledger_account;
-
-  return `${ledger.code || ""} ${
-    ledger.name_ar || ledger.name || ledger.name_en || ""
-  }`.trim();
+  return "border-red-200 bg-red-50 text-red-700 hover:bg-red-50 dark:border-red-900 dark:bg-red-950 dark:text-red-300";
 }
 
 export default function TreasuryCashboxesPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [rows, setRows] = useState<TreasuryCashbox[]>([]);
+  const [items, setItems] = useState<TreasuryCashbox[]>([]);
+  const [summary, setSummary] = useState<Record<string, unknown>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const [actionId, setActionId] = useState<string | number | null>(null);
 
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<
-    "ALL" | "ACTIVE" | "INACTIVE" | "SUSPENDED" | "CLOSED"
-  >("ALL");
-  const [selectedIds, setSelectedIds] = useState<Array<string | number>>([]);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<AccountStatusFilter>("ALL");
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
 
-  const filteredRows = useMemo(() => {
-    const clean = query.trim().toLowerCase();
+  const filteredItems = useMemo(() => {
+    const clean = search.trim().toLowerCase();
 
-    return rows.filter((item) => {
+    return items.filter((item) => {
       const matchesStatus = status === "ALL" || item.status === status;
 
       const text = [
         item.name,
         item.code,
-        item.status,
         item.description,
-        ledgerName(item),
+        item.status,
+        item.status_label,
+        item.ledger_account?.code,
+        item.ledger_account?.name,
+        item.ledger_account?.name_ar,
+        item.ledger_account?.name_en,
       ]
         .join(" ")
         .toLowerCase();
 
       return matchesStatus && (!clean || text.includes(clean));
     });
-  }, [rows, query, status]);
+  }, [items, search, status]);
 
-  const summary = useMemo(() => {
-    const totalBalance = filteredRows.reduce(
-      (sum, item) => sum + Number(item.current_balance || 0),
+  const stats = useMemo(() => {
+    const activeItems = filteredItems.filter((item) => item.status === "ACTIVE");
+    const defaultItems = filteredItems.filter((item) => item.is_default);
+
+    const totalBalance = filteredItems.reduce(
+      (sum, item) => sum + toNumber(item.current_balance),
       0,
     );
 
-    const activeCashboxes = rows.filter(
-      (item) => item.status === "ACTIVE",
-    ).length;
-
-    const inactiveCashboxes = rows.filter(
-      (item) => item.status === "INACTIVE",
-    ).length;
-
-    const defaultCashboxes = rows.filter((item) => item.is_default).length;
+    const openingBalance = filteredItems.reduce(
+      (sum, item) => sum + toNumber(item.opening_balance),
+      0,
+    );
 
     return {
+      totalCashboxes: toNumber(summary.total_accounts || filteredItems.length),
+      activeCashboxes: activeItems.length,
+      defaultCashboxes: defaultItems.length,
       totalBalance,
-      activeCashboxes,
-      inactiveCashboxes,
-      defaultCashboxes,
+      openingBalance,
     };
-  }, [rows, filteredRows]);
+  }, [filteredItems, summary]);
 
-  const allSelected =
-    filteredRows.length > 0 &&
-    filteredRows.every((item) => selectedIds.includes(item.id));
-
-  async function loadRows(showToast = false) {
+  async function loadData(showToast = false) {
     try {
       setIsLoading(true);
 
-      const response = await fetch(
-        "/api/treasury/accounts/?page_size=500&account_type=CASHBOX",
-        {
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-          },
-          cache: "no-store",
-        },
+      const params = new URLSearchParams();
+      params.set("page_size", "100");
+
+      if (status !== "ALL") params.set("status", status);
+      if (search.trim()) params.set("search", search.trim());
+
+      const payload = await fetchJson<unknown>(
+        `/api/treasury/cashboxes/?${params.toString()}`,
       );
 
-      const payload = await response.json().catch(() => null);
-
-      if (!response.ok || payload?.success === false || payload?.ok === false) {
-        throw new Error(payload?.message || `HTTP ${response.status}`);
-      }
-
-      setRows(toArray(payload).map(normalizeCashbox));
-      setSelectedIds([]);
+      setItems(toArray<unknown>(payload).map(normalizeCashbox));
+      setSummary(getPayloadSummary(payload));
 
       if (showToast) toast.success(t.refreshed);
     } catch (error) {
       console.error("Treasury cashboxes load error:", error);
-      setRows([]);
+      setItems([]);
+      setSummary({});
       toast.error(t.apiError);
     } finally {
       setIsLoading(false);
     }
   }
 
+  async function deactivateCashbox(item: TreasuryCashbox) {
+    try {
+      setActionId(item.id);
+
+      await fetchJson(`/api/treasury/accounts/${item.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "INACTIVE",
+        }),
+      });
+
+      toast.success(t.actionSuccess);
+      await loadData(false);
+    } catch (error) {
+      console.error("Deactivate cashbox error:", error);
+      toast.error(t.actionError);
+    } finally {
+      setActionId(null);
+    }
+  }
+
   function exportExcel() {
-    const data = filteredRows.map((item) => ({
-      [t.table.code]: item.code,
-      [t.table.cashbox]: item.name,
-      [t.table.openingBalance]: money(item.opening_balance),
-      [t.table.currentBalance]: money(item.current_balance),
-      [t.table.status]:
-        t.statuses[item.status as keyof typeof t.statuses] || item.status,
-      [t.table.ledgerAccount]: ledgerName(item),
-      [t.table.createdAt]: dateOnly(item.created_at),
-      [t.table.description]: item.description || "-",
-      [t.defaultAccount]: item.is_default ? "Yes" : "No",
+    const rows = filteredItems.map((item) => ({
+      "Code": item.code,
+      "Name": item.name,
+      "Status": item.status_label || item.status,
+      "Opening Balance": money(item.opening_balance),
+      "Current Balance": money(item.current_balance),
+      "Currency": item.currency,
+      "Default": item.is_default ? "Yes" : "No",
+      "Ledger Account": item.ledger_account?.code || "",
+      "Description": item.description || "",
+      "Created At": item.created_at || "",
     }));
 
-    const worksheet = XLSX.utils.json_to_sheet(data);
-
+    const worksheet = XLSX.utils.json_to_sheet(rows);
     worksheet["!cols"] = [
       { wch: 18 },
-      { wch: 32 },
+      { wch: 30 },
+      { wch: 16 },
       { wch: 18 },
       { wch: 18 },
-      { wch: 16 },
-      { wch: 32 },
-      { wch: 16 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 22 },
       { wch: 40 },
-      { wch: 14 },
+      { wch: 24 },
     ];
 
     const workbook = XLSX.utils.book_new();
 
-    XLSX.utils.book_append_sheet(
-      workbook,
-      worksheet,
-      locale === "ar" ? "الصناديق" : "Cashboxes",
-    );
-
-    XLSX.writeFile(
-      workbook,
-      `primey-treasury-cashboxes-${new Date().toISOString().slice(0, 10)}.xlsx`,
-    );
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Cashboxes");
+    XLSX.writeFile(workbook, `primey-treasury-cashboxes-${today()}.xlsx`);
 
     toast.success(t.exported);
   }
 
-  function handlePrint() {
-    if (typeof window === "undefined") return;
+  function printPage() {
     window.print();
   }
 
@@ -453,16 +500,53 @@ export default function TreasuryCashboxesPage() {
     const next = readLocale();
     applyDocumentLocale(next);
     setLocale(next);
+
+    const handleLocaleChange = () => {
+      const updated = readLocale();
+      applyDocumentLocale(updated);
+      setLocale(updated);
+    };
+
+    window.addEventListener("storage", handleLocaleChange);
+    window.addEventListener("primey-locale-changed", handleLocaleChange);
+
+    return () => {
+      window.removeEventListener("storage", handleLocaleChange);
+      window.removeEventListener("primey-locale-changed", handleLocaleChange);
+    };
   }, []);
 
   useEffect(() => {
-    loadRows(false);
+    loadData(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locale]);
 
-  useEffect(() => {
-    setSelectedIds([]);
-  }, [query, status]);
+  const kpiCards = [
+    {
+      label: t.totalCashboxes,
+      value: formatNumber(stats.totalCashboxes),
+      icon: Wallet,
+      currency: false,
+    },
+    {
+      label: t.activeCashboxes,
+      value: formatNumber(stats.activeCashboxes),
+      icon: CheckCircle2,
+      currency: false,
+    },
+    {
+      label: t.totalBalance,
+      value: money(stats.totalBalance),
+      icon: Banknote,
+      currency: true,
+    },
+    {
+      label: t.openingBalance,
+      value: money(stats.openingBalance),
+      icon: ShieldCheck,
+      currency: true,
+    },
+  ];
 
   return (
     <PermissionGuard
@@ -470,15 +554,16 @@ export default function TreasuryCashboxesPage() {
       workspace="system"
       mode="fallback"
     >
-      <div className="space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="space-y-5" dir={isArabic ? "rtl" : "ltr"}>
+        <div className="flex flex-col gap-3 print:hidden lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="rounded-full">
                 /system/treasury/cashboxes
               </Badge>
-              <Badge className="rounded-full">
-                {filteredRows.length} / {rows.length}
+              <Badge className="rounded-full">{t.badge}</Badge>
+              <Badge variant="outline" className="rounded-full">
+                {formatNumber(filteredItems.length)}
               </Badge>
             </div>
 
@@ -499,25 +584,12 @@ export default function TreasuryCashboxesPage() {
               </Link>
             </Button>
 
-            <Button asChild variant="outline" className="h-10 rounded-xl">
-              <Link href="/system/treasury/accounts">
-                <Wallet className="h-4 w-4" />
-                {t.allAccounts}
-              </Link>
-            </Button>
-
-            <Button asChild variant="outline" className="h-10 rounded-xl">
-              <Link href="/system/treasury/transactions">
-                <CreditCard className="h-4 w-4" />
-                {t.transactions}
-              </Link>
-            </Button>
-
             <Button
+              type="button"
               variant="outline"
               className="h-10 rounded-xl"
               disabled={isLoading}
-              onClick={() => loadRows(true)}
+              onClick={() => loadData(true)}
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -534,13 +606,14 @@ export default function TreasuryCashboxesPage() {
               ]}
             >
               <Button
+                type="button"
                 variant="outline"
                 className="h-10 rounded-xl"
-                disabled={!filteredRows.length}
+                disabled={!filteredItems.length}
                 onClick={exportExcel}
               >
                 <Download className="h-4 w-4" />
-                {t.export}
+                {t.exportExcel}
               </Button>
             </Can>
 
@@ -551,9 +624,11 @@ export default function TreasuryCashboxesPage() {
               ]}
             >
               <Button
+                type="button"
                 variant="outline"
                 className="h-10 rounded-xl"
-                onClick={handlePrint}
+                disabled={!filteredItems.length}
+                onClick={printPage}
               >
                 <Printer className="h-4 w-4" />
                 {t.print}
@@ -562,9 +637,9 @@ export default function TreasuryCashboxesPage() {
 
             <Can permission={PERMISSIONS.TREASURY_CREATE}>
               <Button asChild className="h-10 rounded-xl">
-                <Link href="/system/treasury/accounts/create">
+                <Link href="/system/treasury/accounts/create?account_type=CASHBOX">
                   <PlusCircle className="h-4 w-4" />
-                  {t.createAccount}
+                  {t.create}
                 </Link>
               </Button>
             </Can>
@@ -572,333 +647,252 @@ export default function TreasuryCashboxesPage() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    {t.totalBalance}
-                  </p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <Image
-                      src="/currency/sar.svg"
-                      alt="SAR"
-                      width={18}
-                      height={18}
-                    />
-                    <p className="text-2xl font-bold">
-                      {isLoading ? "..." : money(summary.totalBalance)}
-                    </p>
+          {kpiCards.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <Card key={item.label} className="overflow-hidden">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        {item.currency ? (
+                          <Image
+                            src={SAR_ICON}
+                            alt="SAR"
+                            width={18}
+                            height={18}
+                          />
+                        ) : null}
+                        <p className="text-2xl font-bold" dir="ltr">
+                          {isLoading ? "..." : item.value}
+                        </p>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {item.label}
+                      </p>
+                    </div>
+
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-muted">
+                      <Icon className="h-5 w-5" />
+                    </div>
                   </div>
-                </div>
-
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                  <Wallet className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    {t.activeCashboxes}
-                  </p>
-                  <p className="mt-2 text-2xl font-bold">
-                    {isLoading ? "..." : formatNumber(summary.activeCashboxes)}
-                  </p>
-                </div>
-
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                  <Banknote className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    {t.inactiveCashboxes}
-                  </p>
-                  <p className="mt-2 text-2xl font-bold">
-                    {isLoading ? "..." : formatNumber(summary.inactiveCashboxes)}
-                  </p>
-                </div>
-
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                  <FileText className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    {t.defaultCashboxes}
-                  </p>
-                  <p className="mt-2 text-2xl font-bold">
-                    {isLoading ? "..." : formatNumber(summary.defaultCashboxes)}
-                  </p>
-                </div>
-
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                  <Banknote className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
 
-        <Card className="rounded-2xl border bg-card shadow-sm">
+        <Card className="print:hidden">
           <CardHeader>
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Banknote className="h-4 w-4" />
-                  {t.title}
-                </CardTitle>
-                <CardDescription>{t.subtitle}</CardDescription>
-              </div>
-
-              <div className="relative w-full xl:max-w-sm">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.search}
-                  className={`h-10 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                />
-              </div>
-            </div>
+            <CardTitle className="text-base">{t.listTitle}</CardTitle>
+            <CardDescription>{t.listDescription}</CardDescription>
           </CardHeader>
 
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              {(["ALL", "ACTIVE", "INACTIVE", "SUSPENDED", "CLOSED"] as const).map(
-                (item) => (
-                  <Button
-                    key={item}
-                    variant={status === item ? "default" : "outline"}
-                    className="h-10 rounded-xl"
-                    onClick={() => setStatus(item)}
-                  >
-                    {t.statuses[item]}
-                  </Button>
-                ),
-              )}
+          <CardContent>
+            <div className="grid gap-3 lg:grid-cols-4">
+              <div className="relative lg:col-span-2">
+                <Search className="absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ltr:left-3 rtl:right-3" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={t.search}
+                  className="h-10 rounded-xl ltr:pl-9 rtl:pr-9"
+                />
+              </div>
+
+              <select
+                value={status}
+                onChange={(event) =>
+                  setStatus(event.target.value as AccountStatusFilter)
+                }
+                className="h-10 rounded-xl border bg-background px-3 text-sm"
+              >
+                <option value="ALL">{t.all}</option>
+                <option value="ACTIVE">{t.active}</option>
+                <option value="INACTIVE">{t.inactive}</option>
+                <option value="SUSPENDED">{t.suspended}</option>
+                <option value="CLOSED">{t.closed}</option>
+              </select>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-xl"
+                disabled={isLoading}
+                onClick={() => loadData(true)}
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-4 w-4" />
+                )}
+                {t.refresh}
+              </Button>
             </div>
+          </CardContent>
+        </Card>
 
-            <div
-              id="treasury-cashboxes-print-area"
-              className="overflow-hidden rounded-lg border"
-            >
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border"
-                        checked={allSelected}
-                        onChange={() => {
-                          const ids = filteredRows.map((item) => item.id);
+        <Card>
+          <CardHeader className="print:block">
+            <CardTitle className="text-base">{t.listTitle}</CardTitle>
+            <CardDescription>
+              {t.listDescription} — {formatNumber(filteredItems.length)}
+            </CardDescription>
+          </CardHeader>
 
-                          setSelectedIds((current) =>
-                            allSelected
-                              ? current.filter((id) => !ids.includes(id))
-                              : Array.from(new Set([...current, ...ids])),
-                          );
-                        }}
-                      />
-                    </TableHead>
-                    <TableHead>{t.table.cashbox}</TableHead>
-                    <TableHead>{t.table.code}</TableHead>
-                    <TableHead>{t.table.openingBalance}</TableHead>
-                    <TableHead>{t.table.currentBalance}</TableHead>
-                    <TableHead>{t.table.status}</TableHead>
-                    <TableHead>{t.table.ledgerAccount}</TableHead>
-                    <TableHead>{t.actions}</TableHead>
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {isLoading ? (
+          <CardContent>
+            {isLoading ? (
+              <div className="flex h-56 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t.loading}
+              </div>
+            ) : filteredItems.length ? (
+              <div className="overflow-x-auto rounded-2xl border">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={8} className="h-32 text-center">
-                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {t.loading}
-                        </div>
-                      </TableCell>
+                      <TableHead>{t.name}</TableHead>
+                      <TableHead>{t.code}</TableHead>
+                      <TableHead>{t.status}</TableHead>
+                      <TableHead>{t.currentBalance}</TableHead>
+                      <TableHead>{t.openingBalance}</TableHead>
+                      <TableHead>{t.ledgerAccount}</TableHead>
+                      <TableHead>{t.createdAt}</TableHead>
+                      <TableHead className="print:hidden">{t.actions}</TableHead>
                     </TableRow>
-                  ) : filteredRows.length ? (
-                    filteredRows.map((item) => (
+                  </TableHeader>
+
+                  <TableBody>
+                    {filteredItems.map((item) => (
                       <TableRow key={item.id}>
                         <TableCell>
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded border"
-                            checked={selectedIds.includes(item.id)}
-                            onChange={() =>
-                              setSelectedIds((current) =>
-                                current.includes(item.id)
-                                  ? current.filter((id) => id !== item.id)
-                                  : [...current, item.id],
-                              )
-                            }
-                          />
-                        </TableCell>
-
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                              <Banknote className="h-5 w-5" />
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-medium">{item.name}</p>
+                              {item.is_default ? (
+                                <Badge className="rounded-full">
+                                  {t.defaultAccount}
+                                </Badge>
+                              ) : null}
                             </div>
-
-                            <div>
-                              <Link
-                                href={`/system/treasury/accounts/${item.id}`}
-                                className="font-medium hover:underline"
-                              >
-                                {item.name}
-                              </Link>
-
-                              <div className="mt-1 flex flex-wrap items-center gap-2">
-                                {item.is_default ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full text-xs"
-                                  >
-                                    {t.defaultAccount}
-                                  </Badge>
-                                ) : null}
-
-                                {item.description ? (
-                                  <p className="max-w-[260px] truncate text-xs text-muted-foreground">
-                                    {item.description}
-                                  </p>
-                                ) : null}
-                              </div>
-                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {item.description || item.account_type_label || "CASHBOX"}
+                            </p>
                           </div>
                         </TableCell>
 
-                        <TableCell className="font-medium">{item.code}</TableCell>
+                        <TableCell dir="ltr">{item.code}</TableCell>
 
                         <TableCell>
-                          <span
-                            className="flex items-center gap-2 font-semibold"
-                            dir="ltr"
+                          <Badge
+                            variant="outline"
+                            className={`rounded-full ${statusBadgeClass(item.status)}`}
                           >
-                            <Image
-                              src="/currency/sar.svg"
-                              alt="SAR"
-                              width={15}
-                              height={15}
-                            />
-                            {money(item.opening_balance)}
-                          </span>
+                            {item.status_label || item.status}
+                          </Badge>
                         </TableCell>
 
                         <TableCell>
-                          <span
-                            className="flex items-center gap-2 font-bold"
-                            dir="ltr"
-                          >
-                            <Image
-                              src="/currency/sar.svg"
-                              alt="SAR"
-                              width={15}
-                              height={15}
-                            />
+                          <div className="flex items-center gap-2 font-semibold" dir="ltr">
+                            <Image src={SAR_ICON} alt="SAR" width={16} height={16} />
                             {money(item.current_balance)}
-                          </span>
+                          </div>
                         </TableCell>
 
-                        <TableCell>{statusBadge(item.status, t)}</TableCell>
-
-                        <TableCell>{ledgerName(item)}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2" dir="ltr">
+                            <Image src={SAR_ICON} alt="SAR" width={16} height={16} />
+                            {money(item.opening_balance)}
+                          </div>
+                        </TableCell>
 
                         <TableCell>
+                          <div>
+                            <p className="font-medium" dir="ltr">
+                              {item.ledger_account?.code || "-"}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {isArabic
+                                ? item.ledger_account?.name_ar ||
+                                  item.ledger_account?.name ||
+                                  "-"
+                                : item.ledger_account?.name_en ||
+                                  item.ledger_account?.name ||
+                                  "-"}
+                            </p>
+                          </div>
+                        </TableCell>
+
+                        <TableCell dir="ltr">{dateOnly(item.created_at)}</TableCell>
+
+                        <TableCell className="print:hidden">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" className="h-8 w-8 p-0">
-                                <MoreHorizontal className="h-4 w-4" />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9 rounded-xl"
+                              >
+                                {actionId === item.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <MoreHorizontal className="h-4 w-4" />
+                                )}
                               </Button>
                             </DropdownMenuTrigger>
 
-                            <DropdownMenuContent align={isArabic ? "start" : "end"}>
-                              <div dir={isArabic ? "rtl" : "ltr"}>
-                                <DropdownMenuLabel>{t.actions}</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
+                            <DropdownMenuContent
+                              align={isArabic ? "start" : "end"}
+                              className="w-48"
+                            >
+                              <DropdownMenuLabel>{t.menu}</DropdownMenuLabel>
 
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/system/treasury/accounts/${item.id}`}>
-                                    <Eye className="h-4 w-4" />
-                                    {t.details}
-                                  </Link>
-                                </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link href={`/system/treasury/accounts/${item.id}`}>
+                                  <Eye className="h-4 w-4" />
+                                  {t.view}
+                                </Link>
+                              </DropdownMenuItem>
 
-                                <Can
-                                  anyPermissions={[
-                                    PERMISSIONS.TREASURY_VIEW,
-                                    PERMISSIONS.REPORTS_VIEW,
-                                  ]}
+                              <DropdownMenuItem asChild>
+                                <Link href={`/system/treasury/accounts/${item.id}/statement`}>
+                                  <FileText className="h-4 w-4" />
+                                  {t.statement}
+                                </Link>
+                              </DropdownMenuItem>
+
+                              <DropdownMenuSeparator />
+
+                              <Can permission={PERMISSIONS.TREASURY_EDIT}>
+                                <DropdownMenuItem
+                                  disabled={
+                                    item.status !== "ACTIVE" ||
+                                    actionId === item.id
+                                  }
+                                  onSelect={(event) => {
+                                    event.preventDefault();
+                                    deactivateCashbox(item);
+                                  }}
                                 >
-                                  <DropdownMenuItem asChild>
-                                    <Link
-                                      href={`/system/treasury/accounts/${item.id}/statement`}
-                                    >
-                                      <FileText className="h-4 w-4" />
-                                      {t.statement}
-                                    </Link>
-                                  </DropdownMenuItem>
-                                </Can>
-
-                                <Can permission={PERMISSIONS.TREASURY_CREATE}>
-                                  <DropdownMenuItem asChild>
-                                    <Link href="/system/treasury/transactions/create">
-                                      <CreditCard className="h-4 w-4" />
-                                      {t.createTransaction}
-                                    </Link>
-                                  </DropdownMenuItem>
-                                </Can>
-                              </div>
+                                  <XCircle className="h-4 w-4" />
+                                  {t.deactivate}
+                                </DropdownMenuItem>
+                              </Can>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
                       </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell
-                        colSpan={8}
-                        className="h-32 text-center text-muted-foreground"
-                      >
-                        {t.noData}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            <div className="text-sm text-muted-foreground">
-              {formatNumber(selectedIds.length)} / {formatNumber(filteredRows.length)}{" "}
-              {t.selected}
-            </div>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="flex h-56 items-center justify-center rounded-2xl border text-sm text-muted-foreground">
+                {t.noData}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

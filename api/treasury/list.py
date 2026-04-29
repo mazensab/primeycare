@@ -4,6 +4,7 @@
 # ------------------------------------------------------------
 # ✅ قائمة حسابات الخزينة
 # ✅ إنشاء حساب خزينة / بنك
+# ✅ aliases للصناديق والبنوك
 # ✅ قائمة حركات الخزينة
 # ✅ إنشاء حركة خزينة
 # ✅ يدعم الفلاتر والبحث والترقيم البسيط
@@ -123,11 +124,27 @@ def _resolve_ledger_account(value: Any) -> Account | None:
     try:
         account_id = int(value)
     except (TypeError, ValueError):
-        raise ValidationError({"ledger_account": "معرّف الحساب المحاسبي غير صحيح."})
+        raise ValidationError({"ledger_account_id": "معرّف الحساب المحاسبي غير صحيح."})
 
     account = Account.objects.filter(pk=account_id).first()
     if not account:
-        raise ValidationError({"ledger_account": "الحساب المحاسبي غير موجود."})
+        raise ValidationError({"ledger_account_id": "الحساب المحاسبي غير موجود."})
+
+    return account
+
+
+def _resolve_treasury_account(value: Any, *, field_name: str) -> TreasuryAccount | None:
+    if value in (None, "", 0, "0"):
+        return None
+
+    try:
+        account_id = int(value)
+    except (TypeError, ValueError):
+        raise ValidationError({field_name: "معرّف حساب الخزينة غير صحيح."})
+
+    account = TreasuryAccount.objects.filter(pk=account_id).first()
+    if not account:
+        raise ValidationError({field_name: "حساب الخزينة غير موجود."})
 
     return account
 
@@ -227,6 +244,7 @@ def _apply_account_filters(queryset, request: HttpRequest):
             | Q(account_holder_name__icontains=search)
             | Q(account_number__icontains=search)
             | Q(iban__icontains=search)
+            | Q(description__icontains=search)
         )
 
     if account_type:
@@ -251,8 +269,12 @@ def _apply_transaction_filters(queryset, request: HttpRequest):
     currency = request.GET.get("currency", "").strip()
     treasury_account_id = request.GET.get("treasury_account_id", "").strip()
     destination_account_id = request.GET.get("destination_account_id", "").strip()
-    date_from = parse_date(request.GET.get("date_from", "").strip())
-    date_to = parse_date(request.GET.get("date_to", "").strip())
+    account_id = request.GET.get("account_id", "").strip()
+    date_from_raw = request.GET.get("date_from", "").strip()
+    date_to_raw = request.GET.get("date_to", "").strip()
+
+    date_from = parse_date(date_from_raw) if date_from_raw else None
+    date_to = parse_date(date_to_raw) if date_to_raw else None
 
     if search:
         queryset = queryset.filter(
@@ -264,6 +286,8 @@ def _apply_transaction_filters(queryset, request: HttpRequest):
             | Q(journal_entry_reference__icontains=search)
             | Q(treasury_account__name__icontains=search)
             | Q(treasury_account__code__icontains=search)
+            | Q(destination_account__name__icontains=search)
+            | Q(destination_account__code__icontains=search)
         )
 
     if transaction_type:
@@ -274,6 +298,12 @@ def _apply_transaction_filters(queryset, request: HttpRequest):
 
     if currency:
         queryset = queryset.filter(currency__iexact=currency)
+
+    if account_id:
+        queryset = queryset.filter(
+            Q(treasury_account_id=account_id)
+            | Q(destination_account_id=account_id)
+        )
 
     if treasury_account_id:
         queryset = queryset.filter(treasury_account_id=treasury_account_id)
@@ -288,6 +318,73 @@ def _apply_transaction_filters(queryset, request: HttpRequest):
         queryset = queryset.filter(transaction_date__lte=date_to)
 
     return queryset
+
+
+def _build_account_summary(queryset, *, currency: str = "SAR") -> dict[str, Any]:
+    total_current_balance = queryset.aggregate(total=Sum("current_balance"))["total"] or Decimal("0.00")
+
+    return {
+        "total_accounts": queryset.count(),
+        "active_accounts": queryset.filter(status=TreasuryAccountStatus.ACTIVE).count(),
+        "cashbox_accounts": queryset.filter(account_type=TreasuryAccountType.CASHBOX).count(),
+        "bank_accounts": queryset.filter(account_type=TreasuryAccountType.BANK).count(),
+        "total_current_balance": str(total_current_balance),
+        "currency": currency or "SAR",
+    }
+
+
+def _build_transaction_summary(queryset, *, currency: str = "SAR") -> dict[str, Any]:
+    confirmed_qs = queryset.filter(status=TreasuryTransactionStatus.CONFIRMED)
+    income_total = confirmed_qs.filter(
+        transaction_type__in=[
+            TreasuryTransactionType.INCOME,
+            TreasuryTransactionType.OPENING_BALANCE,
+            TreasuryTransactionType.DEPOSIT,
+            TreasuryTransactionType.ADJUSTMENT,
+        ]
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+
+    expense_total = confirmed_qs.filter(
+        transaction_type__in=[
+            TreasuryTransactionType.EXPENSE,
+            TreasuryTransactionType.WITHDRAW,
+        ]
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+
+    transfer_total = confirmed_qs.filter(
+        transaction_type=TreasuryTransactionType.TRANSFER
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+
+    return {
+        "total_transactions": queryset.count(),
+        "confirmed_transactions": confirmed_qs.count(),
+        "income_total": str(income_total),
+        "expense_total": str(expense_total),
+        "transfer_total": str(transfer_total),
+        "net_operational_amount": str(Decimal(income_total) - Decimal(expense_total)),
+        "currency": currency or "SAR",
+    }
+
+
+def _choices_payload() -> dict[str, Any]:
+    return {
+        "account_types": [
+            {"value": value, "label": label}
+            for value, label in TreasuryAccountType.choices
+        ],
+        "account_statuses": [
+            {"value": value, "label": label}
+            for value, label in TreasuryAccountStatus.choices
+        ],
+        "transaction_types": [
+            {"value": value, "label": label}
+            for value, label in TreasuryTransactionType.choices
+        ],
+        "transaction_statuses": [
+            {"value": value, "label": label}
+            for value, label in TreasuryTransactionStatus.choices
+        ],
+    }
 
 
 # ============================================================
@@ -311,31 +408,17 @@ def treasury_accounts(request: HttpRequest) -> JsonResponse:
         paginator = Paginator(queryset, page_size)
         page_obj = paginator.get_page(page)
 
-        active_count = queryset.filter(status=TreasuryAccountStatus.ACTIVE).count()
-        total_current_balance = queryset.aggregate(total=Sum("current_balance"))["total"] or Decimal("0.00")
-
         return _json_response(
             success=True,
             message="تم جلب حسابات الخزينة بنجاح.",
             data={
                 "items": [serialize_treasury_account(account) for account in page_obj.object_list],
                 "pagination": _build_pagination_payload(paginator, page_obj),
-                "summary": {
-                    "total_accounts": queryset.count(),
-                    "active_accounts": active_count,
-                    "total_current_balance": str(total_current_balance),
-                    "currency": request.GET.get("currency", "SAR") or "SAR",
-                },
-                "choices": {
-                    "account_types": [
-                        {"value": value, "label": label}
-                        for value, label in TreasuryAccountType.choices
-                    ],
-                    "statuses": [
-                        {"value": value, "label": label}
-                        for value, label in TreasuryAccountStatus.choices
-                    ],
-                },
+                "summary": _build_account_summary(
+                    queryset,
+                    currency=request.GET.get("currency", "SAR") or "SAR",
+                ),
+                "choices": _choices_payload(),
             },
         )
 
@@ -423,6 +506,40 @@ def treasury_accounts(request: HttpRequest) -> JsonResponse:
 
 
 # ============================================================
+# Cashboxes / Banks aliases
+# ============================================================
+
+@require_http_methods(["GET", "POST"])
+def treasury_cashboxes(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        query_params = request.GET.copy()
+        query_params["account_type"] = TreasuryAccountType.CASHBOX
+        request.GET = query_params
+
+    if request.method == "POST":
+        payload = _read_json_body(request)
+        payload["account_type"] = TreasuryAccountType.CASHBOX
+        request._body = json.dumps(payload).encode("utf-8")
+
+    return treasury_accounts(request)
+
+
+@require_http_methods(["GET", "POST"])
+def treasury_banks(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        query_params = request.GET.copy()
+        query_params["account_type"] = TreasuryAccountType.BANK
+        request.GET = query_params
+
+    if request.method == "POST":
+        payload = _read_json_body(request)
+        payload["account_type"] = TreasuryAccountType.BANK
+        request._body = json.dumps(payload).encode("utf-8")
+
+    return treasury_accounts(request)
+
+
+# ============================================================
 # Treasury Transactions API
 # ============================================================
 
@@ -448,31 +565,17 @@ def treasury_transactions(request: HttpRequest) -> JsonResponse:
         paginator = Paginator(queryset, page_size)
         page_obj = paginator.get_page(page)
 
-        confirmed_qs = queryset.filter(status=TreasuryTransactionStatus.CONFIRMED)
-        total_confirmed_amount = confirmed_qs.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
-
         return _json_response(
             success=True,
             message="تم جلب حركات الخزينة بنجاح.",
             data={
                 "items": [serialize_treasury_transaction(txn) for txn in page_obj.object_list],
                 "pagination": _build_pagination_payload(paginator, page_obj),
-                "summary": {
-                    "total_transactions": queryset.count(),
-                    "confirmed_transactions": confirmed_qs.count(),
-                    "total_confirmed_amount": str(total_confirmed_amount),
-                    "currency": request.GET.get("currency", "SAR") or "SAR",
-                },
-                "choices": {
-                    "transaction_types": [
-                        {"value": value, "label": label}
-                        for value, label in TreasuryTransactionType.choices
-                    ],
-                    "statuses": [
-                        {"value": value, "label": label}
-                        for value, label in TreasuryTransactionStatus.choices
-                    ],
-                },
+                "summary": _build_transaction_summary(
+                    queryset,
+                    currency=request.GET.get("currency", "SAR") or "SAR",
+                ),
+                "choices": _choices_payload(),
             },
         )
 
@@ -482,10 +585,14 @@ def treasury_transactions(request: HttpRequest) -> JsonResponse:
         transaction_number = str(payload.get("transaction_number", "")).strip()
         transaction_type = str(payload.get("transaction_type", "")).strip()
         status_value = str(payload.get("status", TreasuryTransactionStatus.DRAFT)).strip()
-        transaction_date = parse_date(str(payload.get("transaction_date", "")).strip())
+        transaction_date_raw = str(payload.get("transaction_date", "")).strip()
+        transaction_date = parse_date(transaction_date_raw)
 
         if not transaction_number:
             raise ValidationError({"transaction_number": "رقم الحركة مطلوب."})
+
+        if TreasuryTransaction.objects.filter(transaction_number=transaction_number).exists():
+            raise ValidationError({"transaction_number": "رقم الحركة مستخدم مسبقًا."})
 
         if transaction_type not in TreasuryTransactionType.values:
             raise ValidationError({"transaction_type": "نوع الحركة غير صحيح."})
@@ -496,17 +603,17 @@ def treasury_transactions(request: HttpRequest) -> JsonResponse:
         if not transaction_date:
             raise ValidationError({"transaction_date": "تاريخ الحركة مطلوب بصيغة YYYY-MM-DD."})
 
-        treasury_account_id = payload.get("treasury_account_id")
-        treasury_account = TreasuryAccount.objects.filter(pk=treasury_account_id).first()
+        treasury_account = _resolve_treasury_account(
+            payload.get("treasury_account_id"),
+            field_name="treasury_account_id",
+        )
         if not treasury_account:
-            raise ValidationError({"treasury_account_id": "حساب الخزينة غير موجود."})
+            raise ValidationError({"treasury_account_id": "حساب الخزينة مطلوب."})
 
-        destination_account = None
-        destination_account_id = payload.get("destination_account_id")
-        if destination_account_id not in (None, "", 0, "0"):
-            destination_account = TreasuryAccount.objects.filter(pk=destination_account_id).first()
-            if not destination_account:
-                raise ValidationError({"destination_account_id": "حساب الوجهة غير موجود."})
+        destination_account = _resolve_treasury_account(
+            payload.get("destination_account_id"),
+            field_name="destination_account_id",
+        )
 
         amount = _to_decimal(payload.get("amount"), field_name="amount")
 

@@ -3,8 +3,11 @@
 # 🧠 Primey Care | Treasury API URLs
 # ------------------------------------------------------------
 # ✅ Accounts
+# ✅ Cashboxes aliases
+# ✅ Banks aliases
 # ✅ Transactions
 # ✅ Confirm transaction
+# ✅ Cancel transaction
 # ✅ Statement
 # ============================================================
 
@@ -13,11 +16,14 @@ from django.urls import path
 from .detail import (
     treasury_account_detail,
     treasury_account_statement,
+    treasury_transaction_cancel,
     treasury_transaction_confirm,
     treasury_transaction_detail,
 )
 from .list import (
     treasury_accounts,
+    treasury_banks,
+    treasury_cashboxes,
     treasury_transactions,
 )
 
@@ -45,6 +51,24 @@ urlpatterns = [
     ),
 
     # ========================================================
+    # Cashboxes aliases
+    # ========================================================
+    path(
+        "cashboxes/",
+        treasury_cashboxes,
+        name="treasury_cashboxes",
+    ),
+
+    # ========================================================
+    # Banks aliases
+    # ========================================================
+    path(
+        "banks/",
+        treasury_banks,
+        name="treasury_banks",
+    ),
+
+    # ========================================================
     # Treasury Transactions
     # ========================================================
     path(
@@ -61,6 +85,11 @@ urlpatterns = [
         "transactions/<int:transaction_id>/confirm/",
         treasury_transaction_confirm,
         name="treasury_transaction_confirm",
+    ),
+    path(
+        "transactions/<int:transaction_id>/cancel/",
+        treasury_transaction_cancel,
+        name="treasury_transaction_cancel",
     ),
 
     # ========================================================

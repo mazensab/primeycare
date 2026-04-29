@@ -6,18 +6,23 @@
 #    - الصناديق النقدية
 #    - الحسابات البنكية
 #    - الحركات المالية
-# ✅ جاهز لاحقًا للربط مع:
+# ✅ جاهز للربط مع:
 #    - المدفوعات
 #    - الفواتير
 #    - القيود اليومية
 #    - التسويات
 #    - كشوف الحساب
+# ------------------------------------------------------------
+# ملاحظات مهمة:
+# - أثر الرصيد يطبق مرة واحدة فقط عند التأكيد.
+# - عند إلغاء حركة مؤكدة يتم عكس أثرها على الرصيد.
+# - لا يسمح بتعديل الحقول المالية الجوهرية بعد التأكيد.
 # ============================================================
 
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 
 from accounting.models import Account
 
@@ -48,6 +53,11 @@ class TreasuryTransactionStatus(models.TextChoices):
     DRAFT = "DRAFT", "مسودة"
     CONFIRMED = "CONFIRMED", "مؤكدة"
     CANCELLED = "CANCELLED", "ملغاة"
+
+
+def _money(value) -> Decimal:
+    amount = Decimal(str(value or "0.00"))
+    return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class TreasuryAccount(models.Model):
@@ -194,7 +204,6 @@ class TreasuryAccount(models.Model):
 
         if self.account_type == TreasuryAccountType.CASHBOX:
             self.bank_name = ""
-            self.account_holder_name = self.account_holder_name or ""
             self.account_number = ""
             self.iban = ""
             self.branch_name = ""
@@ -203,6 +212,10 @@ class TreasuryAccount(models.Model):
             raise ValidationError(
                 {"bank_name": "اسم البنك مطلوب عند اختيار حساب بنكي."}
             )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class TreasuryTransaction(models.Model):
@@ -336,7 +349,10 @@ class TreasuryTransaction(models.Model):
         if self.amount is not None and self.amount <= 0:
             raise ValidationError({"amount": "المبلغ يجب أن يكون أكبر من صفر."})
 
-        if self.destination_account_id and self.destination_account_id == self.treasury_account_id:
+        if (
+            self.destination_account_id
+            and self.destination_account_id == self.treasury_account_id
+        ):
             raise ValidationError(
                 {"destination_account": "لا يمكن التحويل إلى نفس الحساب."}
             )
@@ -366,69 +382,196 @@ class TreasuryTransaction(models.Model):
                 {"currency": "عملة الحركة يجب أن تطابق عملة الحساب الأساسي."}
             )
 
-    def save(self, *args, **kwargs):
-        is_new = self._state.adding
-        previous_status = None
-
-        if not is_new and self.pk:
-            previous_status = (
-                TreasuryTransaction.objects.filter(pk=self.pk)
-                .values_list("status", flat=True)
-                .first()
+        if self.treasury_account and self.treasury_account.status != TreasuryAccountStatus.ACTIVE:
+            raise ValidationError(
+                {"treasury_account": "لا يمكن استخدام حساب خزينة غير نشط."}
             )
 
-        self.full_clean()
-        super().save(*args, **kwargs)
+        if (
+            self.destination_account
+            and self.destination_account.status != TreasuryAccountStatus.ACTIVE
+        ):
+            raise ValidationError(
+                {"destination_account": "لا يمكن التحويل إلى حساب خزينة غير نشط."}
+            )
 
-        if self.status == TreasuryTransactionStatus.CONFIRMED:
-            if is_new or previous_status != TreasuryTransactionStatus.CONFIRMED:
+    def _get_previous_instance(self):
+        if self._state.adding or not self.pk:
+            return None
+
+        return TreasuryTransaction.objects.filter(pk=self.pk).first()
+
+    def _ensure_confirmed_transaction_not_mutated(self, previous):
+        if not previous:
+            return
+
+        if previous.status != TreasuryTransactionStatus.CONFIRMED:
+            return
+
+        protected_fields = {
+            "transaction_type": previous.transaction_type,
+            "treasury_account_id": previous.treasury_account_id,
+            "destination_account_id": previous.destination_account_id,
+            "amount": _money(previous.amount),
+            "currency": previous.currency,
+        }
+
+        current_fields = {
+            "transaction_type": self.transaction_type,
+            "treasury_account_id": self.treasury_account_id,
+            "destination_account_id": self.destination_account_id,
+            "amount": _money(self.amount),
+            "currency": self.currency,
+        }
+
+        if protected_fields != current_fields:
+            raise ValidationError(
+                "لا يمكن تعديل بيانات مالية جوهرية لحركة خزينة مؤكدة. "
+                "قم بإنشاء حركة تسوية بدل تعديل الحركة الأصلية."
+            )
+
+        if self.status == TreasuryTransactionStatus.DRAFT:
+            raise ValidationError("لا يمكن إعادة حركة مؤكدة إلى مسودة.")
+
+    def save(self, *args, **kwargs):
+        previous = self._get_previous_instance()
+        previous_status = previous.status if previous else None
+
+        self._ensure_confirmed_transaction_not_mutated(previous)
+        self.full_clean()
+
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+
+            if (
+                self.status == TreasuryTransactionStatus.CONFIRMED
+                and previous_status != TreasuryTransactionStatus.CONFIRMED
+            ):
                 self.apply_balance_effect()
 
+            if (
+                previous_status == TreasuryTransactionStatus.CONFIRMED
+                and self.status == TreasuryTransactionStatus.CANCELLED
+            ):
+                self.reverse_balance_effect()
+
+    def _lock_primary_account(self) -> TreasuryAccount:
+        return TreasuryAccount.objects.select_for_update().get(pk=self.treasury_account_id)
+
+    def _lock_transfer_accounts(self) -> tuple[TreasuryAccount, TreasuryAccount]:
+        account_ids = sorted([self.treasury_account_id, self.destination_account_id])
+
+        locked_accounts = {
+            account.pk: account
+            for account in TreasuryAccount.objects.select_for_update().filter(
+                pk__in=account_ids
+            )
+        }
+
+        primary = locked_accounts.get(self.treasury_account_id)
+        destination = locked_accounts.get(self.destination_account_id)
+
+        if not primary or not destination:
+            raise ValidationError("تعذر قفل حسابات الخزينة المطلوبة.")
+
+        return primary, destination
+
     def apply_balance_effect(self):
-        primary = self.treasury_account
-        amount = Decimal(self.amount or Decimal("0.00")).quantize(
-            Decimal("0.01"),
-            rounding=ROUND_HALF_UP,
-        )
+        amount = _money(self.amount)
 
-        if self.transaction_type in {
-            TreasuryTransactionType.INCOME,
-            TreasuryTransactionType.OPENING_BALANCE,
-            TreasuryTransactionType.DEPOSIT,
-        }:
-            primary.current_balance = Decimal(primary.current_balance or Decimal("0.00")) + amount
-            primary.save(update_fields=["current_balance", "updated_at"])
-            return
+        with transaction.atomic():
+            if self.transaction_type in {
+                TreasuryTransactionType.INCOME,
+                TreasuryTransactionType.OPENING_BALANCE,
+                TreasuryTransactionType.DEPOSIT,
+                TreasuryTransactionType.ADJUSTMENT,
+            }:
+                primary = self._lock_primary_account()
+                primary.current_balance = _money(primary.current_balance) + amount
+                primary.save(update_fields=["current_balance", "updated_at"])
+                return
 
-        if self.transaction_type in {
-            TreasuryTransactionType.EXPENSE,
-            TreasuryTransactionType.WITHDRAW,
-        }:
-            new_balance = Decimal(primary.current_balance or Decimal("0.00")) - amount
-            if new_balance < 0:
-                raise ValidationError("لا يمكن أن يصبح رصيد الحساب سالبًا.")
-            primary.current_balance = new_balance
-            primary.save(update_fields=["current_balance", "updated_at"])
-            return
+            if self.transaction_type in {
+                TreasuryTransactionType.EXPENSE,
+                TreasuryTransactionType.WITHDRAW,
+            }:
+                primary = self._lock_primary_account()
+                new_balance = _money(primary.current_balance) - amount
 
-        if self.transaction_type == TreasuryTransactionType.ADJUSTMENT:
-            primary.current_balance = Decimal(primary.current_balance or Decimal("0.00")) + amount
-            primary.save(update_fields=["current_balance", "updated_at"])
-            return
+                if new_balance < Decimal("0.00"):
+                    raise ValidationError("لا يمكن أن يصبح رصيد الحساب سالبًا.")
 
-        if self.transaction_type == TreasuryTransactionType.TRANSFER:
-            if not self.destination_account:
-                raise ValidationError("الحساب الوجهة مطلوب للتحويل.")
+                primary.current_balance = new_balance
+                primary.save(update_fields=["current_balance", "updated_at"])
+                return
 
-            new_source_balance = Decimal(primary.current_balance or Decimal("0.00")) - amount
-            if new_source_balance < 0:
-                raise ValidationError("الرصيد غير كافٍ لإتمام التحويل.")
+            if self.transaction_type == TreasuryTransactionType.TRANSFER:
+                if not self.destination_account_id:
+                    raise ValidationError("الحساب الوجهة مطلوب للتحويل.")
 
-            destination = self.destination_account
-            destination_new_balance = Decimal(destination.current_balance or Decimal("0.00")) + amount
+                primary, destination = self._lock_transfer_accounts()
 
-            primary.current_balance = new_source_balance
-            destination.current_balance = destination_new_balance
+                new_source_balance = _money(primary.current_balance) - amount
+                if new_source_balance < Decimal("0.00"):
+                    raise ValidationError("الرصيد غير كافٍ لإتمام التحويل.")
 
-            primary.save(update_fields=["current_balance", "updated_at"])
-            destination.save(update_fields=["current_balance", "updated_at"])
+                destination_new_balance = _money(destination.current_balance) + amount
+
+                primary.current_balance = new_source_balance
+                destination.current_balance = destination_new_balance
+
+                primary.save(update_fields=["current_balance", "updated_at"])
+                destination.save(update_fields=["current_balance", "updated_at"])
+                return
+
+    def reverse_balance_effect(self):
+        amount = _money(self.amount)
+
+        with transaction.atomic():
+            if self.transaction_type in {
+                TreasuryTransactionType.INCOME,
+                TreasuryTransactionType.OPENING_BALANCE,
+                TreasuryTransactionType.DEPOSIT,
+                TreasuryTransactionType.ADJUSTMENT,
+            }:
+                primary = self._lock_primary_account()
+                new_balance = _money(primary.current_balance) - amount
+
+                if new_balance < Decimal("0.00"):
+                    raise ValidationError(
+                        "لا يمكن إلغاء الحركة لأن الإلغاء سيجعل رصيد الحساب سالبًا."
+                    )
+
+                primary.current_balance = new_balance
+                primary.save(update_fields=["current_balance", "updated_at"])
+                return
+
+            if self.transaction_type in {
+                TreasuryTransactionType.EXPENSE,
+                TreasuryTransactionType.WITHDRAW,
+            }:
+                primary = self._lock_primary_account()
+                primary.current_balance = _money(primary.current_balance) + amount
+                primary.save(update_fields=["current_balance", "updated_at"])
+                return
+
+            if self.transaction_type == TreasuryTransactionType.TRANSFER:
+                if not self.destination_account_id:
+                    raise ValidationError("الحساب الوجهة مطلوب لعكس التحويل.")
+
+                primary, destination = self._lock_transfer_accounts()
+
+                destination_new_balance = _money(destination.current_balance) - amount
+                if destination_new_balance < Decimal("0.00"):
+                    raise ValidationError(
+                        "لا يمكن إلغاء التحويل لأن رصيد الحساب الوجهة غير كافٍ."
+                    )
+
+                source_new_balance = _money(primary.current_balance) + amount
+
+                primary.current_balance = source_new_balance
+                destination.current_balance = destination_new_balance
+
+                primary.save(update_fields=["current_balance", "updated_at"])
+                destination.save(update_fields=["current_balance", "updated_at"])
+                return

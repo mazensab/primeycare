@@ -7,6 +7,7 @@
 # ✅ تغطي:
 #    - إنشاء حركة خزينة
 #    - تأكيد حركة خزينة
+#    - إلغاء حركة خزينة
 #    - إنشاء حركة قبض من دفعة
 #    - إنشاء حركة صرف عمولة مندوب
 #    - دوال ربط رسمية للدفعات من payments.services
@@ -14,11 +15,11 @@
 # ------------------------------------------------------------
 # ملاحظات:
 # - التأكيد يتم مرة واحدة فقط
-# - تمت إضافة wrappers رسمية:
+# - الإلغاء يعكس أثر الحركة المؤكدة من داخل Model
+# - تم دعم التحويلات الواردة والصادرة في كشف الحساب
+# - wrappers الرسمية:
 #    - create_payment_treasury_movement
 #    - create_payment_receipt_movement
-# - تمت إضافة resolver لاختيار الحساب الخزيني المناسب تلقائيًا
-# - تمت إضافة Treasury Statement V1 فوق نفس الملف
 # ============================================================
 
 from __future__ import annotations
@@ -31,12 +32,13 @@ from typing import Any, Optional
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import QuerySet, Sum
+from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from payments.models import Payment, PaymentStatus
 from treasury.models import (
     TreasuryAccount,
+    TreasuryAccountStatus,
     TreasuryTransaction,
     TreasuryTransactionStatus,
     TreasuryTransactionType,
@@ -96,8 +98,10 @@ def _money(value) -> Decimal:
 def _ensure_aware(value: datetime | None) -> datetime | None:
     if value is None:
         return None
+
     if timezone.is_naive(value):
         return timezone.make_aware(value, timezone.get_current_timezone())
+
     return value
 
 
@@ -130,8 +134,7 @@ def _build_transaction_number(prefix: str, object_id: int) -> str:
 
 def _resolve_transaction_type_from_payment(payment: Payment) -> str:
     """
-    حاليًا جميع عمليات التحصيل تعتبر قبض.
-    ويمكن لاحقًا تخصيص منطق مختلف لبعض الطرق.
+    حاليًا كل دفعة محصلة تعتبر قبض خزينة.
     """
     return TreasuryTransactionType.INCOME
 
@@ -217,24 +220,25 @@ def _resolve_active_treasury_account_for_payment(payment: Payment) -> TreasuryAc
     اختيار الحساب الخزيني الأنسب تلقائيًا للدفعة.
 
     منطق الاختيار الحالي:
-    1) تقييد بالشركة إن وُجدت على الحساب
-    2) تفضيل الحساب النشط
-    3) تفضيل مطابقة العملة
-    4) تفضيل الاسم حسب طريقة الدفع:
-       - CASH => صندوق / نقد / cash
-       - BANK / TRANSFER => بنك / bank
-    5) fallback إلى أول حساب نشط مناسب
+    1) تقييد بالشركة إن وُجدت على الحساب مستقبلًا
+    2) الحسابات النشطة فقط
+    3) مطابقة العملة
+    4) تفضيل الحساب الافتراضي
+    5) تفضيل نوع الحساب حسب طريقة الدفع:
+       - CASH => CASHBOX
+       - BANK / BANK_TRANSFER / TRANSFER => BANK
+       - GATEWAY / CARD / WALLET / TAMARA / TABBY => BANK أو حساب افتراضي
+    6) fallback إلى أول حساب نشط مناسب
     """
     company_id = _resolve_payment_company_id(payment)
     currency = _resolve_payment_currency(payment)
     payment_method = _resolve_payment_method(payment)
 
     queryset = TreasuryAccount.objects.all()
-
     model_fields = {field.name for field in TreasuryAccount._meta.fields}
 
     if "status" in model_fields:
-        queryset = queryset.filter(status="ACTIVE")
+        queryset = queryset.filter(status=TreasuryAccountStatus.ACTIVE)
 
     if company_id and "company" in model_fields:
         queryset = queryset.filter(company_id=company_id)
@@ -244,13 +248,30 @@ def _resolve_active_treasury_account_for_payment(payment: Payment) -> TreasuryAc
         if currency_qs.exists():
             queryset = currency_qs
 
-    preferred_keywords = []
+    default_candidate = queryset.filter(is_default=True).order_by("id").first()
+    if default_candidate:
+        return default_candidate
+
     if payment_method in {"CASH"}:
+        type_qs = queryset.filter(account_type="CASHBOX")
+        if type_qs.exists():
+            queryset = type_qs
         preferred_keywords = ["cash", "نقد", "صندوق"]
     elif payment_method in {"BANK", "BANK_TRANSFER", "TRANSFER"}:
-        preferred_keywords = ["bank", "بنك"]
+        type_qs = queryset.filter(account_type="BANK")
+        if type_qs.exists():
+            queryset = type_qs
+        preferred_keywords = ["bank", "بنك", "تحويل"]
     else:
-        preferred_keywords = []
+        preferred_keywords = [
+            "gateway",
+            "payment",
+            "online",
+            "settlement",
+            "تسوية",
+            "إلكتروني",
+            "بوابة",
+        ]
 
     for keyword in preferred_keywords:
         candidate = queryset.filter(name__icontains=keyword).order_by("id").first()
@@ -289,8 +310,8 @@ def _resolve_treasury_account_display_name(account: TreasuryAccount) -> str:
 def _resolve_treasury_account_code(account: TreasuryAccount) -> str:
     return str(
         _first_non_empty(
-            _safe_getattr(account, "account_number"),
             _safe_getattr(account, "code"),
+            _safe_getattr(account, "account_number"),
             _safe_getattr(account, "iban"),
             "",
         )
@@ -298,16 +319,16 @@ def _resolve_treasury_account_code(account: TreasuryAccount) -> str:
 
 
 def _resolve_treasury_transaction_datetime(txn: TreasuryTransaction) -> datetime | None:
+    tx_date = _safe_getattr(txn, "transaction_date")
+    if tx_date:
+        return _coerce_to_datetime(tx_date, end_of_day=False)
+
     value = _first_non_empty(
         _safe_getattr(txn, "created_at"),
         _safe_getattr(txn, "updated_at"),
     )
     if value:
         return _ensure_aware(value)
-
-    tx_date = _safe_getattr(txn, "transaction_date")
-    if tx_date:
-        return _coerce_to_datetime(tx_date, end_of_day=False)
 
     return None
 
@@ -336,6 +357,38 @@ def _sort_datetime_fallback() -> datetime:
     return timezone.now()
 
 
+def _is_inflow_for_account(txn: TreasuryTransaction, treasury_account: TreasuryAccount) -> bool:
+    txn_type = str(_safe_getattr(txn, "transaction_type", ""))
+
+    if txn_type in {
+        TreasuryTransactionType.INCOME,
+        TreasuryTransactionType.OPENING_BALANCE,
+        TreasuryTransactionType.DEPOSIT,
+        TreasuryTransactionType.ADJUSTMENT,
+    }:
+        return txn.treasury_account_id == treasury_account.pk
+
+    if txn_type == TreasuryTransactionType.TRANSFER:
+        return txn.destination_account_id == treasury_account.pk
+
+    return False
+
+
+def _is_outflow_for_account(txn: TreasuryTransaction, treasury_account: TreasuryAccount) -> bool:
+    txn_type = str(_safe_getattr(txn, "transaction_type", ""))
+
+    if txn_type in {
+        TreasuryTransactionType.EXPENSE,
+        TreasuryTransactionType.WITHDRAW,
+    }:
+        return txn.treasury_account_id == treasury_account.pk
+
+    if txn_type == TreasuryTransactionType.TRANSFER:
+        return txn.treasury_account_id == treasury_account.pk
+
+    return False
+
+
 # ============================================================
 # 🧾 إنشاء حركة خزينة عامة
 # ============================================================
@@ -359,7 +412,18 @@ def create_treasury_transaction(
 ) -> TreasuryTransaction:
     """
     إنشاء حركة خزينة عامة.
+    الدالة idempotent عبر transaction_number.
     """
+    if not transaction_number:
+        raise ValidationError("رقم حركة الخزينة مطلوب.")
+
+    if not treasury_account:
+        raise ValidationError("حساب الخزينة مطلوب.")
+
+    amount = _money(amount)
+    if amount <= Decimal("0.00"):
+        raise ValidationError("مبلغ الحركة يجب أن يكون أكبر من صفر.")
+
     txn, created = TreasuryTransaction.objects.get_or_create(
         transaction_number=transaction_number,
         defaults={
@@ -368,7 +432,7 @@ def create_treasury_transaction(
             "transaction_date": transaction_date,
             "treasury_account": treasury_account,
             "destination_account": destination_account,
-            "amount": _money(amount),
+            "amount": amount,
             "currency": currency or treasury_account.currency or "SAR",
             "reference": reference,
             "external_reference": external_reference,
@@ -398,6 +462,10 @@ def confirm_treasury_transaction(
     if not transaction_obj:
         raise ValidationError("حركة الخزينة مطلوبة.")
 
+    transaction_obj = TreasuryTransaction.objects.select_for_update().get(
+        pk=transaction_obj.pk
+    )
+
     if transaction_obj.status == TreasuryTransactionStatus.CANCELLED:
         raise ValidationError("لا يمكن تأكيد حركة خزينة ملغاة.")
 
@@ -405,6 +473,34 @@ def confirm_treasury_transaction(
         return transaction_obj
 
     transaction_obj.status = TreasuryTransactionStatus.CONFIRMED
+    transaction_obj.save(update_fields=["status", "updated_at"])
+    transaction_obj.refresh_from_db()
+    return transaction_obj
+
+
+# ============================================================
+# ❌ إلغاء حركة خزينة
+# ============================================================
+
+@transaction.atomic
+def cancel_treasury_transaction(
+    transaction_obj: TreasuryTransaction,
+) -> TreasuryTransaction:
+    """
+    إلغاء حركة خزينة.
+    إذا كانت الحركة مؤكدة سيتم عكس أثرها على الرصيد من داخل Model.
+    """
+    if not transaction_obj:
+        raise ValidationError("حركة الخزينة مطلوبة.")
+
+    transaction_obj = TreasuryTransaction.objects.select_for_update().get(
+        pk=transaction_obj.pk
+    )
+
+    if transaction_obj.status == TreasuryTransactionStatus.CANCELLED:
+        return transaction_obj
+
+    transaction_obj.status = TreasuryTransactionStatus.CANCELLED
     transaction_obj.save(update_fields=["status", "updated_at"])
     transaction_obj.refresh_from_db()
     return transaction_obj
@@ -432,12 +528,10 @@ def create_payment_receipt_transaction(
     if payment.status not in {
         PaymentStatus.PAID,
         PaymentStatus.PARTIALLY_PAID,
-        PaymentStatus.REFUNDED,
-        PaymentStatus.PARTIALLY_REFUNDED,
     }:
         raise ValidationError("لا يمكن إنشاء حركة خزينة من دفعة غير محصلة فعليًا.")
 
-    if treasury_account.status != "ACTIVE":
+    if treasury_account.status != TreasuryAccountStatus.ACTIVE:
         raise ValidationError("الحساب الخزيني المحدد غير نشط.")
 
     paid_amount = _resolve_paid_amount(payment)
@@ -559,6 +653,12 @@ def create_agent_commission_payout_transaction(
     if amount <= Decimal("0.00"):
         raise ValidationError("المبلغ يجب أن يكون أكبر من صفر.")
 
+    if not treasury_account:
+        raise ValidationError("حساب الخزينة مطلوب.")
+
+    if treasury_account.status != TreasuryAccountStatus.ACTIVE:
+        raise ValidationError("الحساب الخزيني المحدد غير نشط.")
+
     transaction_number = f"TRX-COM-{reference}"
 
     txn = create_treasury_transaction(
@@ -597,16 +697,12 @@ def _build_treasury_statement_summary(
 
     for txn in transactions_qs:
         amount = _money(txn.amount)
-        txn_type = str(_safe_getattr(txn, "transaction_type", ""))
 
-        if txn_type == TreasuryTransactionType.INCOME:
+        if _is_inflow_for_account(txn, treasury_account):
             inflow_total += amount
-        elif txn_type == TreasuryTransactionType.EXPENSE:
+
+        if _is_outflow_for_account(txn, treasury_account):
             outflow_total += amount
-        elif txn_type == TreasuryTransactionType.TRANSFER:
-            # التحويل لا نحسبه تلقائيًا داخل صافي هذا الحساب إلا
-            # لاحقًا في V2 إذا أردنا دعم جهتي التحويل بدقة أعلى
-            continue
 
     inflow_total = _money(inflow_total)
     outflow_total = _money(outflow_total)
@@ -635,6 +731,7 @@ def _build_treasury_statement_summary(
 def _collect_treasury_lines(
     transactions_qs: QuerySet[TreasuryTransaction],
     *,
+    treasury_account: TreasuryAccount,
     currency: str,
 ) -> list[dict[str, Any]]:
     lines: list[dict[str, Any]] = []
@@ -645,18 +742,30 @@ def _collect_treasury_lines(
             continue
 
         txn_type = str(_safe_getattr(txn, "transaction_type", ""))
+
         debit_amount = Decimal("0.00")
         credit_amount = Decimal("0.00")
 
-        if txn_type == TreasuryTransactionType.INCOME:
+        if _is_inflow_for_account(txn, treasury_account):
             debit_amount = amount
-        elif txn_type == TreasuryTransactionType.EXPENSE:
+
+        if _is_outflow_for_account(txn, treasury_account):
             credit_amount = amount
-        elif txn_type == TreasuryTransactionType.TRANSFER:
-            # في V1 سنعرض التحويل بشكل معلوماتي على أنه حركة محايدة
-            # ويمكن تطويره لاحقًا بحسب وجهة التحويل.
-            debit_amount = Decimal("0.00")
-            credit_amount = Decimal("0.00")
+
+        if debit_amount == Decimal("0.00") and credit_amount == Decimal("0.00"):
+            continue
+
+        line_description = _first_non_empty(
+            _safe_getattr(txn, "description"),
+            _safe_getattr(txn, "notes"),
+            f"حركة خزينة رقم {txn.pk}",
+        )
+
+        if txn_type == TreasuryTransactionType.TRANSFER:
+            if txn.destination_account_id == treasury_account.pk:
+                line_description = f"تحويل وارد: {line_description}"
+            elif txn.treasury_account_id == treasury_account.pk:
+                line_description = f"تحويل صادر: {line_description}"
 
         lines.append(
             {
@@ -668,11 +777,7 @@ def _collect_treasury_lines(
                     f"TRX-{txn.pk}",
                 ),
                 "transaction_id": txn.pk,
-                "description": _first_non_empty(
-                    _safe_getattr(txn, "description"),
-                    _safe_getattr(txn, "notes"),
-                    f"حركة خزينة رقم {txn.pk}",
-                ),
+                "description": line_description,
                 "debit_amount": debit_amount,
                 "credit_amount": credit_amount,
                 "currency": _safe_getattr(txn, "currency", None) or currency,
@@ -681,6 +786,7 @@ def _collect_treasury_lines(
                     "reference": _safe_getattr(txn, "reference"),
                     "external_reference": _safe_getattr(txn, "external_reference"),
                     "journal_entry_reference": _safe_getattr(txn, "journal_entry_reference"),
+                    "source_account_id": _safe_getattr(txn, "treasury_account_id"),
                     "destination_account_id": _safe_getattr(txn, "destination_account_id"),
                     "transaction_date": (
                         _safe_getattr(txn, "transaction_date").isoformat()
@@ -709,10 +815,12 @@ def build_treasury_statement(
     """
     بناء كشف حساب الخزينة / البنك.
 
-    الفكرة المالية في V1:
-    - INCOME = مدين يزيد رصيد الحساب
-    - EXPENSE = دائن يخفض رصيد الحساب
-    - TRANSFER يظهر معلوماتيًا في هذه المرحلة
+    الفكرة المالية:
+    - INCOME / OPENING_BALANCE / DEPOSIT / ADJUSTMENT = مدين يزيد الرصيد
+    - EXPENSE / WITHDRAW = دائن يخفض الرصيد
+    - TRANSFER:
+        - إذا الحساب مصدر التحويل => دائن
+        - إذا الحساب وجهة التحويل => مدين
     """
     if not treasury_account:
         raise ValueError("treasury_account is required")
@@ -720,7 +828,10 @@ def build_treasury_statement(
     start_dt = _start_of_day(date_from)
     end_dt = _end_of_day(date_to)
 
-    transactions_qs = TreasuryTransaction.objects.filter(treasury_account=treasury_account)
+    transactions_qs = TreasuryTransaction.objects.filter(
+        Q(treasury_account=treasury_account)
+        | Q(destination_account=treasury_account)
+    )
 
     if "transaction_date" in {field.name for field in TreasuryTransaction._meta.fields}:
         if start_dt:
@@ -743,6 +854,7 @@ def build_treasury_statement(
 
     raw_lines = _collect_treasury_lines(
         transactions_qs=transactions_qs,
+        treasury_account=treasury_account,
         currency=currency,
     )
 
