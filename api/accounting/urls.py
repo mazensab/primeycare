@@ -1,23 +1,27 @@
 # ============================================================
 # 📂 api/accounting/urls.py
-# 🧠 Accounting Reports API URLs — Primey Care V1.4
+# 🧠 Accounting API URLs — Primey Care V1.5
 # ------------------------------------------------------------
-# ✅ ربط مسارات تقارير المحاسبة
-# ✅ يدعم:
-#    - Trial Balance
-#    - Profit & Loss
-#    - Balance Sheet
-# ✅ Excel Export Hooks
+# ✅ Chart of Accounts
 # ✅ Account Detail
 # ✅ Account Detail Excel
 # ✅ General Ledger
 # ✅ General Ledger Excel
 # ✅ Journal Entries
+# ✅ Journal Entry Detail
 # ✅ Journal Entries Excel
-# ------------------------------------------------------------
+# ✅ Trial Balance
+# ✅ Profit & Loss
+# ✅ Balance Sheet
+# ✅ Excel Export Hooks
+# ============================================================
 
 from django.urls import path
 
+from .accounts import (
+    accounting_accounts_api,
+    accounting_accounts_excel_api,
+)
 from .detail import (
     accounting_account_detail_api,
     accounting_account_detail_excel_api,
@@ -44,41 +48,21 @@ app_name = "api_accounting"
 
 urlpatterns = [
     # ========================================================
-    # 📊 Financial Reports
+    # 🌳 Chart of Accounts
     # ========================================================
     path(
-        "reports/trial-balance/",
-        accounting_trial_balance_api,
-        name="accounting_trial_balance_api",
+        "accounts/",
+        accounting_accounts_api,
+        name="accounting_accounts_api",
     ),
     path(
-        "reports/trial-balance/excel/",
-        accounting_trial_balance_excel_api,
-        name="accounting_trial_balance_excel_api",
-    ),
-    path(
-        "reports/profit-loss/",
-        accounting_profit_loss_api,
-        name="accounting_profit_loss_api",
-    ),
-    path(
-        "reports/profit-loss/excel/",
-        accounting_profit_loss_excel_api,
-        name="accounting_profit_loss_excel_api",
-    ),
-    path(
-        "reports/balance-sheet/",
-        accounting_balance_sheet_api,
-        name="accounting_balance_sheet_api",
-    ),
-    path(
-        "reports/balance-sheet/excel/",
-        accounting_balance_sheet_excel_api,
-        name="accounting_balance_sheet_excel_api",
+        "accounts/excel/",
+        accounting_accounts_excel_api,
+        name="accounting_accounts_excel_api",
     ),
 
     # ========================================================
-    # 📘 Account Details
+    # 📘 Account Detail
     # ========================================================
     path(
         "accounts/<int:account_id>/",
@@ -122,5 +106,39 @@ urlpatterns = [
         "journals/<int:journal_entry_id>/",
         accounting_journal_entry_detail_api,
         name="accounting_journal_entry_detail_api",
+    ),
+
+    # ========================================================
+    # 📊 Financial Reports
+    # ========================================================
+    path(
+        "reports/trial-balance/",
+        accounting_trial_balance_api,
+        name="accounting_trial_balance_api",
+    ),
+    path(
+        "reports/trial-balance/excel/",
+        accounting_trial_balance_excel_api,
+        name="accounting_trial_balance_excel_api",
+    ),
+    path(
+        "reports/profit-loss/",
+        accounting_profit_loss_api,
+        name="accounting_profit_loss_api",
+    ),
+    path(
+        "reports/profit-loss/excel/",
+        accounting_profit_loss_excel_api,
+        name="accounting_profit_loss_excel_api",
+    ),
+    path(
+        "reports/balance-sheet/",
+        accounting_balance_sheet_api,
+        name="accounting_balance_sheet_api",
+    ),
+    path(
+        "reports/balance-sheet/excel/",
+        accounting_balance_sheet_excel_api,
+        name="accounting_balance_sheet_excel_api",
     ),
 ]

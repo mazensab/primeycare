@@ -1,7 +1,7 @@
 // ======================================================
 // 📂 الملف: lib/permissions.ts
 // 🧭 Primey Care — Frontend Roles & Permissions Core
-// 🚀 الإصدار: Permissions Frontend V2.1
+// 🚀 الإصدار: Permissions Frontend V2.2
 // ------------------------------------------------------
 // ✅ مصدر مركزي لصلاحيات الفرونت
 // ✅ يدعم Sidebar / Pages / Actions / Middleware Guards
@@ -13,6 +13,7 @@
 // ✅ مصفوفة صلاحيات نهائية لكل Role
 // ✅ system_admin / superuser يتجاوز كل القيود
 // ✅ provider هو المسار الرسمي و company/center توافق خلفي
+// ✅ تمت إضافة صلاحيات تقارير المرحلة 13
 // ======================================================
 
 import type {
@@ -297,6 +298,12 @@ export const PERMISSIONS = {
   REPORTS_VIEW: "reports.view",
   REPORTS_EXPORT: "reports.export",
   REPORTS_PRINT: "reports.print",
+  REPORTS_CUSTOMERS_VIEW: "reports.customers.view",
+  REPORTS_PROVIDERS_VIEW: "reports.providers.view",
+  REPORTS_ORDERS_VIEW: "reports.orders.view",
+  REPORTS_INVOICES_VIEW: "reports.invoices.view",
+  REPORTS_PAYMENTS_VIEW: "reports.payments.view",
+  REPORTS_ACCOUNTING_VIEW: "reports.accounting.view",
 
   // WhatsApp
   WHATSAPP_VIEW: "whatsapp.view",
@@ -437,6 +444,12 @@ export const ROLE_PERMISSION_MATRIX: RolePermissionMatrix = {
     PERMISSIONS.REPORTS_VIEW,
     PERMISSIONS.REPORTS_EXPORT,
     PERMISSIONS.REPORTS_PRINT,
+    PERMISSIONS.REPORTS_CUSTOMERS_VIEW,
+    PERMISSIONS.REPORTS_PROVIDERS_VIEW,
+    PERMISSIONS.REPORTS_ORDERS_VIEW,
+    PERMISSIONS.REPORTS_INVOICES_VIEW,
+    PERMISSIONS.REPORTS_PAYMENTS_VIEW,
+    PERMISSIONS.REPORTS_ACCOUNTING_VIEW,
 
     PERMISSIONS.WHATSAPP_VIEW,
     PERMISSIONS.WHATSAPP_SETTINGS,
@@ -514,6 +527,12 @@ export const ROLE_PERMISSION_MATRIX: RolePermissionMatrix = {
     PERMISSIONS.REPORTS_VIEW,
     PERMISSIONS.REPORTS_EXPORT,
     PERMISSIONS.REPORTS_PRINT,
+    PERMISSIONS.REPORTS_CUSTOMERS_VIEW,
+    PERMISSIONS.REPORTS_PROVIDERS_VIEW,
+    PERMISSIONS.REPORTS_ORDERS_VIEW,
+    PERMISSIONS.REPORTS_INVOICES_VIEW,
+    PERMISSIONS.REPORTS_PAYMENTS_VIEW,
+    PERMISSIONS.REPORTS_ACCOUNTING_VIEW,
   ],
 
   [ROLES.SUPPORT]: [
@@ -542,6 +561,11 @@ export const ROLE_PERMISSION_MATRIX: RolePermissionMatrix = {
     PERMISSIONS.NOTIFICATIONS_SEND,
 
     PERMISSIONS.REPORTS_VIEW,
+    PERMISSIONS.REPORTS_CUSTOMERS_VIEW,
+    PERMISSIONS.REPORTS_PROVIDERS_VIEW,
+    PERMISSIONS.REPORTS_ORDERS_VIEW,
+    PERMISSIONS.REPORTS_INVOICES_VIEW,
+    PERMISSIONS.REPORTS_PAYMENTS_VIEW,
   ],
 
   [ROLES.VIEWER]: [
@@ -557,7 +581,14 @@ export const ROLE_PERMISSION_MATRIX: RolePermissionMatrix = {
     PERMISSIONS.PAYMENTS_VIEW,
     PERMISSIONS.ACCOUNTING_VIEW,
     PERMISSIONS.TREASURY_VIEW,
+
     PERMISSIONS.REPORTS_VIEW,
+    PERMISSIONS.REPORTS_CUSTOMERS_VIEW,
+    PERMISSIONS.REPORTS_PROVIDERS_VIEW,
+    PERMISSIONS.REPORTS_ORDERS_VIEW,
+    PERMISSIONS.REPORTS_INVOICES_VIEW,
+    PERMISSIONS.REPORTS_PAYMENTS_VIEW,
+    PERMISSIONS.REPORTS_ACCOUNTING_VIEW,
   ],
 
   [ROLES.PROVIDER_ADMIN]: [
@@ -758,6 +789,45 @@ export const PATH_ACCESS_RULES: PathAccessRule[] = [
   {
     prefix: "/system/treasury",
     permissions: [PERMISSIONS.TREASURY_VIEW],
+    workspaces: ["system"],
+  },
+
+  // ----------------------------
+  // Reports
+  // ----------------------------
+  {
+    prefix: "/system/reports/customers",
+    permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_CUSTOMERS_VIEW],
+    workspaces: ["system"],
+  },
+  {
+    prefix: "/system/reports/providers",
+    permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_PROVIDERS_VIEW],
+    workspaces: ["system"],
+  },
+  {
+    prefix: "/system/reports/orders",
+    permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_ORDERS_VIEW],
+    workspaces: ["system"],
+  },
+  {
+    prefix: "/system/reports/invoices",
+    permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_INVOICES_VIEW],
+    workspaces: ["system"],
+  },
+  {
+    prefix: "/system/reports/payments",
+    permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_PAYMENTS_VIEW],
+    workspaces: ["system"],
+  },
+  {
+    prefix: "/system/reports/accounting",
+    permissions: [PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_ACCOUNTING_VIEW],
+    workspaces: ["system"],
+  },
+  {
+    prefix: "/system/reports",
+    permissions: [PERMISSIONS.REPORTS_VIEW],
     workspaces: ["system"],
   },
 
@@ -1197,7 +1267,12 @@ export function normalizeWorkspace(workspace: unknown): string {
     return "provider";
   }
 
-  if (value === "system" || value === "provider" || value === "customer" || value === "agent") {
+  if (
+    value === "system" ||
+    value === "provider" ||
+    value === "customer" ||
+    value === "agent"
+  ) {
     return value;
   }
 
@@ -1393,7 +1468,10 @@ export function hasAnyWorkspace(
   const normalizedWorkspaces = workspaces.map(normalizeWorkspace).filter(Boolean);
 
   if (isSystemAdmin(session)) {
-    return normalizedWorkspaces.length === 0 || normalizedWorkspaces.includes("system");
+    return (
+      normalizedWorkspaces.length === 0 ||
+      normalizedWorkspaces.includes("system")
+    );
   }
 
   const currentWorkspace = getSessionWorkspace(session);

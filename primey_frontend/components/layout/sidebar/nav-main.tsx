@@ -166,16 +166,6 @@ const systemNavItems: NavGroup[] = [
             permission: PERMISSIONS.PROVIDERS_CREATE,
             workspaces: ["system"],
           },
-          {
-            title: { ar: "تقارير المراكز", en: "Centers Reports" },
-            href: "/system/centers/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.PROVIDERS_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
-            workspaces: ["system"],
-          },
         ],
       },
       {
@@ -204,16 +194,6 @@ const systemNavItems: NavGroup[] = [
             href: "/system/customers/create",
             icon: Plus,
             permission: PERMISSIONS.CUSTOMERS_CREATE,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "تقارير العملاء", en: "Customers Reports" },
-            href: "/system/customers/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.CUSTOMERS_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
             workspaces: ["system"],
           },
         ],
@@ -246,16 +226,6 @@ const systemNavItems: NavGroup[] = [
             permission: PERMISSIONS.AGENTS_CREATE,
             workspaces: ["system"],
           },
-          {
-            title: { ar: "تقارير المندوبين", en: "Agents Reports" },
-            href: "/system/agents/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.AGENTS_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
-            workspaces: ["system"],
-          },
         ],
       },
       {
@@ -284,16 +254,6 @@ const systemNavItems: NavGroup[] = [
             href: "/system/products/create",
             icon: Plus,
             permission: PERMISSIONS.PRODUCTS_CREATE,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "تقارير المنتجات", en: "Products Reports" },
-            href: "/system/products/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.PRODUCTS_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
             workspaces: ["system"],
           },
         ],
@@ -326,16 +286,6 @@ const systemNavItems: NavGroup[] = [
             permission: PERMISSIONS.ORDERS_CREATE,
             workspaces: ["system"],
           },
-          {
-            title: { ar: "تقارير الطلبات", en: "Orders Reports" },
-            href: "/system/orders/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.ORDERS_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
-            workspaces: ["system"],
-          },
         ],
       },
       {
@@ -364,16 +314,6 @@ const systemNavItems: NavGroup[] = [
             href: "/system/providers/create",
             icon: Plus,
             permission: PERMISSIONS.PROVIDERS_CREATE,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "تقارير مقدمي الخدمة", en: "Providers Reports" },
-            href: "/system/providers/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.PROVIDERS_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
             workspaces: ["system"],
           },
         ],
@@ -406,16 +346,6 @@ const systemNavItems: NavGroup[] = [
             permission: PERMISSIONS.CONTRACTS_CREATE,
             workspaces: ["system"],
           },
-          {
-            title: { ar: "تقارير العقود", en: "Contracts Reports" },
-            href: "/system/contracts/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.CONTRACTS_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
-            workspaces: ["system"],
-          },
         ],
       },
       {
@@ -446,16 +376,6 @@ const systemNavItems: NavGroup[] = [
             permission: PERMISSIONS.INVOICES_CREATE,
             workspaces: ["system"],
           },
-          {
-            title: { ar: "تقارير الفواتير", en: "Invoices Reports" },
-            href: "/system/invoices/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.INVOICES_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
-            workspaces: ["system"],
-          },
         ],
       },
       {
@@ -484,16 +404,6 @@ const systemNavItems: NavGroup[] = [
             href: "/system/payments/create",
             icon: Plus,
             permission: PERMISSIONS.PAYMENTS_CREATE,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "تقارير المدفوعات", en: "Payments Reports" },
-            href: "/system/payments/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.PAYMENTS_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
             workspaces: ["system"],
           },
         ],
@@ -531,16 +441,6 @@ const systemNavItems: NavGroup[] = [
             href: "/system/accounting/ledger",
             icon: BookOpenCheck,
             permission: PERMISSIONS.ACCOUNTING_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "تقارير المحاسبة", en: "Accounting Reports" },
-            href: "/system/accounting/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.ACCOUNTING_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
             workspaces: ["system"],
           },
           {
@@ -630,20 +530,87 @@ const systemNavItems: NavGroup[] = [
             workspaces: ["system"],
           },
           {
-            title: { ar: "تقارير الخزينة", en: "Treasury Reports" },
-            href: "/system/treasury/reports",
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.TREASURY_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
-            workspaces: ["system"],
-          },
-          {
             title: { ar: "إعدادات الخزينة", en: "Treasury Settings" },
             href: "/system/treasury/settings",
             icon: Settings,
             permission: PERMISSIONS.TREASURY_EDIT,
+            workspaces: ["system"],
+          },
+        ],
+      },
+      {
+        title: { ar: "التقارير", en: "Reports" },
+        href: "/system/reports",
+        icon: BarChart3,
+        permission: PERMISSIONS.REPORTS_VIEW,
+        workspaces: ["system"],
+        items: [
+          {
+            title: { ar: "لوحة التقارير", en: "Reports Overview" },
+            href: "/system/reports",
+            icon: BarChart3,
+            permission: PERMISSIONS.REPORTS_VIEW,
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "تقارير العملاء", en: "Customers Reports" },
+            href: "/system/reports/customers",
+            icon: Users,
+            anyPermissions: [
+              PERMISSIONS.REPORTS_VIEW,
+              PERMISSIONS.REPORTS_CUSTOMERS_VIEW,
+            ],
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "تقارير المراكز", en: "Centers Reports" },
+            href: "/system/reports/providers",
+            icon: Building2,
+            anyPermissions: [
+              PERMISSIONS.REPORTS_VIEW,
+              PERMISSIONS.REPORTS_PROVIDERS_VIEW,
+            ],
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "تقارير الطلبات", en: "Orders Reports" },
+            href: "/system/reports/orders",
+            icon: ShoppingCart,
+            anyPermissions: [
+              PERMISSIONS.REPORTS_VIEW,
+              PERMISSIONS.REPORTS_ORDERS_VIEW,
+            ],
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "تقارير الفواتير", en: "Invoices Reports" },
+            href: "/system/reports/invoices",
+            icon: ReceiptText,
+            anyPermissions: [
+              PERMISSIONS.REPORTS_VIEW,
+              PERMISSIONS.REPORTS_INVOICES_VIEW,
+            ],
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "تقارير المدفوعات", en: "Payments Reports" },
+            href: "/system/reports/payments",
+            icon: CreditCard,
+            anyPermissions: [
+              PERMISSIONS.REPORTS_VIEW,
+              PERMISSIONS.REPORTS_PAYMENTS_VIEW,
+            ],
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "تقارير المحاسبة", en: "Accounting Reports" },
+            href: "/system/reports/accounting",
+            icon: Calculator,
+            anyPermissions: [
+              PERMISSIONS.REPORTS_VIEW,
+              PERMISSIONS.REPORTS_ACCOUNTING_VIEW,
+              PERMISSIONS.ACCOUNTING_VIEW,
+            ],
             workspaces: ["system"],
           },
         ],
@@ -817,17 +784,6 @@ const centerNavItems: NavGroup[] = [
             permission: PERMISSIONS.INVOICES_CREATE,
             workspaces: ["provider"],
           },
-          {
-            title: { ar: "تقارير الفواتير", en: "Invoices Reports" },
-            href: "/company/invoices/reports",
-            aliases: ["/center/invoices/reports", "/provider/invoices/reports"],
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.INVOICES_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
-            workspaces: ["provider"],
-          },
         ],
       },
       {
@@ -860,17 +816,6 @@ const centerNavItems: NavGroup[] = [
             aliases: ["/center/payments/create", "/provider/payments/create"],
             icon: Plus,
             permission: PERMISSIONS.PAYMENTS_CREATE,
-            workspaces: ["provider"],
-          },
-          {
-            title: { ar: "تقارير المدفوعات", en: "Payments Reports" },
-            href: "/company/payments/reports",
-            aliases: ["/center/payments/reports", "/provider/payments/reports"],
-            icon: BarChart3,
-            anyPermissions: [
-              PERMISSIONS.PAYMENTS_VIEW,
-              PERMISSIONS.REPORTS_VIEW,
-            ],
             workspaces: ["provider"],
           },
         ],
@@ -1060,16 +1005,6 @@ const agentNavItems: NavGroup[] = [
         workspaces: ["agent"],
       },
       {
-        title: { ar: "تقاريري", en: "My Reports" },
-        href: "/agent/reports",
-        icon: BarChart3,
-        anyPermissions: [
-          PERMISSIONS.REPORTS_VIEW,
-          PERMISSIONS.AGENT_COMMISSIONS_VIEW,
-        ],
-        workspaces: ["agent"],
-      },
-      {
         title: { ar: "حسابي", en: "My Account" },
         href: "/agent/account",
         icon: ShieldCheck,
@@ -1212,6 +1147,13 @@ function inferPermissionInputByHref(item: NavItem): PermissionCheckInput {
   if (href === "/system") {
     return {
       permission: PERMISSIONS.SYSTEM_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/reports")) {
+    return {
+      permission: PERMISSIONS.REPORTS_VIEW,
       workspaces: ["system"],
     };
   }

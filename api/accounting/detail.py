@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 api/accounting/detail.py
-# 🧠 Accounting Account Detail API — Primey Care V1.2
+# 🧠 Accounting Account Detail API — Primey Care V1.3
 # ------------------------------------------------------------
 # ✅ API تفصيلي احترافي للحساب المحاسبي
 # ✅ يرجع:
@@ -17,6 +17,10 @@
 # ✅ Excel Export:
 #    - Account Detail Excel
 # ------------------------------------------------------------
+# ملاحظة:
+# - يعتمد على Account.nature وليس normal_balance
+#   لأن موديل المحاسبة الرسمي يستخدم nature.
+# ============================================================
 
 from __future__ import annotations
 
@@ -65,6 +69,7 @@ def _decimal_to_string(value: Any) -> Any:
 def _parse_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
+
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -73,6 +78,7 @@ def _parse_date(value: str | None, field_name: str) -> date | None:
         return None
 
     raw_value = str(value).strip()
+
     try:
         return date.fromisoformat(raw_value)
     except ValueError as exc:
@@ -86,11 +92,16 @@ def _validate_date_range(date_from: date | None, date_to: date | None) -> None:
         raise ValueError("لا يمكن أن يكون date_from أكبر من date_to.")
 
 
-def _error_response(message: str, status: int = 400, extra: dict | None = None) -> JsonResponse:
+def _error_response(
+    message: str,
+    status: int = 400,
+    extra: dict | None = None,
+) -> JsonResponse:
     payload = {
         "ok": False,
         "message": message,
     }
+
     if extra:
         payload.update(extra)
 
@@ -120,10 +131,12 @@ def _safe_attr(obj: Any, attr_name: str, default: Any = None) -> Any:
 
 
 def _safe_sheet_title(title: str) -> str:
-    invalid_chars = ['\\', '/', '*', '[', ']', ':', '?']
+    invalid_chars = ["\\", "/", "*", "[", "]", ":", "?"]
     clean = title
+
     for char in invalid_chars:
         clean = clean.replace(char, "-")
+
     return clean[:31]
 
 
@@ -166,9 +179,14 @@ def _add_meta_rows(ws, title: str, meta_rows: list[tuple[str, Any]]) -> int:
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
 
     current_row = 3
+
     for label, value in meta_rows:
         ws.cell(row=current_row, column=1, value=label)
-        ws.cell(row=current_row, column=2, value=str(value) if value is not None else "")
+        ws.cell(
+            row=current_row,
+            column=2,
+            value=str(value) if value is not None else "",
+        )
         ws.cell(row=current_row, column=1).font = Font(bold=True)
         current_row += 1
 
@@ -195,6 +213,44 @@ def _resolve_account_display_name(account: Account) -> str:
         or _safe_attr(account, "name_en", None)
         or f"Account #{account.pk}"
     )
+
+
+def _resolve_account_nature(account: Account) -> str:
+    """
+    يرجع طبيعة الحساب الرسمية.
+    موديل Primey Care Accounting يستخدم nature:
+    DEBIT / CREDIT
+    """
+    return str(_safe_attr(account, "nature", "") or "").upper()
+
+
+def _resolve_account_nature_label(account: Account) -> str | None:
+    if hasattr(account, "get_nature_display"):
+        return account.get_nature_display()
+
+    nature = _resolve_account_nature(account)
+
+    if nature == "DEBIT":
+        return "مدين"
+
+    if nature == "CREDIT":
+        return "دائن"
+
+    return None
+
+
+def _balance_side_from_nature(
+    *,
+    balance_amount: Decimal,
+    account_nature: str,
+) -> str:
+    if balance_amount == Decimal("0.00"):
+        return "ZERO"
+
+    if account_nature == "CREDIT":
+        return "CREDIT"
+
+    return "DEBIT"
 
 
 def _serialize_line(line: JournalEntryLine) -> dict[str, Any]:
@@ -232,14 +288,22 @@ def _build_account_detail_payload(account_id: int, request) -> dict[str, Any]:
 
     _validate_date_range(date_from, date_to)
 
-    account = Account.objects.filter(id=account_id).first()
+    account = (
+        Account.objects.select_related("parent")
+        .filter(id=account_id)
+        .first()
+    )
+
     if not account:
         raise ValueError("الحساب المطلوب غير موجود.")
 
-    lines_qs = JournalEntryLine.objects.select_related(
-        "journal_entry",
-        "account",
-    ).filter(account_id=account.id)
+    lines_qs = (
+        JournalEntryLine.objects.select_related(
+            "journal_entry",
+            "account",
+        )
+        .filter(account_id=account.id)
+    )
 
     if posted_only:
         lines_qs = lines_qs.filter(journal_entry__status=JournalEntryStatus.POSTED)
@@ -260,16 +324,28 @@ def _build_account_detail_payload(account_id: int, request) -> dict[str, Any]:
     )
 
     total_debit = _money(
-        sum((_money(_safe_attr(line, "debit_amount", "0.00")) for line in lines), Decimal("0.00"))
+        sum(
+            (
+                _money(_safe_attr(line, "debit_amount", "0.00"))
+                for line in lines
+            ),
+            Decimal("0.00"),
+        )
     )
     total_credit = _money(
-        sum((_money(_safe_attr(line, "credit_amount", "0.00")) for line in lines), Decimal("0.00"))
+        sum(
+            (
+                _money(_safe_attr(line, "credit_amount", "0.00"))
+                for line in lines
+            ),
+            Decimal("0.00"),
+        )
     )
 
-    normal_balance = _safe_attr(account, "normal_balance", None)
+    account_nature = _resolve_account_nature(account)
     net_movement = _money(total_debit - total_credit)
 
-    if normal_balance == "CREDIT":
+    if account_nature == "CREDIT":
         balance_amount = _money(total_credit - total_debit)
     else:
         balance_amount = _money(total_debit - total_credit)
@@ -282,10 +358,23 @@ def _build_account_detail_payload(account_id: int, request) -> dict[str, Any]:
             "name_ar": _safe_attr(account, "name_ar", None),
             "name_en": _safe_attr(account, "name_en", None),
             "account_type": _safe_attr(account, "account_type", None),
-            "normal_balance": normal_balance,
+            "account_type_label": (
+                account.get_account_type_display()
+                if hasattr(account, "get_account_type_display")
+                else None
+            ),
+            "nature": account_nature,
+            "nature_label": _resolve_account_nature_label(account),
             "is_group": bool(_safe_attr(account, "is_group", False)),
             "is_active": bool(_safe_attr(account, "is_active", True)),
             "parent_id": _safe_attr(account, "parent_id", None),
+            "parent_code": _safe_attr(_safe_attr(account, "parent", None), "code", None),
+            "parent_name": (
+                _resolve_account_display_name(account.parent)
+                if _safe_attr(account, "parent", None)
+                else None
+            ),
+            "level": int(_safe_attr(account, "level", 1) or 1),
         },
         "filters": {
             "date_from": date_from.isoformat() if date_from else None,
@@ -298,12 +387,9 @@ def _build_account_detail_payload(account_id: int, request) -> dict[str, Any]:
             "total_credit": total_credit,
             "net_movement": net_movement,
             "balance_amount": balance_amount,
-            "balance_side": (
-                "DEBIT"
-                if balance_amount > Decimal("0.00") and normal_balance != "CREDIT"
-                else "CREDIT"
-                if balance_amount > Decimal("0.00") and normal_balance == "CREDIT"
-                else "ZERO"
+            "balance_side": _balance_side_from_nature(
+                balance_amount=balance_amount,
+                account_nature=account_nature,
             ),
         },
         "transactions": [_serialize_line(line) for line in lines],
@@ -327,7 +413,7 @@ def _build_account_detail_excel(payload: dict[str, Any]) -> HttpResponse:
             ("Account Code", account.get("code")),
             ("Account Name", account.get("name")),
             ("Account Type", account.get("account_type")),
-            ("Normal Balance", account.get("normal_balance")),
+            ("Nature", account.get("nature")),
             ("Date From", filters.get("date_from")),
             ("Date To", filters.get("date_to")),
             ("Posted Only", filters.get("posted_only")),
@@ -361,6 +447,7 @@ def _build_account_detail_excel(payload: dict[str, Any]) -> HttpResponse:
         _apply_header_style(cell)
 
     current_row = start_row + 1
+
     for row in payload["transactions"]:
         ws.cell(row=current_row, column=1, value=row.get("id"))
         ws.cell(row=current_row, column=2, value=row.get("journal_entry_id"))

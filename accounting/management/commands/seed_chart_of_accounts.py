@@ -3,13 +3,22 @@
 # 🧠 Primey Care | Seed Saudi Chart of Accounts
 # ------------------------------------------------------------
 # ✅ يزرع شجرة الحسابات المعتمدة داخل جدول Account
-# ✅ مبني على الملفين العربي والإنجليزي اللذين اعتمدهما المستخدم
+# ✅ مبني على الملفين العربي والإنجليزي المعتمدين
 # ✅ Idempotent:
 #    - يعيد التحديث عند وجود الحساب
 #    - لا يكرر السجلات
 # ✅ يدعم:
 #    - الزرع العادي
-#    - reset آمن عبر فك parent أولًا ثم الحذف
+#    - reset آمن
+#    - force-reset لبيئة التطوير فقط
+# ------------------------------------------------------------
+# ملاحظات مهمة:
+# - لا يسمح بحذف دليل الحسابات إذا كانت هناك قيود محاسبية
+#   إلا عند استخدام --force-reset.
+# - يحافظ على سلامة الشجرة:
+#   parent موجود
+#   نوع الحساب مطابق للأب
+#   لا توجد أكواد مكررة داخل التعريف
 # ============================================================
 
 from __future__ import annotations
@@ -17,17 +26,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from django.core.management.base import BaseCommand
+from django.core.exceptions import ValidationError
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from accounting.models import Account, AccountNature, AccountType
+from accounting.models import Account, AccountNature, AccountType, JournalEntryLine
 
 
 # ============================================================
 # 🧾 DTO
 # ============================================================
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class AccountSeedRow:
     code: str
     name_ar: str
@@ -159,29 +169,169 @@ CHART_OF_ACCOUNTS: List[AccountSeedRow] = [
 
 
 # ============================================================
+# 🧩 الحسابات التشغيلية المطلوبة للنظام
+# ============================================================
+
+REQUIRED_OPERATIONAL_CODES = {
+    "1103": "المدينون",
+    "110101": "النقدية في الخزينة",
+    "110201": "حساب البنك الجاري",
+    "2105": "ضريبة القيمة المضافة المستحقة",
+    "4101": "إيرادات المبيعات/ الخدمات",
+    "5103": "عمولات البيع",
+    "2102": "مصروفات مستحقة",
+}
+
+
+# ============================================================
 # 🛠️ Helpers
 # ============================================================
 
 def build_description(name_en: str, extra_description: str = "") -> str:
+    name_en = str(name_en or "").strip()
+    extra_description = str(extra_description or "").strip()
+
     if extra_description and name_en:
         return f"EN: {name_en}\n{extra_description}"
+
     if name_en:
         return f"EN: {name_en}"
-    return extra_description or ""
+
+    return extra_description
 
 
 def sort_rows_by_code_length(rows: List[AccountSeedRow]) -> List[AccountSeedRow]:
     return sorted(rows, key=lambda item: (len(item.code), item.code))
 
 
-def safe_reset_accounts() -> None:
+def get_seed_code_map() -> Dict[str, AccountSeedRow]:
+    return {row.code: row for row in CHART_OF_ACCOUNTS}
+
+
+def validate_chart_definition() -> None:
+    """
+    التحقق من سلامة تعريف شجرة الحسابات قبل الزرع.
+    """
+    seen_codes: set[str] = set()
+    duplicated_codes: list[str] = []
+
+    for row in CHART_OF_ACCOUNTS:
+        code = str(row.code or "").strip()
+
+        if not code:
+            raise CommandError("يوجد حساب بدون كود داخل CHART_OF_ACCOUNTS.")
+
+        if code in seen_codes:
+            duplicated_codes.append(code)
+
+        seen_codes.add(code)
+
+        if not row.name_ar:
+            raise CommandError(f"الحساب {code} لا يحتوي على اسم عربي.")
+
+        if not row.account_type:
+            raise CommandError(f"الحساب {code} لا يحتوي على نوع حساب.")
+
+        if not row.nature:
+            raise CommandError(f"الحساب {code} لا يحتوي على طبيعة حساب.")
+
+    if duplicated_codes:
+        raise CommandError(
+            "توجد أكواد مكررة داخل شجرة الحسابات: "
+            + ", ".join(sorted(set(duplicated_codes)))
+        )
+
+    code_map = get_seed_code_map()
+
+    for row in CHART_OF_ACCOUNTS:
+        if not row.parent_code:
+            continue
+
+        parent = code_map.get(row.parent_code)
+
+        if not parent:
+            raise CommandError(
+                f"الحساب {row.code} مرتبط بحساب أب غير موجود داخل الشجرة: {row.parent_code}"
+            )
+
+        if parent.is_group is False:
+            raise CommandError(
+                f"الحساب الأب {parent.code} للحساب {row.code} يجب أن يكون حسابًا تجميعيًا."
+            )
+
+        if parent.account_type != row.account_type:
+            raise CommandError(
+                f"نوع الحساب {row.code} لا يطابق نوع الحساب الأب {parent.code}."
+            )
+
+    for code in REQUIRED_OPERATIONAL_CODES:
+        if code not in code_map:
+            raise CommandError(
+                f"الحساب التشغيلي المطلوب غير موجود داخل الشجرة: {code}"
+            )
+
+
+def has_accounting_postings() -> bool:
+    """
+    هل توجد أسطر قيود مرتبطة بدليل الحسابات؟
+    """
+    return JournalEntryLine.objects.exists()
+
+
+def safe_reset_accounts(*, force: bool = False) -> None:
     """
     Reset آمن لدليل الحسابات:
-    1) فك parent
-    2) حذف الحسابات
+    1) يمنع الحذف إذا توجد قيود محاسبية.
+    2) عند force يفك parent ثم يحذف.
     """
+    if has_accounting_postings() and not force:
+        raise CommandError(
+            "لا يمكن تنفيذ --reset لأن هناك قيودًا محاسبية مرتبطة بدليل الحسابات. "
+            "إذا كنت في بيئة تطوير وتريد الحذف القسري استخدم: --reset --force-reset"
+        )
+
     Account.objects.update(parent=None)
     Account.objects.all().delete()
+
+
+def account_fields_from_seed(row: AccountSeedRow) -> dict:
+    return {
+        "name": row.name_ar,
+        "account_type": row.account_type,
+        "nature": row.nature,
+        "is_group": row.is_group,
+        "is_active": row.is_active,
+        "description": build_description(row.name_en, row.description),
+    }
+
+
+def update_account_from_seed(account: Account, row: AccountSeedRow) -> bool:
+    """
+    يرجع True إذا تم تعديل الحساب.
+    """
+    changed = False
+    fields = account_fields_from_seed(row)
+
+    for field_name, new_value in fields.items():
+        if getattr(account, field_name) != new_value:
+            setattr(account, field_name, new_value)
+            changed = True
+
+    if changed:
+        account.full_clean()
+        account.save()
+
+    return changed
+
+
+def ensure_operational_accounts_exist() -> list[str]:
+    missing_codes: list[str] = []
+
+    for code in REQUIRED_OPERATIONAL_CODES:
+        if not Account.objects.filter(code=code, is_active=True, is_group=False).exists():
+            missing_codes.append(code)
+
+    return missing_codes
 
 
 # ============================================================
@@ -195,71 +345,62 @@ class Command(BaseCommand):
         parser.add_argument(
             "--reset",
             action="store_true",
-            help="حذف دليل الحسابات الحالي ثم إعادة الزرع",
+            help="حذف دليل الحسابات الحالي ثم إعادة الزرع. يمنع تلقائيًا إذا توجد قيود.",
+        )
+        parser.add_argument(
+            "--force-reset",
+            action="store_true",
+            help="حذف قسري لدليل الحسابات حتى لو توجد قيود. يستخدم للتطوير فقط.",
         )
 
     @transaction.atomic
     def handle(self, *args, **options):
         reset = options.get("reset", False)
+        force_reset = options.get("force_reset", False)
+
+        validate_chart_definition()
+
+        if force_reset and not reset:
+            raise CommandError("لا يمكن استخدام --force-reset بدون --reset.")
 
         if reset:
-            self.stdout.write(self.style.WARNING("سيتم حذف دليل الحسابات الحالي بالكامل..."))
-            safe_reset_accounts()
+            if force_reset:
+                self.stdout.write(
+                    self.style.WARNING(
+                        "تحذير: سيتم حذف دليل الحسابات الحالي بالقوة. استخدم هذا الخيار للتطوير فقط."
+                    )
+                )
+            else:
+                self.stdout.write(
+                    self.style.WARNING("سيتم حذف دليل الحسابات الحالي إذا لم توجد قيود محاسبية.")
+                )
+
+            safe_reset_accounts(force=force_reset)
 
         self.stdout.write(self.style.NOTICE("بدء زرع شجرة الحسابات المعتمدة..."))
 
         created_count = 0
         updated_count = 0
+        parent_updated_count = 0
         code_to_account: Dict[str, Account] = {}
 
         # ----------------------------------------------------
         # المرحلة الأولى: إنشاء/تحديث الحسابات بدون parent
         # ----------------------------------------------------
         for row in sort_rows_by_code_length(CHART_OF_ACCOUNTS):
+            defaults = account_fields_from_seed(row)
+
             account, created = Account.objects.get_or_create(
                 code=row.code,
-                defaults={
-                    "name": row.name_ar,
-                    "account_type": row.account_type,
-                    "nature": row.nature,
-                    "is_group": row.is_group,
-                    "is_active": row.is_active,
-                    "description": build_description(row.name_en, row.description),
-                },
+                defaults=defaults,
             )
 
             if created:
+                account.full_clean()
+                account.save()
                 created_count += 1
             else:
-                changed = False
-
-                if account.name != row.name_ar:
-                    account.name = row.name_ar
-                    changed = True
-
-                if account.account_type != row.account_type:
-                    account.account_type = row.account_type
-                    changed = True
-
-                if account.nature != row.nature:
-                    account.nature = row.nature
-                    changed = True
-
-                if account.is_group != row.is_group:
-                    account.is_group = row.is_group
-                    changed = True
-
-                if account.is_active != row.is_active:
-                    account.is_active = row.is_active
-                    changed = True
-
-                new_description = build_description(row.name_en, row.description)
-                if account.description != new_description:
-                    account.description = new_description
-                    changed = True
-
-                if changed:
-                    account.save()
+                if update_account_from_seed(account, row):
                     updated_count += 1
 
             code_to_account[row.code] = account
@@ -271,20 +412,34 @@ class Command(BaseCommand):
             account = code_to_account[row.code]
             parent = code_to_account.get(row.parent_code) if row.parent_code else None
 
+            expected_parent_id = parent.pk if parent else None
+            expected_level = (parent.level + 1) if parent else 1
+
             changed = False
 
-            if account.parent_id != (parent.id if parent else None):
+            if account.parent_id != expected_parent_id:
                 account.parent = parent
                 changed = True
 
-            expected_level = (parent.level + 1) if parent else 1
             if account.level != expected_level:
                 account.level = expected_level
                 changed = True
 
             if changed:
+                account.full_clean()
                 account.save()
-                updated_count += 1
+                parent_updated_count += 1
+
+        # ----------------------------------------------------
+        # تحقق نهائي من الحسابات التشغيلية
+        # ----------------------------------------------------
+        missing_operational_codes = ensure_operational_accounts_exist()
+
+        if missing_operational_codes:
+            raise CommandError(
+                "تم الزرع لكن توجد حسابات تشغيلية مفقودة أو غير قابلة للترحيل: "
+                + ", ".join(missing_operational_codes)
+            )
 
         # ----------------------------------------------------
         # ملخص
@@ -294,14 +449,11 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("تم زرع شجرة الحسابات بنجاح."))
         self.stdout.write(f"إجمالي الحسابات الحالية: {total_accounts}")
         self.stdout.write(f"تم إنشاء: {created_count}")
-        self.stdout.write(f"تم تحديث: {updated_count}")
+        self.stdout.write(f"تم تحديث البيانات: {updated_count}")
+        self.stdout.write(f"تم تحديث الربط الشجري/المستويات: {parent_updated_count}")
 
         self.stdout.write("")
         self.stdout.write(self.style.NOTICE("الحسابات التشغيلية المعتمدة حاليًا داخل Primey Care:"))
-        self.stdout.write("1103   -> المدينون")
-        self.stdout.write("110101 -> النقدية في الخزينة")
-        self.stdout.write("110201 -> حساب البنك الجاري")
-        self.stdout.write("2105   -> ضريبة القيمة المضافة المستحقة")
-        self.stdout.write("4101   -> إيرادات المبيعات/ الخدمات")
-        self.stdout.write("5103   -> عمولات البيع")
-        self.stdout.write("2102   -> مصروفات مستحقة")
+
+        for code, label in REQUIRED_OPERATIONAL_CODES.items():
+            self.stdout.write(f"{code:<6} -> {label}")

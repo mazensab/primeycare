@@ -1,10 +1,10 @@
 # ============================================================
 # 📂 api/accounting/ledger.py
-# 🧠 General Ledger API — Primey Care V1.2
+# 🧠 General Ledger API — Primey Care V1.3
 # ------------------------------------------------------------
 # ✅ دفتر الأستاذ العام
 # ✅ يدعم:
-#    - account_id (اختياري)
+#    - account_id اختياري
 #    - date_from
 #    - date_to
 #    - posted_only
@@ -22,6 +22,10 @@
 #    - الحركات مرتبة محاسبيًا
 #    - بيانات التصفح pagination
 # ------------------------------------------------------------
+# ملاحظة:
+# - يعتمد على Account.nature وليس normal_balance
+#   لأن موديل المحاسبة الرسمي يستخدم nature.
+# ============================================================
 
 from __future__ import annotations
 
@@ -91,6 +95,7 @@ def _decimal_to_string(value: Any) -> Any:
 def _parse_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
+
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -99,6 +104,7 @@ def _parse_int(value: str | None, field_name: str) -> int | None:
         return None
 
     raw_value = str(value).strip()
+
     try:
         parsed = int(raw_value)
     except ValueError as exc:
@@ -122,6 +128,7 @@ def _parse_positive_int(
         parsed = default
     else:
         raw_value = str(value).strip()
+
         try:
             parsed = int(raw_value)
         except ValueError as exc:
@@ -141,6 +148,7 @@ def _parse_date(value: str | None, field_name: str) -> date | None:
         return None
 
     raw_value = str(value).strip()
+
     try:
         return date.fromisoformat(raw_value)
     except ValueError as exc:
@@ -151,9 +159,11 @@ def _parse_date(value: str | None, field_name: str) -> date | None:
 
 def _parse_ordering(value: str | None, default: str = "entry_date") -> str:
     raw_value = (value or "").strip() or default
+
     if raw_value not in ALLOWED_ORDERING:
         allowed = ", ".join(ALLOWED_ORDERING.keys())
         raise ValueError(f"قيمة ordering غير مدعومة. القيم المسموحة: {allowed}")
+
     return raw_value
 
 
@@ -162,11 +172,16 @@ def _validate_date_range(date_from: date | None, date_to: date | None) -> None:
         raise ValueError("لا يمكن أن يكون date_from أكبر من date_to.")
 
 
-def _error_response(message: str, status: int = 400, extra: dict | None = None) -> JsonResponse:
+def _error_response(
+    message: str,
+    status: int = 400,
+    extra: dict | None = None,
+) -> JsonResponse:
     payload = {
         "ok": False,
         "message": message,
     }
+
     if extra:
         payload.update(extra)
 
@@ -196,10 +211,12 @@ def _safe_attr(obj: Any, attr_name: str, default: Any = None) -> Any:
 
 
 def _safe_sheet_title(title: str) -> str:
-    invalid_chars = ['\\', '/', '*', '[', ']', ':', '?']
+    invalid_chars = ["\\", "/", "*", "[", "]", ":", "?"]
     clean = title
+
     for char in invalid_chars:
         clean = clean.replace(char, "-")
+
     return clean[:31]
 
 
@@ -242,9 +259,14 @@ def _add_meta_rows(ws, title: str, meta_rows: list[tuple[str, Any]]) -> int:
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
 
     current_row = 3
+
     for label, value in meta_rows:
         ws.cell(row=current_row, column=1, value=label)
-        ws.cell(row=current_row, column=2, value=str(value) if value is not None else "")
+        ws.cell(
+            row=current_row,
+            column=2,
+            value=str(value) if value is not None else "",
+        )
         ws.cell(row=current_row, column=1).font = Font(bold=True)
         current_row += 1
 
@@ -276,13 +298,42 @@ def _resolve_account_name(account: Account | None) -> str | None:
     )
 
 
+def _resolve_account_nature(account: Account | None) -> str:
+    """
+    يرجع طبيعة الحساب الرسمية:
+    DEBIT / CREDIT
+    """
+    if not account:
+        return "DEBIT"
+
+    return str(_safe_attr(account, "nature", "") or "DEBIT").upper()
+
+
+def _resolve_account_nature_label(account: Account | None) -> str | None:
+    if not account:
+        return None
+
+    if hasattr(account, "get_nature_display"):
+        return account.get_nature_display()
+
+    nature = _resolve_account_nature(account)
+
+    if nature == "DEBIT":
+        return "مدين"
+
+    if nature == "CREDIT":
+        return "دائن"
+
+    return None
+
+
 def _account_signed_delta(
     *,
-    normal_balance: str | None,
+    account_nature: str | None,
     debit_amount: Decimal,
     credit_amount: Decimal,
 ) -> Decimal:
-    if str(normal_balance or "").upper() == "CREDIT":
+    if str(account_nature or "").upper() == "CREDIT":
         return _money(credit_amount - debit_amount)
 
     return _money(debit_amount - credit_amount)
@@ -290,9 +341,36 @@ def _account_signed_delta(
 
 def _build_order_by(ordering_key: str) -> list[str]:
     field_name = ALLOWED_ORDERING[ordering_key]
+
     if ordering_key.startswith("-"):
         return [field_name, "-journal_entry__id", "-sort_order", "-id"]
+
     return [field_name, "journal_entry__id", "sort_order", "id"]
+
+
+def _serialize_account(account: Account | None) -> dict[str, Any] | None:
+    if not account:
+        return None
+
+    return {
+        "id": account.id,
+        "code": _safe_attr(account, "code", None),
+        "name": _resolve_account_name(account),
+        "name_ar": _safe_attr(account, "name_ar", None),
+        "name_en": _safe_attr(account, "name_en", None),
+        "account_type": _safe_attr(account, "account_type", None),
+        "account_type_label": (
+            account.get_account_type_display()
+            if hasattr(account, "get_account_type_display")
+            else None
+        ),
+        "nature": _resolve_account_nature(account),
+        "nature_label": _resolve_account_nature_label(account),
+        "is_group": bool(_safe_attr(account, "is_group", False)),
+        "is_active": bool(_safe_attr(account, "is_active", True)),
+        "parent_id": _safe_attr(account, "parent_id", None),
+        "level": int(_safe_attr(account, "level", 1) or 1),
+    }
 
 
 def _build_ledger_payload(request) -> dict[str, Any]:
@@ -306,8 +384,14 @@ def _build_ledger_payload(request) -> dict[str, Any]:
     _validate_date_range(date_from, date_to)
 
     selected_account: Account | None = None
+
     if account_id:
-        selected_account = Account.objects.filter(id=account_id).first()
+        selected_account = (
+            Account.objects.select_related("parent")
+            .filter(id=account_id)
+            .first()
+        )
+
         if not selected_account:
             raise ValueError("الحساب المطلوب غير موجود.")
 
@@ -323,14 +407,17 @@ def _build_ledger_payload(request) -> dict[str, Any]:
         base_qs = base_qs.filter(account_id=selected_account.id)
 
     opening_qs = base_qs
+
     if date_from:
         opening_qs = opening_qs.filter(journal_entry__entry_date__lt=date_from)
     else:
         opening_qs = base_qs.none()
 
     period_qs = base_qs
+
     if date_from:
         period_qs = period_qs.filter(journal_entry__entry_date__gte=date_from)
+
     if date_to:
         period_qs = period_qs.filter(journal_entry__entry_date__lte=date_to)
 
@@ -338,22 +425,29 @@ def _build_ledger_payload(request) -> dict[str, Any]:
 
     opening_debit = _money(
         sum(
-            (_money(_safe_attr(line, "debit_amount", "0.00")) for line in opening_qs),
+            (
+                _money(_safe_attr(line, "debit_amount", "0.00"))
+                for line in opening_qs
+            ),
             Decimal("0.00"),
         )
     )
     opening_credit = _money(
         sum(
-            (_money(_safe_attr(line, "credit_amount", "0.00")) for line in opening_qs),
+            (
+                _money(_safe_attr(line, "credit_amount", "0.00"))
+                for line in opening_qs
+            ),
             Decimal("0.00"),
         )
     )
 
     opening_balance = Decimal("0.00")
+
     if include_opening:
         if selected_account:
             opening_balance = _account_signed_delta(
-                normal_balance=_safe_attr(selected_account, "normal_balance", None),
+                account_nature=_resolve_account_nature(selected_account),
                 debit_amount=opening_debit,
                 credit_amount=opening_credit,
             )
@@ -378,7 +472,7 @@ def _build_ledger_payload(request) -> dict[str, Any]:
 
         if selected_account:
             delta = _account_signed_delta(
-                normal_balance=_safe_attr(account, "normal_balance", None),
+                account_nature=_resolve_account_nature(account),
                 debit_amount=debit_amount,
                 credit_amount=credit_amount,
             )
@@ -405,7 +499,13 @@ def _build_ledger_payload(request) -> dict[str, Any]:
                 "account_code": _safe_attr(account, "code", None),
                 "account_name": _resolve_account_name(account),
                 "account_type": _safe_attr(account, "account_type", None),
-                "normal_balance": _safe_attr(account, "normal_balance", None),
+                "account_type_label": (
+                    account.get_account_type_display()
+                    if account and hasattr(account, "get_account_type_display")
+                    else None
+                ),
+                "nature": _resolve_account_nature(account),
+                "nature_label": _resolve_account_nature_label(account),
                 "line_description": _safe_attr(line, "description", None),
                 "debit_amount": debit_amount,
                 "credit_amount": credit_amount,
@@ -433,22 +533,7 @@ def _build_ledger_payload(request) -> dict[str, Any]:
             "include_opening": include_opening,
             "ordering": ordering_key,
         },
-        "account": (
-            {
-                "id": selected_account.id,
-                "code": _safe_attr(selected_account, "code", None),
-                "name": _resolve_account_name(selected_account),
-                "name_ar": _safe_attr(selected_account, "name_ar", None),
-                "name_en": _safe_attr(selected_account, "name_en", None),
-                "account_type": _safe_attr(selected_account, "account_type", None),
-                "normal_balance": _safe_attr(selected_account, "normal_balance", None),
-                "is_group": bool(_safe_attr(selected_account, "is_group", False)),
-                "is_active": bool(_safe_attr(selected_account, "is_active", True)),
-                "parent_id": _safe_attr(selected_account, "parent_id", None),
-            }
-            if selected_account
-            else None
-        ),
+        "account": _serialize_account(selected_account),
         "summary": {
             "transaction_count": len(transactions_all),
             "opening_debit": opening_debit,
@@ -504,7 +589,7 @@ def _build_ledger_excel(payload: dict[str, Any]) -> HttpResponse:
         "Account Code",
         "Account Name",
         "Account Type",
-        "Normal Balance",
+        "Nature",
         "Line Description",
         "Debit Amount",
         "Credit Amount",
@@ -519,6 +604,7 @@ def _build_ledger_excel(payload: dict[str, Any]) -> HttpResponse:
         _apply_header_style(cell)
 
     current_row = start_row + 1
+
     for row in payload["transactions_all"]:
         ws.cell(row=current_row, column=1, value=row.get("id"))
         ws.cell(row=current_row, column=2, value=row.get("journal_entry_id"))
@@ -532,7 +618,7 @@ def _build_ledger_excel(payload: dict[str, Any]) -> HttpResponse:
         ws.cell(row=current_row, column=10, value=row.get("account_code"))
         ws.cell(row=current_row, column=11, value=row.get("account_name"))
         ws.cell(row=current_row, column=12, value=row.get("account_type"))
-        ws.cell(row=current_row, column=13, value=row.get("normal_balance"))
+        ws.cell(row=current_row, column=13, value=row.get("nature"))
         ws.cell(row=current_row, column=14, value=row.get("line_description"))
         ws.cell(row=current_row, column=15, value=float(row.get("debit_amount", 0) or 0))
         ws.cell(row=current_row, column=16, value=float(row.get("credit_amount", 0) or 0))
@@ -573,7 +659,9 @@ def accounting_general_ledger_api(request):
         base_payload = _build_ledger_payload(request)
 
         transactions_all = base_payload["transactions_all"]
+
         paginator = Paginator(transactions_all, page_size)
+
         try:
             page_obj = paginator.page(page)
         except EmptyPage:

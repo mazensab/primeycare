@@ -7,6 +7,7 @@
 # ✅ متوافق مع Frontend API-first
 # ✅ تم ربط Treasury API رسميًا ضمن Finance APIs
 # ✅ تم ربط Users API رسميًا ضمن System Modules APIs
+# ✅ تم ربط Reports API رسميًا ضمن System Modules APIs
 # ============================================================
 
 from django.urls import include, path
@@ -55,6 +56,7 @@ urlpatterns = [
     # --------------------------------------------------------
     # 📈 System Modules APIs
     # --------------------------------------------------------
+    path("reports/", include("api.reports.urls")),
     path("performance-center/", include("api.performance_center.urls")),
     path("notification-center/", include("api.notification_center.urls")),
     path("system-log/", include("api.system_log.urls")),

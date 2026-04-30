@@ -3,28 +3,22 @@
 # 🧠 Primey Care | Accounting Posting & Reporting Services
 # ------------------------------------------------------------
 # ✅ خدمات الترحيل المحاسبي الرسمية
-# ✅ مبنية الآن على شجرة الحسابات المعتمدة المرسلة من المستخدم
+# ✅ مبنية على شجرة الحسابات المعتمدة
 # ✅ تغطي:
 #    - ترحيل إصدار الفاتورة
 #    - ترحيل تحصيل الدفعة
 #    - ترحيل استحقاق عمولة المندوب
-# ✅ Idempotent:
-#    - تمنع تكرار إنشاء نفس القيد عند إعادة الاستدعاء
-# ✅ متوافقة مع طبقات الخدمات الأخرى عبر aliases رسمية
-# ✅ Trial Balance V1
-# ✅ Profit & Loss V1
-# ✅ Balance Sheet V1
+#    - إنشاء قيود يدوية
+#    - ميزان المراجعة
+#    - قائمة الدخل
+#    - الميزانية العمومية
 # ------------------------------------------------------------
 # ملاحظات مهمة:
-# - تم استبدال الأكواد الافتراضية السابقة بالأكواد الفعلية
-#   من شجرة الحسابات المعتمدة
-# - هذه الطبقة لا تقوم بزرع الشجرة تلقائيًا
-# - عند غياب الحساب المطلوب سترجع ValidationError واضحة
-# - ميزان المراجعة يعتمد على القيود المرحلة فقط افتراضيًا
-# - الأرباح والخسائر تعتمد على حسابات الإيرادات والمصاريف
-# - المركز المالي يعتمد على:
-#   ASSET / LIABILITY / EQUITY
-#   مع إضافة صافي الربح الحالي إلى حقوق الملكية
+# - Idempotent: لا يكرر القيود لنفس المصدر.
+# - لا يرحّل على حساب تجميعي أو غير نشط.
+# - لا ينشئ قيد مرحل قبل إنشاء أسطره.
+# - يمنع استبدال أسطر قيد مرحل قائم حتى لا تتغير الدفاتر بصمت.
+# - التقارير تعتمد افتراضيًا على القيود المرحلة فقط.
 # ============================================================
 
 from __future__ import annotations
@@ -162,7 +156,7 @@ ACCOUNT_CODE_AGENT_COMMISSION_PAYABLE = "2102"
 # 🧾 DTO داخلي لأسطر القيد
 # ============================================================
 
-@dataclass
+@dataclass(slots=True)
 class EntryLinePayload:
     account: Account
     description: str
@@ -196,6 +190,7 @@ class TrialBalanceResult:
     total_accounts: int
     total_debit: Decimal
     total_credit: Decimal
+    is_balanced: bool
     rows: list[TrialBalanceRow]
 
 
@@ -261,7 +256,7 @@ class BalanceSheetResult:
 
 
 # ============================================================
-# 🛠️ Helpers
+# 🛠️ Helpers عامة
 # ============================================================
 
 def _money(value: Decimal | int | float | str | None) -> Decimal:
@@ -284,6 +279,7 @@ def _coerce_to_datetime(
 ) -> datetime | None:
     if value is None:
         return None
+
     if isinstance(value, datetime):
         return _ensure_aware(value)
 
@@ -306,27 +302,54 @@ def _safe_getattr(obj: Any, attr_name: str, default: Any = None) -> Any:
         return default
 
 
+def _choice_value(value: Any) -> str:
+    """
+    يرجع قيمة TextChoices أو Enum أو string بشكل موحد.
+    """
+    raw = getattr(value, "value", value)
+    return str(raw or "").strip().upper()
+
+
+def _get_posting_source_value(source_name: str, fallback: str = PostingSource.OTHER) -> str:
+    """
+    يحافظ على التوافق إذا كان PostingSource في migration قديم لا يحتوي بعض القيم.
+    """
+    return getattr(PostingSource, source_name, fallback)
+
+
+def _build_entry_number(prefix: str, object_id: int | str | None) -> str:
+    if object_id in [None, ""]:
+        raise ValidationError("لا يمكن بناء رقم قيد بدون معرف.")
+    return f"{prefix}-{object_id}"
+
+
 def _get_required_account(account_code: str) -> Account:
+    code = str(account_code or "").strip()
+
+    if not code:
+        raise ValidationError("كود الحساب المحاسبي مطلوب.")
+
     try:
-        account = Account.objects.get(code=account_code, is_active=True)
+        account = Account.objects.get(code=code)
     except Account.DoesNotExist as exc:
-        account_name = SAUDI_COA.get(account_code, "غير معروف")
+        account_name = SAUDI_COA.get(code, "غير معروف")
         raise ValidationError(
-            f"الحساب المحاسبي المطلوب غير موجود أو غير نشط. "
-            f"الكود المطلوب: {account_code} - {account_name}"
+            f"الحساب المحاسبي المطلوب غير موجود. "
+            f"الكود المطلوب: {code} - {account_name}"
         ) from exc
+
+    if not account.is_active:
+        raise ValidationError(
+            f"الحساب المحاسبي بالكود {code} ({account.name}) غير نشط."
+        )
 
     if account.is_group:
         raise ValidationError(
-            f"الحساب المحاسبي بالكود {account_code} ({account.name}) حساب تجميعي "
+            f"الحساب المحاسبي بالكود {code} ({account.name}) حساب تجميعي "
             f"ولا يمكن الترحيل عليه."
         )
 
     return account
-
-
-def _build_entry_number(prefix: str, object_id: int) -> str:
-    return f"{prefix}-{object_id}"
 
 
 def _get_or_create_entry_header(
@@ -340,78 +363,220 @@ def _get_or_create_entry_header(
     notes: str = "",
     currency: str = "SAR",
 ) -> JournalEntry:
-    entry, _ = JournalEntry.objects.get_or_create(
+    """
+    ينشئ رأس القيد كمسودة أولًا.
+    لا ننشئه POSTED قبل الأسطر حتى لا يفشل validation في models.py.
+    """
+    if not entry_number:
+        raise ValidationError("رقم القيد مطلوب.")
+
+    if not entry_date:
+        entry_date = timezone.localdate()
+
+    entry, created = JournalEntry.objects.get_or_create(
         entry_number=entry_number,
         defaults={
             "entry_date": entry_date,
-            "status": JournalEntryStatus.POSTED,
+            "status": JournalEntryStatus.DRAFT,
             "posting_source": posting_source,
             "reference": reference,
-            "external_reference": external_reference,
-            "description": description,
-            "notes": notes,
-            "currency": currency or "SAR",
-            "posted_at": timezone.now(),
+            "external_reference": external_reference or "",
+            "description": description or "",
+            "notes": notes or "",
+            "currency": (currency or "SAR").upper(),
         },
     )
+
+    if not created:
+        if entry.status == JournalEntryStatus.CANCELLED:
+            raise ValidationError(
+                f"القيد {entry.entry_number} موجود لكنه ملغي ولا يمكن إعادة استخدامه."
+            )
+
+        if reference and entry.reference and entry.reference != reference:
+            raise ValidationError(
+                f"رقم القيد {entry.entry_number} مستخدم مسبقًا بمرجع مختلف."
+            )
+
+        if entry.status == JournalEntryStatus.POSTED and entry.lines.exists():
+            return entry
+
+        entry.entry_date = entry_date
+        entry.posting_source = posting_source
+        entry.reference = reference
+        entry.external_reference = external_reference or entry.external_reference or ""
+        entry.description = description or entry.description or ""
+        entry.notes = notes or entry.notes or ""
+        entry.currency = (currency or entry.currency or "SAR").upper()
+        entry.save(
+            update_fields=[
+                "entry_date",
+                "posting_source",
+                "reference",
+                "external_reference",
+                "description",
+                "notes",
+                "currency",
+                "updated_at",
+            ]
+        )
+
     return entry
+
+
+def _validate_entry_lines(lines: Iterable[EntryLinePayload]) -> list[EntryLinePayload]:
+    prepared_lines = list(lines)
+
+    if not prepared_lines:
+        raise ValidationError("لا يمكن إنشاء قيد بدون أسطر.")
+
+    total_debit = Decimal("0.00")
+    total_credit = Decimal("0.00")
+
+    for item in prepared_lines:
+        if not item.account:
+            raise ValidationError("كل سطر قيد يجب أن يحتوي على حساب.")
+
+        if item.account.is_group:
+            raise ValidationError(
+                f"لا يمكن الترحيل على حساب تجميعي: {item.account.code} - {item.account.name}"
+            )
+
+        if not item.account.is_active:
+            raise ValidationError(
+                f"لا يمكن الترحيل على حساب غير نشط: {item.account.code} - {item.account.name}"
+            )
+
+        debit = _money(item.debit_amount)
+        credit = _money(item.credit_amount)
+
+        if debit < Decimal("0.00") or credit < Decimal("0.00"):
+            raise ValidationError("لا يمكن أن تكون مبالغ القيد سالبة.")
+
+        if debit == Decimal("0.00") and credit == Decimal("0.00"):
+            raise ValidationError("لا يمكن إنشاء سطر قيد بقيمة صفرية.")
+
+        if debit > Decimal("0.00") and credit > Decimal("0.00"):
+            raise ValidationError("لا يمكن أن يحتوي نفس السطر على مدين ودائن معًا.")
+
+        total_debit += debit
+        total_credit += credit
+
+    if _money(total_debit) != _money(total_credit):
+        raise ValidationError(
+            f"القيد غير متوازن. إجمالي المدين: {_money(total_debit)}، "
+            f"إجمالي الدائن: {_money(total_credit)}"
+        )
+
+    if _money(total_debit) <= Decimal("0.00"):
+        raise ValidationError("لا يمكن إنشاء قيد بإجمالي صفري.")
+
+    return prepared_lines
 
 
 def _replace_entry_lines(
     entry: JournalEntry,
     lines: Iterable[EntryLinePayload],
 ) -> JournalEntry:
+    """
+    يستبدل أسطر القيد إذا كان القيد مسودة فقط.
+    إذا كان القيد مرحلًا وموجودًا مسبقًا يرجعه كما هو لضمان idempotency.
+    """
+    if not entry:
+        raise ValidationError("القيد مطلوب.")
+
+    if entry.status == JournalEntryStatus.CANCELLED:
+        raise ValidationError("لا يمكن تعديل قيد ملغي.")
+
+    if entry.status == JournalEntryStatus.POSTED and entry.lines.exists():
+        if not entry.is_balanced:
+            raise ValidationError("القيد المرحل الموجود غير متوازن.")
+        return entry
+
+    prepared_lines = _validate_entry_lines(lines)
+
     entry.lines.all().delete()
 
-    for item in lines:
+    for item in prepared_lines:
         JournalEntryLine.objects.create(
             journal_entry=entry,
             account=item.account,
-            description=item.description,
+            description=item.description or "",
             debit_amount=_money(item.debit_amount),
             credit_amount=_money(item.credit_amount),
             sort_order=item.sort_order,
         )
 
-    entry.status = JournalEntryStatus.POSTED
-    entry.posted_at = entry.posted_at or timezone.now()
     entry._sync_totals_from_lines()
-    entry.save(
-        update_fields=[
-            "status",
-            "posted_at",
-            "total_debit",
-            "total_credit",
-            "updated_at",
-        ]
-    )
 
     if not entry.is_balanced:
         raise ValidationError("القيد الناتج غير متوازن محاسبيًا.")
+
+    if hasattr(entry, "mark_as_posted"):
+        entry.mark_as_posted()
+    else:
+        entry.status = JournalEntryStatus.POSTED
+        entry.posted_at = entry.posted_at or timezone.now()
+        entry.save(
+            update_fields=[
+                "status",
+                "posted_at",
+                "total_debit",
+                "total_credit",
+                "updated_at",
+            ]
+        )
 
     return entry
 
 
 def _resolve_payment_treasury_account(payment: Payment) -> Account:
-    if payment.payment_method in {
+    """
+    يحدد حساب الخزينة أو البنك حسب وسيلة الدفع.
+    """
+    method = _choice_value(_safe_getattr(payment, "payment_method", ""))
+
+    bank_methods = {
         "BANK_TRANSFER",
+        "TRANSFER",
+        "WIRE_TRANSFER",
         "CREDIT_CARD",
         "DEBIT_CARD",
+        "CARD",
+        "MADA",
+        "VISA",
+        "MASTERCARD",
         "APPLE_PAY",
         "STC_PAY",
         "TAMARA",
         "TABBY",
-    }:
+        "TAP",
+        "GATEWAY",
+        "ONLINE",
+    }
+
+    if method in bank_methods:
         return _get_required_account(ACCOUNT_CODE_BANK)
 
     return _get_required_account(ACCOUNT_CODE_CASH_ON_HAND)
 
 
-def _serialize_trial_balance_row(row: TrialBalanceRow) -> dict[str, Any]:
-    data = asdict(row)
-    for key in ["total_debit", "total_credit", "net_debit", "net_credit"]:
+def _serialize_decimal_dict(data: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+    for key in keys:
         data[key] = str(data[key])
     return data
+
+
+# ============================================================
+# 🔁 Serializers — Trial Balance
+# ============================================================
+
+def _serialize_trial_balance_row(row: TrialBalanceRow) -> dict[str, Any]:
+    data = asdict(row)
+    return _serialize_decimal_dict(
+        data,
+        ["total_debit", "total_credit", "net_debit", "net_credit"],
+    )
 
 
 def _serialize_trial_balance_result(result: TrialBalanceResult) -> dict[str, Any]:
@@ -422,9 +587,14 @@ def _serialize_trial_balance_result(result: TrialBalanceResult) -> dict[str, Any
         "total_accounts": result.total_accounts,
         "total_debit": str(result.total_debit),
         "total_credit": str(result.total_credit),
+        "is_balanced": result.is_balanced,
         "rows": [_serialize_trial_balance_row(row) for row in result.rows],
     }
 
+
+# ============================================================
+# 🔁 Serializers — Profit & Loss
+# ============================================================
 
 def _serialize_profit_loss_row(row: ProfitLossRow) -> dict[str, Any]:
     data = asdict(row)
@@ -450,6 +620,10 @@ def _serialize_profit_loss_result(result: ProfitLossResult) -> dict[str, Any]:
         "net_profit": str(result.net_profit),
     }
 
+
+# ============================================================
+# 🔁 Serializers — Balance Sheet
+# ============================================================
 
 def _serialize_balance_sheet_row(row: BalanceSheetRow) -> dict[str, Any]:
     data = asdict(row)
@@ -494,8 +668,7 @@ def create_manual_journal_entry(
     currency: str = "SAR",
     lines: List[EntryLinePayload],
 ) -> JournalEntry:
-    if not lines:
-        raise ValidationError("لا يمكن إنشاء قيد بدون أسطر.")
+    prepared_lines = _validate_entry_lines(lines)
 
     entry = _get_or_create_entry_header(
         entry_number=entry_number,
@@ -507,7 +680,8 @@ def create_manual_journal_entry(
         notes=notes,
         currency=currency,
     )
-    return _replace_entry_lines(entry, lines)
+
+    return _replace_entry_lines(entry, prepared_lines)
 
 
 # ============================================================
@@ -528,39 +702,53 @@ def post_invoice_issue(
     if invoice.status == InvoiceStatus.CANCELLED:
         raise ValidationError("لا يمكن ترحيل فاتورة ملغاة.")
 
+    if not invoice.pk:
+        raise ValidationError("لا يمكن ترحيل فاتورة غير محفوظة.")
+
     receivable_account = _get_required_account(receivable_account_code)
     revenue_account = _get_required_account(revenue_account_code)
     output_vat_account = _get_required_account(output_vat_account_code)
 
-    taxable_amount = _money(invoice.taxable_amount)
-    tax_amount = _money(invoice.tax_amount)
-    total_amount = _money(invoice.total_amount)
+    taxable_amount = _money(_safe_getattr(invoice, "taxable_amount", None))
+    tax_amount = _money(_safe_getattr(invoice, "tax_amount", None))
+    total_amount = _money(_safe_getattr(invoice, "total_amount", None))
 
     if total_amount <= Decimal("0.00"):
         raise ValidationError("لا يمكن ترحيل فاتورة بإجمالي صفري أو سالب.")
 
+    if taxable_amount <= Decimal("0.00"):
+        taxable_amount = _money(total_amount - tax_amount)
+
+    if taxable_amount < Decimal("0.00"):
+        raise ValidationError("صافي الفاتورة قبل الضريبة لا يمكن أن يكون سالبًا.")
+
+    invoice_number = _safe_getattr(invoice, "invoice_number", "") or f"INV-{invoice.pk}"
+    issue_date = _safe_getattr(invoice, "issue_date", None) or timezone.localdate()
+    currency = _safe_getattr(invoice, "currency", "SAR") or "SAR"
+    order_id = _safe_getattr(invoice, "order_id", None)
+
     entry = _get_or_create_entry_header(
-        entry_number=_build_entry_number("INV", invoice.id),
-        entry_date=invoice.issue_date or timezone.localdate(),
+        entry_number=_build_entry_number("INV", invoice.pk),
+        entry_date=issue_date,
         posting_source=PostingSource.INVOICE,
-        reference=f"INVOICE:{invoice.id}:ISSUE",
-        external_reference=invoice.invoice_number,
-        description=f"ترحيل إصدار فاتورة رقم {invoice.invoice_number}",
-        notes=f"Order #{invoice.order_id}",
-        currency=invoice.currency or "SAR",
+        reference=f"INVOICE:{invoice.pk}:ISSUE",
+        external_reference=invoice_number,
+        description=f"ترحيل إصدار فاتورة رقم {invoice_number}",
+        notes=f"Order #{order_id}" if order_id else "",
+        currency=currency,
     )
 
     lines: List[EntryLinePayload] = [
         EntryLinePayload(
             account=receivable_account,
-            description=f"إثبات مديونية العميل - فاتورة {invoice.invoice_number}",
+            description=f"إثبات مديونية العميل - فاتورة {invoice_number}",
             debit_amount=total_amount,
             credit_amount=Decimal("0.00"),
             sort_order=1,
         ),
         EntryLinePayload(
             account=revenue_account,
-            description=f"إثبات إيراد الفاتورة {invoice.invoice_number}",
+            description=f"إثبات إيراد الفاتورة {invoice_number}",
             debit_amount=Decimal("0.00"),
             credit_amount=taxable_amount,
             sort_order=2,
@@ -571,7 +759,7 @@ def post_invoice_issue(
         lines.append(
             EntryLinePayload(
                 account=output_vat_account,
-                description=f"إثبات ضريبة القيمة المضافة - فاتورة {invoice.invoice_number}",
+                description=f"إثبات ضريبة القيمة المضافة - فاتورة {invoice_number}",
                 debit_amount=Decimal("0.00"),
                 credit_amount=tax_amount,
                 sort_order=3,
@@ -594,32 +782,42 @@ def post_payment_receipt(
     if not payment:
         raise ValidationError("الدفع مطلوب.")
 
-    if payment.status not in {
+    if not payment.pk:
+        raise ValidationError("لا يمكن ترحيل دفعة غير محفوظة.")
+
+    allowed_statuses = {
         PaymentStatus.PAID,
         PaymentStatus.PARTIALLY_PAID,
-        PaymentStatus.REFUNDED,
-        PaymentStatus.PARTIALLY_REFUNDED,
-    }:
+    }
+
+    if payment.status not in allowed_statuses:
         raise ValidationError("لا يمكن ترحيل دفعة غير محصلة فعليًا.")
 
-    paid_amount = _money(payment.paid_amount)
+    paid_amount = _money(_safe_getattr(payment, "paid_amount", None))
+
+    if paid_amount <= Decimal("0.00"):
+        paid_amount = _money(_safe_getattr(payment, "amount", None))
+
     if paid_amount <= Decimal("0.00"):
         raise ValidationError("المبلغ المدفوع يجب أن يكون أكبر من صفر.")
 
     treasury_account = _resolve_payment_treasury_account(payment)
     receivable_account = _get_required_account(receivable_account_code)
 
-    payment_number = payment.payment_number or f"PAY-{payment.id}"
+    payment_number = _safe_getattr(payment, "payment_number", "") or f"PAY-{payment.pk}"
+    paid_at = _safe_getattr(payment, "paid_at", None)
+    order_id = _safe_getattr(payment, "order_id", None)
+    currency = _safe_getattr(payment, "currency", "SAR") or "SAR"
 
     entry = _get_or_create_entry_header(
-        entry_number=_build_entry_number("PAY", payment.id),
-        entry_date=(payment.paid_at.date() if payment.paid_at else timezone.localdate()),
+        entry_number=_build_entry_number("PAY", payment.pk),
+        entry_date=(paid_at.date() if paid_at else timezone.localdate()),
         posting_source=PostingSource.PAYMENT,
-        reference=f"PAYMENT:{payment.id}:RECEIPT",
+        reference=f"PAYMENT:{payment.pk}:RECEIPT",
         external_reference=payment_number,
         description=f"ترحيل تحصيل دفعة رقم {payment_number}",
-        notes=f"Order #{payment.order_id}",
-        currency=payment.currency or "SAR",
+        notes=f"Order #{order_id}" if order_id else "",
+        currency=currency,
     )
 
     lines: List[EntryLinePayload] = [
@@ -656,39 +854,48 @@ def post_agent_commission_accrual(
     if not agent_commission:
         raise ValidationError("سجل العمولة مطلوب.")
 
-    commission_amount = _money(agent_commission.commission_amount)
+    if not agent_commission.pk:
+        raise ValidationError("لا يمكن ترحيل عمولة غير محفوظة.")
+
+    commission_amount = _money(_safe_getattr(agent_commission, "commission_amount", None))
+
     if commission_amount <= Decimal("0.00"):
         raise ValidationError("قيمة العمولة يجب أن تكون أكبر من صفر.")
 
     expense_account = _get_required_account(commission_expense_account_code)
     payable_account = _get_required_account(commission_payable_account_code)
 
+    earned_at = _safe_getattr(agent_commission, "earned_at", None)
+    order_id = _safe_getattr(agent_commission, "order_id", None)
+    agent_id = _safe_getattr(agent_commission, "agent_id", None)
+
+    posting_source = _get_posting_source_value(
+        "AGENT_COMMISSION",
+        fallback=PostingSource.OTHER,
+    )
+
     entry = _get_or_create_entry_header(
-        entry_number=_build_entry_number("COM", agent_commission.id),
-        entry_date=(
-            agent_commission.earned_at.date()
-            if agent_commission.earned_at
-            else timezone.localdate()
-        ),
-        posting_source=PostingSource.OTHER,
-        reference=f"AGENT_COMMISSION:{agent_commission.id}:ACCRUAL",
-        external_reference=str(agent_commission.order_id),
-        description=f"ترحيل استحقاق عمولة مندوب للطلب #{agent_commission.order_id}",
-        notes=f"Agent #{agent_commission.agent_id}",
+        entry_number=_build_entry_number("COM", agent_commission.pk),
+        entry_date=(earned_at.date() if earned_at else timezone.localdate()),
+        posting_source=posting_source,
+        reference=f"AGENT_COMMISSION:{agent_commission.pk}:ACCRUAL",
+        external_reference=str(order_id or ""),
+        description=f"ترحيل استحقاق عمولة مندوب للطلب #{order_id or '-'}",
+        notes=f"Agent #{agent_id}" if agent_id else "",
         currency="SAR",
     )
 
     lines: List[EntryLinePayload] = [
         EntryLinePayload(
             account=expense_account,
-            description=f"مصروف عمولة مندوب - الطلب #{agent_commission.order_id}",
+            description=f"مصروف عمولة مندوب - الطلب #{order_id or '-'}",
             debit_amount=commission_amount,
             credit_amount=Decimal("0.00"),
             sort_order=1,
         ),
         EntryLinePayload(
             account=payable_account,
-            description=f"إثبات عمولة مستحقة للمندوب - الطلب #{agent_commission.order_id}",
+            description=f"إثبات عمولة مستحقة للمندوب - الطلب #{order_id or '-'}",
             debit_amount=Decimal("0.00"),
             credit_amount=commission_amount,
             sort_order=2,
@@ -789,27 +996,19 @@ def post_agent_commission(
 
 
 # ============================================================
-# 📊 Trial Balance V1
+# 📊 Query Helpers للتقارير
 # ============================================================
 
-def build_trial_balance(
+def _journal_lines_queryset(
     *,
     date_from: date | datetime | None = None,
     date_to: date | datetime | None = None,
-    include_zero_accounts: bool = False,
+    as_of_date: date | datetime | None = None,
     posted_only: bool = True,
-) -> TrialBalanceResult:
-    """
-    بناء ميزان المراجعة.
-
-    المنطق:
-    - يعتمد على JournalEntryLine
-    - يجمع المدين والدائن لكل حساب
-    - يحسب صافي مدين أو صافي دائن
-    - افتراضيًا يعتمد على القيود المرحلة فقط
-    """
+):
     start_dt = _start_of_day(date_from)
     end_dt = _end_of_day(date_to)
+    cutoff_dt = _end_of_day(as_of_date)
 
     lines_qs = JournalEntryLine.objects.select_related(
         "account",
@@ -825,10 +1024,22 @@ def build_trial_balance(
     if end_dt:
         lines_qs = lines_qs.filter(journal_entry__entry_date__lte=end_dt.date())
 
+    if cutoff_dt:
+        lines_qs = lines_qs.filter(journal_entry__entry_date__lte=cutoff_dt.date())
+
+    return lines_qs.order_by("account__code", "id")
+
+
+def _collect_account_totals(lines_qs, allowed_types: set[str] | None = None) -> dict[int, dict[str, Any]]:
     account_map: dict[int, dict[str, Any]] = {}
 
-    for line in lines_qs.order_by("account__code", "id"):
+    for line in lines_qs:
         account = line.account
+        account_type = str(_safe_getattr(account, "account_type", ""))
+
+        if allowed_types and account_type not in allowed_types:
+            continue
+
         account_id = account.pk
 
         if account_id not in account_map:
@@ -836,7 +1047,7 @@ def build_trial_balance(
                 "account_id": account.pk,
                 "account_code": account.code,
                 "account_name": account.name,
-                "account_type": str(_safe_getattr(account, "account_type", "")),
+                "account_type": account_type,
                 "is_group": bool(_safe_getattr(account, "is_group", False)),
                 "total_debit": Decimal("0.00"),
                 "total_credit": Decimal("0.00"),
@@ -845,60 +1056,93 @@ def build_trial_balance(
         account_map[account_id]["total_debit"] += _money(line.debit_amount)
         account_map[account_id]["total_credit"] += _money(line.credit_amount)
 
-    rows: list[TrialBalanceRow] = []
+    return account_map
+
+
+def _append_zero_accounts(
+    account_map: dict[int, dict[str, Any]],
+    *,
+    account_types: set[str] | None = None,
+) -> dict[int, dict[str, Any]]:
+    qs = Account.objects.filter(is_active=True).order_by("code")
+
+    if account_types:
+        qs = qs.filter(account_type__in=account_types)
+
+    for account in qs:
+        account_map.setdefault(
+            account.pk,
+            {
+                "account_id": account.pk,
+                "account_code": account.code,
+                "account_name": account.name,
+                "account_type": str(_safe_getattr(account, "account_type", "")),
+                "is_group": bool(_safe_getattr(account, "is_group", False)),
+                "total_debit": Decimal("0.00"),
+                "total_credit": Decimal("0.00"),
+            },
+        )
+
+    return account_map
+
+
+# ============================================================
+# 📊 Trial Balance V1
+# ============================================================
+
+def build_trial_balance(
+    *,
+    date_from: date | datetime | None = None,
+    date_to: date | datetime | None = None,
+    include_zero_accounts: bool = False,
+    posted_only: bool = True,
+) -> TrialBalanceResult:
+    """
+    بناء ميزان المراجعة.
+
+    المنطق:
+    - يعتمد على JournalEntryLine.
+    - يجمع المدين والدائن لكل حساب.
+    - يحسب صافي مدين أو صافي دائن.
+    - افتراضيًا يعتمد على القيود المرحلة فقط.
+    """
+    start_dt = _start_of_day(date_from)
+    end_dt = _end_of_day(date_to)
+
+    lines_qs = _journal_lines_queryset(
+        date_from=date_from,
+        date_to=date_to,
+        posted_only=posted_only,
+    )
+
+    account_map = _collect_account_totals(lines_qs)
 
     if include_zero_accounts:
-        accounts_qs = Account.objects.filter(is_active=True).order_by("code")
-        for account in accounts_qs:
-            account_data = account_map.get(
-                account.pk,
-                {
-                    "account_id": account.pk,
-                    "account_code": account.code,
-                    "account_name": account.name,
-                    "account_type": str(_safe_getattr(account, "account_type", "")),
-                    "is_group": bool(_safe_getattr(account, "is_group", False)),
-                    "total_debit": Decimal("0.00"),
-                    "total_credit": Decimal("0.00"),
-                },
-            )
+        account_map = _append_zero_accounts(account_map)
 
-            total_debit = _money(account_data["total_debit"])
-            total_credit = _money(account_data["total_credit"])
-            net_value = _money(total_debit - total_credit)
+    rows: list[TrialBalanceRow] = []
 
-            rows.append(
-                TrialBalanceRow(
-                    account_id=account_data["account_id"],
-                    account_code=account_data["account_code"],
-                    account_name=account_data["account_name"],
-                    account_type=account_data["account_type"],
-                    is_group=account_data["is_group"],
-                    total_debit=total_debit,
-                    total_credit=total_credit,
-                    net_debit=net_value if net_value > Decimal("0.00") else Decimal("0.00"),
-                    net_credit=abs(net_value) if net_value < Decimal("0.00") else Decimal("0.00"),
-                )
-            )
-    else:
-        for _, account_data in sorted(account_map.items(), key=lambda item: item[1]["account_code"]):
-            total_debit = _money(account_data["total_debit"])
-            total_credit = _money(account_data["total_credit"])
-            net_value = _money(total_debit - total_credit)
+    for _, account_data in sorted(account_map.items(), key=lambda item: item[1]["account_code"]):
+        total_debit = _money(account_data["total_debit"])
+        total_credit = _money(account_data["total_credit"])
+        net_value = _money(total_debit - total_credit)
 
-            rows.append(
-                TrialBalanceRow(
-                    account_id=account_data["account_id"],
-                    account_code=account_data["account_code"],
-                    account_name=account_data["account_name"],
-                    account_type=account_data["account_type"],
-                    is_group=account_data["is_group"],
-                    total_debit=total_debit,
-                    total_credit=total_credit,
-                    net_debit=net_value if net_value > Decimal("0.00") else Decimal("0.00"),
-                    net_credit=abs(net_value) if net_value < Decimal("0.00") else Decimal("0.00"),
-                )
+        if not include_zero_accounts and total_debit == Decimal("0.00") and total_credit == Decimal("0.00"):
+            continue
+
+        rows.append(
+            TrialBalanceRow(
+                account_id=account_data["account_id"],
+                account_code=account_data["account_code"],
+                account_name=account_data["account_name"],
+                account_type=account_data["account_type"],
+                is_group=account_data["is_group"],
+                total_debit=total_debit,
+                total_credit=total_credit,
+                net_debit=net_value if net_value > Decimal("0.00") else Decimal("0.00"),
+                net_credit=abs(net_value) if net_value < Decimal("0.00") else Decimal("0.00"),
             )
+        )
 
     total_debit = _money(sum((row.total_debit for row in rows), Decimal("0.00")))
     total_credit = _money(sum((row.total_credit for row in rows), Decimal("0.00")))
@@ -910,6 +1154,7 @@ def build_trial_balance(
         total_accounts=len(rows),
         total_debit=total_debit,
         total_credit=total_credit,
+        is_balanced=(total_debit == total_credit),
         rows=rows,
     )
 
@@ -945,123 +1190,69 @@ def build_profit_and_loss(
     بناء تقرير الأرباح والخسائر.
 
     المنطق:
-    - الإيرادات = صافي الدائن - المدين لحسابات REVENUE
-    - المصاريف = صافي المدين - الدائن لحسابات EXPENSE
-    - صافي الربح = إجمالي الإيرادات - إجمالي المصاريف
+    - الإيرادات = صافي الدائن - المدين لحسابات REVENUE.
+    - المصاريف = صافي المدين - الدائن لحسابات EXPENSE.
+    - صافي الربح = إجمالي الإيرادات - إجمالي المصاريف.
     """
     start_dt = _start_of_day(date_from)
     end_dt = _end_of_day(date_to)
 
-    lines_qs = JournalEntryLine.objects.select_related(
-        "account",
-        "journal_entry",
+    lines_qs = _journal_lines_queryset(
+        date_from=date_from,
+        date_to=date_to,
+        posted_only=posted_only,
     )
 
-    if posted_only:
-        lines_qs = lines_qs.filter(journal_entry__status=JournalEntryStatus.POSTED)
-
-    if start_dt:
-        lines_qs = lines_qs.filter(journal_entry__entry_date__gte=start_dt.date())
-
-    if end_dt:
-        lines_qs = lines_qs.filter(journal_entry__entry_date__lte=end_dt.date())
-
-    revenue_map: dict[int, dict[str, Any]] = {}
-    expense_map: dict[int, dict[str, Any]] = {}
-
-    for line in lines_qs.order_by("account__code", "id"):
-        account = line.account
-        account_type = str(_safe_getattr(account, "account_type", ""))
-
-        if account_type not in {"REVENUE", "EXPENSE"}:
-            continue
-
-        target_map = revenue_map if account_type == "REVENUE" else expense_map
-
-        if account.pk not in target_map:
-            target_map[account.pk] = {
-                "account_id": account.pk,
-                "account_code": account.code,
-                "account_name": account.name,
-                "account_type": account_type,
-                "total_debit": Decimal("0.00"),
-                "total_credit": Decimal("0.00"),
-            }
-
-        target_map[account.pk]["total_debit"] += _money(line.debit_amount)
-        target_map[account.pk]["total_credit"] += _money(line.credit_amount)
+    account_map = _collect_account_totals(
+        lines_qs,
+        allowed_types={"REVENUE", "EXPENSE"},
+    )
 
     if include_zero_accounts:
-        income_accounts = Account.objects.filter(
-            is_active=True,
-            is_group=False,
-            account_type="REVENUE",
-        ).order_by("code")
-
-        expense_accounts = Account.objects.filter(
-            is_active=True,
-            is_group=False,
-            account_type="EXPENSE",
-        ).order_by("code")
-
-        for account in income_accounts:
-            revenue_map.setdefault(
-                account.pk,
-                {
-                    "account_id": account.pk,
-                    "account_code": account.code,
-                    "account_name": account.name,
-                    "account_type": "REVENUE",
-                    "total_debit": Decimal("0.00"),
-                    "total_credit": Decimal("0.00"),
-                },
-            )
-
-        for account in expense_accounts:
-            expense_map.setdefault(
-                account.pk,
-                {
-                    "account_id": account.pk,
-                    "account_code": account.code,
-                    "account_name": account.name,
-                    "account_type": "EXPENSE",
-                    "total_debit": Decimal("0.00"),
-                    "total_credit": Decimal("0.00"),
-                },
-            )
+        account_map = _append_zero_accounts(
+            account_map,
+            account_types={"REVENUE", "EXPENSE"},
+        )
 
     revenue_rows: list[ProfitLossRow] = []
     expense_rows: list[ProfitLossRow] = []
 
-    for _, data in sorted(revenue_map.items(), key=lambda item: item[1]["account_code"]):
-        amount = _money(data["total_credit"] - data["total_debit"])
-        if not include_zero_accounts and amount == Decimal("0.00"):
-            continue
+    for _, data in sorted(account_map.items(), key=lambda item: item[1]["account_code"]):
+        account_type = data["account_type"]
+        total_debit = _money(data["total_debit"])
+        total_credit = _money(data["total_credit"])
 
-        revenue_rows.append(
-            ProfitLossRow(
-                account_id=data["account_id"],
-                account_code=data["account_code"],
-                account_name=data["account_name"],
-                account_type=data["account_type"],
-                amount=amount if amount > Decimal("0.00") else Decimal("0.00"),
+        if account_type == "REVENUE":
+            amount = _money(total_credit - total_debit)
+
+            if not include_zero_accounts and amount == Decimal("0.00"):
+                continue
+
+            revenue_rows.append(
+                ProfitLossRow(
+                    account_id=data["account_id"],
+                    account_code=data["account_code"],
+                    account_name=data["account_name"],
+                    account_type=account_type,
+                    amount=amount,
+                )
             )
-        )
 
-    for _, data in sorted(expense_map.items(), key=lambda item: item[1]["account_code"]):
-        amount = _money(data["total_debit"] - data["total_credit"])
-        if not include_zero_accounts and amount == Decimal("0.00"):
-            continue
+        elif account_type == "EXPENSE":
+            amount = _money(total_debit - total_credit)
 
-        expense_rows.append(
-            ProfitLossRow(
-                account_id=data["account_id"],
-                account_code=data["account_code"],
-                account_name=data["account_name"],
-                account_type=data["account_type"],
-                amount=amount if amount > Decimal("0.00") else Decimal("0.00"),
+            if not include_zero_accounts and amount == Decimal("0.00"):
+                continue
+
+            expense_rows.append(
+                ProfitLossRow(
+                    account_id=data["account_id"],
+                    account_code=data["account_code"],
+                    account_name=data["account_name"],
+                    account_type=account_type,
+                    amount=amount,
+                )
             )
-        )
 
     total_revenue = _money(sum((row.amount for row in revenue_rows), Decimal("0.00")))
     total_expenses = _money(sum((row.amount for row in expense_rows), Decimal("0.00")))
@@ -1116,159 +1307,85 @@ def build_balance_sheet(
     بناء المركز المالي.
 
     المنطق:
-    - الأصول = صافي المدين - الدائن لحسابات ASSET
-    - الالتزامات = صافي الدائن - المدين لحسابات LIABILITY
-    - حقوق الملكية = صافي الدائن - المدين لحسابات EQUITY
-    - يمكن إضافة صافي الربح الحالي ضمن حقوق الملكية
+    - الأصول = صافي المدين - الدائن لحسابات ASSET.
+    - الالتزامات = صافي الدائن - المدين لحسابات LIABILITY.
+    - حقوق الملكية = صافي الدائن - المدين لحسابات EQUITY.
+    - يمكن إضافة صافي الربح الحالي ضمن حقوق الملكية.
     """
     cutoff_dt = _end_of_day(as_of_date)
 
-    lines_qs = JournalEntryLine.objects.select_related(
-        "account",
-        "journal_entry",
+    lines_qs = _journal_lines_queryset(
+        as_of_date=as_of_date,
+        posted_only=posted_only,
     )
 
-    if posted_only:
-        lines_qs = lines_qs.filter(journal_entry__status=JournalEntryStatus.POSTED)
-
-    if cutoff_dt:
-        lines_qs = lines_qs.filter(journal_entry__entry_date__lte=cutoff_dt.date())
-
-    asset_map: dict[int, dict[str, Any]] = {}
-    liability_map: dict[int, dict[str, Any]] = {}
-    equity_map: dict[int, dict[str, Any]] = {}
-
-    for line in lines_qs.order_by("account__code", "id"):
-        account = line.account
-        account_type = str(_safe_getattr(account, "account_type", ""))
-
-        if account_type not in {"ASSET", "LIABILITY", "EQUITY"}:
-            continue
-
-        if account_type == "ASSET":
-            target_map = asset_map
-        elif account_type == "LIABILITY":
-            target_map = liability_map
-        else:
-            target_map = equity_map
-
-        if account.pk not in target_map:
-            target_map[account.pk] = {
-                "account_id": account.pk,
-                "account_code": account.code,
-                "account_name": account.name,
-                "account_type": account_type,
-                "total_debit": Decimal("0.00"),
-                "total_credit": Decimal("0.00"),
-            }
-
-        target_map[account.pk]["total_debit"] += _money(line.debit_amount)
-        target_map[account.pk]["total_credit"] += _money(line.credit_amount)
+    account_map = _collect_account_totals(
+        lines_qs,
+        allowed_types={"ASSET", "LIABILITY", "EQUITY"},
+    )
 
     if include_zero_accounts:
-        asset_accounts = Account.objects.filter(
-            is_active=True,
-            is_group=False,
-            account_type="ASSET",
-        ).order_by("code")
-        liability_accounts = Account.objects.filter(
-            is_active=True,
-            is_group=False,
-            account_type="LIABILITY",
-        ).order_by("code")
-        equity_accounts = Account.objects.filter(
-            is_active=True,
-            is_group=False,
-            account_type="EQUITY",
-        ).order_by("code")
-
-        for account in asset_accounts:
-            asset_map.setdefault(
-                account.pk,
-                {
-                    "account_id": account.pk,
-                    "account_code": account.code,
-                    "account_name": account.name,
-                    "account_type": "ASSET",
-                    "total_debit": Decimal("0.00"),
-                    "total_credit": Decimal("0.00"),
-                },
-            )
-
-        for account in liability_accounts:
-            liability_map.setdefault(
-                account.pk,
-                {
-                    "account_id": account.pk,
-                    "account_code": account.code,
-                    "account_name": account.name,
-                    "account_type": "LIABILITY",
-                    "total_debit": Decimal("0.00"),
-                    "total_credit": Decimal("0.00"),
-                },
-            )
-
-        for account in equity_accounts:
-            equity_map.setdefault(
-                account.pk,
-                {
-                    "account_id": account.pk,
-                    "account_code": account.code,
-                    "account_name": account.name,
-                    "account_type": "EQUITY",
-                    "total_debit": Decimal("0.00"),
-                    "total_credit": Decimal("0.00"),
-                },
-            )
+        account_map = _append_zero_accounts(
+            account_map,
+            account_types={"ASSET", "LIABILITY", "EQUITY"},
+        )
 
     asset_rows: list[BalanceSheetRow] = []
     liability_rows: list[BalanceSheetRow] = []
     equity_rows: list[BalanceSheetRow] = []
 
-    for _, data in sorted(asset_map.items(), key=lambda item: item[1]["account_code"]):
-        amount = _money(data["total_debit"] - data["total_credit"])
-        if not include_zero_accounts and amount == Decimal("0.00"):
-            continue
+    for _, data in sorted(account_map.items(), key=lambda item: item[1]["account_code"]):
+        account_type = data["account_type"]
+        total_debit = _money(data["total_debit"])
+        total_credit = _money(data["total_credit"])
 
-        asset_rows.append(
-            BalanceSheetRow(
-                account_id=data["account_id"],
-                account_code=data["account_code"],
-                account_name=data["account_name"],
-                account_type=data["account_type"],
-                amount=amount if amount > Decimal("0.00") else Decimal("0.00"),
+        if account_type == "ASSET":
+            amount = _money(total_debit - total_credit)
+
+            if not include_zero_accounts and amount == Decimal("0.00"):
+                continue
+
+            asset_rows.append(
+                BalanceSheetRow(
+                    account_id=data["account_id"],
+                    account_code=data["account_code"],
+                    account_name=data["account_name"],
+                    account_type=account_type,
+                    amount=amount,
+                )
             )
-        )
 
-    for _, data in sorted(liability_map.items(), key=lambda item: item[1]["account_code"]):
-        amount = _money(data["total_credit"] - data["total_debit"])
-        if not include_zero_accounts and amount == Decimal("0.00"):
-            continue
+        elif account_type == "LIABILITY":
+            amount = _money(total_credit - total_debit)
 
-        liability_rows.append(
-            BalanceSheetRow(
-                account_id=data["account_id"],
-                account_code=data["account_code"],
-                account_name=data["account_name"],
-                account_type=data["account_type"],
-                amount=amount if amount > Decimal("0.00") else Decimal("0.00"),
+            if not include_zero_accounts and amount == Decimal("0.00"):
+                continue
+
+            liability_rows.append(
+                BalanceSheetRow(
+                    account_id=data["account_id"],
+                    account_code=data["account_code"],
+                    account_name=data["account_name"],
+                    account_type=account_type,
+                    amount=amount,
+                )
             )
-        )
 
-    for _, data in sorted(equity_map.items(), key=lambda item: item[1]["account_code"]):
-        amount = _money(data["total_credit"] - data["total_debit"])
-        if not include_zero_accounts and amount == Decimal("0.00"):
-            continue
+        elif account_type == "EQUITY":
+            amount = _money(total_credit - total_debit)
 
-        equity_rows.append(
-            BalanceSheetRow(
-                account_id=data["account_id"],
-                account_code=data["account_code"],
-                account_name=data["account_name"],
-                account_type=data["account_type"],
-                amount=amount if amount > Decimal("0.00") else Decimal("0.00"),
+            if not include_zero_accounts and amount == Decimal("0.00"):
+                continue
+
+            equity_rows.append(
+                BalanceSheetRow(
+                    account_id=data["account_id"],
+                    account_code=data["account_code"],
+                    account_name=data["account_name"],
+                    account_type=account_type,
+                    amount=amount,
+                )
             )
-        )
 
     if include_current_year_earnings:
         pnl = build_profit_and_loss(

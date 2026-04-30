@@ -242,10 +242,12 @@ export function getResults<T>(payload: any): T[] {
   if (Array.isArray(payload?.results)) return payload.results;
   if (Array.isArray(payload?.customers)) return payload.customers;
   if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.rows)) return payload.rows;
   if (Array.isArray(payload?.data)) return payload.data;
   if (Array.isArray(payload?.data?.results)) return payload.data.results;
   if (Array.isArray(payload?.data?.customers)) return payload.data.customers;
   if (Array.isArray(payload?.data?.items)) return payload.data.items;
+  if (Array.isArray(payload?.data?.rows)) return payload.data.rows;
 
   return [];
 }
@@ -348,6 +350,17 @@ export const API_PATHS = {
     transfers: "/api/treasury/transfers/",
     reports: "/api/treasury/reports/",
     settings: "/api/treasury/settings/",
+  },
+
+  reports: {
+    overview: "/api/reports/overview/",
+    customers: "/api/reports/customers/",
+    providers: "/api/reports/providers/",
+    centers: "/api/reports/providers/",
+    orders: "/api/reports/orders/",
+    invoices: "/api/reports/invoices/",
+    payments: "/api/reports/payments/",
+    accounting: "/api/reports/accounting/",
   },
 
   users: {
