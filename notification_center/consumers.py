@@ -5,6 +5,7 @@
 # ✅ ملف اختياري للمستقبل
 # ✅ لا يتم تحميله تلقائيًا من apps.py
 # ✅ يمكن استخدامه لاحقًا لو تم تفعيل Channels/WebSocket
+# ✅ يدعم عداد الإشعارات غير المقروءة + تعليم كمقروء
 # ============================================================
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import json
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from django.utils import timezone
 
 from notification_center.models import Notification
 
@@ -43,11 +45,22 @@ class NotificationConsumer(AsyncWebsocketConsumer):
         except Exception:
             data = {}
 
-        if data.get("action") == "mark_read":
+        action = data.get("action")
+
+        if action == "mark_read":
             notification_id = data.get("id")
             if notification_id:
-                await self.mark_as_read(notification_id)
-                await self.send_json({"status": "ok"})
+                updated = await self.mark_as_read(notification_id)
+                count = await self.get_unread_count()
+                await self.send_json(
+                    {
+                        "status": "ok" if updated else "not_found",
+                        "unread_count": count,
+                    }
+                )
+
+        elif action == "refresh":
+            await self.send_initial_unread()
 
     async def send_initial_unread(self):
         unread = await self.get_latest_unread()
@@ -91,8 +104,10 @@ class NotificationConsumer(AsyncWebsocketConsumer):
                 "id": n.id,
                 "title": n.title,
                 "message": n.message,
+                "notification_type": n.notification_type,
                 "severity": n.severity,
-                "created_at": n.created_at.strftime("%Y-%m-%d %H:%M"),
+                "link": n.link or "",
+                "created_at": timezone.localtime(n.created_at).strftime("%Y-%m-%d %H:%M"),
             }
             for n in notes
         ]
@@ -106,10 +121,20 @@ class NotificationConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def mark_as_read(self, notification_id):
-        Notification.objects.filter(
-            id=notification_id,
-            recipient=self.user,
-        ).update(is_read=True)
+        notification = (
+            Notification.objects
+            .filter(
+                id=notification_id,
+                recipient=self.user,
+            )
+            .first()
+        )
+
+        if not notification:
+            return False
+
+        notification.mark_as_read()
+        return True
 
     async def send_json(self, data: dict):
         await self.send(text_data=json.dumps(data, ensure_ascii=False))

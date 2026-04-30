@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import {
   DropdownMenu,
@@ -33,93 +34,109 @@ interface Notification {
   is_read: boolean;
   link?: string | null;
   created_at: string;
+  read_at?: string | null;
+  event_id?: number | null;
+  recipient_id?: number | null;
 }
 
 type NotificationsApiResponse = {
+  ok?: boolean;
+  message?: string;
   results?: Notification[];
-  unread_count?: number;
   count?: number;
-  data?: {
-    results?: Notification[];
+  unread_count?: number;
+  data?:
+    | Notification[]
+    | {
+        results?: Notification[];
+        unread_count?: number;
+        counts?: {
+          unread?: number;
+          total?: number;
+          read?: number;
+        };
+      };
+  meta?: {
     unread_count?: number;
+    counts?: {
+      unread?: number;
+      total?: number;
+      read?: number;
+    };
   };
 };
 
 /* =========================================================
-   🔗 Helpers - Resolve API & WS Base Safely
+   🔗 Helpers
 ========================================================= */
 
-function trimTrailingSlash(value: string): string {
-  return value.replace(/\/+$/, "");
+const NOTIFICATIONS_INBOX_ENDPOINT = "/api/notification-center/inbox/";
+
+function readStoredLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
+
+    const savedLocale = window.localStorage.getItem("primey-locale");
+    if (savedLocale === "en") return "en";
+    if (savedLocale === "ar") return "ar";
+
+    const htmlLang = document.documentElement.lang;
+    return htmlLang === "en" ? "en" : "ar";
+  } catch (error) {
+    console.error("Notifications locale read error:", error);
+    return "ar";
+  }
 }
 
-function normalizeApiBase(value: string): string {
-  const cleanValue = trimTrailingSlash(value.trim());
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
 
-  if (cleanValue.endsWith("/api")) {
-    return cleanValue.slice(0, -4);
-  }
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
 
-  return cleanValue;
+  return parts.length === 2 ? parts.pop()?.split(";").shift() || "" : "";
 }
 
-function resolveApiBase(): string {
-  const envApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-  const envApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
-
-  if (envApiBase) {
-    return normalizeApiBase(envApiBase);
-  }
-
-  if (envApiUrl) {
-    return normalizeApiBase(envApiUrl);
-  }
-
-  return "http://127.0.0.1:8000";
-}
-
-function resolveWsBase(): string {
-  const envWs = process.env.NEXT_PUBLIC_WS_URL?.trim();
-
-  if (envWs) {
-    return trimTrailingSlash(envWs);
-  }
-
-  const envApiBase =
-    process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_API_URL?.trim();
-
-  if (envApiBase) {
-    const cleanApiBase = normalizeApiBase(envApiBase);
-
-    try {
-      const url = new URL(cleanApiBase);
-      const protocol = url.protocol === "https:" ? "wss:" : "ws:";
-
-      return `${protocol}//${url.host}`;
-    } catch {
-      return "";
-    }
-  }
-
-  return "ws://127.0.0.1:8000";
+function getCSRFToken() {
+  return getCookie("csrftoken") || getCookie("csrf_token") || "";
 }
 
 function extractNotifications(payload: NotificationsApiResponse) {
-  const results = Array.isArray(payload.results)
-    ? payload.results
-    : Array.isArray(payload.data?.results)
-      ? payload.data.results
-      : [];
+  let results: Notification[] = [];
+
+  if (Array.isArray(payload.results)) {
+    results = payload.results;
+  } else if (Array.isArray(payload.data)) {
+    results = payload.data;
+  } else if (
+    payload.data &&
+    !Array.isArray(payload.data) &&
+    Array.isArray(payload.data.results)
+  ) {
+    results = payload.data.results;
+  }
 
   const unreadCount = Number(
-    payload.unread_count ?? payload.data?.unread_count ?? 0,
+    payload.unread_count ??
+      payload.meta?.unread_count ??
+      payload.meta?.counts?.unread ??
+      (!Array.isArray(payload.data) ? payload.data?.unread_count : undefined) ??
+      (!Array.isArray(payload.data) ? payload.data?.counts?.unread : undefined) ??
+      results.filter((item) => !item.is_read).length,
   );
 
   return {
     results,
     unreadCount: Number.isFinite(unreadCount) ? unreadCount : 0,
   };
+}
+
+function resolveWebSocketUrl() {
+  const envWs = process.env.NEXT_PUBLIC_WS_URL?.trim();
+
+  if (!envWs) return "";
+
+  return `${envWs.replace(/\/+$/, "")}/ws/system/notifications/`;
 }
 
 /* =========================================================
@@ -138,55 +155,31 @@ const Notifications = () => {
   const [markingAll, setMarkingAll] = useState<boolean>(false);
 
   const socketRef = useRef<WebSocket | null>(null);
+  const didLoadRef = useRef(false);
 
   const isArabic = locale === "ar";
 
-  /* =========================================================
-     🧭 Detect Current Scope
-  ========================================================= */
-
   const isCompanyScope = useMemo(() => {
-    return pathname?.startsWith("/company") || pathname?.startsWith("/center");
+    return (
+      pathname?.startsWith("/company") ||
+      pathname?.startsWith("/center") ||
+      pathname?.startsWith("/provider")
+    );
   }, [pathname]);
-
-  const apiRoot = useMemo(() => resolveApiBase(), []);
-  const wsRoot = useMemo(() => resolveWsBase(), []);
-
-  const apiBase = useMemo(() => {
-    if (!apiRoot) return "";
-
-    return isCompanyScope
-      ? `${apiRoot}/api/company/notifications`
-      : `${apiRoot}/api/system/notifications`;
-  }, [apiRoot, isCompanyScope]);
-
-  const wsNotificationsUrl = useMemo(() => {
-    if (!wsRoot) return "";
-
-    return `${wsRoot}/ws/system/notifications/`;
-  }, [wsRoot]);
 
   const pageHref = isCompanyScope
     ? "/company/notifications"
     : "/system/notifications";
 
+  const wsNotificationsUrl = useMemo(() => resolveWebSocketUrl(), []);
+
   /* =========================================================
-     🍪 Load Locale from localStorage
+     🍪 Load Locale
   ========================================================= */
 
   useEffect(() => {
     const syncLocale = () => {
-      try {
-        const savedLocale =
-          typeof window !== "undefined"
-            ? (window.localStorage.getItem("primey-locale") as AppLocale | null)
-            : null;
-
-        setLocale(savedLocale === "en" ? "en" : "ar");
-      } catch (error) {
-        console.error("Notifications locale initialization error", error);
-        setLocale("ar");
-      }
+      setLocale(readStoredLocale());
     };
 
     syncLocale();
@@ -202,41 +195,37 @@ const Notifications = () => {
 
   /* =========================================================
      📥 Load Notifications from Backend
-     لا تكسر الهيدر أو الصفحات إذا API غير موجود
   ========================================================= */
 
   async function loadNotifications() {
-    if (!apiBase) {
-      setNotifications([]);
-      setUnreadCount(0);
-      return;
-    }
-
     try {
       setLoading(true);
 
-      const res = await fetch(`${apiBase}/`, {
-        credentials: "include",
-        cache: "no-store",
-        headers: {
-          Accept: "application/json",
-        },
+      const searchParams = new URLSearchParams({
+        action: "latest",
+        limit: "8",
       });
 
-      if (res.status === 404) {
-        setNotifications([]);
-        setUnreadCount(0);
-        return;
-      }
+      const res = await fetch(
+        `${NOTIFICATIONS_INBOX_ENDPOINT}?${searchParams.toString()}`,
+        {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+          headers: {
+            Accept: "application/json",
+          },
+        },
+      );
 
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
         setNotifications([]);
         setUnreadCount(0);
         return;
       }
 
       if (!res.ok) {
-        console.warn(`Notifications API unavailable: ${res.status}`);
+        console.warn(`Notifications inbox API unavailable: ${res.status}`);
         setNotifications([]);
         setUnreadCount(0);
         return;
@@ -247,8 +236,8 @@ const Notifications = () => {
 
       setNotifications(parsed.results);
       setUnreadCount(parsed.unreadCount);
-    } catch (err) {
-      console.error("Notifications load error", err);
+    } catch (error) {
+      console.error("Notifications load error:", error);
       setNotifications([]);
       setUnreadCount(0);
     } finally {
@@ -257,13 +246,14 @@ const Notifications = () => {
   }
 
   useEffect(() => {
+    if (didLoadRef.current) return;
+
+    didLoadRef.current = true;
     void loadNotifications();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase]);
+  }, []);
 
   /* =========================================================
-     🔔 WebSocket Realtime Notifications
-     لا يكسر النظام إذا WS غير جاهز
+     🔔 Optional WebSocket Realtime Notifications
   ========================================================= */
 
   useEffect(() => {
@@ -277,20 +267,23 @@ const Notifications = () => {
 
       socket.onmessage = (event) => {
         try {
-          const payload = JSON.parse(event.data) as Notification;
+          const payload = JSON.parse(event.data);
 
-          if (!payload?.id) return;
+          const notification =
+            payload?.notification || payload?.data?.notification || payload;
+
+          if (!notification?.id) return;
 
           setNotifications((prev) => {
-            const exists = prev.some((item) => item.id === payload.id);
+            const exists = prev.some((item) => item.id === notification.id);
             if (exists) return prev;
 
-            return [payload, ...prev];
+            return [notification as Notification, ...prev].slice(0, 8);
           });
 
           setUnreadCount((prev) => prev + 1);
-        } catch (err) {
-          console.error("Realtime notification parse error", err);
+        } catch (error) {
+          console.error("Realtime notification parse error:", error);
         }
       };
 
@@ -302,7 +295,7 @@ const Notifications = () => {
         socketRef.current = null;
       };
     } catch (error) {
-      console.error("Notification socket initialization error", error);
+      console.error("Notification socket initialization error:", error);
     }
 
     return () => {
@@ -310,7 +303,7 @@ const Notifications = () => {
         socket?.close();
         socketRef.current?.close();
       } catch (error) {
-        console.error("Notification socket close error", error);
+        console.error("Notification socket close error:", error);
       } finally {
         socketRef.current = null;
       }
@@ -322,38 +315,61 @@ const Notifications = () => {
   ========================================================= */
 
   async function markAsRead(id: number) {
-    if (!apiBase) return;
-
     try {
-      const res = await fetch(`${apiBase}/read/${id}/`, {
+      const csrfToken = getCSRFToken();
+
+      const res = await fetch(NOTIFICATIONS_INBOX_ENDPOINT, {
         method: "POST",
         credentials: "include",
+        cache: "no-store",
         headers: {
           Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
         },
+        body: JSON.stringify({
+          action: "mark_read",
+          notification_id: id,
+        }),
       });
 
-      if (res.status === 404 || res.status === 401 || res.status === 403) {
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
         setNotifications((prev) =>
-          prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
+          prev.map((item) =>
+            item.id === id
+              ? { ...item, is_read: true, read_at: new Date().toISOString() }
+              : item,
+          ),
         );
-
         setUnreadCount((prev) => (prev > 0 ? prev - 1 : 0));
         return;
       }
 
       if (!res.ok) {
-        console.warn(`Failed to mark notification as read: ${res.status}`);
+        toast.error(
+          isArabic
+            ? "تعذر تحديث حالة الإشعار"
+            : "Could not update notification",
+        );
         return;
       }
 
+      const payload = (await res.json()) as NotificationsApiResponse;
+      const nextUnread = Number(payload.meta?.unread_count);
+
       setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
+        prev.map((item) =>
+          item.id === id
+            ? { ...item, is_read: true, read_at: new Date().toISOString() }
+            : item,
+        ),
       );
 
-      setUnreadCount((prev) => (prev > 0 ? prev - 1 : 0));
-    } catch (err) {
-      console.error("Mark read error", err);
+      setUnreadCount((prev) =>
+        Number.isFinite(nextUnread) ? nextUnread : prev > 0 ? prev - 1 : 0,
+      );
+    } catch (error) {
+      console.error("Mark notification read error:", error);
     }
   }
 
@@ -362,34 +378,64 @@ const Notifications = () => {
   ========================================================= */
 
   async function markAllAsRead() {
-    if (unreadCount <= 0 || !apiBase) return;
+    if (unreadCount <= 0) return;
 
     try {
       setMarkingAll(true);
 
-      const res = await fetch(`${apiBase}/read-all/`, {
+      const csrfToken = getCSRFToken();
+
+      const res = await fetch(NOTIFICATIONS_INBOX_ENDPOINT, {
         method: "POST",
         credentials: "include",
+        cache: "no-store",
         headers: {
           Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
         },
+        body: JSON.stringify({
+          action: "mark_all_read",
+        }),
       });
 
-      if (res.status === 404 || res.status === 401 || res.status === 403) {
-        setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
+        setNotifications((prev) =>
+          prev.map((item) => ({
+            ...item,
+            is_read: true,
+            read_at: new Date().toISOString(),
+          })),
+        );
         setUnreadCount(0);
         return;
       }
 
       if (!res.ok) {
-        console.warn(`Failed to mark all notifications as read: ${res.status}`);
+        toast.error(
+          isArabic
+            ? "تعذر تعليم الإشعارات كمقروءة"
+            : "Could not mark notifications as read",
+        );
         return;
       }
 
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setNotifications((prev) =>
+        prev.map((item) => ({
+          ...item,
+          is_read: true,
+          read_at: new Date().toISOString(),
+        })),
+      );
       setUnreadCount(0);
-    } catch (err) {
-      console.error("Mark all read error", err);
+
+      toast.success(
+        isArabic
+          ? "تم تعليم كل الإشعارات كمقروءة"
+          : "All notifications marked as read",
+      );
+    } catch (error) {
+      console.error("Mark all notifications read error:", error);
     } finally {
       setMarkingAll(false);
     }
@@ -411,6 +457,24 @@ const Notifications = () => {
     } catch {
       return value;
     }
+  }
+
+  function severityClassName(severity: string) {
+    const normalized = severity?.toLowerCase();
+
+    if (normalized === "success") {
+      return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+    }
+
+    if (normalized === "warning") {
+      return "bg-amber-500/10 text-amber-700 dark:text-amber-300";
+    }
+
+    if (normalized === "error" || normalized === "critical") {
+      return "bg-red-500/10 text-red-700 dark:text-red-300";
+    }
+
+    return "bg-blue-500/10 text-blue-700 dark:text-blue-300";
   }
 
   /* =========================================================
@@ -498,15 +562,23 @@ const Notifications = () => {
                     <div className="flex flex-1 items-start gap-2">
                       <div className="flex-none">
                         <Avatar className="size-8">
-                          <AvatarFallback>
+                          <AvatarFallback
+                            className={severityClassName(item.severity)}
+                          >
                             {item.title?.charAt(0) || (isArabic ? "إ" : "N")}
                           </AvatarFallback>
                         </Avatar>
                       </div>
 
                       <div className="flex flex-1 flex-col gap-1">
-                        <div className="truncate text-sm font-medium">
-                          {item.title}
+                        <div className="flex items-center gap-2">
+                          <div className="truncate text-sm font-medium">
+                            {item.title}
+                          </div>
+
+                          {!item.is_read ? (
+                            <span className="bg-primary size-2 rounded-full" />
+                          ) : null}
                         </div>
 
                         <div className="text-muted-foreground line-clamp-1 text-xs">
@@ -519,12 +591,6 @@ const Notifications = () => {
                         </div>
                       </div>
                     </div>
-
-                    {!item.is_read ? (
-                      <div className="flex-0">
-                        <span className="bg-destructive/80 block size-2 rounded-full border" />
-                      </div>
-                    ) : null}
                   </DropdownMenuItem>
                 ))
               : null}

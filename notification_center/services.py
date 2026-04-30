@@ -10,12 +10,14 @@
 # ✅ مستقل عن company_manager
 # ✅ لا يفترض وجود whatsapp_center/channels بشكل إجباري
 # ✅ Fail-Safe كامل
+# ✅ جاهز لمرحلة Notifications & WhatsApp
 # ============================================================
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Iterable, Optional
+from decimal import Decimal, InvalidOperation
+from typing import Any, Iterable
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -77,11 +79,15 @@ def _default_app_name() -> str:
 
 
 def _frontend_base_url() -> str:
+    """
+    لا نستخدم localhost كـ fallback داخل Primey Care.
+    يتم ضبط الرابط من settings/env:
+    FRONTEND_BASE_URL أو FRONTEND_URL أو NEXT_PUBLIC_APP_URL.
+    """
     return (
         _clean_text(getattr(settings, "FRONTEND_BASE_URL", ""))
         or _clean_text(getattr(settings, "FRONTEND_URL", ""))
         or _clean_text(getattr(settings, "NEXT_PUBLIC_APP_URL", ""))
-        or "http://127.0.0.1:3000"
     ).rstrip("/")
 
 
@@ -219,6 +225,7 @@ def _resolve_user_phone(user: User | None) -> str:
         "whatsapp_number",
         "mobile_number",
     ]
+
     for field_name in fields:
         value = _clean_text(getattr(user, field_name, ""))
         if value:
@@ -381,10 +388,15 @@ def _absolute_link(value: str | None) -> str:
     if raw.startswith(("http://", "https://")):
         return raw
 
-    if raw.startswith("/"):
-        return f"{_frontend_base_url()}{raw}"
+    base_url = _frontend_base_url()
 
-    return f"{_frontend_base_url()}/{raw}"
+    if not base_url:
+        return raw
+
+    if raw.startswith("/"):
+        return f"{base_url}{raw}"
+
+    return f"{base_url}/{raw}"
 
 
 def _safe_model_label(obj: Any) -> str:
@@ -502,13 +514,16 @@ def _build_default_notification_email_html(
     resolved_link = _absolute_link(link)
     app_name = escape(_default_app_name())
     support_email = escape(_default_support_email())
-    app_url = escape(_frontend_base_url())
+    raw_app_url = _frontend_base_url()
+    app_url = escape(raw_app_url or "#")
     logo_url = escape(_default_logo_url())
+
     recipient_name = escape(
         _resolve_user_display_name(recipient)
         or _clean_text(_json_safe_dict(context).get("recipient_name"))
         or "المستخدم"
     )
+
     company_name = escape(_company_name(company=company, context=context) or app_name)
     safe_title = escape(_clean_text(title) or _clean_text(subject) or "تنبيه جديد")
     safe_subject = escape(_clean_text(subject) or _clean_text(title) or "تنبيه جديد")
@@ -819,7 +834,11 @@ def _finalize_event_status(event: NotificationEvent | None) -> None:
         event.save(update_fields=["status", "processed_at"])
 
     except Exception as exc:
-        logger.warning("Failed to finalize event status #%s: %s", getattr(event, "id", "?"), exc)
+        logger.warning(
+            "Failed to finalize event status #%s: %s",
+            getattr(event, "id", "?"),
+            exc,
+        )
 
 
 # ============================================================
@@ -954,7 +973,10 @@ def _send_notification_whatsapp(
         or _safe_username(recipient)
     )
 
-    resolved_language = _clean_text(language_code) or _resolve_user_language_code(recipient, default="ar")
+    resolved_language = _clean_text(language_code) or _resolve_user_language_code(
+        recipient,
+        default="ar",
+    )
 
     try:
         from whatsapp_center.services import send_notification_center_whatsapp_delivery
@@ -1118,8 +1140,14 @@ def create_notification(
 
         if recipient is not None and create_in_app:
             note = Notification.objects.create(
-                company_reference=_company_reference(company=company, context=resolved_context) or getattr(event, "company_reference", ""),
-                company_name=_company_name(company=company, context=resolved_context) or getattr(event, "company_name", ""),
+                company_reference=(
+                    _company_reference(company=company, context=resolved_context)
+                    or getattr(event, "company_reference", "")
+                ),
+                company_name=(
+                    _company_name(company=company, context=resolved_context)
+                    or getattr(event, "company_name", "")
+                ),
                 recipient=recipient,
                 recipient_name=_resolve_user_display_name(recipient),
                 title=title,
@@ -1161,8 +1189,10 @@ def create_notification(
             _broadcast_live_notification(note)
 
         if send_email:
-            email_destination = ",".join(resolved_email_recipients) if resolved_email_recipients else _clean_text(
-                getattr(recipient, "email", "") if recipient else ""
+            email_destination = (
+                ",".join(resolved_email_recipients)
+                if resolved_email_recipients
+                else _clean_text(getattr(recipient, "email", "") if recipient else "")
             )
 
             email_delivery = create_notification_delivery(
@@ -1207,9 +1237,11 @@ def create_notification(
                     )
                 else:
                     email_delivery.mark_failed(
-                        error_message=_clean_text(email_response.get("reason"))
-                        or _clean_text(email_response.get("error"))
-                        or "EMAIL_SEND_FAILED",
+                        error_message=(
+                            _clean_text(email_response.get("reason"))
+                            or _clean_text(email_response.get("error"))
+                            or "EMAIL_SEND_FAILED"
+                        ),
                         provider_response=email_response,
                     )
 
@@ -1230,12 +1262,17 @@ def create_notification(
                 subject=title,
                 rendered_message=message,
                 template_key=template_key,
-                language_code=_clean_text(language_code) or _resolve_user_language_code(recipient, default="ar"),
+                language_code=(
+                    _clean_text(language_code)
+                    or _resolve_user_language_code(recipient, default="ar")
+                ),
                 provider_name="whatsapp_center",
                 notification=note,
             )
 
             if whatsapp_delivery:
+                whatsapp_delivery.mark_attempt()
+
                 whatsapp_sent, whatsapp_response = _send_notification_whatsapp(
                     delivery=whatsapp_delivery,
                     recipient=recipient,
@@ -1253,23 +1290,30 @@ def create_notification(
                 if whatsapp_delivery.status == NotificationDeliveryStatus.PENDING:
                     if whatsapp_sent:
                         whatsapp_delivery.mark_sent(
-                            provider_message_id=_clean_text(
-                                whatsapp_response.get("external_message_id", "")
-                            ) or None,
+                            provider_message_id=(
+                                _clean_text(whatsapp_response.get("external_message_id", ""))
+                                or None
+                            ),
                             provider_response=whatsapp_response,
                         )
                     else:
                         whatsapp_delivery.mark_failed(
-                            error_message=_clean_text(whatsapp_response.get("reason"))
-                            or _clean_text(whatsapp_response.get("failure_reason"))
-                            or _clean_text(whatsapp_response.get("error"))
-                            or "WHATSAPP_SEND_FAILED",
+                            error_message=(
+                                _clean_text(whatsapp_response.get("reason"))
+                                or _clean_text(whatsapp_response.get("failure_reason"))
+                                or _clean_text(whatsapp_response.get("error"))
+                                or "WHATSAPP_SEND_FAILED"
+                            ),
                             provider_response=whatsapp_response,
                         )
 
         _finalize_event_status(event)
 
-        logger.info("Notification processed successfully for %s: %s", _safe_username(recipient), title)
+        logger.info(
+            "Notification processed successfully for %s: %s",
+            _safe_username(recipient),
+            title,
+        )
         return note
 
     except Exception as exc:
@@ -1471,4 +1515,513 @@ def notify_many(
         context=context,
         target_object=target_object,
         template_key=template_key,
+    )
+
+
+# ============================================================
+# Primey Care Domain Notifications
+# ============================================================
+
+def _safe_decimal(value: Any) -> Decimal:
+    try:
+        if value is None or value == "":
+            return Decimal("0")
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal("0")
+
+
+def _format_money(value: Any) -> str:
+    amount = _safe_decimal(value)
+    return f"{amount:,.2f} SAR"
+
+
+def _object_reference(obj: Any, *fields: str, default: str = "") -> str:
+    if obj is None:
+        return default
+
+    for field_name in fields:
+        value = _clean_text(_safe_getattr(obj, field_name, ""))
+        if value:
+            return value
+
+    obj_id = _safe_object_id(obj)
+    return obj_id or default
+
+
+def _object_amount(obj: Any, *fields: str) -> str:
+    if obj is None:
+        return ""
+
+    for field_name in fields:
+        value = _safe_getattr(obj, field_name, None)
+        if value not in [None, ""]:
+            return _format_money(value)
+
+    return ""
+
+
+def _merge_context(base: dict | None = None, extra: dict | None = None) -> dict:
+    merged = {}
+    merged.update(_json_safe_dict(base))
+    merged.update(_json_safe_dict(extra))
+    return merged
+
+
+def notify_order_created(
+    *,
+    recipient: User,
+    order: Any,
+    actor: User | None = None,
+    company=None,
+    send_email: bool = False,
+    send_whatsapp: bool = False,
+    context: dict | None = None,
+) -> Notification | None:
+    order_number = _object_reference(
+        order,
+        "order_number",
+        "number",
+        "code",
+        "reference",
+        default="",
+    )
+    customer_name = _object_reference(
+        _safe_getattr(order, "customer", None),
+        "name",
+        "full_name",
+        "customer_name",
+        default="",
+    )
+    total_amount = _object_amount(
+        order,
+        "total_amount",
+        "grand_total",
+        "net_amount",
+        "amount",
+    )
+
+    title = f"تم إنشاء طلب جديد {order_number}".strip()
+    message_parts = ["تم إنشاء طلب جديد داخل النظام."]
+
+    if customer_name:
+        message_parts.append(f"العميل: {customer_name}.")
+
+    if total_amount:
+        message_parts.append(f"القيمة: {total_amount}.")
+
+    return create_notification(
+        recipient=recipient,
+        title=title,
+        message="\n".join(message_parts),
+        notification_type="order",
+        severity="success",
+        send_email=send_email,
+        send_whatsapp=send_whatsapp,
+        link=(
+            f"/system/orders/{_safe_object_id(order)}"
+            if _safe_object_id(order)
+            else "/system/orders"
+        ),
+        company=company,
+        event_code="order_created",
+        event_group="orders",
+        actor=actor,
+        target_user=recipient,
+        language_code=_resolve_user_language_code(recipient, default="ar"),
+        source="notification_center.services.notify_order_created",
+        context=_merge_context(
+            context,
+            {
+                "order_id": _safe_object_id(order),
+                "order_number": order_number,
+                "customer_name": customer_name,
+                "total_amount": total_amount,
+            },
+        ),
+        target_object=order,
+        template_key="order_created",
+    )
+
+
+def notify_order_status_changed(
+    *,
+    recipient: User,
+    order: Any,
+    status: str,
+    actor: User | None = None,
+    company=None,
+    send_email: bool = False,
+    send_whatsapp: bool = False,
+    context: dict | None = None,
+) -> Notification | None:
+    order_number = _object_reference(
+        order,
+        "order_number",
+        "number",
+        "code",
+        "reference",
+        default="",
+    )
+    clean_status = _clean_text(status) or _clean_text(_safe_getattr(order, "status", ""))
+
+    severity = "info"
+    if clean_status in {"completed", "confirmed"}:
+        severity = "success"
+    elif clean_status in {"cancelled", "refunded"}:
+        severity = "warning"
+
+    return create_notification(
+        recipient=recipient,
+        title=f"تحديث حالة الطلب {order_number}".strip(),
+        message=f"تم تحديث حالة الطلب إلى: {clean_status or 'غير محدد'}",
+        notification_type="order",
+        severity=severity,
+        send_email=send_email,
+        send_whatsapp=send_whatsapp,
+        link=(
+            f"/system/orders/{_safe_object_id(order)}"
+            if _safe_object_id(order)
+            else "/system/orders"
+        ),
+        company=company,
+        event_code="order_status_changed",
+        event_group="orders",
+        actor=actor,
+        target_user=recipient,
+        language_code=_resolve_user_language_code(recipient, default="ar"),
+        source="notification_center.services.notify_order_status_changed",
+        context=_merge_context(
+            context,
+            {
+                "order_id": _safe_object_id(order),
+                "order_number": order_number,
+                "status": clean_status,
+            },
+        ),
+        target_object=order,
+        template_key="order_status_changed",
+    )
+
+
+def notify_invoice_issued(
+    *,
+    recipient: User,
+    invoice: Any,
+    actor: User | None = None,
+    company=None,
+    send_email: bool = False,
+    send_whatsapp: bool = False,
+    context: dict | None = None,
+) -> Notification | None:
+    invoice_number = _object_reference(
+        invoice,
+        "invoice_number",
+        "number",
+        "code",
+        "reference",
+        default="",
+    )
+    total_amount = _object_amount(
+        invoice,
+        "total_amount",
+        "grand_total",
+        "net_amount",
+        "amount",
+    )
+
+    message_parts = ["تم إصدار فاتورة جديدة."]
+
+    if invoice_number:
+        message_parts.append(f"رقم الفاتورة: {invoice_number}.")
+
+    if total_amount:
+        message_parts.append(f"الإجمالي: {total_amount}.")
+
+    return create_notification(
+        recipient=recipient,
+        title=f"تم إصدار فاتورة {invoice_number}".strip(),
+        message="\n".join(message_parts),
+        notification_type="invoice",
+        severity="success",
+        send_email=send_email,
+        send_whatsapp=send_whatsapp,
+        link=(
+            f"/system/invoices/{_safe_object_id(invoice)}"
+            if _safe_object_id(invoice)
+            else "/system/invoices"
+        ),
+        company=company,
+        event_code="invoice_issued",
+        event_group="invoices",
+        actor=actor,
+        target_user=recipient,
+        language_code=_resolve_user_language_code(recipient, default="ar"),
+        source="notification_center.services.notify_invoice_issued",
+        context=_merge_context(
+            context,
+            {
+                "invoice_id": _safe_object_id(invoice),
+                "invoice_number": invoice_number,
+                "total_amount": total_amount,
+            },
+        ),
+        target_object=invoice,
+        template_key="invoice_issued",
+    )
+
+
+def notify_invoice_paid(
+    *,
+    recipient: User,
+    invoice: Any,
+    actor: User | None = None,
+    company=None,
+    send_email: bool = False,
+    send_whatsapp: bool = False,
+    context: dict | None = None,
+) -> Notification | None:
+    invoice_number = _object_reference(
+        invoice,
+        "invoice_number",
+        "number",
+        "code",
+        "reference",
+        default="",
+    )
+    total_amount = _object_amount(
+        invoice,
+        "total_amount",
+        "grand_total",
+        "net_amount",
+        "amount",
+        "paid_amount",
+    )
+
+    message_parts = ["تم سداد الفاتورة بنجاح."]
+
+    if invoice_number:
+        message_parts.append(f"رقم الفاتورة: {invoice_number}.")
+
+    if total_amount:
+        message_parts.append(f"المبلغ: {total_amount}.")
+
+    return create_notification(
+        recipient=recipient,
+        title=f"تم سداد فاتورة {invoice_number}".strip(),
+        message="\n".join(message_parts),
+        notification_type="invoice",
+        severity="success",
+        send_email=send_email,
+        send_whatsapp=send_whatsapp,
+        link=(
+            f"/system/invoices/{_safe_object_id(invoice)}"
+            if _safe_object_id(invoice)
+            else "/system/invoices"
+        ),
+        company=company,
+        event_code="invoice_paid",
+        event_group="invoices",
+        actor=actor,
+        target_user=recipient,
+        language_code=_resolve_user_language_code(recipient, default="ar"),
+        source="notification_center.services.notify_invoice_paid",
+        context=_merge_context(
+            context,
+            {
+                "invoice_id": _safe_object_id(invoice),
+                "invoice_number": invoice_number,
+                "total_amount": total_amount,
+            },
+        ),
+        target_object=invoice,
+        template_key="invoice_paid",
+    )
+
+
+def notify_payment_confirmed(
+    *,
+    recipient: User,
+    payment: Any,
+    actor: User | None = None,
+    company=None,
+    send_email: bool = False,
+    send_whatsapp: bool = False,
+    context: dict | None = None,
+) -> Notification | None:
+    payment_reference = _object_reference(
+        payment,
+        "payment_number",
+        "reference",
+        "transaction_reference",
+        "code",
+        default="",
+    )
+    paid_amount = _object_amount(
+        payment,
+        "amount",
+        "paid_amount",
+        "total_amount",
+    )
+
+    message_parts = ["تم تأكيد عملية دفع بنجاح."]
+
+    if payment_reference:
+        message_parts.append(f"مرجع الدفع: {payment_reference}.")
+
+    if paid_amount:
+        message_parts.append(f"المبلغ: {paid_amount}.")
+
+    return create_notification(
+        recipient=recipient,
+        title=f"تم تأكيد الدفع {payment_reference}".strip(),
+        message="\n".join(message_parts),
+        notification_type="payment",
+        severity="success",
+        send_email=send_email,
+        send_whatsapp=send_whatsapp,
+        link=(
+            f"/system/payments/{_safe_object_id(payment)}"
+            if _safe_object_id(payment)
+            else "/system/payments"
+        ),
+        company=company,
+        event_code="payment_confirmed",
+        event_group="payments",
+        actor=actor,
+        target_user=recipient,
+        language_code=_resolve_user_language_code(recipient, default="ar"),
+        source="notification_center.services.notify_payment_confirmed",
+        context=_merge_context(
+            context,
+            {
+                "payment_id": _safe_object_id(payment),
+                "payment_reference": payment_reference,
+                "paid_amount": paid_amount,
+            },
+        ),
+        target_object=payment,
+        template_key="payment_confirmed",
+    )
+
+
+def notify_agent_commission_registered(
+    *,
+    recipient: User,
+    commission: Any,
+    actor: User | None = None,
+    company=None,
+    send_email: bool = False,
+    send_whatsapp: bool = False,
+    context: dict | None = None,
+) -> Notification | None:
+    commission_reference = _object_reference(
+        commission,
+        "commission_number",
+        "reference",
+        "code",
+        default="",
+    )
+    commission_amount = _object_amount(
+        commission,
+        "amount",
+        "commission_amount",
+        "total_amount",
+    )
+
+    message_parts = ["تم تسجيل عمولة مندوب جديدة."]
+
+    if commission_reference:
+        message_parts.append(f"مرجع العمولة: {commission_reference}.")
+
+    if commission_amount:
+        message_parts.append(f"قيمة العمولة: {commission_amount}.")
+
+    return create_notification(
+        recipient=recipient,
+        title=f"تم تسجيل عمولة {commission_reference}".strip(),
+        message="\n".join(message_parts),
+        notification_type="agent_commission",
+        severity="info",
+        send_email=send_email,
+        send_whatsapp=send_whatsapp,
+        link="/system/agents",
+        company=company,
+        event_code="agent_commission_registered",
+        event_group="agents",
+        actor=actor,
+        target_user=recipient,
+        language_code=_resolve_user_language_code(recipient, default="ar"),
+        source="notification_center.services.notify_agent_commission_registered",
+        context=_merge_context(
+            context,
+            {
+                "commission_id": _safe_object_id(commission),
+                "commission_reference": commission_reference,
+                "commission_amount": commission_amount,
+            },
+        ),
+        target_object=commission,
+        template_key="agent_commission_registered",
+    )
+
+
+def notify_agent_commission_approved(
+    *,
+    recipient: User,
+    commission: Any,
+    actor: User | None = None,
+    company=None,
+    send_email: bool = False,
+    send_whatsapp: bool = False,
+    context: dict | None = None,
+) -> Notification | None:
+    commission_reference = _object_reference(
+        commission,
+        "commission_number",
+        "reference",
+        "code",
+        default="",
+    )
+    commission_amount = _object_amount(
+        commission,
+        "amount",
+        "commission_amount",
+        "total_amount",
+    )
+
+    message_parts = ["تم اعتماد عمولة المندوب."]
+
+    if commission_reference:
+        message_parts.append(f"مرجع العمولة: {commission_reference}.")
+
+    if commission_amount:
+        message_parts.append(f"قيمة العمولة: {commission_amount}.")
+
+    return create_notification(
+        recipient=recipient,
+        title=f"تم اعتماد عمولة {commission_reference}".strip(),
+        message="\n".join(message_parts),
+        notification_type="agent_commission",
+        severity="success",
+        send_email=send_email,
+        send_whatsapp=send_whatsapp,
+        link="/system/agents",
+        company=company,
+        event_code="agent_commission_approved",
+        event_group="agents",
+        actor=actor,
+        target_user=recipient,
+        language_code=_resolve_user_language_code(recipient, default="ar"),
+        source="notification_center.services.notify_agent_commission_approved",
+        context=_merge_context(
+            context,
+            {
+                "commission_id": _safe_object_id(commission),
+                "commission_reference": commission_reference,
+                "commission_amount": commission_amount,
+            },
+        ),
+        target_object=commission,
+        template_key="agent_commission_approved",
     )

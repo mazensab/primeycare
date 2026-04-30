@@ -8,6 +8,8 @@
 # ✅ تم ربط Treasury API رسميًا ضمن Finance APIs
 # ✅ تم ربط Users API رسميًا ضمن System Modules APIs
 # ✅ تم ربط Reports API رسميًا ضمن System Modules APIs
+# ✅ تم ربط Notification Center رسميًا ضمن System Modules APIs
+# ✅ تم إضافة alias احتياطي لمسار notifications/ القديم
 # ============================================================
 
 from django.urls import include, path
@@ -60,6 +62,17 @@ urlpatterns = [
     path("performance-center/", include("api.performance_center.urls")),
     path("notification-center/", include("api.notification_center.urls")),
     path("system-log/", include("api.system_log.urls")),
+
+    # --------------------------------------------------------
+    # 🔔 Notification Center Legacy Alias
+    # --------------------------------------------------------
+    # المسار الرسمي:
+    # /api/notification-center/
+    #
+    # هذا alias احتياطي لأي استدعاءات قديمة مثل:
+    # /api/notifications/
+    # /api/notifications/inbox/
+    path("notifications/", include("api.notification_center.urls")),
 
     # --------------------------------------------------------
     # 💬 Communication APIs

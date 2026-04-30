@@ -391,11 +391,26 @@ export const API_PATHS = {
 
   notificationCenter: {
     overview: "/api/notification-center/",
-    list: "/api/notification-center/",
+    list: "/api/notification-center/list/",
+    detail: "/api/notification-center/detail/",
+    create: "/api/notification-center/create/",
+    update: "/api/notification-center/update/",
+    delete: "/api/notification-center/delete/",
+    inbox: "/api/notification-center/inbox/",
+    preferences: "/api/notification-center/preferences/",
+    logs: "/api/notification-center/logs/",
+    settings: "/api/notification-center/settings/",
   },
 
   notifications: {
-    list: "/api/notification-center/",
+    inbox: "/api/notification-center/inbox/",
+    latest: "/api/notification-center/inbox/",
+    count: "/api/notification-center/inbox/",
+    list: "/api/notification-center/inbox/",
+    markRead: "/api/notification-center/inbox/",
+    markUnread: "/api/notification-center/inbox/",
+    markAllRead: "/api/notification-center/inbox/",
+    bulkMarkRead: "/api/notification-center/inbox/",
   },
 
   systemLog: {
@@ -403,3 +418,120 @@ export const API_PATHS = {
     list: "/api/system-log/",
   },
 } as const;
+
+/* ============================================================
+   🔔 Notification Center Helpers
+============================================================ */
+
+export type NotificationInboxItem = {
+  id: number;
+  title: string;
+  message: string;
+  notification_type: string;
+  severity: string;
+  link?: string | null;
+  is_read: boolean;
+  read_at?: string | null;
+  created_at: string;
+  recipient_id?: number | null;
+  event_id?: number | null;
+};
+
+export type NotificationInboxCounts = {
+  total?: number;
+  unread?: number;
+  read?: number;
+  info?: number;
+  success?: number;
+  warning?: number;
+  error?: number;
+  critical?: number;
+};
+
+export type NotificationInboxPayload = {
+  ok?: boolean;
+  message?: string;
+  data?:
+    | NotificationInboxItem[]
+    | {
+        unread_count?: number;
+        counts?: NotificationInboxCounts;
+      };
+  results?: NotificationInboxItem[];
+  count?: number;
+  meta?: {
+    unread_count?: number;
+    counts?: NotificationInboxCounts;
+    page?: number;
+    page_size?: number;
+    total_pages?: number;
+    total_items?: number;
+    has_next?: boolean;
+    has_previous?: boolean;
+  };
+};
+
+export function extractNotificationInboxItems(
+  payload: NotificationInboxPayload | any,
+): NotificationInboxItem[] {
+  return getResults<NotificationInboxItem>(payload);
+}
+
+export function extractNotificationUnreadCount(
+  payload: NotificationInboxPayload | any,
+): number {
+  const value =
+    payload?.unread_count ??
+    payload?.meta?.unread_count ??
+    payload?.meta?.counts?.unread ??
+    payload?.data?.unread_count ??
+    payload?.data?.counts?.unread;
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export const notificationApi = {
+  inbox: (query?: ApiQuery) =>
+    apiGet<NotificationInboxPayload>(API_PATHS.notifications.inbox, query),
+
+  latest: (limit = 8) =>
+    apiGet<NotificationInboxPayload>(API_PATHS.notifications.latest, {
+      action: "latest",
+      limit,
+    }),
+
+  count: () =>
+    apiGet<NotificationInboxPayload>(API_PATHS.notifications.count, {
+      action: "count",
+    }),
+
+  markRead: (notificationId: number | string) =>
+    apiPost<NotificationInboxPayload>(API_PATHS.notifications.markRead, {
+      action: "mark_read",
+      notification_id: notificationId,
+    }),
+
+  markUnread: (notificationId: number | string) =>
+    apiPost<NotificationInboxPayload>(API_PATHS.notifications.markUnread, {
+      action: "mark_unread",
+      notification_id: notificationId,
+    }),
+
+  markAllRead: (filters?: {
+    notification_type?: string;
+    severity?: string;
+    company_reference?: string;
+  }) =>
+    apiPost<NotificationInboxPayload>(API_PATHS.notifications.markAllRead, {
+      action: "mark_all_read",
+      ...(filters || {}),
+    }),
+
+  bulkMarkRead: (ids: Array<number | string>) =>
+    apiPost<NotificationInboxPayload>(API_PATHS.notifications.bulkMarkRead, {
+      action: "bulk_mark_read",
+      ids,
+    }),
+};
