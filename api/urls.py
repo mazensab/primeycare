@@ -9,7 +9,7 @@
 # ✅ تم ربط Users API رسميًا ضمن System Modules APIs
 # ✅ تم ربط Reports API رسميًا ضمن System Modules APIs
 # ✅ تم ربط Notification Center رسميًا ضمن System Modules APIs
-# ✅ تم إضافة alias احتياطي لمسار notifications/ القديم
+# ✅ تم إضافة alias احتياطي لمسار notifications/ القديم بدون تكرار namespace
 # ============================================================
 
 from django.urls import include, path
@@ -72,7 +72,17 @@ urlpatterns = [
     # هذا alias احتياطي لأي استدعاءات قديمة مثل:
     # /api/notifications/
     # /api/notifications/inbox/
-    path("notifications/", include("api.notification_center.urls")),
+    #
+    # مهم:
+    # نستخدم namespace مختلف حتى لا يظهر تحذير:
+    # urls.W005 URL namespace 'notification_center_api' isn't unique
+    path(
+        "notifications/",
+        include(
+            ("api.notification_center.urls", "notification_center_api"),
+            namespace="notifications_legacy_api",
+        ),
+    ),
 
     # --------------------------------------------------------
     # 💬 Communication APIs

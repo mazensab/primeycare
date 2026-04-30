@@ -1,11 +1,20 @@
 # ============================================================
 # 📂 api/whatsapp/templates.py
 # Primey Care - System WhatsApp Templates API
+# ------------------------------------------------------------
+# ✅ إدارة قوالب WhatsApp الخاصة بالنظام
+# ✅ متوافق مع WhatsApp Center Core V1
+# ✅ لا يعتمد على company FK أو company_id
+# ✅ يعتمد على:
+#    - scope_type
+#    - company_reference
+#    - company_name
 # ============================================================
 
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
@@ -14,6 +23,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_GET, require_POST
 
+from api.whatsapp.helpers import json_ok
 from whatsapp_center.models import (
     MessageType,
     ScopeType,
@@ -21,20 +31,24 @@ from whatsapp_center.models import (
     TemplateProviderSyncStatus,
     WhatsAppTemplate,
 )
-from api.whatsapp.helpers import json_ok
 
 
 # ============================================================
 # 🧩 Constants
 # ============================================================
+
+SYSTEM_COMPANY_REFERENCE = ""
+SYSTEM_COMPANY_NAME = ""
+
 MESSAGE_TYPE_VALUES = {choice[0] for choice in MessageType.choices}
 APPROVAL_STATUS_VALUES = {choice[0] for choice in TemplateApprovalStatus.choices}
 PROVIDER_STATUS_VALUES = {choice[0] for choice in TemplateProviderSyncStatus.choices}
 
 
 # ============================================================
-# ❌ Error Helper
+# ❌ Response Helpers
 # ============================================================
+
 def _json_error(message: str, status: int = 400, errors: dict | None = None):
     return JsonResponse(
         {
@@ -50,12 +64,22 @@ def _json_error(message: str, status: int = 400, errors: dict | None = None):
 # ============================================================
 # 🧠 Small Helpers
 # ============================================================
-def _safe_iso(value):
-    return value.isoformat() if value else None
+
+def _safe_iso(value: Any):
+    try:
+        return value.isoformat() if value else None
+    except Exception:
+        return None
+
+
+def _clean_str(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    return str(value).strip()
 
 
 def _build_body_preview(body_text: str, limit: int = 180) -> str:
-    text = (body_text or "").strip()
+    text = _clean_str(body_text)
     if not text:
         return ""
 
@@ -65,47 +89,67 @@ def _build_body_preview(body_text: str, limit: int = 180) -> str:
     return f"{text[:limit].rstrip()}..."
 
 
-def _parse_json_body(request):
+def _parse_json_body(request) -> dict:
     try:
         body = request.body.decode("utf-8") if request.body else "{}"
-        return json.loads(body or "{}")
+        parsed = json.loads(body or "{}")
+        return parsed if isinstance(parsed, dict) else {}
     except json.JSONDecodeError as exc:
         raise ValueError("Invalid JSON payload") from exc
 
 
-def _as_bool(value, default=False):
+def _as_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
+
     if value is None:
         return default
+
     if isinstance(value, str):
-        value = value.strip().lower()
-        if value in {"true", "1", "yes", "on"}:
+        normalized = value.strip().lower()
+
+        if normalized in {"true", "1", "yes", "on"}:
             return True
-        if value in {"false", "0", "no", "off"}:
+
+        if normalized in {"false", "0", "no", "off"}:
             return False
+
     if isinstance(value, int):
         return value == 1
+
     return default
 
 
-def _clean_str(value, default=""):
-    if value is None:
+def _system_templates_queryset():
+    return WhatsAppTemplate.objects.filter(
+        scope_type=ScopeType.SYSTEM,
+        company_reference=SYSTEM_COMPANY_REFERENCE,
+    )
+
+
+def _get_model_attr(obj: Any, attr_name: str, default: Any = "") -> Any:
+    try:
+        return getattr(obj, attr_name, default)
+    except Exception:
         return default
-    return str(value).strip()
 
 
 # ============================================================
 # 🧾 Serializer
 # ============================================================
-def _serialize_template(item: WhatsAppTemplate):
+
+def _serialize_template(item: WhatsAppTemplate) -> dict:
+    company_reference = _clean_str(_get_model_attr(item, "company_reference", ""))
+    company_name = _clean_str(_get_model_attr(item, "company_name", ""))
+
     return {
-        # ------------------------------------------------
-        # الحقول الأصلية
-        # ------------------------------------------------
+        # ----------------------------------------------------
+        # Core Fields
+        # ----------------------------------------------------
         "id": item.id,
         "scope_type": item.scope_type,
-        "company_id": getattr(item, "company_id", None),
+        "company_reference": company_reference,
+        "company_name": company_name,
         "event_code": item.event_code,
         "template_key": item.template_key,
         "template_name": item.template_name,
@@ -124,23 +168,23 @@ def _serialize_template(item: WhatsAppTemplate):
         "created_at": _safe_iso(item.created_at),
         "updated_at": _safe_iso(item.updated_at),
 
-        # ------------------------------------------------
-        # دورة الحياة
-        # ------------------------------------------------
+        # ----------------------------------------------------
+        # Lifecycle
+        # ----------------------------------------------------
         "approval_status": item.approval_status,
         "provider_status": item.provider_status,
         "rejection_reason": item.rejection_reason,
-        "last_synced_at": _safe_iso(getattr(item, "last_synced_at", None)),
+        "last_synced_at": _safe_iso(_get_model_attr(item, "last_synced_at", None)),
 
-        # ------------------------------------------------
+        # ----------------------------------------------------
         # Metadata
-        # ------------------------------------------------
-        "created_by_id": getattr(item, "created_by_id", None),
-        "updated_by_id": getattr(item, "updated_by_id", None),
+        # ----------------------------------------------------
+        "created_by_id": _get_model_attr(item, "created_by_id", None),
+        "updated_by_id": _get_model_attr(item, "updated_by_id", None),
 
-        # ------------------------------------------------
-        # حقول مساعدة للواجهة
-        # ------------------------------------------------
+        # ----------------------------------------------------
+        # Frontend Helpers
+        # ----------------------------------------------------
         "name": item.template_name or item.template_key or f"Template #{item.id}",
         "language": item.language_code,
         "status": item.approval_status,
@@ -153,6 +197,7 @@ def _serialize_template(item: WhatsAppTemplate):
 # ============================================================
 # ✅ Validation
 # ============================================================
+
 def _validate_template_payload(payload: dict, is_update: bool = False):
     errors: dict[str, str] = {}
 
@@ -175,10 +220,12 @@ def _validate_template_payload(payload: dict, is_update: bool = False):
         payload.get("approval_status"),
         TemplateApprovalStatus.DRAFT,
     ).upper()
+
     provider_status = _clean_str(
         payload.get("provider_status"),
         TemplateProviderSyncStatus.NOT_SYNCED,
     ).upper()
+
     rejection_reason = _clean_str(payload.get("rejection_reason"))
 
     is_default = _as_bool(payload.get("is_default"), False)
@@ -197,7 +244,9 @@ def _validate_template_payload(payload: dict, is_update: bool = False):
             errors["body_text"] = "body_text is required."
 
     if message_type not in MESSAGE_TYPE_VALUES:
-        errors["message_type"] = f"message_type must be one of: {sorted(MESSAGE_TYPE_VALUES)}"
+        errors["message_type"] = (
+            f"message_type must be one of: {sorted(MESSAGE_TYPE_VALUES)}"
+        )
 
     if approval_status not in APPROVAL_STATUS_VALUES:
         errors["approval_status"] = (
@@ -238,6 +287,7 @@ def _validate_template_payload(payload: dict, is_update: bool = False):
 # ============================================================
 # 🔧 Business Helpers
 # ============================================================
+
 def _ensure_unique_default(template: WhatsAppTemplate):
     """
     إذا تم تعليم قالب كافتراضي، نلغي الافتراضي عن بقية القوالب
@@ -247,8 +297,8 @@ def _ensure_unique_default(template: WhatsAppTemplate):
         return
 
     WhatsAppTemplate.objects.filter(
-        scope_type=ScopeType.SYSTEM,
-        company__isnull=True,
+        scope_type=template.scope_type,
+        company_reference=_clean_str(_get_model_attr(template, "company_reference", "")),
         event_code=template.event_code,
         language_code=template.language_code,
         is_default=True,
@@ -257,21 +307,25 @@ def _ensure_unique_default(template: WhatsAppTemplate):
 
 def _get_next_version(event_code: str, language_code: str) -> int:
     current = (
-        WhatsAppTemplate.objects.filter(
-            scope_type=ScopeType.SYSTEM,
-            company__isnull=True,
+        _system_templates_queryset()
+        .filter(
             event_code=event_code,
             language_code=language_code,
-        ).aggregate(max_version=Max("version"))
+        )
+        .aggregate(max_version=Max("version"))
     ).get("max_version") or 0
 
     return current + 1
 
 
-def _find_duplicate_template(*, event_code: str, template_key: str, language_code: str, exclude_pk=None):
-    qs = WhatsAppTemplate.objects.filter(
-        scope_type=ScopeType.SYSTEM,
-        company__isnull=True,
+def _find_duplicate_template(
+    *,
+    event_code: str,
+    template_key: str,
+    language_code: str,
+    exclude_pk=None,
+):
+    qs = _system_templates_queryset().filter(
         event_code=event_code,
         template_key=template_key,
         language_code=language_code,
@@ -283,14 +337,25 @@ def _find_duplicate_template(*, event_code: str, template_key: str, language_cod
     return qs
 
 
+def _get_system_template_or_404(template_id: int):
+    return get_object_or_404(
+        WhatsAppTemplate,
+        pk=template_id,
+        scope_type=ScopeType.SYSTEM,
+        company_reference=SYSTEM_COMPANY_REFERENCE,
+    )
+
+
 # ============================================================
 # 📋 List Templates
 # ============================================================
+
 @login_required
 @require_GET
 def system_whatsapp_templates(request):
     """
     إرجاع قوالب واتساب الخاصة بالنظام فقط.
+
     يدعم:
     - q               : بحث عام
     - status          : approval_status
@@ -299,17 +364,14 @@ def system_whatsapp_templates(request):
     - event_code      : event code
     - is_active       : true/false
     """
-    q = (request.GET.get("q") or "").strip()
-    status = (request.GET.get("status") or "").strip().upper()
-    provider_status = (request.GET.get("provider_status") or "").strip().upper()
-    language_code = (request.GET.get("language_code") or "").strip().lower()
-    event_code = (request.GET.get("event_code") or "").strip()
-    is_active = (request.GET.get("is_active") or "").strip().lower()
+    q = _clean_str(request.GET.get("q"))
+    status = _clean_str(request.GET.get("status")).upper()
+    provider_status = _clean_str(request.GET.get("provider_status")).upper()
+    language_code = _clean_str(request.GET.get("language_code")).lower()
+    event_code = _clean_str(request.GET.get("event_code"))
+    is_active = _clean_str(request.GET.get("is_active")).lower()
 
-    templates = WhatsAppTemplate.objects.filter(
-        scope_type=ScopeType.SYSTEM,
-        company__isnull=True,
-    )
+    templates = _system_templates_queryset()
 
     if status and status != "ALL":
         templates = templates.filter(approval_status=status)
@@ -336,6 +398,8 @@ def system_whatsapp_templates(request):
             | Q(body_text__icontains=q)
             | Q(header_text__icontains=q)
             | Q(footer_text__icontains=q)
+            | Q(company_reference__icontains=q)
+            | Q(company_name__icontains=q)
         )
 
     templates = templates.order_by("event_code", "-version", "-id")
@@ -346,12 +410,21 @@ def system_whatsapp_templates(request):
         data=results,
         results=results,
         count=len(results),
+        filters={
+            "q": q,
+            "status": status,
+            "provider_status": provider_status,
+            "language_code": language_code,
+            "event_code": event_code,
+            "is_active": is_active,
+        },
     )
 
 
 # ============================================================
 # ➕ Create Template
 # ============================================================
+
 @login_required
 @require_POST
 def system_whatsapp_template_create(request):
@@ -382,7 +455,8 @@ def system_whatsapp_template_create(request):
     with transaction.atomic():
         template = WhatsAppTemplate.objects.create(
             scope_type=ScopeType.SYSTEM,
-            company=None,
+            company_reference=SYSTEM_COMPANY_REFERENCE,
+            company_name=SYSTEM_COMPANY_NAME,
             event_code=cleaned["event_code"],
             template_key=cleaned["template_key"],
             template_name=cleaned["template_name"],
@@ -407,26 +481,24 @@ def system_whatsapp_template_create(request):
             created_by=request.user,
             updated_by=request.user,
         )
+
         _ensure_unique_default(template)
 
     return json_ok(
         "System WhatsApp template created successfully.",
         item=_serialize_template(template),
+        data=_serialize_template(template),
     )
 
 
 # ============================================================
 # ✏️ Update Template
 # ============================================================
+
 @login_required
 @require_POST
 def system_whatsapp_template_update(request, template_id: int):
-    template = get_object_or_404(
-        WhatsAppTemplate,
-        pk=template_id,
-        scope_type=ScopeType.SYSTEM,
-        company__isnull=True,
-    )
+    template = _get_system_template_or_404(template_id)
 
     try:
         payload = _parse_json_body(request)
@@ -438,9 +510,21 @@ def system_whatsapp_template_update(request, template_id: int):
         return _json_error("Validation error.", status=400, errors=errors)
 
     with transaction.atomic():
-        next_event_code = cleaned["event_code"] if "event_code" in payload else template.event_code
-        next_template_key = cleaned["template_key"] if "template_key" in payload else template.template_key
-        next_language_code = cleaned["language_code"] if "language_code" in payload else template.language_code
+        next_event_code = (
+            cleaned["event_code"]
+            if "event_code" in payload
+            else template.event_code
+        )
+        next_template_key = (
+            cleaned["template_key"]
+            if "template_key" in payload
+            else template.template_key
+        )
+        next_language_code = (
+            cleaned["language_code"]
+            if "language_code" in payload
+            else template.language_code
+        )
 
         duplicate_qs = _find_duplicate_template(
             event_code=next_event_code,
@@ -500,7 +584,10 @@ def system_whatsapp_template_update(request, template_id: int):
         if "provider_status" in payload:
             template.provider_status = cleaned["provider_status"]
 
-        if "rejection_reason" in payload or cleaned["approval_status"] != TemplateApprovalStatus.REJECTED:
+        if (
+            "rejection_reason" in payload
+            or cleaned["approval_status"] != TemplateApprovalStatus.REJECTED
+        ):
             template.rejection_reason = cleaned["rejection_reason"]
 
         if "is_default" in payload:
@@ -509,28 +596,29 @@ def system_whatsapp_template_update(request, template_id: int):
         if "is_active" in payload:
             template.is_active = cleaned["is_active"]
 
+        template.scope_type = ScopeType.SYSTEM
+        template.company_reference = SYSTEM_COMPANY_REFERENCE
+        template.company_name = SYSTEM_COMPANY_NAME
         template.updated_by = request.user
         template.save()
+
         _ensure_unique_default(template)
 
     return json_ok(
         "System WhatsApp template updated successfully.",
         item=_serialize_template(template),
+        data=_serialize_template(template),
     )
 
 
 # ============================================================
 # 🔁 Toggle Template Active Status
 # ============================================================
+
 @login_required
 @require_POST
 def system_whatsapp_template_toggle(request, template_id: int):
-    template = get_object_or_404(
-        WhatsAppTemplate,
-        pk=template_id,
-        scope_type=ScopeType.SYSTEM,
-        company__isnull=True,
-    )
+    template = _get_system_template_or_404(template_id)
 
     template.is_active = not template.is_active
     template.updated_by = request.user
@@ -539,21 +627,18 @@ def system_whatsapp_template_toggle(request, template_id: int):
     return json_ok(
         "System WhatsApp template status updated successfully.",
         item=_serialize_template(template),
+        data=_serialize_template(template),
     )
 
 
 # ============================================================
 # 🗑 Delete Template
 # ============================================================
+
 @login_required
 @require_POST
 def system_whatsapp_template_delete(request, template_id: int):
-    template = get_object_or_404(
-        WhatsAppTemplate,
-        pk=template_id,
-        scope_type=ScopeType.SYSTEM,
-        company__isnull=True,
-    )
+    template = _get_system_template_or_404(template_id)
 
     template_data = _serialize_template(template)
     template.delete()
@@ -561,4 +646,5 @@ def system_whatsapp_template_delete(request, template_id: int):
     return json_ok(
         "System WhatsApp template deleted successfully.",
         item=template_data,
+        data=template_data,
     )

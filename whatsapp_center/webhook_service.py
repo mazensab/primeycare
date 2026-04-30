@@ -1,21 +1,29 @@
 # ============================================================
 # 📂 whatsapp_center/webhook_service.py
-# Mham Cloud - WhatsApp Webhook Service
-# ============================================================
+# 🧠 Primey Care - WhatsApp Webhook Service V1 Core
+# ------------------------------------------------------------
 # ✅ يدعم:
-# - Raw webhook audit storage
-# - Safe provider normalization
-# - Safe status normalization
-# - Idempotent inbound event detection
-# - Message log status update
-# - Inbox Runtime Engine
-#   * Contact create/update
-#   * Conversation create/update
-#   * ConversationMessage create/update
+#    - Raw webhook audit storage
+#    - Safe provider normalization
+#    - Safe status normalization
+#    - Idempotent inbound event detection
+#    - Message log status update
+#    - Inbox Runtime Engine
+#      * Contact create/update
+#      * Conversation create/update
+#      * ConversationMessage create/update
+#
+# ✅ متوافق مع Primey Care WhatsApp Models V1 Core
+# ✅ لا يستخدم company FK مباشر
+# ✅ يعتمد على:
+#    - scope_type
+#    - company_reference
+#    - company_name
 # ============================================================
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -34,6 +42,8 @@ from .models import (
     WhatsAppWebhookEvent,
 )
 from .utils import normalize_phone_number
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -60,10 +70,88 @@ def _normalize_provider(provider: str) -> str:
     if value in {"meta", "meta_cloud_api"}:
         return "META"
 
-    if value in {"whatsapp_web_session", "web_session"}:
+    if value in {"whatsapp_web_session", "web_session", "baileys", "baileys_gateway"}:
         return "whatsapp_web_session"
 
     return _safe_str(provider or "META") or "META"
+
+
+def _resolve_scope_type(scope_type: str) -> str:
+    value = _safe_str(scope_type).upper()
+    if value == ScopeType.COMPANY:
+        return ScopeType.COMPANY
+    return ScopeType.SYSTEM
+
+
+def _resolve_company_reference(
+    *,
+    company=None,
+    company_reference: str | None = None,
+    payload: dict | None = None,
+    message_item: dict | None = None,
+) -> str:
+    if company_reference:
+        return _safe_str(company_reference)
+
+    payload = _safe_dict(payload)
+    message_item = _safe_dict(message_item)
+
+    for source in [message_item, payload]:
+        for key in ["company_reference", "company_id", "company_code", "tenant_reference"]:
+            value = _safe_str(source.get(key))
+            if value:
+                return value
+
+    if company is not None:
+        for attr_name in ["company_reference", "reference", "code", "pk", "id"]:
+            value = getattr(company, attr_name, None)
+            if value not in [None, ""]:
+                return _safe_str(value)
+
+    return ""
+
+
+def _resolve_company_name(
+    *,
+    company=None,
+    company_name: str | None = None,
+    payload: dict | None = None,
+    message_item: dict | None = None,
+) -> str:
+    if company_name:
+        return _safe_str(company_name)
+
+    payload = _safe_dict(payload)
+    message_item = _safe_dict(message_item)
+
+    for source in [message_item, payload]:
+        for key in ["company_name", "company_title", "tenant_name"]:
+            value = _safe_str(source.get(key))
+            if value:
+                return value
+
+    if company is not None:
+        for attr_name in ["company_name", "name", "title"]:
+            value = _safe_str(getattr(company, attr_name, ""))
+            if value:
+                return value
+
+    return ""
+
+
+def _system_company_reference() -> str:
+    return ""
+
+
+def _clean_company_reference_for_scope(
+    *,
+    scope_type: str,
+    company_reference: str = "",
+) -> str:
+    resolved_scope = _resolve_scope_type(scope_type)
+    if resolved_scope == ScopeType.COMPANY:
+        return _safe_str(company_reference)
+    return _system_company_reference()
 
 
 def normalize_status_value(value: Any) -> str:
@@ -118,14 +206,18 @@ def _normalize_runtime_message_type(message_type: str, media_type: str = "") -> 
     if msg_type in {
         "conversation",
         "extendedtextmessage",
+        "extended_text_message",
         "buttonsresponsemessage",
+        "buttons_response_message",
         "listresponsemessage",
+        "list_response_message",
         "templatebuttonreplymessage",
+        "template_button_reply_message",
         "text",
     }:
         return MessageType.TEXT
 
-    if msg_type in {"template", "templatemessage"}:
+    if msg_type in {"template", "templatemessage", "template_message"}:
         return MessageType.TEMPLATE
 
     if msg_type:
@@ -141,7 +233,10 @@ def _parse_message_datetime(message_item: dict[str, Any]):
     timestamp_iso = _safe_str(message_item.get("timestamp_iso"))
     if timestamp_iso:
         try:
-            return datetime.fromisoformat(timestamp_iso.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(timestamp_iso.replace("Z", "+00:00"))
+            if timezone.is_naive(parsed):
+                return timezone.make_aware(parsed, timezone.get_current_timezone())
+            return parsed
         except Exception:
             pass
 
@@ -155,6 +250,15 @@ def _parse_message_datetime(message_item: dict[str, Any]):
     return timezone.now()
 
 
+def _extract_external_message_id(message_item: dict[str, Any]) -> str:
+    return _safe_str(
+        message_item.get("message_id")
+        or message_item.get("external_message_id")
+        or message_item.get("id")
+        or message_item.get("key_id")
+    )
+
+
 # ============================================================
 # 🌐 Webhook Event Storage
 # ============================================================
@@ -164,57 +268,91 @@ def store_webhook_event(
     payload: dict,
     event_type: str = "",
     external_message_id: str = "",
-    scope_type: str = "SYSTEM",
+    scope_type: str = ScopeType.SYSTEM,
     company=None,
+    company_reference: str | None = None,
+    company_name: str | None = None,
     provider: str = "META",
 ):
     """
     تخزين webhook event الخام كما وصل من المزود / gateway.
+
+    Primey Care V1:
+    لا نستخدم company FK مباشر.
+    نعتمد على scope_type + company_reference + company_name.
     """
+    payload = _safe_dict(payload)
+    resolved_scope_type = _resolve_scope_type(scope_type)
+    resolved_company_reference = _clean_company_reference_for_scope(
+        scope_type=resolved_scope_type,
+        company_reference=_resolve_company_reference(
+            company=company,
+            company_reference=company_reference,
+            payload=payload,
+        ),
+    )
+    resolved_company_name = (
+        _resolve_company_name(
+            company=company,
+            company_name=company_name,
+            payload=payload,
+        )
+        if resolved_scope_type == ScopeType.COMPANY
+        else ""
+    )
+
     return WhatsAppWebhookEvent.objects.create(
-        scope_type=scope_type,
-        company=company,
+        scope_type=resolved_scope_type,
+        company_reference=resolved_company_reference,
+        company_name=resolved_company_name,
         provider=_normalize_provider(provider),
         event_type=_safe_str(event_type) or "provider_webhook",
         external_message_id=_safe_str(external_message_id),
-        payload_json=_safe_dict(payload),
+        payload_json=payload,
     )
 
 
 def inbound_event_exists(
     *,
     external_message_id: str,
-    scope_type: str = "SYSTEM",
+    scope_type: str = ScopeType.SYSTEM,
     company=None,
+    company_reference: str | None = None,
     event_type: str = "inbound_message",
 ) -> bool:
     """
-    تحقق idempotent: هل تم تخزين نفس الرسالة الواردة مسبقًا؟
+    تحقق idempotent:
+    هل تم تخزين نفس الرسالة الواردة مسبقًا؟
     """
     external_message_id = _safe_str(external_message_id)
     if not external_message_id:
         return False
 
-    queryset = WhatsAppWebhookEvent.objects.filter(
-        scope_type=scope_type,
-        external_message_id=external_message_id,
-        event_type=event_type,
+    resolved_scope_type = _resolve_scope_type(scope_type)
+    resolved_company_reference = _clean_company_reference_for_scope(
+        scope_type=resolved_scope_type,
+        company_reference=_resolve_company_reference(
+            company=company,
+            company_reference=company_reference,
+        ),
     )
 
-    if company is None:
-        queryset = queryset.filter(company__isnull=True)
-    else:
-        queryset = queryset.filter(company=company)
-
-    return queryset.exists()
+    return WhatsAppWebhookEvent.objects.filter(
+        scope_type=resolved_scope_type,
+        company_reference=resolved_company_reference,
+        external_message_id=external_message_id,
+        event_type=event_type,
+    ).exists()
 
 
 def store_inbound_message_event(
     *,
     payload: dict,
     external_message_id: str,
-    scope_type: str = "SYSTEM",
+    scope_type: str = ScopeType.SYSTEM,
     company=None,
+    company_reference: str | None = None,
+    company_name: str | None = None,
     provider: str = "whatsapp_web_session",
 ):
     """
@@ -226,6 +364,8 @@ def store_inbound_message_event(
         external_message_id=external_message_id,
         scope_type=scope_type,
         company=company,
+        company_reference=company_reference,
+        company_name=company_name,
         provider=provider,
     )
 
@@ -340,12 +480,16 @@ def apply_status_update_to_message(*, external_message_id: str, new_status: str)
     if changed_fields:
         if "updated_at" not in changed_fields:
             changed_fields.append("updated_at")
-        log.save(update_fields=changed_fields)
+        log.save(update_fields=list(dict.fromkeys(changed_fields)))
 
     return log
 
 
-def apply_status_update_to_conversation_message(*, external_message_id: str, new_status: str):
+def apply_status_update_to_conversation_message(
+    *,
+    external_message_id: str,
+    new_status: str,
+):
     """
     تطبيق الحالة على طبقة Runtime للشات.
     """
@@ -417,9 +561,63 @@ def apply_status_update_to_conversation_message(*, external_message_id: str, new
     if changed_fields:
         if "updated_at" not in changed_fields:
             changed_fields.append("updated_at")
-        message.save(update_fields=changed_fields)
+        message.save(update_fields=list(dict.fromkeys(changed_fields)))
 
     return message
+
+
+def apply_provider_status_webhook(
+    *,
+    payload: dict,
+    external_message_id: str,
+    new_status: str,
+    scope_type: str = ScopeType.SYSTEM,
+    company=None,
+    company_reference: str | None = None,
+    company_name: str | None = None,
+    provider: str = "whatsapp_web_session",
+):
+    """
+    تخزين webhook حالة الرسالة ثم تطبيقها على:
+    - WhatsAppMessageLog
+    - WhatsAppConversationMessage إن وجدت
+    """
+    external_message_id = _safe_str(external_message_id)
+    if not external_message_id:
+        return {
+            "success": False,
+            "message": "external_message_id is required.",
+            "message_log_updated": False,
+            "conversation_message_updated": False,
+        }
+
+    event = store_webhook_event(
+        payload=payload,
+        event_type="message_status",
+        external_message_id=external_message_id,
+        scope_type=scope_type,
+        company=company,
+        company_reference=company_reference,
+        company_name=company_name,
+        provider=provider,
+    )
+
+    log = apply_status_update_to_message(
+        external_message_id=external_message_id,
+        new_status=new_status,
+    )
+
+    conversation_message = apply_status_update_to_conversation_message(
+        external_message_id=external_message_id,
+        new_status=new_status,
+    )
+
+    return {
+        "success": True,
+        "webhook_event_id": event.id,
+        "message_log_updated": bool(log),
+        "conversation_message_updated": bool(conversation_message),
+    }
 
 
 # ============================================================
@@ -437,12 +635,11 @@ def build_inbound_runtime_snapshot(*, payload: dict) -> dict[str, Any]:
         "provider": _safe_str(payload.get("provider")),
         "source": _safe_str(payload.get("source")),
         "event_type": _safe_str(payload.get("event_type") or payload.get("event")),
+        "scope_type": _safe_str(payload.get("scope_type") or ScopeType.SYSTEM),
+        "company_reference": _safe_str(payload.get("company_reference")),
+        "company_name": _safe_str(payload.get("company_name")),
         "session_name": _safe_str(payload.get("session_name")),
-        "message_id": _safe_str(
-            message.get("message_id")
-            or message.get("external_message_id")
-            or message.get("id")
-        ),
+        "message_id": _extract_external_message_id(message),
         "sender_phone": _safe_str(message.get("sender_phone")),
         "remote_phone": _safe_str(message.get("remote_phone")),
         "sender_jid": _safe_str(message.get("sender_jid")),
@@ -467,6 +664,9 @@ def build_inbound_event_payload(
     *,
     root_payload: dict,
     message_item: dict,
+    scope_type: str = ScopeType.SYSTEM,
+    company_reference: str = "",
+    company_name: str = "",
 ) -> dict[str, Any]:
     """
     بناء payload مستقل لكل رسالة واردة.
@@ -476,7 +676,9 @@ def build_inbound_event_payload(
         "source": root_payload.get("source") or "baileys_gateway",
         "event": "inbound_message",
         "event_type": "inbound_message",
-        "scope_type": root_payload.get("scope_type") or ScopeType.SYSTEM,
+        "scope_type": _resolve_scope_type(scope_type),
+        "company_reference": _safe_str(company_reference),
+        "company_name": _safe_str(company_name),
         "session_name": root_payload.get("session_name") or "",
         "received_at": root_payload.get("received_at") or "",
         "message": message_item,
@@ -487,17 +689,12 @@ def build_inbound_event_payload(
 # 💬 Inbox Runtime Helpers
 # ============================================================
 
-def _resolve_scope_type(scope_type: str) -> str:
-    value = _safe_str(scope_type).upper()
-    if value == ScopeType.COMPANY:
-        return ScopeType.COMPANY
-    return ScopeType.SYSTEM
-
-
 def resolve_normalized_phone(*, message_item: dict) -> str:
     candidates = [
         message_item.get("sender_phone"),
         message_item.get("remote_phone"),
+        message_item.get("from"),
+        message_item.get("phone"),
     ]
 
     for candidate in candidates:
@@ -512,9 +709,29 @@ def resolve_or_create_contact(
     *,
     scope_type: str,
     company=None,
+    company_reference: str | None = None,
+    company_name: str | None = None,
     message_item: dict,
 ) -> WhatsAppContact | None:
     scope_type = _resolve_scope_type(scope_type)
+    resolved_company_reference = _clean_company_reference_for_scope(
+        scope_type=scope_type,
+        company_reference=_resolve_company_reference(
+            company=company,
+            company_reference=company_reference,
+            message_item=message_item,
+        ),
+    )
+    resolved_company_name = (
+        _resolve_company_name(
+            company=company,
+            company_name=company_name,
+            message_item=message_item,
+        )
+        if scope_type == ScopeType.COMPANY
+        else ""
+    )
+
     phone_number = resolve_normalized_phone(message_item=message_item)
     if not phone_number:
         return None
@@ -522,36 +739,48 @@ def resolve_or_create_contact(
     message_at = _parse_message_datetime(message_item)
 
     defaults = {
+        "company_name": resolved_company_name,
         "display_name": _safe_str(
             message_item.get("push_name")
             or message_item.get("sender_name")
+            or message_item.get("name")
             or ""
         ),
         "push_name": _safe_str(message_item.get("push_name")),
         "wa_jid": _safe_str(
             message_item.get("sender_jid")
             or message_item.get("remote_jid")
+            or message_item.get("jid")
         ),
         "profile_name": _safe_str(message_item.get("push_name")),
         "last_seen_at": timezone.now(),
         "last_message_at": message_at,
         "extra_json": {
             "session_name": _safe_str(message_item.get("session_name")),
+            "source": "webhook",
         },
     }
 
     contact, created = WhatsAppContact.objects.get_or_create(
         scope_type=scope_type,
-        company=company,
+        company_reference=resolved_company_reference,
         phone_number=phone_number,
         defaults=defaults,
     )
 
     update_fields: list[str] = []
 
+    if created:
+        return contact
+
+    if resolved_company_name and contact.company_name != resolved_company_name:
+        contact.company_name = resolved_company_name
+        update_fields.append("company_name")
+
     display_name = _safe_str(
         message_item.get("push_name")
         or message_item.get("sender_name")
+        or message_item.get("name")
         or ""
     )
     if display_name and contact.display_name != display_name:
@@ -566,16 +795,21 @@ def resolve_or_create_contact(
     wa_jid = _safe_str(
         message_item.get("sender_jid")
         or message_item.get("remote_jid")
+        or message_item.get("jid")
     )
     if wa_jid and contact.wa_jid != wa_jid:
         contact.wa_jid = wa_jid
         update_fields.append("wa_jid")
 
-    contact.last_seen_at = timezone.now()
-    contact.last_message_at = message_at
-    update_fields.extend(["last_seen_at", "last_message_at"])
+    if contact.last_seen_at is None or contact.last_seen_at <= timezone.now():
+        contact.last_seen_at = timezone.now()
+        update_fields.append("last_seen_at")
 
-    if update_fields and not created:
+    if contact.last_message_at != message_at:
+        contact.last_message_at = message_at
+        update_fields.append("last_message_at")
+
+    if update_fields:
         if "updated_at" not in update_fields:
             update_fields.append("updated_at")
         contact.save(update_fields=list(dict.fromkeys(update_fields)))
@@ -587,17 +821,37 @@ def resolve_or_create_conversation(
     *,
     scope_type: str,
     company=None,
+    company_reference: str | None = None,
+    company_name: str | None = None,
     contact: WhatsAppContact,
     message_item: dict,
 ) -> WhatsAppConversation:
     scope_type = _resolve_scope_type(scope_type)
+    resolved_company_reference = _clean_company_reference_for_scope(
+        scope_type=scope_type,
+        company_reference=_resolve_company_reference(
+            company=company,
+            company_reference=company_reference,
+            message_item=message_item,
+        ),
+    )
+    resolved_company_name = (
+        _resolve_company_name(
+            company=company,
+            company_name=company_name,
+            message_item=message_item,
+        )
+        if scope_type == ScopeType.COMPANY
+        else ""
+    )
+
     session_name = _safe_str(message_item.get("session_name"))
 
     conversation = (
         WhatsAppConversation.objects
         .filter(
             scope_type=scope_type,
-            company=company,
+            company_reference=resolved_company_reference,
             contact=contact,
         )
         .order_by("-last_message_at", "-id")
@@ -605,11 +859,27 @@ def resolve_or_create_conversation(
     )
 
     if conversation:
+        update_fields: list[str] = []
+
+        if resolved_company_name and conversation.company_name != resolved_company_name:
+            conversation.company_name = resolved_company_name
+            update_fields.append("company_name")
+
+        if session_name and conversation.session_name != session_name:
+            conversation.session_name = session_name
+            update_fields.append("session_name")
+
+        if update_fields:
+            if "updated_at" not in update_fields:
+                update_fields.append("updated_at")
+            conversation.save(update_fields=list(dict.fromkeys(update_fields)))
+
         return conversation
 
     return WhatsAppConversation.objects.create(
         scope_type=scope_type,
-        company=company,
+        company_reference=resolved_company_reference,
+        company_name=resolved_company_name,
         contact=contact,
         session_name=session_name,
         status="OPEN",
@@ -625,15 +895,25 @@ def conversation_message_exists(
     external_message_id: str,
     scope_type: str,
     company=None,
+    company_reference: str | None = None,
 ) -> bool:
     external_message_id = _safe_str(external_message_id)
     if not external_message_id:
         return False
 
+    resolved_scope_type = _resolve_scope_type(scope_type)
+    resolved_company_reference = _clean_company_reference_for_scope(
+        scope_type=resolved_scope_type,
+        company_reference=_resolve_company_reference(
+            company=company,
+            company_reference=company_reference,
+        ),
+    )
+
     return WhatsAppConversationMessage.objects.filter(
         external_message_id=external_message_id,
-        scope_type=_resolve_scope_type(scope_type),
-        company=company,
+        scope_type=resolved_scope_type,
+        company_reference=resolved_company_reference,
     ).exists()
 
 
@@ -642,16 +922,35 @@ def create_inbound_conversation_message(
     root_payload: dict,
     scope_type: str,
     company=None,
+    company_reference: str | None = None,
+    company_name: str | None = None,
     message_item: dict,
     contact: WhatsAppContact,
     conversation: WhatsAppConversation,
     webhook_event: WhatsAppWebhookEvent | None,
 ) -> WhatsAppConversationMessage | None:
-    external_message_id = _safe_str(
-        message_item.get("message_id")
-        or message_item.get("external_message_id")
-        or message_item.get("id")
+    scope_type = _resolve_scope_type(scope_type)
+    resolved_company_reference = _clean_company_reference_for_scope(
+        scope_type=scope_type,
+        company_reference=_resolve_company_reference(
+            company=company,
+            company_reference=company_reference,
+            payload=root_payload,
+            message_item=message_item,
+        ),
     )
+    resolved_company_name = (
+        _resolve_company_name(
+            company=company,
+            company_name=company_name,
+            payload=root_payload,
+            message_item=message_item,
+        )
+        if scope_type == ScopeType.COMPANY
+        else ""
+    )
+
+    external_message_id = _extract_external_message_id(message_item)
     if not external_message_id:
         return None
 
@@ -659,6 +958,7 @@ def create_inbound_conversation_message(
         external_message_id=external_message_id,
         scope_type=scope_type,
         company=company,
+        company_reference=resolved_company_reference,
     ):
         return None
 
@@ -668,8 +968,9 @@ def create_inbound_conversation_message(
 
     message = WhatsAppConversationMessage.objects.create(
         conversation=conversation,
-        scope_type=_resolve_scope_type(scope_type),
-        company=company,
+        scope_type=scope_type,
+        company_reference=resolved_company_reference,
+        company_name=resolved_company_name,
         direction=ConversationDirection.INBOUND,
         message_type=_normalize_runtime_message_type(
             message_type=_safe_str(message_item.get("message_type")),
@@ -682,25 +983,29 @@ def create_inbound_conversation_message(
         wa_jid=_safe_str(
             message_item.get("sender_jid")
             or message_item.get("remote_jid")
+            or message_item.get("jid")
         ),
         sender_phone=contact.phone_number,
         sender_name=contact.display_name or contact.push_name,
         body_text=body_text,
         caption=caption,
-        attachment_url="",
+        attachment_url=_safe_str(message_item.get("attachment_url")),
         attachment_name=_safe_str(message_item.get("file_name")),
         mime_type=_safe_str(message_item.get("mime_type")),
         media_type=_safe_str(message_item.get("media_type")),
         is_read=False,
         is_from_me=False,
-        replied_to_external_message_id="",
+        replied_to_external_message_id=_safe_str(
+            message_item.get("replied_to_external_message_id")
+            or message_item.get("quoted_message_id")
+        ),
         payload_json=message_item,
         extra_json={
-          "session_name": _safe_str(root_payload.get("session_name")),
-          "source": _safe_str(root_payload.get("source")),
-          "is_group": _safe_bool(message_item.get("is_group")),
-          "is_broadcast": _safe_bool(message_item.get("is_broadcast")),
-          "is_status": _safe_bool(message_item.get("is_status")),
+            "session_name": _safe_str(root_payload.get("session_name")),
+            "source": _safe_str(root_payload.get("source")),
+            "is_group": _safe_bool(message_item.get("is_group")),
+            "is_broadcast": _safe_bool(message_item.get("is_broadcast")),
+            "is_status": _safe_bool(message_item.get("is_status")),
         },
         webhook_event=webhook_event,
         message_log=None,
@@ -726,11 +1031,21 @@ def create_inbound_conversation_message(
         conversation.session_name = session_name
         update_fields.append("session_name")
 
+    if resolved_company_name and conversation.company_name != resolved_company_name:
+        conversation.company_name = resolved_company_name
+        update_fields.append("company_name")
+
     conversation.save(update_fields=list(dict.fromkeys(update_fields)))
 
     contact.last_message_at = message_created_at
     contact.last_seen_at = timezone.now()
-    contact.save(update_fields=["last_message_at", "last_seen_at", "updated_at"])
+
+    contact_update_fields = ["last_message_at", "last_seen_at", "updated_at"]
+    if resolved_company_name and contact.company_name != resolved_company_name:
+        contact.company_name = resolved_company_name
+        contact_update_fields.append("company_name")
+
+    contact.save(update_fields=list(dict.fromkeys(contact_update_fields)))
 
     return message
 
@@ -744,6 +1059,8 @@ def create_or_update_inbox_from_webhook(
     payload: dict,
     scope_type: str = ScopeType.SYSTEM,
     company=None,
+    company_reference: str | None = None,
+    company_name: str | None = None,
 ) -> dict[str, int]:
     """
     إنشاء / تحديث Inbox Runtime من payload يحتوي على messages.
@@ -753,9 +1070,32 @@ def create_or_update_inbox_from_webhook(
         "created_count": x,
         "skipped_count": y,
     }
+
+    Primey Care V1:
+    - لا يعتمد على company FK.
+    - يستخدم scope_type + company_reference.
     """
-    scope_type = _resolve_scope_type(scope_type)
     payload = _safe_dict(payload)
+    scope_type = _resolve_scope_type(payload.get("scope_type") or scope_type)
+
+    resolved_company_reference = _clean_company_reference_for_scope(
+        scope_type=scope_type,
+        company_reference=_resolve_company_reference(
+            company=company,
+            company_reference=company_reference,
+            payload=payload,
+        ),
+    )
+
+    resolved_company_name = (
+        _resolve_company_name(
+            company=company,
+            company_name=company_name,
+            payload=payload,
+        )
+        if scope_type == ScopeType.COMPANY
+        else ""
+    )
 
     created_count = 0
     skipped_count = 0
@@ -767,11 +1107,7 @@ def create_or_update_inbox_from_webhook(
             skipped_count += 1
             continue
 
-        external_message_id = _safe_str(
-            item.get("message_id")
-            or item.get("external_message_id")
-            or item.get("id")
-        )
+        external_message_id = _extract_external_message_id(item)
 
         if not external_message_id:
             skipped_count += 1
@@ -794,6 +1130,7 @@ def create_or_update_inbox_from_webhook(
             external_message_id=external_message_id,
             scope_type=scope_type,
             company=company,
+            company_reference=resolved_company_reference,
             event_type="inbound_message",
         ):
             skipped_count += 1
@@ -802,6 +1139,9 @@ def create_or_update_inbox_from_webhook(
         inbound_payload = build_inbound_event_payload(
             root_payload=payload,
             message_item=item,
+            scope_type=scope_type,
+            company_reference=resolved_company_reference,
+            company_name=resolved_company_name,
         )
 
         try:
@@ -811,6 +1151,8 @@ def create_or_update_inbox_from_webhook(
                     external_message_id=external_message_id,
                     scope_type=scope_type,
                     company=company,
+                    company_reference=resolved_company_reference,
+                    company_name=resolved_company_name,
                     provider=_normalize_provider(
                         payload.get("provider") or "whatsapp_web_session"
                     ),
@@ -819,6 +1161,8 @@ def create_or_update_inbox_from_webhook(
                 contact = resolve_or_create_contact(
                     scope_type=scope_type,
                     company=company,
+                    company_reference=resolved_company_reference,
+                    company_name=resolved_company_name,
                     message_item=item,
                 )
                 if not contact:
@@ -827,6 +1171,8 @@ def create_or_update_inbox_from_webhook(
                 conversation = resolve_or_create_conversation(
                     scope_type=scope_type,
                     company=company,
+                    company_reference=resolved_company_reference,
+                    company_name=resolved_company_name,
                     contact=contact,
                     message_item=item,
                 )
@@ -835,6 +1181,8 @@ def create_or_update_inbox_from_webhook(
                     root_payload=payload,
                     scope_type=scope_type,
                     company=company,
+                    company_reference=resolved_company_reference,
+                    company_name=resolved_company_name,
                     message_item=item,
                     contact=contact,
                     conversation=conversation,
@@ -846,8 +1194,13 @@ def create_or_update_inbox_from_webhook(
 
                 created_count += 1
 
-        except Exception:
+        except Exception as exc:
             skipped_count += 1
+            logger.warning(
+                "Skipped inbound WhatsApp message | external_message_id=%s | error=%s",
+                external_message_id,
+                exc,
+            )
             continue
 
     return {

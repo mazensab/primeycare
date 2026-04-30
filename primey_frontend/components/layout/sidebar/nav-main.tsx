@@ -51,6 +51,8 @@ import {
   Layers3,
   Banknote,
   ArrowLeftRight,
+  BellRing,
+  Inbox,
   type LucideIcon,
 } from "lucide-react";
 
@@ -616,40 +618,82 @@ const systemNavItems: NavGroup[] = [
         ],
       },
       {
-        title: { ar: "واتساب", en: "WhatsApp" },
-        href: "/system/whatsapp",
-        icon: MessageCircle,
-        roles: ["system_admin"],
+        title: { ar: "الإشعارات", en: "Notifications" },
+        href: "/system/notifications",
+        icon: BellRing,
+        anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
         workspaces: ["system"],
         items: [
           {
-            title: { ar: "الرئيسية", en: "Overview" },
+            title: { ar: "لوحة الإشعارات", en: "Notifications Overview" },
+            href: "/system/notifications",
+            icon: BellRing,
+            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "قائمة الإشعارات", en: "Notifications List" },
+            href: "/system/notifications/list",
+            icon: ListChecks,
+            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "إعدادات الإشعارات", en: "Notification Settings" },
+            href: "/system/notifications/settings",
+            icon: Settings,
+            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
+            workspaces: ["system"],
+          },
+        ],
+      },
+      {
+        title: { ar: "واتساب", en: "WhatsApp" },
+        href: "/system/whatsapp",
+        icon: MessageCircle,
+        anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
+        workspaces: ["system"],
+        items: [
+          {
+            title: { ar: "لوحة واتساب", en: "WhatsApp Overview" },
             href: "/system/whatsapp",
-            roles: ["system_admin"],
+            icon: MessageCircle,
+            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
             workspaces: ["system"],
           },
           {
-            title: { ar: "الإعدادات", en: "Settings" },
-            href: "/system/whatsapp/settings",
-            roles: ["system_admin"],
+            title: { ar: "صندوق المحادثات", en: "Inbox" },
+            href: "/system/whatsapp/inbox",
+            icon: Inbox,
+            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
             workspaces: ["system"],
           },
           {
-            title: { ar: "السجل", en: "Logs" },
+            title: { ar: "السجلات", en: "Logs" },
             href: "/system/whatsapp/logs",
-            roles: ["system_admin"],
+            icon: ListChecks,
+            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
             workspaces: ["system"],
           },
           {
             title: { ar: "القوالب", en: "Templates" },
             href: "/system/whatsapp/templates",
-            roles: ["system_admin"],
+            icon: FileText,
+            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
             workspaces: ["system"],
           },
           {
             title: { ar: "البث الجماعي", en: "Broadcasts" },
             href: "/system/whatsapp/broadcasts",
-            roles: ["system_admin"],
+            icon: Send,
+            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "إعدادات واتساب", en: "WhatsApp Settings" },
+            href: "/system/whatsapp/settings",
+            icon: Settings,
+            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
             workspaces: ["system"],
           },
         ],
@@ -816,47 +860,6 @@ const centerNavItems: NavGroup[] = [
             aliases: ["/center/payments/create", "/provider/payments/create"],
             icon: Plus,
             permission: PERMISSIONS.PAYMENTS_CREATE,
-            workspaces: ["provider"],
-          },
-        ],
-      },
-      {
-        title: { ar: "واتساب", en: "WhatsApp" },
-        href: "/company/whatsapp",
-        aliases: ["/center/whatsapp", "/provider/whatsapp"],
-        icon: Send,
-        roles: ["provider_admin", "system_admin"],
-        workspaces: ["provider"],
-        items: [
-          {
-            title: { ar: "الرئيسية", en: "Overview" },
-            href: "/company/whatsapp",
-            aliases: ["/center/whatsapp", "/provider/whatsapp"],
-            roles: ["provider_admin", "system_admin"],
-            workspaces: ["provider"],
-          },
-          {
-            title: { ar: "الإعدادات", en: "Settings" },
-            href: "/company/whatsapp/settings",
-            aliases: ["/center/whatsapp/settings", "/provider/whatsapp/settings"],
-            roles: ["provider_admin", "system_admin"],
-            workspaces: ["provider"],
-          },
-          {
-            title: { ar: "السجل", en: "Logs" },
-            href: "/company/whatsapp/logs",
-            aliases: ["/center/whatsapp/logs", "/provider/whatsapp/logs"],
-            roles: ["provider_admin", "system_admin"],
-            workspaces: ["provider"],
-          },
-          {
-            title: { ar: "القوالب", en: "Templates" },
-            href: "/company/whatsapp/templates",
-            aliases: [
-              "/center/whatsapp/templates",
-              "/provider/whatsapp/templates",
-            ],
-            roles: ["provider_admin", "system_admin"],
             workspaces: ["provider"],
           },
         ],
@@ -1147,6 +1150,20 @@ function inferPermissionInputByHref(item: NavItem): PermissionCheckInput {
   if (href === "/system") {
     return {
       permission: PERMISSIONS.SYSTEM_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/notifications")) {
+    return {
+      anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/whatsapp")) {
+    return {
+      anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
       workspaces: ["system"],
     };
   }

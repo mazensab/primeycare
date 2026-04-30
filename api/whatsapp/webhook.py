@@ -1,7 +1,7 @@
 # ============================================================
 # 📂 api/whatsapp/webhook.py
 # Primey Care - System WhatsApp Webhook API
-# ============================================================
+# ------------------------------------------------------------
 # ✅ يدعم:
 # - Meta-style verify endpoint
 # - Internal Gateway Token Validation
@@ -10,6 +10,13 @@
 # - Baileys messages.update intake
 # - Legacy statuses intake
 # - Delegation to webhook_service Inbox Engine
+#
+# ✅ متوافق مع WhatsApp Center Core V1
+# ✅ لا يعتمد على company FK
+# ✅ يعتمد على:
+#    - scope_type
+#    - company_reference
+#    - company_name
 # ============================================================
 
 from __future__ import annotations
@@ -37,15 +44,21 @@ from whatsapp_center.webhook_service import (
 # ============================================================
 # 🔐 Security Helpers
 # ============================================================
+
 def _safe_str(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
 
 
+def _safe_dict(value: Any) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
 def _get_internal_webhook_token() -> str:
     """
     التوكن الداخلي بين Gateway و Django.
+
     أولوية القراءة:
     1) Django settings
     2) Environment variable
@@ -60,6 +73,7 @@ def _get_internal_webhook_token() -> str:
 def _is_internal_webhook_authorized(request) -> bool:
     """
     التحقق من أن الطلب قادم من الـ gateway الداخلي.
+
     يدعم:
     - Authorization: Bearer <token>
     - X-Primey-Webhook-Token: <token>
@@ -85,6 +99,7 @@ def _is_internal_webhook_authorized(request) -> bool:
 # ============================================================
 # 🔍 Verify Helpers
 # ============================================================
+
 def _get_verify_token_from_system_config() -> str:
     """
     جلب verify token من الإعدادات النشطة للنظام إن وجد.
@@ -115,16 +130,112 @@ def _get_expected_verify_token() -> str:
 # ============================================================
 # 🧠 Payload Parsing Helpers
 # ============================================================
-def _normalize_provider(provider_value: str) -> str:
+
+def _normalize_provider(provider_value: Any) -> str:
     provider = _safe_str(provider_value).lower()
 
     if provider in {"meta", "meta_cloud_api"}:
         return "META"
 
-    if provider in {"whatsapp_web_session", "web_session"}:
+    if provider in {
+        "whatsapp_web_session",
+        "web_session",
+        "baileys",
+        "baileys_gateway",
+    }:
         return "whatsapp_web_session"
 
     return _safe_str(provider_value or "META") or "META"
+
+
+def _resolve_scope_type(payload: dict[str, Any]) -> str:
+    """
+    يحدد نطاق webhook:
+    - SYSTEM افتراضيًا
+    - COMPANY عند وجود scope_type=COMPANY أو company_reference
+    """
+    raw_scope = _safe_str(payload.get("scope_type")).upper()
+    company_reference = _safe_str(
+        payload.get("company_reference")
+        or payload.get("company_id")
+        or payload.get("company_code")
+        or payload.get("tenant_reference")
+    )
+
+    if raw_scope == ScopeType.COMPANY or company_reference:
+        return ScopeType.COMPANY
+
+    return ScopeType.SYSTEM
+
+
+def _resolve_company_reference(payload: dict[str, Any]) -> str:
+    for key in [
+        "company_reference",
+        "company_id",
+        "company_code",
+        "tenant_reference",
+        "provider_id",
+        "center_id",
+    ]:
+        value = _safe_str(payload.get(key))
+        if value:
+            return value
+
+    return ""
+
+
+def _resolve_company_name(payload: dict[str, Any]) -> str:
+    for key in [
+        "company_name",
+        "company_title",
+        "tenant_name",
+        "provider_name",
+        "center_name",
+    ]:
+        value = _safe_str(payload.get(key))
+        if value:
+            return value
+
+    return ""
+
+
+def _extract_external_message_id_from_payload(payload: dict[str, Any]) -> str:
+    """
+    محاولة استخراج external_message_id للـ audit event العام.
+    هذا لا يؤثر على رسائل inbound المفصلة لأنها تعالج داخل webhook_service.
+    """
+    for key in ["external_message_id", "message_id", "id", "wamid"]:
+        value = _safe_str(payload.get(key))
+        if value:
+            return value
+
+    messages = payload.get("messages")
+    if isinstance(messages, list) and messages:
+        first = _safe_dict(messages[0])
+        for key in ["message_id", "external_message_id", "id", "key_id"]:
+            value = _safe_str(first.get(key))
+            if value:
+                return value
+
+    statuses = payload.get("statuses")
+    if isinstance(statuses, list) and statuses:
+        first = _safe_dict(statuses[0])
+        value = _safe_str(first.get("id") or first.get("message_id"))
+        if value:
+            return value
+
+    updates = payload.get("message_updates")
+    if isinstance(updates, list) and updates:
+        first = _safe_dict(updates[0])
+        value = _safe_str(
+            first.get("message_id")
+            or first.get("external_message_id")
+            or first.get("id")
+        )
+        if value:
+            return value
+
+    return ""
 
 
 def _extract_legacy_statuses(payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -137,7 +248,14 @@ def _extract_legacy_statuses(payload: dict[str, Any]) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
 
     for item in payload.get("statuses", []) or []:
-        external_message_id = _safe_str(item.get("id"))
+        if not isinstance(item, dict):
+            continue
+
+        external_message_id = _safe_str(
+            item.get("id")
+            or item.get("message_id")
+            or item.get("external_message_id")
+        )
         new_status = normalize_status_value(item.get("status"))
 
         if external_message_id and new_status:
@@ -169,6 +287,9 @@ def _extract_gateway_message_updates(payload: dict[str, Any]) -> list[dict[str, 
     normalized: list[dict[str, str]] = []
 
     for item in payload.get("message_updates", []) or []:
+        if not isinstance(item, dict):
+            continue
+
         external_message_id = _safe_str(
             item.get("message_id")
             or item.get("external_message_id")
@@ -176,12 +297,17 @@ def _extract_gateway_message_updates(payload: dict[str, Any]) -> list[dict[str, 
         )
 
         update = item.get("update", {}) or {}
+        if not isinstance(update, dict):
+            update = {}
 
         candidate_status = (
             update.get("status")
             or update.get("delivery_status")
             or update.get("ack")
             or update.get("messageStatus")
+            or item.get("status")
+            or item.get("delivery_status")
+            or item.get("ack")
         )
 
         new_status = normalize_status_value(candidate_status)
@@ -248,9 +374,33 @@ def _read_payload(request) -> dict[str, Any] | None:
     return payload
 
 
+def _json_error(message: str, status: int = 400, **extra):
+    return JsonResponse(
+        {
+            "ok": False,
+            "success": False,
+            "message": message,
+            **extra,
+        },
+        status=status,
+    )
+
+
+def _json_success(**payload):
+    return JsonResponse(
+        {
+            "ok": True,
+            "success": True,
+            **payload,
+        },
+        status=200,
+    )
+
+
 # ============================================================
 # 🌐 Verify Endpoint
 # ============================================================
+
 @require_GET
 def system_whatsapp_webhook_verify(request):
     verify_token = _safe_str(request.GET.get("hub.verify_token"))
@@ -274,52 +424,60 @@ def system_whatsapp_webhook_verify(request):
 # ============================================================
 # 📥 Webhook Receive Endpoint
 # ============================================================
+
 @csrf_exempt
 @require_POST
 def system_whatsapp_webhook_receive(request):
     if not _is_internal_webhook_authorized(request):
-        return JsonResponse(
-            {
-                "ok": False,
-                "success": False,
-                "message": "Unauthorized webhook token",
-            },
+        return _json_error(
+            "Unauthorized webhook token",
             status=401,
         )
 
     payload = _read_payload(request)
     if payload is None:
-        return JsonResponse(
-            {
-                "ok": False,
-                "success": False,
-                "message": "Invalid JSON or payload must be a JSON object",
-            },
+        return _json_error(
+            "Invalid JSON or payload must be a JSON object",
             status=400,
         )
 
     provider = _normalize_provider(payload.get("provider") or "META")
-    event_type = _safe_str(payload.get("event_type") or payload.get("event") or "provider_webhook")
+    event_type = _safe_str(
+        payload.get("event_type")
+        or payload.get("event")
+        or "provider_webhook"
+    )
+
+    scope_type = _resolve_scope_type(payload)
+    company_reference = _resolve_company_reference(payload)
+    company_name = _resolve_company_name(payload)
+
+    if scope_type == ScopeType.SYSTEM:
+        company_reference = ""
+        company_name = ""
+
+    audit_event_id = None
+    inbound_created = 0
+    inbound_skipped = 0
+    applied_status_updates = 0
 
     # --------------------------------------------------------
     # 1) Audit Store — نحفظ payload الخام كاملًا أولًا
     # --------------------------------------------------------
     try:
-        store_webhook_event(
+        audit_event = store_webhook_event(
             payload=payload,
             event_type=event_type or "provider_webhook",
-            external_message_id="",
-            scope_type=ScopeType.SYSTEM,
-            company=None,
+            external_message_id=_extract_external_message_id_from_payload(payload),
+            scope_type=scope_type,
+            company_reference=company_reference,
+            company_name=company_name,
             provider=provider,
         )
+        audit_event_id = getattr(audit_event, "id", None)
     except Exception:
         # لا نوقف المعالجة بسبب فشل الـ audit store
-        pass
-
-    inbound_created = 0
-    inbound_skipped = 0
-    applied_status_updates = 0
+        audit_event_id = None
 
     # --------------------------------------------------------
     # 2) Inbound Messages Intake + Runtime Creation
@@ -328,11 +486,13 @@ def system_whatsapp_webhook_receive(request):
         if payload.get("messages"):
             result = create_or_update_inbox_from_webhook(
                 payload=payload,
-                scope_type=ScopeType.SYSTEM,
-                company=None,
+                scope_type=scope_type,
+                company_reference=company_reference,
+                company_name=company_name,
             ) or {}
-            inbound_created = result.get("created_count", 0)
-            inbound_skipped = result.get("skipped_count", 0)
+
+            inbound_created = int(result.get("created_count", 0) or 0)
+            inbound_skipped = int(result.get("skipped_count", 0) or 0)
     except Exception:
         inbound_created = 0
         inbound_skipped = 0
@@ -345,16 +505,15 @@ def system_whatsapp_webhook_receive(request):
     except Exception:
         applied_status_updates = 0
 
-    return JsonResponse(
-        {
-            "ok": True,
-            "success": True,
-            "message": "Webhook received",
-            "event_type": event_type,
-            "provider": provider,
-            "inbound_created": inbound_created,
-            "inbound_skipped": inbound_skipped,
-            "applied_status_updates": applied_status_updates,
-        },
-        status=200,
+    return _json_success(
+        message="Webhook received",
+        event_type=event_type,
+        provider=provider,
+        scope_type=scope_type,
+        company_reference=company_reference,
+        company_name=company_name,
+        audit_event_id=audit_event_id,
+        inbound_created=inbound_created,
+        inbound_skipped=inbound_skipped,
+        applied_status_updates=applied_status_updates,
     )
