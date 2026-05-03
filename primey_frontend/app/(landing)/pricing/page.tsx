@@ -1,448 +1,414 @@
-"use client"
-
-/* =========================================================
-   📄 Mham Cloud — Landing Pricing Page
-   المسار:
-   C:\Users\mazen\primeyhrm\primey_frontend\app\(landing)\pricing\page.tsx
-   ========================================================= */
-
-import { useEffect, useMemo, useState } from "react"
-import Image from "next/image"
-import Link from "next/link"
+import { cookies } from "next/headers";
+import type { Metadata } from "next";
+import Link from "next/link";
 import {
-  Check,
-  Loader2,
-  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  HeartPulse,
+  Mail,
+  MessageCircle,
+  Phone,
+  ShieldCheck,
   Sparkles,
-  Users,
-  Building2,
-  LayoutGrid,
-} from "lucide-react"
+} from "lucide-react";
 
-import { toast } from "sonner"
-
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { ChatWidget } from "@/components/chat-widget";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { ContactSection } from "@/components/layout/sections/contact";
+import { FAQSection } from "@/components/layout/sections/faq";
+import { FooterSection } from "@/components/layout/sections/footer";
+import { NewsletterSection } from "@/components/layout/sections/newsletter";
+import { cn } from "@/lib/utils";
 
 /* =========================================================
-   🌐 API Helpers
+   🌐 Language Helpers
 ========================================================= */
-const ENV_API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? ""
+type AppLang = "ar" | "en";
 
-function buildApiUrl(path: string): string {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`
+function normalizeLang(value?: string | null): AppLang {
+  const normalized = (value || "").trim().toLowerCase();
 
-  if (ENV_API_BASE) {
-    return `${ENV_API_BASE}${normalizedPath}`
+  if (
+    normalized === "ar" ||
+    normalized.startsWith("ar-") ||
+    normalized.startsWith("ar_")
+  ) {
+    return "ar";
   }
 
-  if (typeof window !== "undefined") {
-    return `${window.location.origin}${normalizedPath}`
+  return "en";
+}
+
+async function getPageLang(): Promise<AppLang> {
+  const cookieStore = await cookies();
+
+  const cookieLang =
+    cookieStore.get("lang")?.value ||
+    cookieStore.get("locale")?.value ||
+    cookieStore.get("NEXT_LOCALE")?.value;
+
+  return normalizeLang(cookieLang);
+}
+
+/* =========================================================
+   🧾 Metadata
+========================================================= */
+export async function generateMetadata(): Promise<Metadata> {
+  const lang = await getPageLang();
+  const isArabic = lang === "ar";
+
+  const title = isArabic
+    ? "تواصل مع Primey Care | استفسر عن البطاقات والمزايا"
+    : "Contact Primey Care | Ask About Cards and Benefits";
+
+  const description = isArabic
+    ? "تواصل مع Primey Care للاستفسار عن بطاقات وبرامج الرعاية الصحية، المزايا الطبية، الشبكة المشاركة، وخطوات الاشتراك."
+    : "Contact Primey Care to ask about healthcare cards, medical benefits, participating providers, and subscription steps.";
+
+  return {
+    title,
+    description,
+    keywords: isArabic
+      ? [
+          "تواصل Primey Care",
+          "برايمي كير",
+          "استفسار بطاقة رعاية صحية",
+          "بطاقة خصم طبي",
+          "مزايا طبية",
+          "الشبكة الطبية",
+          "اشتراك Primey Care",
+        ]
+      : [
+          "Contact Primey Care",
+          "Primey Care support",
+          "healthcare card inquiry",
+          "medical benefits",
+          "medical discount card",
+          "healthcare network",
+          "Primey Care subscription",
+        ],
+    alternates: {
+      canonical: "/contact",
+      languages: {
+        ar: "/contact",
+        en: "/contact",
+      },
+    },
+    openGraph: {
+      type: "website",
+      title,
+      description,
+      siteName: "Primey Care",
+      locale: isArabic ? "ar_SA" : "en_US",
+      images: [
+        {
+          url: "/seo.jpg",
+          width: 1200,
+          height: 630,
+          alt: isArabic ? "تواصل مع Primey Care" : "Contact Primey Care",
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: ["/seo.jpg"],
+    },
+  };
+}
+
+/* =========================================================
+   📝 Localized Content
+========================================================= */
+const content = {
+  ar: {
+    badge: "تواصل مع Primey Care",
+    title: "نساعدك تختار البطاقة أو البرنامج الأنسب لك",
+    description:
+      "لديك سؤال عن المزايا، الشبكة الطبية، الاشتراك، أو البرامج الصحية؟ أرسل استفسارك وسنساعدك في معرفة الخيار المناسب لك ولعائلتك.",
+    primaryButton: "أرسل طلب اشتراك",
+    secondaryButton: "عرض الاشتراكات",
+    note:
+      "Primey Care ليست تأمينًا طبيًا، بل بطاقة وبرامج مزايا وخصومات طبية لدى مزودي خدمة مشاركين.",
+    cards: [
+      {
+        title: "استفسار عن المزايا",
+        description:
+          "اعرف الخدمات الطبية التي يمكن أن تشملها البطاقة أو البرنامج حسب احتياجك.",
+      },
+      {
+        title: "معرفة الشبكة الطبية",
+        description:
+          "اسأل عن مقدمي الخدمة والمراكز المشاركة حسب المدينة أو نوع الخدمة.",
+      },
+      {
+        title: "مساعدة في الاختيار",
+        description:
+          "نساعدك في تحديد ما إذا كانت البطاقة الفردية أو العائلية أو البرنامج المتخصص هو الأنسب.",
+      },
+    ],
+    quickLinksTitle: "روابط قد تهمك",
+    quickLinks: [
+      {
+        label: "المزايا",
+        href: "/#benefits",
+      },
+      {
+        label: "الخدمات الصحية",
+        href: "/#features",
+      },
+      {
+        label: "الاشتراكات",
+        href: "/pricing",
+      },
+      {
+        label: "الأسئلة الشائعة",
+        href: "/#faq",
+      },
+    ],
+  },
+  en: {
+    badge: "Contact Primey Care",
+    title: "We help you choose the right card or program",
+    description:
+      "Have a question about benefits, providers, subscriptions, or healthcare programs? Send your inquiry and we will help you find the right option for you and your family.",
+    primaryButton: "Send Subscription Request",
+    secondaryButton: "View Subscriptions",
+    note:
+      "Primey Care is not medical insurance. It is a healthcare benefits and discount card through participating providers.",
+    cards: [
+      {
+        title: "Ask About Benefits",
+        description:
+          "Learn what healthcare services may be included in the card or program based on your needs.",
+      },
+      {
+        title: "Check Provider Network",
+        description:
+          "Ask about participating providers and centers by city or service type.",
+      },
+      {
+        title: "Get Help Choosing",
+        description:
+          "We help you decide whether an individual card, family card, or specialized program is the right fit.",
+      },
+    ],
+    quickLinksTitle: "Useful Links",
+    quickLinks: [
+      {
+        label: "Benefits",
+        href: "/#benefits",
+      },
+      {
+        label: "Healthcare Services",
+        href: "/#features",
+      },
+      {
+        label: "Subscriptions",
+        href: "/pricing",
+      },
+      {
+        label: "FAQ",
+        href: "/#faq",
+      },
+    ],
+  },
+} satisfies Record<
+  AppLang,
+  {
+    badge: string;
+    title: string;
+    description: string;
+    primaryButton: string;
+    secondaryButton: string;
+    note: string;
+    cards: Array<{
+      title: string;
+      description: string;
+    }>;
+    quickLinksTitle: string;
+    quickLinks: Array<{
+      label: string;
+      href: string;
+    }>;
   }
-
-  return normalizedPath
-}
+>;
 
 /* =========================================================
-   🧩 Types
+   🧩 Page
 ========================================================= */
+export default async function LandingContactPage() {
+  const lang = await getPageLang();
+  const isArabic = lang === "ar";
+  const dir = isArabic ? "rtl" : "ltr";
+  const t = content[lang];
 
-type BillingMode = "monthly" | "yearly"
+  const ArrowIcon = isArabic ? ChevronLeft : ChevronRight;
 
-interface Plan {
-  id: number
-  name: string
-  description: string
-  price_monthly: number | null
-  price_yearly: number | null
-  max_companies: number | null
-  max_employees: number | null
-  is_active: boolean
-  apps: string[]
-}
-
-interface PlansResponse {
-  plans: Plan[]
-}
-
-/* =========================================================
-   🔧 Helpers
-========================================================= */
-
-function normalizeApps(apps: unknown): string[] {
-  if (!Array.isArray(apps)) return []
-
-  return apps
-    .map((item) => String(item).trim())
-    .filter(Boolean)
-}
-
-function normalizeNumber(value: unknown): number {
-  if (typeof value === "number" && !Number.isNaN(value)) {
-    return value
-  }
-
-  const parsed = Number(value ?? 0)
-  return Number.isNaN(parsed) ? 0 : parsed
-}
-
-function formatNumber(value: number | null | undefined): string {
-  const safeValue = normalizeNumber(value)
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(safeValue)
-}
-
-function formatPrice(value: number | null | undefined): string {
-  const safeValue = normalizeNumber(value)
-
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(safeValue)
-}
-
-function prettifyAppName(app: string): string {
-  return app
-    .replace(/_/g, " ")
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase())
-}
-
-/* =========================================================
-   🎨 Page
-========================================================= */
-
-export default function LandingPricingPage() {
-  const [plans, setPlans] = useState<Plan[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState("")
-  const [billingMode, setBillingMode] = useState<BillingMode>("monthly")
-
-  useEffect(() => {
-    let isMounted = true
-
-    async function fetchPlans() {
-      try {
-        setLoading(true)
-        setError("")
-
-        const res = await fetch(buildApiUrl("/api/system/plans/"), {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-          },
-          cache: "no-store",
-        })
-
-        if (!res.ok) {
-          throw new Error(`Failed to fetch plans: ${res.status}`)
-        }
-
-        const data: PlansResponse = await res.json()
-
-        const normalizedPlans: Plan[] = Array.isArray(data?.plans)
-          ? data.plans
-              .filter((plan) => plan?.is_active !== false)
-              .map((plan) => ({
-                id: normalizeNumber(plan.id),
-                name: String(plan.name || "Plan"),
-                description: String(plan.description || ""),
-                price_monthly: normalizeNumber(plan.price_monthly),
-                price_yearly: normalizeNumber(plan.price_yearly),
-                max_companies: normalizeNumber(plan.max_companies),
-                max_employees: normalizeNumber(plan.max_employees),
-                is_active: Boolean(plan.is_active),
-                apps: normalizeApps(plan.apps),
-              }))
-          : []
-
-        if (!isMounted) return
-
-        setPlans(normalizedPlans)
-      } catch (err) {
-        console.error("Pricing plans fetch error:", err)
-
-        if (!isMounted) return
-
-        setError("تعذر تحميل الباقات الحالية من النظام")
-        toast.error("تعذر تحميل الباقات الحالية")
-      } finally {
-        if (isMounted) {
-          setLoading(false)
-        }
-      }
-    }
-
-    fetchPlans()
-
-    return () => {
-      isMounted = false
-    }
-  }, [])
-
-  const sortedPlans = useMemo(() => {
-    return [...plans].sort((a, b) => {
-      const aPrice =
-        billingMode === "monthly"
-          ? normalizeNumber(a.price_monthly)
-          : normalizeNumber(a.price_yearly)
-
-      const bPrice =
-        billingMode === "monthly"
-          ? normalizeNumber(b.price_monthly)
-          : normalizeNumber(b.price_yearly)
-
-      return aPrice - bPrice
-    })
-  }, [plans, billingMode])
-
-  const popularPlanId = useMemo(() => {
-    if (sortedPlans.length === 0) return null
-    if (sortedPlans.length < 3) {
-      return sortedPlans[1]?.id ?? sortedPlans[0]?.id ?? null
-    }
-
-    return sortedPlans[Math.floor(sortedPlans.length / 2)]?.id ?? null
-  }, [sortedPlans])
+  const cardIcons = [MessageCircle, Phone, HeartPulse];
 
   return (
-    <main className="relative min-h-screen bg-background">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute left-1/2 top-0 h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
-        <div className="absolute bottom-0 left-0 h-[280px] w-[280px] rounded-full bg-emerald-500/10 blur-3xl" />
-        <div className="absolute right-0 top-1/3 h-[260px] w-[260px] rounded-full bg-sky-500/10 blur-3xl" />
-      </div>
-
-      <section className="relative container mx-auto px-4 py-16 md:px-6 md:py-24">
-        <div className="mx-auto mb-12 max-w-3xl text-center">
-          <Badge className="mb-4 rounded-full px-4 py-1.5 text-sm">
-            Pricing Plans
-          </Badge>
-
-          <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
-            اختر الباقة المناسبة لأعمالك
-          </h1>
-
-          <p className="mt-4 text-base text-muted-foreground md:text-lg">
-            جميع الباقات المعروضة هنا يتم جلبها مباشرة من النظام الفعلي،
-            وتُعرض فقط الباقات النشطة الجاهزة للاشتراك.
-          </p>
+    <main lang={lang} dir={dir} className="relative min-h-screen w-full">
+      <section className="relative overflow-hidden">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute left-1/2 top-0 h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
+          <div className="absolute bottom-0 left-0 h-[280px] w-[280px] rounded-full bg-emerald-500/10 blur-3xl" />
+          <div className="absolute right-0 top-1/3 h-[260px] w-[260px] rounded-full bg-sky-500/10 blur-3xl" />
         </div>
 
-        <div className="mb-10 flex justify-center">
-          <div className="inline-flex rounded-2xl border bg-background/80 p-1 shadow-sm backdrop-blur">
-            <button
-              type="button"
-              onClick={() => setBillingMode("monthly")}
-              className={[
-                "rounded-xl px-5 py-2.5 text-sm font-medium transition-all",
-                billingMode === "monthly"
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              ].join(" ")}
+        <div className="container relative mx-auto px-4 py-16 md:px-6 md:py-24">
+          <div className="mx-auto max-w-4xl text-center">
+            <Badge
+              variant="outline"
+              className="mb-5 rounded-full bg-background/70 px-4 py-2 text-sm backdrop-blur"
             >
-              Monthly
-            </button>
+              <Sparkles className="size-4 text-primary" />
+              {t.badge}
+            </Badge>
 
-            <button
-              type="button"
-              onClick={() => setBillingMode("yearly")}
-              className={[
-                "rounded-xl px-5 py-2.5 text-sm font-medium transition-all",
-                billingMode === "yearly"
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              ].join(" ")}
+            <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
+              {t.title}
+            </h1>
+
+            <p className="text-muted-foreground mx-auto mt-5 max-w-3xl text-base leading-8 md:text-lg">
+              {t.description}
+            </p>
+
+            <div
+              className={cn(
+                "mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row!",
+                isArabic && "sm:flex-row-reverse!"
+              )}
             >
-              Annually
-            </button>
-          </div>
-        </div>
+              <Button asChild size="lg" className="rounded-2xl px-8">
+                <Link href="/register">
+                  {t.primaryButton}
+                  <ArrowIcon className="size-4" />
+                </Link>
+              </Button>
 
-        {loading && (
-          <div className="flex min-h-[280px] items-center justify-center">
-            <div className="flex items-center gap-3 rounded-2xl border bg-background/80 px-6 py-4 shadow-sm backdrop-blur">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <span className="text-sm font-medium">جاري تحميل الباقات...</span>
+              <Button
+                asChild
+                size="lg"
+                variant="outline"
+                className="rounded-2xl px-8"
+              >
+                <Link href="/pricing">{t.secondaryButton}</Link>
+              </Button>
+            </div>
+
+            <div className="mx-auto mt-6 max-w-3xl rounded-2xl border bg-background/70 px-5 py-4 text-sm leading-7 text-muted-foreground backdrop-blur">
+              <div
+                className={cn(
+                  "flex items-start justify-center gap-2",
+                  isArabic && "flex-row-reverse text-right"
+                )}
+              >
+                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
+                <span>{t.note}</span>
+              </div>
             </div>
           </div>
-        )}
 
-        {!loading && error && (
-          <Card className="mx-auto max-w-2xl rounded-3xl border-destructive/20">
-            <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-              <AlertCircle className="h-10 w-10 text-destructive" />
-              <h2 className="text-xl font-semibold">تعذر تحميل الباقات</h2>
-              <p className="text-muted-foreground">{error}</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {!loading && !error && sortedPlans.length === 0 && (
-          <Card className="mx-auto max-w-2xl rounded-3xl">
-            <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-              <Sparkles className="h-10 w-10 text-primary" />
-              <h2 className="text-xl font-semibold">لا توجد باقات نشطة حاليًا</h2>
-              <p className="text-muted-foreground">
-                عند تفعيل الباقات من لوحة النظام ستظهر هنا تلقائيًا.
-              </p>
-            </CardContent>
-          </Card>
-        )}
-
-        {!loading && !error && sortedPlans.length > 0 && (
-          <div className="grid gap-6 lg:grid-cols-3">
-            {sortedPlans.map((plan) => {
-              const isPopular = plan.id === popularPlanId
-              const currentPrice =
-                billingMode === "monthly"
-                  ? plan.price_monthly
-                  : plan.price_yearly
-
-              const hasDiscount =
-                normalizeNumber(plan.price_monthly) > 0 &&
-                normalizeNumber(plan.price_yearly) > 0 &&
-                normalizeNumber(plan.price_yearly) <
-                  normalizeNumber(plan.price_monthly) * 12
+          <div className="mx-auto mt-12 grid max-w-6xl gap-6 md:grid-cols-3">
+            {t.cards.map((card, index) => {
+              const Icon = cardIcons[index] ?? MessageCircle;
 
               return (
                 <Card
-                  key={plan.id}
-                  className={[
-                    "relative overflow-hidden rounded-3xl border bg-background/80 shadow-sm backdrop-blur transition-all duration-300 hover:-translate-y-1 hover:shadow-xl",
-                    isPopular
-                      ? "border-primary shadow-lg ring-1 ring-primary/20"
-                      : "",
-                  ].join(" ")}
+                  key={card.title}
+                  className="bg-background/75 shadow-sm backdrop-blur"
                 >
-                  {isPopular && (
-                    <div className="absolute right-4 top-4">
-                      <Badge className="rounded-full px-3 py-1">
-                        Most Popular
-                      </Badge>
-                    </div>
-                  )}
-
-                  <CardHeader className="pb-4">
-                    <CardTitle className="text-2xl font-bold">
-                      {plan.name}
-                    </CardTitle>
-
-                    <CardDescription className="min-h-[48px] text-sm leading-6">
-                      {plan.description || "Mham Cloud subscription plan"}
-                    </CardDescription>
-
-                    <div className="pt-4">
-                      <div className="flex items-end gap-2">
-                        <div className="flex items-center gap-2">
-                          <Image
-                            src="/currency/sar.svg"
-                            alt="SAR"
-                            width={26}
-                            height={26}
-                            className="h-6 w-6"
-                          />
-                          <span className="text-5xl font-bold tracking-tight">
-                            {formatPrice(currentPrice)}
-                          </span>
-                        </div>
-
-                        <span className="pb-1 text-base text-muted-foreground">
-                          /{billingMode === "monthly" ? "month" : "year"}
-                        </span>
-                      </div>
-
-                      {billingMode === "yearly" && hasDiscount && (
-                        <p className="mt-2 text-sm font-medium text-emerald-600">
-                          وفر أكثر عند الاشتراك السنوي
-                        </p>
+                  <CardContent className="p-6">
+                    <div
+                      className={cn(
+                        "mb-5 flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary ring-8 ring-primary/5",
+                        isArabic && "mr-auto"
                       )}
-                    </div>
-                  </CardHeader>
-
-                  <CardContent className="space-y-6">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-2xl border bg-muted/40 p-4">
-                        <div className="mb-2 flex items-center gap-2 text-muted-foreground">
-                          <Building2 className="h-4 w-4" />
-                          <span className="text-xs font-medium">
-                            Max Companies
-                          </span>
-                        </div>
-                        <p className="text-lg font-semibold">
-                          {formatNumber(plan.max_companies)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-2xl border bg-muted/40 p-4">
-                        <div className="mb-2 flex items-center gap-2 text-muted-foreground">
-                          <Users className="h-4 w-4" />
-                          <span className="text-xs font-medium">
-                            Max Employees
-                          </span>
-                        </div>
-                        <p className="text-lg font-semibold">
-                          {formatNumber(plan.max_employees)}
-                        </p>
-                      </div>
+                    >
+                      <Icon className="size-5" />
                     </div>
 
-                    <div>
-                      <div className="mb-3 flex items-center gap-2">
-                        <LayoutGrid className="h-4 w-4 text-primary" />
-                        <h3 className="text-sm font-semibold">
-                          Included Apps
-                        </h3>
-                      </div>
+                    <h2
+                      className={cn(
+                        "text-lg font-bold",
+                        isArabic && "text-right"
+                      )}
+                    >
+                      {card.title}
+                    </h2>
 
-                      <div className="space-y-3">
-                        {plan.apps.length > 0 ? (
-                          plan.apps.map((app, index) => (
-                            <div
-                              key={`${plan.id}-${app}-${index}`}
-                              className="flex items-start gap-3"
-                            >
-                              <div className="mt-0.5 rounded-full bg-primary/10 p-1 text-primary">
-                                <Check className="h-3.5 w-3.5" />
-                              </div>
-                              <span className="text-sm text-muted-foreground">
-                                {prettifyAppName(app)}
-                              </span>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-sm text-muted-foreground">
-                            No apps listed for this plan.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="pt-2">
-                      <Button
-                        asChild
-                        className="h-11 w-full rounded-2xl text-sm font-semibold"
-                        variant={isPopular ? "default" : "outline"}
-                      >
-                        <Link href="/register">Get Started</Link>
-                      </Button>
-                    </div>
+                    <p
+                      className={cn(
+                        "text-muted-foreground mt-3 leading-7",
+                        isArabic && "text-right"
+                      )}
+                    >
+                      {card.description}
+                    </p>
                   </CardContent>
                 </Card>
-              )
+              );
             })}
           </div>
-        )}
+
+          <div className="mx-auto mt-10 max-w-5xl rounded-3xl border bg-muted/40 p-5 backdrop-blur">
+            <div
+              className={cn(
+                "flex flex-col gap-4 md:flex-row md:items-center md:justify-between",
+                isArabic && "md:flex-row-reverse"
+              )}
+            >
+              <h2
+                className={cn(
+                  "flex items-center gap-2 text-base font-bold",
+                  isArabic && "flex-row-reverse text-right"
+                )}
+              >
+                <Mail className="size-4 text-primary" />
+                {t.quickLinksTitle}
+              </h2>
+
+              <div
+                className={cn(
+                  "flex flex-wrap gap-3",
+                  isArabic && "justify-end"
+                )}
+              >
+                {t.quickLinks.map((link) => (
+                  <Button
+                    key={link.href}
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl bg-background/70"
+                  >
+                    <Link href={link.href}>{link.label}</Link>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
+
+      {/* نموذج التواصل الرئيسي */}
+      <ContactSection />
+
+      {/* الأسئلة الشائعة */}
+      <FAQSection />
+
+      {/* العروض والتحديثات */}
+      <NewsletterSection />
+
+      {/* الفوتر */}
+      <FooterSection />
+
+      {/* الدعم العائم */}
+      <ChatWidget />
     </main>
-  )
+  );
 }

@@ -1,8 +1,8 @@
 import { cookies } from "next/headers";
 import type { Metadata } from "next";
 
+import { ChatWidget } from "@/components/chat-widget";
 import { BenefitsSection } from "@/components/layout/sections/benefits";
-import { CommunitySection } from "@/components/layout/sections/community";
 import { ContactSection } from "@/components/layout/sections/contact";
 import { FAQSection } from "@/components/layout/sections/faq";
 import { FeaturesSection } from "@/components/layout/sections/features";
@@ -12,7 +12,6 @@ import { NewsletterSection } from "@/components/layout/sections/newsletter";
 import { PricingSection } from "@/components/layout/sections/pricing";
 import { ServicesSection } from "@/components/layout/sections/services";
 import { SponsorsSection } from "@/components/layout/sections/sponsors";
-import { TeamSection } from "@/components/layout/sections/team";
 import { TestimonialSection } from "@/components/layout/sections/testimonial";
 
 /* =========================================================
@@ -57,24 +56,57 @@ export async function generateMetadata(): Promise<Metadata> {
   const isArabic = lang === "ar";
 
   const title = isArabic
-    ? "Mham Cloud منصة احترافية لإدارة الحسابات و الفاتورة الألكترونية و الموارد البشرية"
-    : "Mham Cloud — Smart Cloud HR Management Platform";
+    ? "Primey Care | بطاقة وبرامج رعاية صحية بخصومات طبية"
+    : "Primey Care | Healthcare Cards and Medical Benefits";
 
   const description = isArabic
-    ? "Mham Cloud منصة احترافية لإدارة الحسابات و الفاتورة الألكترونية و الموارد البشرية، الحضور، الرواتب، الإجازات، والأداء ضمن تجربة SaaS حديثة ومتعددة اللغات."
-    : "Mham Cloud is a professional SaaS platform for HR, attendance, payroll, leave management, and performance with a modern multilingual experience.";
+    ? "Primey Care بطاقة وبرامج رعاية صحية تمنحك مزايا وخصومات طبية مختارة على الكشف، التحاليل، الأشعة، الأسنان، الجلدية، التجميل، الولادة وخدمات صحية متنوعة لدى مزودي خدمة مشاركين."
+    : "Primey Care offers healthcare cards and programs with selected medical benefits and discounts on consultations, lab tests, scans, dental care, dermatology, beauty, maternity, and other healthcare services through participating providers.";
 
   const imageAlt = isArabic
-    ? "Mham Cloud Landing Page"
-    : "Mham Cloud Landing Page";
+    ? "Primey Care بطاقة وبرامج رعاية صحية"
+    : "Primey Care healthcare cards and programs";
 
   return {
     title,
     description,
+    keywords: isArabic
+      ? [
+          "Primey Care",
+          "برايمي كير",
+          "بطاقة رعاية صحية",
+          "خصومات طبية",
+          "بطاقة خصم طبي",
+          "برامج صحية",
+          "خصومات أسنان",
+          "خصومات تحاليل",
+          "خصومات جلدية وتجميل",
+          "رعاية صحية",
+        ]
+      : [
+          "Primey Care",
+          "healthcare card",
+          "medical discount card",
+          "healthcare benefits",
+          "medical programs",
+          "dental discounts",
+          "lab test discounts",
+          "dermatology discounts",
+          "family healthcare card",
+        ],
+    alternates: {
+      canonical: "/",
+      languages: {
+        ar: "/",
+        en: "/",
+      },
+    },
     openGraph: {
       type: "website",
       title,
       description,
+      siteName: "Primey Care",
+      locale: isArabic ? "ar_SA" : "en_US",
       images: [
         {
           url: "/seo.jpg",
@@ -94,27 +126,83 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /* =========================================================
-   🏠 Home Page
+   🧩 Structured Data
+========================================================= */
+function buildStructuredData(lang: AppLang) {
+  const isArabic = lang === "ar";
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "Primey Care",
+    url: "/",
+    logo: "/hero logo.png",
+    description: isArabic
+      ? "Primey Care بطاقة وبرامج رعاية صحية تمنح العملاء مزايا وخصومات طبية مختارة لدى مزودي خدمة مشاركين."
+      : "Primey Care offers healthcare cards and programs with selected medical benefits through participating providers.",
+    sameAs: [
+      "https://www.facebook.com/mhamcloud",
+      "https://www.instagram.com/mhamcloud",
+      "https://twitter.com/mhamcloud",
+      "https://www.youtube.com/@mhamcloud",
+      "https://in.linkedin.com/company/mhamcloud",
+    ],
+  };
+}
+
+/* =========================================================
+   🏠 Landing Home Page
 ========================================================= */
 export default async function Home() {
   const lang = await getPageLang();
   const dir = getPageDirection(lang);
+  const structuredData = buildStructuredData(lang);
 
   return (
     <main lang={lang} dir={dir} className="w-full" suppressHydrationWarning>
+      <script
+        type="application/ld+json"
+        suppressHydrationWarning
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(structuredData),
+        }}
+      />
+
+      {/* الصفحة الرئيسية */}
       <HeroSection />
+
+      {/* التخصصات والشبكة الطبية */}
       <SponsorsSection />
+
+      {/* لماذا Primey Care؟ */}
       <BenefitsSection />
+
+      {/* الخدمات الصحية والمزايا */}
       <FeaturesSection />
+
+      {/* البطاقات والبرامج */}
       <ServicesSection />
-      <TestimonialSection />
-      <TeamSection />
+
+      {/* الاشتراكات */}
       <PricingSection />
-      <CommunitySection />
+
+      {/* تجارب العملاء */}
+      <TestimonialSection />
+
+      {/* التواصل */}
       <ContactSection />
+
+      {/* الأسئلة الشائعة */}
       <FAQSection />
+
+      {/* العروض والتحديثات */}
       <NewsletterSection />
+
+      {/* الفوتر */}
       <FooterSection />
+
+      {/* الدعم العائم */}
+      <ChatWidget />
     </main>
   );
 }

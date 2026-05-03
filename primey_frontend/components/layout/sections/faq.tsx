@@ -36,9 +36,12 @@ async function getPageLang(): Promise<AppLang> {
   const cookieLang =
     cookieStore.get("lang")?.value ||
     cookieStore.get("locale")?.value ||
-    cookieStore.get("NEXT_LOCALE")?.value;
+    cookieStore.get("NEXT_LOCALE")?.value ||
+    "";
 
-  return cookieLang === "ar" ? "ar" : "en";
+  const normalizedLang = cookieLang.toLowerCase();
+
+  return normalizedLang.startsWith("ar") ? "ar" : "en";
 }
 
 /* =========================================================
@@ -47,63 +50,73 @@ async function getPageLang(): Promise<AppLang> {
 const faqContent: Record<AppLang, FAQContent> = {
   ar: {
     subTitle: "الأسئلة الشائعة",
-    title: "الأسئلة الأكثر شيوعًا",
+    title: "كل ما تحتاج معرفته قبل الاشتراك",
     items: [
       {
-        question: "ما الذي يميز منصتكم عن الحلول الأخرى؟",
+        question: "هل Primey Care تأمين طبي؟",
         answer:
-          "نقدم تجربة حديثة وسهلة الاستخدام تجمع بين الأداء العالي، التصميم الاحترافي، والمرونة التي تحتاجها الشركات للنمو وإدارة أعمالها بكفاءة.",
+          "لا، Primey Care ليست تأمينًا طبيًا ولا تغني عن التأمين الصحي. هي بطاقة وبرامج مزايا وخصومات طبية تساعدك على الاستفادة من عروض وأسعار مخفضة لدى مزودي خدمة مشاركين حسب الشروط المتاحة.",
       },
       {
-        question: "هل يمكنني البدء بسرعة دون خبرة تقنية كبيرة؟",
+        question: "كيف أستفيد من بطاقة Primey Care؟",
         answer:
-          "نعم، تم تصميم المنصة لتكون سهلة الاستخدام وسريعة الإعداد، بحيث تتمكن من البدء والاستفادة منها دون تعقيد تقني.",
+          "بعد الاشتراك وتفعيل البطاقة أو البرنامج، يمكنك استخدام بيانات عضويتك لدى مقدم الخدمة المشارك للاستفادة من الخصم أو الميزة المتاحة حسب نوع الخدمة وشروط العرض.",
       },
       {
-        question: "هل المنصة مناسبة للشركات الصغيرة والمتوسطة؟",
+        question: "هل الخصومات ثابتة على جميع الخدمات؟",
         answer:
-          "بالتأكيد، المنصة مناسبة للشركات الصغيرة والمتوسطة، كما أنها قابلة للتوسع لدعم احتياجات الأعمال الأكبر مستقبلًا.",
+          "تختلف الخصومات والمزايا حسب مقدم الخدمة، نوع الخدمة، المدينة، البرنامج المختار، والعرض المتاح وقت الاستخدام. لذلك ننصح دائمًا بمراجعة تفاصيل الميزة قبل زيارة مقدم الخدمة.",
       },
       {
-        question: "هل يتوفر دعم فني عند الحاجة؟",
+        question: "هل البطاقة مناسبة للأفراد والعائلات؟",
         answer:
-          "نعم، نوفر دعمًا فنيًا لمساعدتك في الاستفسارات، حل المشكلات، وضمان تجربة تشغيل مستقرة وسلسة.",
+          "نعم، Primey Care توفر خيارات مناسبة للأفراد والعائلات حسب نوع البطاقة أو البرنامج. بعض الخيارات قد تكون فردية، وبعضها قد يدعم أكثر من مستفيد وفق شروط الاشتراك.",
       },
       {
-        question: "هل يمكن تخصيص المنصة حسب احتياجات العمل؟",
+        question: "ما نوع الخدمات التي يمكن أن تشملها المزايا؟",
         answer:
-          "نعم، توفر المنصة مرونة عالية تسمح بتكييفها مع متطلبات العمل المختلفة وسير الإجراءات داخل شركتك.",
+          "يمكن أن تشمل المزايا الكشف والاستشارات، التحاليل، الأشعة، الأسنان، الجلدية، التجميل، النساء والولادة، الفحوصات الدورية، وبعض الخدمات الصحية المختارة حسب الشبكة والبرنامج.",
+      },
+      {
+        question: "كيف أعرف المراكز أو مقدمي الخدمة المشاركين؟",
+        answer:
+          "يمكنك معرفة الشبكة الطبية والمراكز المشاركة من خلال قنوات Primey Care المعتمدة، أو عبر التواصل معنا قبل الاشتراك للتأكد من توفر الخدمة أو العرض المناسب في مدينتك.",
       },
     ],
   },
   en: {
     subTitle: "FAQS",
-    title: "Common Questions",
+    title: "Everything You Need to Know Before Joining",
     items: [
       {
-        question: "What makes your platform different from other solutions?",
+        question: "Is Primey Care medical insurance?",
         answer:
-          "We provide a modern, easy-to-use experience that combines strong performance, professional design, and the flexibility businesses need to grow efficiently.",
+          "No. Primey Care is not medical insurance and does not replace health insurance. It is a healthcare benefits and discount card that helps you access selected offers and reduced prices through participating providers, subject to available terms.",
       },
       {
-        question: "Can I get started quickly without deep technical experience?",
+        question: "How do I use my Primey Care card?",
         answer:
-          "Yes, the platform is designed to be easy to use and quick to set up, so you can start benefiting from it without technical complexity.",
+          "After subscribing and activating your card or program, you can use your membership details at a participating provider to access the available discount or benefit according to the service type and offer terms.",
       },
       {
-        question: "Is the platform suitable for small and medium-sized businesses?",
+        question: "Are discounts fixed across all services?",
         answer:
-          "Absolutely. The platform works well for small and medium-sized businesses and can scale to support larger operations over time.",
+          "Discounts and benefits may vary depending on the provider, service type, city, selected program, and available offer at the time of use. We recommend checking the benefit details before visiting the provider.",
       },
       {
-        question: "Is technical support available when needed?",
+        question: "Is the card suitable for individuals and families?",
         answer:
-          "Yes, we provide technical support to help with questions, resolve issues, and ensure a smooth and stable experience.",
+          "Yes. Primey Care offers options for individuals and families depending on the card or program type. Some options may be individual, while others may support more than one beneficiary according to subscription terms.",
       },
       {
-        question: "Can the platform be customized to fit our business needs?",
+        question: "What services can the benefits include?",
         answer:
-          "Yes, the platform offers strong flexibility that allows it to adapt to different business requirements and internal workflows.",
+          "Benefits may include consultations, lab tests, scans, dental care, dermatology, beauty services, maternity, routine checkups, and selected healthcare services depending on the network and program.",
+      },
+      {
+        question: "How can I know the participating providers?",
+        answer:
+          "You can check the healthcare network and participating providers through Primey Care’s approved channels, or contact us before subscribing to confirm the right service or offer in your city.",
       },
     ],
   },
@@ -118,7 +131,7 @@ export const FAQSection = async () => {
   const t = faqContent[lang];
 
   return (
-    <SectionContainer>
+    <SectionContainer id="faq">
       <div dir={isArabic ? "rtl" : "ltr"}>
         <SectionHeader subTitle={t.subTitle} title={t.title} />
 
@@ -140,7 +153,7 @@ export const FAQSection = async () => {
 
                   <AccordionContent
                     className={cn(
-                      "text-base text-muted-foreground",
+                      "text-base text-muted-foreground leading-7",
                       isArabic && "text-right"
                     )}
                   >

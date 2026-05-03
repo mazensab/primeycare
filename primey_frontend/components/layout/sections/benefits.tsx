@@ -33,9 +33,12 @@ async function getPageLang(): Promise<AppLang> {
   const cookieLang =
     cookieStore.get("lang")?.value ||
     cookieStore.get("locale")?.value ||
-    cookieStore.get("NEXT_LOCALE")?.value;
+    cookieStore.get("NEXT_LOCALE")?.value ||
+    "";
 
-  return cookieLang === "ar" ? "ar" : "en";
+  const normalizedLang = cookieLang.toLowerCase();
+
+  return normalizedLang.startsWith("ar") ? "ar" : "en";
 }
 
 /* =========================================================
@@ -43,58 +46,58 @@ async function getPageLang(): Promise<AppLang> {
 ========================================================= */
 const benefitsContent: Record<AppLang, BenefitsContent> = {
   ar: {
-    subTitle: "المزايا",
-    title: "ماذا نقدم لك؟",
+    subTitle: "لماذا Primey Care؟",
+    title: "مزايا صحية تساعدك أنت وعائلتك على التوفير",
     description:
-      "كل الحلول الذكية والمبتكرة التي تحتاجها لتنمية أعمالك موجودة هنا. نحن نضيف قيمة حقيقية لأعمالك من خلال مزايا تبسّط سير العمل، وترفع الكفاءة، وتدعم قراراتك بثقة.",
+      "Primey Care تمنحك طريقة أسهل للاستفادة من خدمات طبية متنوعة بخصومات مختارة، عبر بطاقة وبرامج رعاية مصممة لتجعل الوصول إلى الرعاية الصحية أوضح وأقرب وأقل تكلفة.",
     items: [
       {
-        title: "تحسين الكفاءة التشغيلية",
+        title: "وفّر في كل زيارة",
         description:
-          "نساعدك على تبسيط العمليات اليومية وتقليل الأعمال اليدوية المكررة حتى يعمل فريقك بسرعة ودقة أكبر.",
+          "استفد من خصومات مختارة على الكشف، التحاليل، الأشعة، الأسنان، الجلدية، التجميل، الولادة وخدمات طبية أخرى حسب مقدم الخدمة والعرض المتاح.",
       },
       {
-        title: "اتخاذ قرارات أفضل",
+        title: "بطاقة سهلة الاستخدام",
         description:
-          "من خلال الرؤى الذكية والتقارير الواضحة، يمكنك متابعة الأداء واتخاذ قرارات مبنية على بيانات فعلية.",
+          "اشترك في البطاقة أو البرنامج المناسب، ثم استخدم بيانات عضويتك لدى مزودي الخدمة المشاركين للاستفادة من المزايا المتاحة بكل سهولة.",
       },
       {
-        title: "تجربة عمل أكثر سلاسة",
+        title: "شبكة طبية مختارة",
         description:
-          "نوفر لك أدوات حديثة وسهلة الاستخدام تجعل إدارة الأعمال أكثر تنظيمًا ومرونة وراحة لفريقك.",
+          "نوفر لك وصولًا إلى مجموعة من العيادات والمراكز والمستشفيات ومقدمي الخدمات الصحية المشاركين لتلبية احتياجاتك واحتياجات عائلتك.",
       },
       {
-        title: "نمو قابل للتوسع",
+        title: "خيارات تناسب احتياجك",
         description:
-          "حلولنا مصممة لتدعم تطور أعمالك وتساعدك على التوسع بثبات دون تعقيد أو فوضى تشغيلية.",
+          "سواء كنت تبحث عن بطاقة رعاية سنوية أو برنامج طبي محدد للأسنان أو الفحوصات أو التجميل أو الولادة، ستجد خيارات مرنة تساعدك على اختيار الأنسب.",
       },
     ],
   },
   en: {
-    subTitle: "Benefits",
-    title: "What Do We Bring to You?",
+    subTitle: "Why Primey Care?",
+    title: "Healthcare benefits that help you and your family save",
     description:
-      "All the innovative solutions you need to grow your business are here. We add value to your business with features that simplify your workflow, increase efficiency, and strengthen your decisions.",
+      "Primey Care gives you an easier way to access a wide range of healthcare services with selected discounts through care cards and programs designed to make healthcare clearer, closer, and more affordable.",
     items: [
       {
-        title: "Operational Efficiency",
+        title: "Save on Every Visit",
         description:
-          "We help you streamline daily operations and reduce repetitive manual work so your team can move faster and more accurately.",
+          "Enjoy selected discounts on consultations, lab tests, scans, dental care, dermatology, beauty, maternity, and other healthcare services depending on the provider and available offer.",
       },
       {
-        title: "Smarter Decision Making",
+        title: "Easy-to-Use Card",
         description:
-          "With clear insights and intelligent reporting, you can track performance and make decisions based on real data.",
+          "Subscribe to the card or program that fits your needs, then use your membership details at participating providers to access available benefits with ease.",
       },
       {
-        title: "Smoother Work Experience",
+        title: "Selected Healthcare Network",
         description:
-          "We provide modern, easy-to-use tools that make business management more organized, flexible, and comfortable for your team.",
+          "Get access to a network of participating clinics, medical centers, hospitals, and healthcare providers that support your needs and your family’s needs.",
       },
       {
-        title: "Scalable Growth",
+        title: "Options That Fit Your Needs",
         description:
-          "Our solutions are built to support your business growth and help you scale confidently without operational complexity.",
+          "Whether you need an annual care card or a specific healthcare program for dental care, checkups, beauty, or maternity, Primey Care offers flexible options to choose from.",
       },
     ],
   },
@@ -131,25 +134,33 @@ export const BenefitsSection = async () => {
               <Card
                 key={title}
                 className={cn("group/number bg-background lg:sticky")}
-                style={{ top: `${20 + index + 2}rem` }}>
+                style={{ top: `${20 + index + 2}rem` }}
+              >
                 <CardHeader>
                   <div className="flex justify-between">
                     <Icon
                       name={icon}
                       className="text-primary bg-primary/20 ring-primary/10 mb-6 size-10 rounded-full p-2 ring-8"
                     />
+
                     <span className="text-muted-foreground/15 group-hover/number:text-muted-foreground/30 text-5xl font-bold transition-all delay-75">
                       0{index + 1}
                     </span>
                   </div>
 
-                  <CardTitle className={cn("text-lg", isArabic && "text-right")}>
+                  <CardTitle
+                    className={cn("text-lg", isArabic && "text-right")}
+                  >
                     {translatedItem?.title || title}
                   </CardTitle>
                 </CardHeader>
 
                 <CardContent
-                  className={cn("text-muted-foreground", isArabic && "text-right")}>
+                  className={cn(
+                    "text-muted-foreground leading-7",
+                    isArabic && "text-right"
+                  )}
+                >
                   {translatedItem?.description || ""}
                 </CardContent>
               </Card>

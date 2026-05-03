@@ -52,78 +52,78 @@ function getCurrentLang(): AppLang {
 ========================================================= */
 const content: Record<AppLang, FeaturesContent> = {
   ar: {
-    subTitle: "المميزات",
-    title: "كل ما تحتاجه للنجاح",
+    subTitle: "مزايا البطاقة",
+    title: "خدمات صحية متنوعة بخصومات أقرب لك",
     description:
-      "توفر منصتنا المتكاملة جميع الأدوات التي تحتاجها لتحسين موقعك، رفع الأداء، وتعزيز تجربة المستخدم بشكل احترافي.",
+      "تمنحك Primey Care مزايا مختارة على مجموعة واسعة من الخدمات الطبية اليومية والمتخصصة، لتجعل الوصول إلى الرعاية الصحية أسهل وأوضح لك ولعائلتك.",
     items: [
       {
-        title: "تحليلات ذكية",
+        title: "الكشف والاستشارات",
         description:
-          "احصل على رؤى واضحة تساعدك على فهم الأداء واتخاذ قرارات مبنية على البيانات بثقة أكبر.",
+          "استفد من خصومات على الكشف والاستشارات الطبية لدى عيادات ومراكز مختارة في تخصصات متعددة حسب الشبكة المتاحة.",
       },
       {
-        title: "أداء أعلى",
+        title: "التحاليل والمختبرات",
         description:
-          "حسّن سرعة وكفاءة تجربتك الرقمية من خلال أدوات مصممة لرفع الأداء وتقليل التعقيد.",
+          "احصل على مزايا وخصومات على التحاليل الطبية والفحوصات المخبرية الأساسية والدورية لدى مزودي خدمة مشاركين.",
       },
       {
-        title: "تجربة مستخدم أفضل",
+        title: "الأشعة والفحوصات",
         description:
-          "قدّم تجربة أكثر سلاسة وتنظيمًا لعملائك وفريقك عبر واجهات حديثة وسهلة الاستخدام.",
+          "استفد من عروض مختارة على خدمات الأشعة والفحوصات التشخيصية، بما يساعدك على متابعة صحتك بتكلفة أوضح.",
       },
       {
-        title: "مرونة في التوسع",
+        title: "الأسنان والعناية بالفم",
         description:
-          "ابدأ بسهولة وتوسع مع نمو أعمالك دون الحاجة إلى إعادة بناء تدفقاتك من الصفر.",
+          "خصومات على الكشف، التنظيف، الحشوات، التقويم وبعض خدمات الأسنان الأخرى حسب مقدم الخدمة والعرض المتاح.",
       },
       {
-        title: "إدارة مركزية",
+        title: "الجلدية والتجميل",
         description:
-          "تحكم في العمليات والبيانات والأدوات من مكان واحد يسهّل المتابعة والإدارة اليومية.",
+          "مزايا على خدمات الجلدية، العناية بالبشرة، الجلسات التجميلية، والإجراءات المختارة لدى مزودي خدمة معتمدين.",
       },
       {
-        title: "تكامل سلس",
+        title: "الولادة والبرامج الصحية",
         description:
-          "اربط منصتك مع الأدوات والأنظمة التي تحتاجها لتبسيط العمل وتحقيق أعلى إنتاجية.",
+          "برامج وخيارات مساندة للمتابعة، الفحوصات، الولادة، والخدمات الصحية المتخصصة حسب الباقات المتاحة.",
       },
     ],
   },
   en: {
-    subTitle: "Features",
-    title: "Everything You Need to Succeed",
+    subTitle: "Card Benefits",
+    title: "Healthcare services with savings closer to you",
     description:
-      "Our comprehensive platform provides all the tools you need to optimize your website, boost performance, and enhance user experience.",
+      "Primey Care gives you selected benefits across everyday and specialized healthcare services, making access to care easier and clearer for you and your family.",
     items: [
       {
-        title: "Smart Analytics",
+        title: "Consultations & Checkups",
         description:
-          "Get clear insights that help you understand performance and make confident, data-driven decisions.",
+          "Enjoy selected discounts on medical consultations and checkups at participating clinics and centers across multiple specialties.",
       },
       {
-        title: "Higher Performance",
+        title: "Lab Tests",
         description:
-          "Improve speed and operational efficiency with tools designed to boost performance and reduce complexity.",
+          "Get benefits on medical lab tests, routine screenings, and essential diagnostics through participating healthcare providers.",
       },
       {
-        title: "Better User Experience",
+        title: "Scans & Diagnostics",
         description:
-          "Deliver a smoother and more organized experience for both your customers and your internal team.",
+          "Access selected offers on scans and diagnostic services to help you follow up on your health with clearer costs.",
       },
       {
-        title: "Scalable Flexibility",
+        title: "Dental Care",
         description:
-          "Start simply and scale as your business grows without rebuilding your workflows from scratch.",
+          "Save on dental consultations, cleaning, fillings, orthodontics, and selected dental services depending on the provider and available offer.",
       },
       {
-        title: "Centralized Management",
+        title: "Dermatology & Beauty",
         description:
-          "Manage operations, data, and tools from one place to simplify oversight and daily administration.",
+          "Enjoy benefits on dermatology, skincare, beauty sessions, and selected procedures through approved healthcare providers.",
       },
       {
-        title: "Seamless Integration",
+        title: "Maternity & Care Programs",
         description:
-          "Connect your platform with the tools and systems you need to streamline work and maximize productivity.",
+          "Explore supportive programs for follow-ups, tests, maternity, and specialized healthcare needs depending on available packages.",
       },
     ],
   },
@@ -186,13 +186,15 @@ export const FeaturesSection = () => {
                 )}
               >
                 <div className="space-y-4">
-                  <CardTitle className={cn("text-lg", isArabic && "text-right")}>
+                  <CardTitle
+                    className={cn("text-lg", isArabic && "text-right")}
+                  >
                     {translatedItem?.title || card.title}
                   </CardTitle>
 
                   <p
                     className={cn(
-                      "text-muted-foreground font-normal",
+                      "text-muted-foreground font-normal leading-7",
                       isArabic && "text-right"
                     )}
                   >

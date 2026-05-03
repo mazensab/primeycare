@@ -1,10 +1,11 @@
 "use client";
 
-import Image from "next/image";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
-
+import Image from "next/image";
+import Link from "next/link";
+import { ChevronLeft, ChevronRight, MessageCircle } from "lucide-react";
 import { motion } from "motion/react";
+
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -14,10 +15,11 @@ import { cn } from "@/lib/utils";
 type AppLang = "ar" | "en";
 
 type PricingCtaContent = {
+  eyebrow: string;
   title: string;
   description: string;
-  scheduleDemo: string;
-  startTrial: string;
+  askButton: string;
+  joinButton: string;
   imageAlt: string;
 };
 
@@ -26,20 +28,22 @@ type PricingCtaContent = {
 ========================================================= */
 const content: Record<AppLang, PricingCtaContent> = {
   ar: {
-    title: "هل أنت مستعد لتحويل موقعك إلى تجربة أقوى؟",
+    eyebrow: "ابدأ الآن",
+    title: "رعاية صحية أوفر وأسهل لك ولعائلتك",
     description:
-      "انضم إلى آلاف العملاء الراضين الذين حسّنوا مواقعهم ورفعوا معدلات التحويل باستخدام منصة Metro المدعومة بالذكاء الاصطناعي.",
-    scheduleDemo: "احجز عرضًا تجريبيًا",
-    startTrial: "ابدأ التجربة المجانية",
-    imageAlt: "صورة توضيحية للمنصة",
+      "اختر بطاقة أو برنامج Primey Care المناسب لك، واستفد من مزايا وخصومات طبية مختارة لدى مزودي خدمة مشاركين بطريقة سهلة وواضحة.",
+    askButton: "استفسر عن المزايا",
+    joinButton: "اشترك الآن",
+    imageAlt: "بطاقة Primey Care ومزايا الرعاية الصحية",
   },
   en: {
-    title: "Ready to Transform Your Website?",
+    eyebrow: "Get Started",
+    title: "Smarter and more affordable care for you and your family",
     description:
-      "Join thousands of satisfied customers who have optimized their websites and boosted conversions with Metro's AI-powered platform.",
-    scheduleDemo: "Schedule a Demo",
-    startTrial: "Start Free Trial",
-    imageAlt: "shadcn landing page",
+      "Choose the Primey Care card or program that fits your needs and enjoy selected healthcare benefits and discounts through participating providers with a clear and easy experience.",
+    askButton: "Ask About Benefits",
+    joinButton: "Join Now",
+    imageAlt: "Primey Care card and healthcare benefits",
   },
 };
 
@@ -105,11 +109,17 @@ export function PricingCtaSection() {
             isArabic && "lg:text-right"
           )}
         >
+          <div className="flex">
+            <span className="bg-primary/10 text-primary inline-flex items-center rounded-full px-3 py-1 text-sm font-medium">
+              {t.eyebrow}
+            </span>
+          </div>
+
           <h2 className="text-2xl font-bold tracking-tight md:text-3xl">
             {t.title}
           </h2>
 
-          <p className="text-muted-foreground md:text-lg">
+          <p className="text-muted-foreground leading-7 md:text-lg">
             {t.description}
           </p>
 
@@ -119,11 +129,18 @@ export function PricingCtaSection() {
               isArabic && "sm:flex-row-reverse!"
             )}
           >
-            <Button variant="outline">{t.scheduleDemo}</Button>
+            <Button asChild variant="outline">
+              <Link href="/contact" className="gap-2">
+                <MessageCircle className="size-4" />
+                {t.askButton}
+              </Link>
+            </Button>
 
-            <Button className="gap-2">
-              {t.startTrial}
-              {isArabic ? <ChevronLeft /> : <ChevronRight />}
+            <Button asChild className="gap-2">
+              <Link href="/register">
+                {t.joinButton}
+                {isArabic ? <ChevronLeft /> : <ChevronRight />}
+              </Link>
             </Button>
           </div>
         </motion.div>
@@ -131,7 +148,10 @@ export function PricingCtaSection() {
         <figure className="relative h-75 w-full lg:mt-10">
           <Image
             fill
-            className="bottom-0 self-end object-cover lg:rounded-tl-lg"
+            className={cn(
+              "bottom-0 self-end object-cover",
+              isArabic ? "lg:rounded-tr-lg" : "lg:rounded-tl-lg"
+            )}
             src="/hero.png"
             alt={t.imageAlt}
             unoptimized

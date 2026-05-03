@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Building2, Clock, Mail, Phone } from "lucide-react";
+import { Clock, Mail, MapPin, MessageCircle, Phone } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -47,13 +47,16 @@ function buildApiUrl(path: string): string {
   return normalizedPath;
 }
 
+/* =========================================================
+   🧩 Types
+========================================================= */
 const SUBJECT_OPTIONS = [
-  "Sales Inquiry",
-  "Demo Request",
-  "Technical Support",
-  "Billing & Subscription",
-  "Partnership",
-  "General Inquiry",
+  "Join Primey Care",
+  "Ask About Benefits",
+  "Healthcare Network",
+  "Family Card",
+  "Medical Programs",
+  "Customer Support",
 ] as const;
 
 type AppLang = "ar" | "en";
@@ -78,6 +81,8 @@ type ContactContent = {
     locationValue: string;
     phoneLabel: string;
     phoneValue: string;
+    whatsappLabel: string;
+    whatsappValue: string;
     emailLabel: string;
     emailValue: string;
     businessHoursLabel: string;
@@ -115,38 +120,43 @@ type ContactContent = {
   subjects: Record<SubjectOption, string>;
 };
 
+/* =========================================================
+   📝 Localized Content
+========================================================= */
 const content: Record<AppLang, ContactContent> = {
   ar: {
     section: {
       subTitle: "تواصل معنا",
-      title: "ابقَ على اتصال معنا",
+      title: "هل تريد معرفة البطاقة أو البرنامج الأنسب لك؟",
       description:
-        "ابقَ على تواصل معنا للحصول على التحديثات، الدعم، والرؤى المفيدة. نحن هنا لمساعدتك في كل خطوة.",
+        "أرسل لنا استفسارك وسنساعدك في اختيار بطاقة أو برنامج Primey Care المناسب لك ولعائلتك، مع توضيح المزايا والشبكة الطبية المتاحة حسب احتياجك.",
     },
     contactInfo: {
       locationLabel: "الموقع:",
-      locationValue:
-        "Madina 2809 Al-Jumah, Prince Abdul Mohsen bin Abdul Aziz, 42316",
+      locationValue: "المملكة العربية السعودية",
       phoneLabel: "اتصل بنا:",
       phoneValue: "00966 (50) 526-3775",
-      emailLabel: "راسلنا:",
+      whatsappLabel: "واتساب:",
+      whatsappValue: "تواصل سريع للاستفسار عن المزايا والاشتراك",
+      emailLabel: "البريد الإلكتروني:",
       emailValue: "info@mhamcloud.sa",
-      businessHoursLabel: "ساعات العمل:",
-      businessHoursValue: "من الثلاثاء إلى السبت، 9 صباحًا - 5 مساءً",
+      businessHoursLabel: "ساعات التواصل:",
+      businessHoursValue: "من السبت إلى الخميس، 9 صباحًا - 5 مساءً",
     },
     form: {
-      cardTitle: "إرسال رسالة",
+      cardTitle: "أرسل استفسارك",
       firstName: "الاسم الأول",
       lastName: "اسم العائلة",
       email: "البريد الإلكتروني",
-      subject: "الموضوع",
+      subject: "نوع الاستفسار",
       message: "الرسالة",
       firstNamePlaceholder: "مازن",
       lastNamePlaceholder: "العتيبي",
-      emailPlaceholder: "info@example.com",
-      subjectPlaceholder: "اختر الموضوع",
-      messagePlaceholder: "اكتب رسالتك هنا...",
-      submit: "إرسال الرسالة",
+      emailPlaceholder: "name@example.com",
+      subjectPlaceholder: "اختر نوع الاستفسار",
+      messagePlaceholder:
+        "اكتب استفسارك هنا، مثل المدينة، نوع البطاقة، أو الخدمة الطبية التي تريد معرفة مزاياها...",
+      submit: "إرسال الاستفسار",
       submitting: "جارٍ الإرسال...",
     },
     validation: {
@@ -154,55 +164,57 @@ const content: Record<AppLang, ContactContent> = {
       lastNameRequired: "اسم العائلة مطلوب",
       tooLong: "النص طويل جدًا",
       invalidEmail: "البريد الإلكتروني غير صالح",
-      selectSubject: "يرجى اختيار الموضوع",
+      selectSubject: "يرجى اختيار نوع الاستفسار",
       messageTooShort: "الرسالة قصيرة جدًا",
       messageTooLong: "الرسالة طويلة جدًا",
     },
     toast: {
-      success: "تم إرسال رسالتك بنجاح.",
-      errorDefault: "حدث خطأ أثناء إرسال رسالتك.",
-      sendFailed: "تعذر إرسال الرسالة",
+      success: "تم إرسال استفسارك بنجاح.",
+      errorDefault: "حدث خطأ أثناء إرسال الاستفسار.",
+      sendFailed: "تعذر إرسال الاستفسار",
     },
     subjects: {
-      "Sales Inquiry": "استفسار مبيعات",
-      "Demo Request": "طلب عرض تجريبي",
-      "Technical Support": "الدعم الفني",
-      "Billing & Subscription": "الفوترة والاشتراك",
-      Partnership: "شراكة",
-      "General Inquiry": "استفسار عام",
+      "Join Primey Care": "الاشتراك في Primey Care",
+      "Ask About Benefits": "الاستفسار عن المزايا",
+      "Healthcare Network": "الشبكة الطبية والمراكز المشاركة",
+      "Family Card": "البطاقة العائلية",
+      "Medical Programs": "البرامج الطبية",
+      "Customer Support": "الدعم والمساعدة",
     },
   },
   en: {
     section: {
       subTitle: "Contact",
-      title: "Get Connect With Us access",
+      title: "Need help choosing the right card or program?",
       description:
-        "Stay in touch with us for updates, support, and valuable insights. We’re here to help you every step of the way!",
+        "Send us your inquiry and we will help you choose the Primey Care card or program that fits you and your family, with clear details about benefits and available healthcare providers.",
     },
     contactInfo: {
       locationLabel: "Location:",
-      locationValue:
-        "Madina 2809 Al-Jumah, Prince Abdul Mohsen bin Abdul Aziz, 42316",
+      locationValue: "Saudi Arabia",
       phoneLabel: "Call us:",
-      phoneValue: "+9 (665) 526-3775",
-      emailLabel: "Email us:",
+      phoneValue: "+966 (50) 526-3775",
+      whatsappLabel: "WhatsApp:",
+      whatsappValue: "Quick support for benefits and subscription inquiries",
+      emailLabel: "Email:",
       emailValue: "info@mhamcloud.sa",
-      businessHoursLabel: "Business Hours:",
+      businessHoursLabel: "Contact Hours:",
       businessHoursValue: "Saturday to Thursday, 9 AM - 5 PM",
     },
     form: {
-      cardTitle: "Send Message",
-      firstName: "Firstname",
-      lastName: "Lastname",
+      cardTitle: "Send Your Inquiry",
+      firstName: "First Name",
+      lastName: "Last Name",
       email: "Email",
-      subject: "Subject",
+      subject: "Inquiry Type",
       message: "Message",
-      firstNamePlaceholder: "Leopoldo",
-      lastNamePlaceholder: "Miranda",
-      emailPlaceholder: "contact@mhamcloud.com",
-      subjectPlaceholder: "Select a subject",
-      messagePlaceholder: "Your message...",
-      submit: "Send message",
+      firstNamePlaceholder: "First name",
+      lastNamePlaceholder: "Last name",
+      emailPlaceholder: "name@example.com",
+      subjectPlaceholder: "Select inquiry type",
+      messagePlaceholder:
+        "Write your inquiry here, such as your city, preferred card type, or the healthcare service you want to know about...",
+      submit: "Send Inquiry",
       submitting: "Sending...",
     },
     validation: {
@@ -210,26 +222,29 @@ const content: Record<AppLang, ContactContent> = {
       lastNameRequired: "Last name is required",
       tooLong: "Too long",
       invalidEmail: "Invalid email address",
-      selectSubject: "Please select a subject",
+      selectSubject: "Please select an inquiry type",
       messageTooShort: "Message is too short",
       messageTooLong: "Message is too long",
     },
     toast: {
-      success: "Message sent successfully.",
-      errorDefault: "Something went wrong while sending your message.",
-      sendFailed: "Failed to send message",
+      success: "Your inquiry has been sent successfully.",
+      errorDefault: "Something went wrong while sending your inquiry.",
+      sendFailed: "Failed to send inquiry",
     },
     subjects: {
-      "Sales Inquiry": "Sales Inquiry",
-      "Demo Request": "Demo Request",
-      "Technical Support": "Technical Support",
-      "Billing & Subscription": "Billing & Subscription",
-      Partnership: "Partnership",
-      "General Inquiry": "General Inquiry",
+      "Join Primey Care": "Join Primey Care",
+      "Ask About Benefits": "Ask About Benefits",
+      "Healthcare Network": "Healthcare Network",
+      "Family Card": "Family Card",
+      "Medical Programs": "Medical Programs",
+      "Customer Support": "Customer Support",
     },
   },
 };
 
+/* =========================================================
+   🍪 Language Helpers
+========================================================= */
 function getCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
 
@@ -248,6 +263,9 @@ function getCurrentLang(): AppLang {
   return "en";
 }
 
+/* =========================================================
+   ✅ Validation
+========================================================= */
 function createFormSchema(t: ContactContent) {
   return z.object({
     firstName: z
@@ -272,6 +290,9 @@ function createFormSchema(t: ContactContent) {
   });
 }
 
+/* =========================================================
+   🧩 Section
+========================================================= */
 export const ContactSection = () => {
   const [lang, setLang] = useState<AppLang>("en");
   const [mounted, setMounted] = useState(false);
@@ -279,6 +300,7 @@ export const ContactSection = () => {
 
   useEffect(() => {
     const nextLang = getCurrentLang();
+
     setLang(nextLang);
     setMounted(true);
 
@@ -335,6 +357,7 @@ export const ContactSection = () => {
           email: values.email,
           subject: values.subject,
           message: values.message,
+          source: "primey_care_landing",
         }),
       });
 
@@ -382,12 +405,13 @@ export const ContactSection = () => {
                     isArabic && "flex-row-reverse justify-end text-right"
                   )}
                 >
-                  <Building2 className="size-4 shrink-0" />
+                  <MapPin className="size-4 shrink-0" />
                   <div className="font-bold">{t.contactInfo.locationLabel}</div>
                 </div>
+
                 <div
                   className={cn(
-                    "text-muted-foreground",
+                    "text-muted-foreground leading-7",
                     isArabic && "text-right"
                   )}
                 >
@@ -405,7 +429,9 @@ export const ContactSection = () => {
                   <Phone className="size-4 shrink-0" />
                   <div className="font-bold">{t.contactInfo.phoneLabel}</div>
                 </div>
+
                 <div
+                  dir="ltr"
                   className={cn(
                     "text-muted-foreground",
                     isArabic && "text-right"
@@ -422,10 +448,35 @@ export const ContactSection = () => {
                     isArabic && "flex-row-reverse justify-end text-right"
                   )}
                 >
+                  <MessageCircle className="size-4 shrink-0" />
+                  <div className="font-bold">
+                    {t.contactInfo.whatsappLabel}
+                  </div>
+                </div>
+
+                <div
+                  className={cn(
+                    "text-muted-foreground leading-7",
+                    isArabic && "text-right"
+                  )}
+                >
+                  {t.contactInfo.whatsappValue}
+                </div>
+              </div>
+
+              <div className="bg-muted">
+                <div
+                  className={cn(
+                    "mb-4 flex items-center gap-3",
+                    isArabic && "flex-row-reverse justify-end text-right"
+                  )}
+                >
                   <Mail className="size-4 shrink-0" />
                   <div className="font-bold">{t.contactInfo.emailLabel}</div>
                 </div>
+
                 <div
+                  dir="ltr"
                   className={cn(
                     "text-muted-foreground",
                     isArabic && "text-right"
@@ -447,9 +498,10 @@ export const ContactSection = () => {
                     {t.contactInfo.businessHoursLabel}
                   </div>
                 </div>
+
                 <div
                   className={cn(
-                    "text-muted-foreground",
+                    "text-muted-foreground leading-7",
                     isArabic && "text-right"
                   )}
                 >
@@ -472,7 +524,12 @@ export const ContactSection = () => {
                   onSubmit={form.handleSubmit(onSubmit)}
                   className="grid w-full gap-6"
                 >
-                  <div className="flex flex-col gap-6 md:flex-row">
+                  <div
+                    className={cn(
+                      "flex flex-col gap-6 md:flex-row",
+                      isArabic && "md:flex-row-reverse"
+                    )}
+                  >
                     <FormField
                       control={form.control}
                       name="firstName"
@@ -486,6 +543,7 @@ export const ContactSection = () => {
                           >
                             {t.form.firstName}
                           </FormLabel>
+
                           <FormControl>
                             <Input
                               placeholder={t.form.firstNamePlaceholder}
@@ -494,6 +552,7 @@ export const ContactSection = () => {
                               {...field}
                             />
                           </FormControl>
+
                           {fieldState.error && (
                             <p
                               className={cn(
@@ -521,6 +580,7 @@ export const ContactSection = () => {
                           >
                             {t.form.lastName}
                           </FormLabel>
+
                           <FormControl>
                             <Input
                               placeholder={t.form.lastNamePlaceholder}
@@ -529,6 +589,7 @@ export const ContactSection = () => {
                               {...field}
                             />
                           </FormControl>
+
                           {fieldState.error && (
                             <p
                               className={cn(
@@ -544,130 +605,139 @@ export const ContactSection = () => {
                     />
                   </div>
 
-                  <div className="flex flex-col gap-1.5">
-                    <FormField
-                      control={form.control}
-                      name="email"
-                      render={({ field, fieldState }) => (
-                        <FormItem className="gap-4">
-                          <FormLabel
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field, fieldState }) => (
+                      <FormItem className="gap-4">
+                        <FormLabel
+                          className={cn(
+                            "font-semibold",
+                            isArabic && "text-right"
+                          )}
+                        >
+                          {t.form.email}
+                        </FormLabel>
+
+                        <FormControl>
+                          <Input
+                            type="email"
+                            placeholder={t.form.emailPlaceholder}
+                            dir="ltr"
+                            className="text-left"
+                            {...field}
+                          />
+                        </FormControl>
+
+                        {fieldState.error && (
+                          <p
                             className={cn(
-                              "font-semibold",
+                              "text-sm text-red-500",
                               isArabic && "text-right"
                             )}
                           >
-                            {t.form.email}
-                          </FormLabel>
+                            {fieldState.error.message}
+                          </p>
+                        )}
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="subject"
+                    render={({ field, fieldState }) => (
+                      <FormItem className="gap-4">
+                        <FormLabel
+                          className={cn(
+                            "font-semibold",
+                            isArabic && "text-right"
+                          )}
+                        >
+                          {t.form.subject}
+                        </FormLabel>
+
+                        <Select
+                          value={field.value}
+                          onValueChange={field.onChange}
+                          dir={dir}
+                        >
                           <FormControl>
-                            <Input
-                              type="email"
-                              placeholder={t.form.emailPlaceholder}
-                              dir="ltr"
-                              className={cn(isArabic && "text-left")}
-                              {...field}
-                            />
-                          </FormControl>
-                          {fieldState.error && (
-                            <p
+                            <SelectTrigger
                               className={cn(
-                                "text-sm text-red-500",
+                                "w-full",
                                 isArabic && "text-right"
                               )}
                             >
-                              {fieldState.error.message}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
-                  </div>
+                              <SelectValue
+                                placeholder={t.form.subjectPlaceholder}
+                              />
+                            </SelectTrigger>
+                          </FormControl>
 
-                  <div className="flex flex-col gap-1.5">
-                    <FormField
-                      control={form.control}
-                      name="subject"
-                      render={({ field, fieldState }) => (
-                        <FormItem className="gap-4">
-                          <FormLabel
+                          <SelectContent>
+                            {SUBJECT_OPTIONS.map((option) => (
+                              <SelectItem key={option} value={option}>
+                                {t.subjects[option]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        {fieldState.error && (
+                          <p
                             className={cn(
-                              "font-semibold",
+                              "text-sm text-red-500",
                               isArabic && "text-right"
                             )}
                           >
-                            {t.form.subject}
-                          </FormLabel>
+                            {fieldState.error.message}
+                          </p>
+                        )}
+                      </FormItem>
+                    )}
+                  />
 
-                          <Select value={field.value} onValueChange={field.onChange}>
-                            <FormControl>
-                              <SelectTrigger className="w-full">
-                                <SelectValue placeholder={t.form.subjectPlaceholder} />
-                              </SelectTrigger>
-                            </FormControl>
-
-                            <SelectContent>
-                              {SUBJECT_OPTIONS.map((option) => (
-                                <SelectItem key={option} value={option}>
-                                  {t.subjects[option]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-
-                          {fieldState.error && (
-                            <p
-                              className={cn(
-                                "text-sm text-red-500",
-                                isArabic && "text-right"
-                              )}
-                            >
-                              {fieldState.error.message}
-                            </p>
+                  <FormField
+                    control={form.control}
+                    name="message"
+                    render={({ field, fieldState }) => (
+                      <FormItem className="gap-4">
+                        <FormLabel
+                          className={cn(
+                            "font-semibold",
+                            isArabic && "text-right"
                           )}
-                        </FormItem>
-                      )}
-                    />
-                  </div>
+                        >
+                          {t.form.message}
+                        </FormLabel>
 
-                  <div className="flex flex-col gap-1.5">
-                    <FormField
-                      control={form.control}
-                      name="message"
-                      render={({ field, fieldState }) => (
-                        <FormItem className="gap-4">
-                          <FormLabel
+                        <FormControl>
+                          <Textarea
+                            rows={5}
+                            placeholder={t.form.messagePlaceholder}
                             className={cn(
-                              "font-semibold",
+                              "resize-none",
+                              isArabic && "text-right"
+                            )}
+                            dir={isArabic ? "rtl" : "ltr"}
+                            {...field}
+                          />
+                        </FormControl>
+
+                        {fieldState.error && (
+                          <p
+                            className={cn(
+                              "text-sm text-red-500",
                               isArabic && "text-right"
                             )}
                           >
-                            {t.form.message}
-                          </FormLabel>
-                          <FormControl>
-                            <Textarea
-                              rows={5}
-                              placeholder={t.form.messagePlaceholder}
-                              className={cn(
-                                "resize-none",
-                                isArabic && "text-right"
-                              )}
-                              dir={isArabic ? "rtl" : "ltr"}
-                              {...field}
-                            />
-                          </FormControl>
-                          {fieldState.error && (
-                            <p
-                              className={cn(
-                                "text-sm text-red-500",
-                                isArabic && "text-right"
-                              )}
-                            >
-                              {fieldState.error.message}
-                            </p>
-                          )}
-                        </FormItem>
-                      )}
-                    />
-                  </div>
+                            {fieldState.error.message}
+                          </p>
+                        )}
+                      </FormItem>
+                    )}
+                  />
 
                   <Button size="lg" type="submit" disabled={isSubmitting}>
                     {isSubmitting ? t.form.submitting : t.form.submit}

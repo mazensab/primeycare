@@ -28,9 +28,12 @@ async function getPageLang(): Promise<AppLang> {
   const cookieLang =
     cookieStore.get("lang")?.value ||
     cookieStore.get("locale")?.value ||
-    cookieStore.get("NEXT_LOCALE")?.value;
+    cookieStore.get("NEXT_LOCALE")?.value ||
+    "";
 
-  return cookieLang === "ar" ? "ar" : "en";
+  const normalizedLang = cookieLang.toLowerCase();
+
+  return normalizedLang.startsWith("ar") ? "ar" : "en";
 }
 
 /* =========================================================
@@ -38,21 +41,21 @@ async function getPageLang(): Promise<AppLang> {
 ========================================================= */
 const content: Record<AppLang, NewsletterContent> = {
   ar: {
-    titleStart: "انضم إلى",
-    titleHighlight: "نشرتنا اليومية",
+    titleStart: "كن أول من يعرف",
+    titleHighlight: "عروض الرعاية الصحية",
     description:
-      "اشترك ليصلك آخر التحديثات، والرؤى المهمة، والعروض الحصرية مباشرة إلى بريدك الإلكتروني.",
-    emailPlaceholder: "contact@bundui.com",
+      "اشترك ليصلك جديد مزايا Primey Care، والعروض الطبية، والبرامج الصحية المختارة للأفراد والعائلات.",
+    emailPlaceholder: "name@example.com",
     emailAriaLabel: "البريد الإلكتروني",
-    buttonText: "اشتراك",
+    buttonText: "اشترك الآن",
   },
   en: {
-    titleStart: "Join Our Daily",
-    titleHighlight: "Newsletter",
+    titleStart: "Be the first to know about",
+    titleHighlight: "healthcare offers",
     description:
-      "Subscribe to receive the latest updates, insights, and exclusive offers directly to your inbox.",
-    emailPlaceholder: "contact@bundui.com",
-    emailAriaLabel: "email",
+      "Subscribe to receive Primey Care updates, medical offers, and selected healthcare programs for individuals and families.",
+    emailPlaceholder: "name@example.com",
+    emailAriaLabel: "Email address",
     buttonText: "Subscribe",
   },
 };
@@ -82,12 +85,14 @@ export async function NewsletterSection() {
 
         <form className="mx-auto flex w-full flex-col gap-4 md:w-6/12 md:flex-row md:gap-2 lg:w-4/12">
           <Input
+            type="email"
             placeholder={t.emailPlaceholder}
             className="bg-muted/50 dark:bg-muted/80"
             aria-label={t.emailAriaLabel}
             dir="ltr"
           />
-          <Button>{t.buttonText}</Button>
+
+          <Button type="submit">{t.buttonText}</Button>
         </form>
       </div>
     </SectionContainer>

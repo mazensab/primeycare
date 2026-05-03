@@ -21,25 +21,33 @@ type AppLang = "ar" | "en";
 
 type FooterContent = {
   description: string;
+  disclaimer: string;
   groups: {
-    contact: string;
-    platforms: string;
-    help: string;
+    explore: string;
+    programs: string;
+    support: string;
     socials: string;
   };
   links: {
+    benefits: string;
+    features: string;
+    pricing: string;
+    register: string;
+    annualCard: string;
+    dentalProgram: string;
+    checkupsProgram: string;
+    beautyProgram: string;
+    contactUs: string;
+    faq: string;
+    network: string;
+    offers: string;
     facebook: string;
     twitter: string;
     instagram: string;
-    ios: string;
-    android: string;
-    web: string;
-    contactUs: string;
-    faq: string;
-    feedback: string;
     youtube: string;
     linkedin: string;
   };
+  copyright: string;
   logoAlt: string;
 };
 
@@ -80,51 +88,69 @@ const SOCIAL_LINKS = {
 const content: Record<AppLang, FooterContent> = {
   ar: {
     description:
-      "تعرّف على حلّنا السحابي المدعوم بالذكاء الاصطناعي لتخفيف عبء العمل، ورفع الكفاءة، ومساعدتك على اتخاذ قرارات أكثر دقة.",
+      "Primey Care بطاقة وبرامج رعاية صحية تمنحك مزايا وخصومات طبية مختارة على خدمات متنوعة لدى مزودي خدمة مشاركين، بطريقة سهلة وواضحة لك ولعائلتك.",
+    disclaimer:
+      "تنبيه: Primey Care ليست تأمينًا طبيًا ولا تغني عن التأمين الصحي. تختلف المزايا والخصومات حسب مقدم الخدمة، المدينة، نوع البرنامج، وشروط العرض المتاحة.",
     groups: {
-      contact: "التواصل",
-      platforms: "المنصات",
-      help: "المساعدة",
-      socials: "الشبكات الاجتماعية",
+      explore: "استكشف",
+      programs: "البرامج",
+      support: "الدعم",
+      socials: "تابعنا",
     },
     links: {
+      benefits: "المزايا",
+      features: "الخدمات الصحية",
+      pricing: "الاشتراكات",
+      register: "اشترك الآن",
+      annualCard: "بطاقة الرعاية السنوية",
+      dentalProgram: "برنامج الأسنان",
+      checkupsProgram: "الفحوصات والتحاليل",
+      beautyProgram: "الجلدية والتجميل",
+      contactUs: "تواصل معنا",
+      faq: "الأسئلة الشائعة",
+      network: "الشبكة الطبية",
+      offers: "العروض والمزايا",
       facebook: "فيسبوك",
       twitter: "إكس",
       instagram: "إنستغرام",
-      ios: "iOS",
-      android: "أندرويد",
-      web: "الويب",
-      contactUs: "تواصل معنا",
-      faq: "الأسئلة الشائعة",
-      feedback: "ملاحظاتك",
       youtube: "يوتيوب",
       linkedin: "لينكدإن",
     },
-    logoAlt: "شعار Primey الرئيسي",
+    copyright: "جميع الحقوق محفوظة",
+    logoAlt: "شعار Primey Care",
   },
   en: {
     description:
-      "Meet our AI-powered SaaS solution to lighten your workload, increase efficiency and make more accurate decisions.",
+      "Primey Care offers healthcare cards and programs with selected medical benefits and discounts across participating providers, giving you and your family a clearer and easier way to access care.",
+    disclaimer:
+      "Notice: Primey Care is not medical insurance and does not replace health insurance. Benefits and discounts may vary by provider, city, program type, and available offer terms.",
     groups: {
-      contact: "Contact",
-      platforms: "Platforms",
-      help: "Help",
-      socials: "Socials",
+      explore: "Explore",
+      programs: "Programs",
+      support: "Support",
+      socials: "Follow Us",
     },
     links: {
+      benefits: "Benefits",
+      features: "Healthcare Services",
+      pricing: "Subscriptions",
+      register: "Join Now",
+      annualCard: "Annual Care Card",
+      dentalProgram: "Dental Program",
+      checkupsProgram: "Checkups & Lab Tests",
+      beautyProgram: "Dermatology & Beauty",
+      contactUs: "Contact Us",
+      faq: "FAQ",
+      network: "Healthcare Network",
+      offers: "Offers & Benefits",
       facebook: "Facebook",
       twitter: "X",
       instagram: "Instagram",
-      ios: "iOS",
-      android: "Android",
-      web: "Web",
-      contactUs: "Contact Us",
-      faq: "FAQ",
-      feedback: "Feedback",
       youtube: "YouTube",
       linkedin: "LinkedIn",
     },
-    logoAlt: "Primey main hero logo",
+    copyright: "All rights reserved",
+    logoAlt: "Primey Care logo",
   },
 };
 
@@ -194,13 +220,111 @@ export const FooterSection = () => {
               />
             </Link>
 
-            <p className={cn("text-muted-foreground", isArabic && "text-right")}>
+            <p
+              className={cn(
+                "text-muted-foreground leading-7",
+                isArabic && "text-right"
+              )}
+            >
               {t.description}
+            </p>
+
+            <p
+              className={cn(
+                "text-muted-foreground/80 rounded-xl border bg-background/60 p-3 text-xs leading-6",
+                isArabic && "text-right"
+              )}
+            >
+              {t.disclaimer}
             </p>
           </div>
 
           <div className={cn("flex flex-col gap-2", isArabic && "text-right")}>
-            <h3 className="mb-2 text-lg font-bold">{t.groups.contact}</h3>
+            <h3 className="mb-2 text-lg font-bold">{t.groups.explore}</h3>
+
+            <div>
+              <Link href="/#benefits" className="opacity-60 hover:opacity-100">
+                {t.links.benefits}
+              </Link>
+            </div>
+
+            <div>
+              <Link href="/#features" className="opacity-60 hover:opacity-100">
+                {t.links.features}
+              </Link>
+            </div>
+
+            <div>
+              <Link href="/pricing" className="opacity-60 hover:opacity-100">
+                {t.links.pricing}
+              </Link>
+            </div>
+
+            <div>
+              <Link href="/register" className="opacity-60 hover:opacity-100">
+                {t.links.register}
+              </Link>
+            </div>
+          </div>
+
+          <div className={cn("flex flex-col gap-2", isArabic && "text-right")}>
+            <h3 className="mb-2 text-lg font-bold">{t.groups.programs}</h3>
+
+            <div>
+              <Link href="/#solutions" className="opacity-60 hover:opacity-100">
+                {t.links.annualCard}
+              </Link>
+            </div>
+
+            <div>
+              <Link href="/#solutions" className="opacity-60 hover:opacity-100">
+                {t.links.dentalProgram}
+              </Link>
+            </div>
+
+            <div>
+              <Link href="/#solutions" className="opacity-60 hover:opacity-100">
+                {t.links.checkupsProgram}
+              </Link>
+            </div>
+
+            <div>
+              <Link href="/#solutions" className="opacity-60 hover:opacity-100">
+                {t.links.beautyProgram}
+              </Link>
+            </div>
+          </div>
+
+          <div className={cn("flex flex-col gap-2", isArabic && "text-right")}>
+            <h3 className="mb-2 text-lg font-bold">{t.groups.support}</h3>
+
+            <div>
+              <Link href="/contact" className="opacity-60 hover:opacity-100">
+                {t.links.contactUs}
+              </Link>
+            </div>
+
+            <div>
+              <Link href="/#faq" className="opacity-60 hover:opacity-100">
+                {t.links.faq}
+              </Link>
+            </div>
+
+            <div>
+              <Link href="/#features" className="opacity-60 hover:opacity-100">
+                {t.links.network}
+              </Link>
+            </div>
+
+            <div>
+              <Link href="/#pricing" className="opacity-60 hover:opacity-100">
+                {t.links.offers}
+              </Link>
+            </div>
+          </div>
+
+          <div className={cn("flex flex-col gap-2", isArabic && "text-right")}>
+            <h3 className="mb-2 text-lg font-bold">{t.groups.socials}</h3>
 
             <div>
               <a
@@ -234,54 +358,6 @@ export const FooterSection = () => {
                 {t.links.instagram}
               </a>
             </div>
-          </div>
-
-          <div className={cn("flex flex-col gap-2", isArabic && "text-right")}>
-            <h3 className="mb-2 text-lg font-bold">{t.groups.platforms}</h3>
-
-            <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
-                {t.links.ios}
-              </Link>
-            </div>
-
-            <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
-                {t.links.android}
-              </Link>
-            </div>
-
-            <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
-                {t.links.web}
-              </Link>
-            </div>
-          </div>
-
-          <div className={cn("flex flex-col gap-2", isArabic && "text-right")}>
-            <h3 className="mb-2 text-lg font-bold">{t.groups.help}</h3>
-
-            <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
-                {t.links.contactUs}
-              </Link>
-            </div>
-
-            <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
-                {t.links.faq}
-              </Link>
-            </div>
-
-            <div>
-              <Link href="#" className="opacity-60 hover:opacity-100">
-                {t.links.feedback}
-              </Link>
-            </div>
-          </div>
-
-          <div className={cn("flex flex-col gap-2", isArabic && "text-right")}>
-            <h3 className="mb-2 text-lg font-bold">{t.groups.socials}</h3>
 
             <div>
               <a
@@ -304,17 +380,6 @@ export const FooterSection = () => {
                 {t.links.linkedin}
               </a>
             </div>
-
-            <div>
-              <a
-                href={SOCIAL_LINKS.instagram}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="opacity-60 hover:opacity-100"
-              >
-                {t.links.instagram}
-              </a>
-            </div>
           </div>
         </div>
       </div>
@@ -333,8 +398,9 @@ export const FooterSection = () => {
         >
           <span>&copy; {new Date().getFullYear()}</span>
           <span>|</span>
-          <span className="font-medium">Mhamcloud</span>
-          <span>.</span>
+          <span className="font-medium">Primey Care</span>
+          <span>|</span>
+          <span>{t.copyright}</span>
         </div>
 
         <div className="flex items-center justify-center gap-2">

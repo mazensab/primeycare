@@ -1,2623 +1,1030 @@
-"use client"
+"use client";
 
-import Image from "next/image"
-import { Suspense, useEffect, useMemo, useRef, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
-
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-
-import { toast } from "sonner"
-
+import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
 import {
   ArrowLeft,
   ArrowRight,
-  Building2,
+  BadgeCheck,
   CheckCircle2,
-  CreditCard,
-  FileText,
-  Landmark,
+  HeartPulse,
   Loader2,
-  LogIn,
+  Mail,
   MapPin,
-  QrCode,
-  ReceiptText,
+  MessageCircle,
+  Phone,
   ShieldCheck,
   Sparkles,
-  User2,
-  Wallet,
-  Languages,
-  Phone,
-} from "lucide-react"
+  UserRound,
+} from "lucide-react";
+import { toast } from "sonner";
 
-const API = process.env.NEXT_PUBLIC_API_URL
-const LOGIN_PATH = "/login"
-const SUCCESS_REDIRECT_SECONDS = 8
+import { ChatWidget } from "@/components/chat-widget";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
-type AppLocale = "ar" | "en"
-type BillingCycle = "monthly" | "yearly"
-type PaymentMethod = "BANK_TRANSFER" | "CREDIT_CARD" | "TAMARA"
+/* =========================================================
+   🌐 API Helpers
+========================================================= */
+const ENV_API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? "";
 
-type Plan = {
-  id: number
-  name: string
-  description?: string
-  price_monthly: number | null
-  price_yearly: number | null
-  max_companies: number | null
-  max_employees: number | null
-  is_active: boolean
-  apps: string[]
+function buildApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (ENV_API_BASE) {
+    return `${ENV_API_BASE}${normalizedPath}`;
+  }
+
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}${normalizedPath}`;
+  }
+
+  return normalizedPath;
 }
 
-type PlansResponse = {
-  plans: Plan[]
-}
+/* =========================================================
+   🌐 Types
+========================================================= */
+type AppLocale = "ar" | "en";
 
-type BillingPreview = {
-  price?: number | string
-  discount?: number | string
-  subtotal?: number | string
-  vat?: number | string
-  total?: number | string
-  code?: string
-  valid?: boolean
-}
+type ProgramValue =
+  | "individual_card"
+  | "family_card"
+  | "dental_program"
+  | "checkups_labs"
+  | "dermatology_beauty"
+  | "maternity_care";
 
-type StartPaymentResponse = {
-  draft_id?: string | number
-  checkout_url?: string
-  payment_url?: string
-  redirect_url?: string
-  url?: string
-  message?: string
-  success?: boolean
-  ok?: boolean
-  status?: string
-  tap_charge_id?: string
-  tap_status?: string
-}
+type ContactPreference = "whatsapp" | "phone" | "email";
 
-type ConfirmPaymentResponse = {
-  company_id?: number
-  company_name?: string
-  admin_username?: string
-  payment_method?: string
-  gateway_status?: string
-  gateway_transaction_id?: string | null
-  invoice_id?: number
-  error?: string
-  details?: string
-  message?: string
-  status?: string
-}
+type RegisterFormState = {
+  fullName: string;
+  phone: string;
+  email: string;
+  city: string;
+  program: ProgramValue;
+  contactPreference: ContactPreference;
+  message: string;
+};
 
-type RegistrationSuccessState = {
-  draftId: string
-  companyId?: number
-  companyName?: string
-  adminUsername?: string
-  invoiceId?: number
-  paymentMethod?: string
-  gatewayStatus?: string
-  gatewayTransactionId?: string | null
-  message?: string
-}
+type ProgramOption = {
+  value: ProgramValue;
+  icon: React.ElementType;
+  title: Record<AppLocale, string>;
+  description: Record<AppLocale, string>;
+};
 
-type RegistrationDraftSnapshot = {
-  draftId: string
-  companyName?: string
-  adminUsername?: string
-  adminEmail?: string
-  adminPhone?: string
-  planName?: string
-  paymentMethod?: PaymentMethod
-  billingCycle?: BillingCycle
-}
+type Content = {
+  badge: string;
+  title: string;
+  description: string;
+  primaryNote: string;
+  formTitle: string;
+  formDescription: string;
+  fullName: string;
+  fullNamePlaceholder: string;
+  phone: string;
+  phonePlaceholder: string;
+  email: string;
+  emailPlaceholder: string;
+  city: string;
+  cityPlaceholder: string;
+  program: string;
+  contactPreference: string;
+  message: string;
+  messagePlaceholder: string;
+  submit: string;
+  submitting: string;
+  backHome: string;
+  viewPricing: string;
+  contactUs: string;
+  benefitsTitle: string;
+  disclaimerTitle: string;
+  disclaimerText: string;
+  sideTitle: string;
+  sideDescription: string;
+  steps: Array<{
+    title: string;
+    description: string;
+  }>;
+  contactPreferences: Record<ContactPreference, string>;
+  validation: {
+    fullName: string;
+    phone: string;
+    email: string;
+    city: string;
+    program: string;
+    submitError: string;
+    submitSuccess: string;
+  };
+};
 
-const countries = [
+/* =========================================================
+   🧭 Options
+========================================================= */
+const programOptions: ProgramOption[] = [
   {
-    name: "Saudi Arabia",
-    currency: "SAR",
-    label: { ar: "المملكة العربية السعودية", en: "Saudi Arabia" },
+    value: "individual_card",
+    icon: UserRound,
+    title: {
+      ar: "بطاقة فردية",
+      en: "Individual Card",
+    },
+    description: {
+      ar: "مناسبة للاستفادة من مزايا وخصومات طبية طوال العام.",
+      en: "Suitable for year-round healthcare benefits and selected discounts.",
+    },
   },
   {
-    name: "UAE",
-    currency: "AED",
-    label: { ar: "الإمارات العربية المتحدة", en: "UAE" },
+    value: "family_card",
+    icon: HeartPulse,
+    title: {
+      ar: "بطاقة عائلية",
+      en: "Family Card",
+    },
+    description: {
+      ar: "خيار مناسب للعائلة حسب نوع البطاقة وشروط الاشتراك.",
+      en: "A family-friendly option depending on the card type and terms.",
+    },
   },
   {
-    name: "Egypt",
-    currency: "EGP",
-    label: { ar: "مصر", en: "Egypt" },
+    value: "dental_program",
+    icon: BadgeCheck,
+    title: {
+      ar: "برنامج الأسنان",
+      en: "Dental Program",
+    },
+    description: {
+      ar: "مزايا على الكشف والتنظيف والحشوات وخدمات العناية بالفم.",
+      en: "Benefits on consultations, cleaning, fillings, and oral care.",
+    },
   },
-]
+  {
+    value: "checkups_labs",
+    icon: ShieldCheck,
+    title: {
+      ar: "الفحوصات والتحاليل",
+      en: "Checkups & Lab Tests",
+    },
+    description: {
+      ar: "خيارات للفحوصات الدورية والتحاليل والخدمات التشخيصية.",
+      en: "Options for routine checkups, lab tests, and diagnostics.",
+    },
+  },
+  {
+    value: "dermatology_beauty",
+    icon: Sparkles,
+    title: {
+      ar: "الجلدية والتجميل",
+      en: "Dermatology & Beauty",
+    },
+    description: {
+      ar: "مزايا على العناية بالبشرة والجلسات التجميلية المختارة.",
+      en: "Benefits on skincare and selected beauty services.",
+    },
+  },
+  {
+    value: "maternity_care",
+    icon: HeartPulse,
+    title: {
+      ar: "الولادة والرعاية",
+      en: "Maternity Care",
+    },
+    description: {
+      ar: "خيارات مساندة للمتابعة والولادة حسب البرامج المتاحة.",
+      en: "Supportive options for follow-ups and maternity care.",
+    },
+  },
+];
 
-function getCookie(name: string) {
-  if (typeof document === "undefined") return null
+/* =========================================================
+   📝 Localized Content
+========================================================= */
+const content: Record<AppLocale, Content> = {
+  ar: {
+    badge: "طلب اشتراك Primey Care",
+    title: "ابدأ رحلتك مع رعاية صحية أوفر وأسهل",
+    description:
+      "املأ بياناتك واختر البطاقة أو البرنامج المناسب لك، وسيتواصل معك فريق Primey Care لتوضيح المزايا والشبكة الطبية وخطوات الاشتراك.",
+    primaryNote:
+      "Primey Care بطاقة وبرامج مزايا وخصومات طبية وليست تأمينًا طبيًا.",
+    formTitle: "بيانات الاشتراك",
+    formDescription:
+      "أدخل بياناتك الأساسية وسنساعدك في اختيار الخيار الأنسب لك ولعائلتك.",
+    fullName: "الاسم الكامل",
+    fullNamePlaceholder: "مثال: مازن العتيبي",
+    phone: "رقم الجوال",
+    phonePlaceholder: "05XXXXXXXX",
+    email: "البريد الإلكتروني",
+    emailPlaceholder: "name@example.com",
+    city: "المدينة",
+    cityPlaceholder: "مثال: الرياض",
+    program: "البطاقة أو البرنامج المطلوب",
+    contactPreference: "طريقة التواصل المفضلة",
+    message: "ملاحظات إضافية",
+    messagePlaceholder:
+      "اكتب أي تفاصيل مهمة مثل المدينة، عدد أفراد العائلة، أو نوع الخدمة الطبية التي تهتم بها...",
+    submit: "إرسال طلب الاشتراك",
+    submitting: "جارٍ إرسال الطلب...",
+    backHome: "العودة للرئيسية",
+    viewPricing: "عرض الاشتراكات",
+    contactUs: "تواصل معنا",
+    benefitsTitle: "ماذا يحدث بعد إرسال الطلب؟",
+    disclaimerTitle: "تنبيه مهم",
+    disclaimerText:
+      "المزايا والخصومات تختلف حسب مقدم الخدمة، المدينة، نوع البرنامج، وشروط العرض المتاحة. سيتم توضيح التفاصيل قبل إتمام الاشتراك.",
+    sideTitle: "Primey Care تجعل اختيار الرعاية أوضح",
+    sideDescription:
+      "بدل البحث المتكرر عن العروض، اختر بطاقة أو برنامجًا صحيًا يساعدك على الوصول إلى مزايا طبية مناسبة لك ولعائلتك.",
+    steps: [
+      {
+        title: "نراجع طلبك",
+        description:
+          "نتأكد من نوع البطاقة أو البرنامج الذي يناسب احتياجك والمدينة المطلوبة.",
+      },
+      {
+        title: "نوضح المزايا",
+        description:
+          "نرسل لك تفاصيل المزايا والشبكة الطبية والشروط المتاحة قبل الاشتراك.",
+      },
+      {
+        title: "تبدأ الاستفادة",
+        description:
+          "بعد التفعيل، يمكنك استخدام بيانات عضويتك لدى مزودي الخدمة المشاركين.",
+      },
+    ],
+    contactPreferences: {
+      whatsapp: "واتساب",
+      phone: "اتصال هاتفي",
+      email: "البريد الإلكتروني",
+    },
+    validation: {
+      fullName: "اكتب الاسم الكامل",
+      phone: "اكتب رقم جوال صحيح",
+      email: "اكتب بريدًا إلكترونيًا صحيحًا",
+      city: "اكتب المدينة",
+      program: "اختر البطاقة أو البرنامج",
+      submitError: "تعذر إرسال طلب الاشتراك",
+      submitSuccess: "تم إرسال طلب الاشتراك بنجاح",
+    },
+  },
+  en: {
+    badge: "Primey Care Subscription Request",
+    title: "Start your journey toward easier and more affordable care",
+    description:
+      "Fill in your details and choose the card or program that fits your needs. The Primey Care team will contact you with benefits, network details, and subscription steps.",
+    primaryNote:
+      "Primey Care is a healthcare benefits and discount card, not medical insurance.",
+    formTitle: "Subscription Details",
+    formDescription:
+      "Enter your basic information and we will help you choose the best option for you and your family.",
+    fullName: "Full Name",
+    fullNamePlaceholder: "Example: Mazen Alotaibi",
+    phone: "Mobile Number",
+    phonePlaceholder: "05XXXXXXXX",
+    email: "Email",
+    emailPlaceholder: "name@example.com",
+    city: "City",
+    cityPlaceholder: "Example: Riyadh",
+    program: "Preferred Card or Program",
+    contactPreference: "Preferred Contact Method",
+    message: "Additional Notes",
+    messagePlaceholder:
+      "Write any important details such as your city, family members, or the healthcare service you are interested in...",
+    submit: "Send Subscription Request",
+    submitting: "Sending request...",
+    backHome: "Back Home",
+    viewPricing: "View Subscriptions",
+    contactUs: "Contact Us",
+    benefitsTitle: "What happens after submitting?",
+    disclaimerTitle: "Important Notice",
+    disclaimerText:
+      "Benefits and discounts may vary by provider, city, program type, and available offer terms. Details will be clarified before completing the subscription.",
+    sideTitle: "Primey Care makes choosing care clearer",
+    sideDescription:
+      "Instead of searching repeatedly for offers, choose a healthcare card or program that helps you access suitable medical benefits for you and your family.",
+    steps: [
+      {
+        title: "We review your request",
+        description:
+          "We check the card or program that fits your needs and requested city.",
+      },
+      {
+        title: "We explain the benefits",
+        description:
+          "You receive benefit details, healthcare network information, and available terms before subscribing.",
+      },
+      {
+        title: "You start using benefits",
+        description:
+          "After activation, you can use your membership details with participating providers.",
+      },
+    ],
+    contactPreferences: {
+      whatsapp: "WhatsApp",
+      phone: "Phone Call",
+      email: "Email",
+    },
+    validation: {
+      fullName: "Enter your full name",
+      phone: "Enter a valid mobile number",
+      email: "Enter a valid email address",
+      city: "Enter your city",
+      program: "Choose a card or program",
+      submitError: "Failed to send subscription request",
+      submitSuccess: "Subscription request sent successfully",
+    },
+  },
+};
 
-  const value = `; ${document.cookie}`
-  const parts = value.split(`; ${name}=`)
+/* =========================================================
+   🌐 Locale Helpers
+========================================================= */
+function getCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
 
-  if (parts.length === 2) {
-    return parts.pop()?.split(";").shift() || null
-  }
+  const match = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${name}=`));
 
-  return null
+  return match ? decodeURIComponent(match.split("=")[1]) : null;
 }
 
-async function ensureCsrf() {
-  if (!API) return null
+function getCurrentLocale(): AppLocale {
+  const storageLocale =
+    typeof window !== "undefined"
+      ? window.localStorage.getItem("primey-locale")
+      : null;
 
-  try {
-    await fetch(`${API}/api/auth/csrf/`, {
-      credentials: "include",
-    })
-  } catch {
-    return null
-  }
+  const cookieLocale =
+    getCookie("lang") || getCookie("locale") || getCookie("NEXT_LOCALE");
 
-  return getCookie("csrftoken")
+  const value = (storageLocale || cookieLocale || "ar").toLowerCase();
+
+  return value.startsWith("ar") ? "ar" : "en";
 }
 
-function generatePassword(length = 12) {
-  const chars =
-    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%"
-
-  let pass = ""
-
-  for (let i = 0; i < length; i++) {
-    pass += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-
-  return pass
+/* =========================================================
+   ✅ Validation
+========================================================= */
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-function passwordStrength(password: string, locale: AppLocale) {
-  let score = 0
-
-  if (password.length >= 8) score++
-  if (/[A-Z]/.test(password)) score++
-  if (/[0-9]/.test(password)) score++
-  if (/[^A-Za-z0-9]/.test(password)) score++
-
-  if (score <= 1) {
-    return {
-      label: locale === "ar" ? "ضعيفة" : "Weak",
-      color: "bg-red-500",
-      width: "25%",
-      textClass: "text-red-600",
-    }
-  }
-
-  if (score === 2) {
-    return {
-      label: locale === "ar" ? "متوسطة" : "Medium",
-      color: "bg-yellow-500",
-      width: "50%",
-      textClass: "text-yellow-600",
-    }
-  }
-
-  if (score === 3) {
-    return {
-      label: locale === "ar" ? "قوية" : "Strong",
-      color: "bg-green-500",
-      width: "75%",
-      textClass: "text-green-600",
-    }
-  }
-
-  return {
-    label: locale === "ar" ? "قوية جدًا" : "Very Strong",
-    color: "bg-emerald-600",
-    width: "100%",
-    textClass: "text-emerald-600",
-  }
+function isValidPhone(value: string): boolean {
+  const normalized = value.replace(/\s+/g, "");
+  return /^(\+9665|9665|05|5)[0-9]{8}$/.test(normalized);
 }
 
-function normalizeNumber(value: unknown): number {
-  if (typeof value === "number" && !Number.isNaN(value)) return value
+/* =========================================================
+   🧩 Page
+========================================================= */
+export default function RegisterPage() {
+  const [locale, setLocale] = useState<AppLocale>("ar");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const parsed = Number(value ?? 0)
-  return Number.isNaN(parsed) ? 0 : parsed
-}
-
-function formatMoney(value: number, currency = "SAR", locale: AppLocale = "ar") {
-  return `${new Intl.NumberFormat(locale === "ar" ? "ar-SA" : "en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)} ${currency}`
-}
-
-function getMethodLabel(value: PaymentMethod, locale: AppLocale) {
-  switch (value) {
-    case "BANK_TRANSFER":
-      return locale === "ar" ? "تحويل بنكي" : "Bank Transfer"
-    case "CREDIT_CARD":
-      return locale === "ar" ? "بطاقة ائتمانية" : "Credit Card"
-    case "TAMARA":
-      return "Tamara"
-    default:
-      return value
-  }
-}
-
-function getMethodDescription(value: PaymentMethod, locale: AppLocale) {
-  switch (value) {
-    case "TAMARA":
-      return locale === "ar"
-        ? "قسّم دفعتك بأمان عبر بوابة تمارا."
-        : "Split your payment securely through Tamara checkout."
-    case "CREDIT_CARD":
-      return locale === "ar"
-        ? "ادفع أونلاين عبر بوابة Tap الآمنة للبطاقات."
-        : "Pay online using Tap secure card gateway."
-    case "BANK_TRANSFER":
-      return locale === "ar"
-        ? "أنشئ الطلب أولًا ثم أكمل التحويل وفق تعليمات المالية."
-        : "Create the request first, then complete transfer according to finance instructions."
-    default:
-      return ""
-  }
-}
-
-function buildRegisterUrl(params: Record<string, string | null | undefined>) {
-  const search = new URLSearchParams()
-
-  Object.entries(params).forEach(([key, value]) => {
-    if (value && value.trim()) {
-      search.set(key, value)
-    }
-  })
-
-  const qs = search.toString()
-  return qs ? `/register?${qs}` : "/register"
-}
-
-function normalizeReturnedPaymentMethod(value: string | null): PaymentMethod | null {
-  const normalized = (value || "").trim().toUpperCase()
-
-  if (normalized === "BANK_TRANSFER") return "BANK_TRANSFER"
-  if (normalized === "CREDIT_CARD" || normalized === "TAP") return "CREDIT_CARD"
-  if (normalized === "TAMARA") return "TAMARA"
-
-  return null
-}
-
-function buildGatewayConfirmationPayload(params: {
-  returnedDraftId: string | null
-  returnedPaymentMethod: string | null
-  returnedGatewayStatus: string | null
-  returnedGatewayTransactionId: string | null
-  paymentStatus: string | null
-}) {
-  const {
-    returnedDraftId,
-    returnedPaymentMethod,
-    returnedGatewayStatus,
-    returnedGatewayTransactionId,
-    paymentStatus,
-  } = params
-
-  if (!returnedDraftId) {
-    return null
-  }
-
-  const normalizedPaymentMethod =
-    normalizeReturnedPaymentMethod(returnedPaymentMethod) ||
-    (returnedGatewayTransactionId ? "CREDIT_CARD" : null)
-
-  if (!normalizedPaymentMethod) {
-    return null
-  }
-
-  let effectiveGatewayStatus = (returnedGatewayStatus || "").trim().toUpperCase()
-
-  if (!effectiveGatewayStatus && paymentStatus === "success") {
-    if (normalizedPaymentMethod === "CREDIT_CARD") {
-      effectiveGatewayStatus = "CAPTURED"
-    } else if (normalizedPaymentMethod === "TAMARA") {
-      effectiveGatewayStatus = "APPROVED"
-    }
-  }
-
-  if (!effectiveGatewayStatus) {
-    return null
-  }
-
-  return {
-    draft_id: returnedDraftId,
-    payment_method: normalizedPaymentMethod,
-    gateway_status: effectiveGatewayStatus,
-    gateway_transaction_id: returnedGatewayTransactionId || null,
-  }
-}
-
-function getSuccessStorageKey(draftId: string) {
-  return `primey-register-success:${draftId}`
-}
-
-function getDraftSnapshotStorageKey(draftId: string) {
-  return `primey-register-draft:${draftId}`
-}
-
-function persistSuccessState(data: RegistrationSuccessState) {
-  if (typeof window === "undefined" || !data.draftId) return
-
-  try {
-    window.sessionStorage.setItem(getSuccessStorageKey(data.draftId), JSON.stringify(data))
-  } catch (error) {
-    console.error("Persist success state error:", error)
-  }
-}
-
-function restoreSuccessState(draftId: string | null) {
-  if (typeof window === "undefined" || !draftId) return null
-
-  try {
-    const raw = window.sessionStorage.getItem(getSuccessStorageKey(draftId))
-    if (!raw) return null
-
-    return JSON.parse(raw) as RegistrationSuccessState
-  } catch (error) {
-    console.error("Restore success state error:", error)
-    return null
-  }
-}
-
-function persistDraftSnapshot(data: RegistrationDraftSnapshot) {
-  if (typeof window === "undefined" || !data.draftId) return
-
-  try {
-    window.sessionStorage.setItem(
-      getDraftSnapshotStorageKey(data.draftId),
-      JSON.stringify(data)
-    )
-  } catch (error) {
-    console.error("Persist draft snapshot error:", error)
-  }
-}
-
-function restoreDraftSnapshot(draftId: string | null) {
-  if (typeof window === "undefined" || !draftId) return null
-
-  try {
-    const raw = window.sessionStorage.getItem(getDraftSnapshotStorageKey(draftId))
-    if (!raw) return null
-
-    return JSON.parse(raw) as RegistrationDraftSnapshot
-  } catch (error) {
-    console.error("Restore draft snapshot error:", error)
-    return null
-  }
-}
-
-function buildDraftSnapshot(params: {
-  draftId: string
-  companyName: string
-  adminUsername: string
-  adminEmail: string
-  adminPhone: string
-  planName: string
-  paymentMethod: PaymentMethod
-  billingCycle: BillingCycle
-}): RegistrationDraftSnapshot {
-  return {
-    draftId: params.draftId,
-    companyName: params.companyName,
-    adminUsername: params.adminUsername,
-    adminEmail: params.adminEmail,
-    adminPhone: params.adminPhone,
-    planName: params.planName,
-    paymentMethod: params.paymentMethod,
-    billingCycle: params.billingCycle,
-  }
-}
-
-function RegisterCompanyPageFallback() {
-  return (
-    <div className="mx-auto max-w-7xl space-y-6 p-6" dir="rtl">
-      <Card>
-        <CardContent className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          جارٍ تحميل صفحة التسجيل...
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-function RegisterCompanyPageContent() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-
-  const [locale, setLocale] = useState<AppLocale>("ar")
-
-  const initialPlanId = searchParams.get("plan_id") || ""
-  const initialPlanName = searchParams.get("plan_name") || ""
-  const initialDraftId = searchParams.get("draft_id") || ""
-  const paymentToastShownRef = useRef(false)
-  const gatewayConfirmRunRef = useRef(false)
-
-  /* =========================================================
-     COMPANY
-  ========================================================= */
-  const [name, setName] = useState("")
-  const [email, setEmail] = useState("")
-  const [phone, setPhone] = useState("")
-  const [city, setCity] = useState("")
-  const [country, setCountry] = useState("Saudi Arabia")
-  const [currency, setCurrency] = useState("SAR")
-  const [commercialNumber, setCommercialNumber] = useState("")
-  const [vatNumber, setVatNumber] = useState("")
-  const [buildingNumber, setBuildingNumber] = useState("")
-  const [street, setStreet] = useState("")
-  const [district, setDistrict] = useState("")
-  const [postalCode, setPostalCode] = useState("")
-  const [shortAddress, setShortAddress] = useState("")
-
-  /* =========================================================
-     PLAN
-  ========================================================= */
-  const [plans, setPlans] = useState<Plan[]>([])
-  const [planId, setPlanId] = useState(initialPlanId)
-  const [plansLoading, setPlansLoading] = useState(true)
-  const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly")
-
-  /* =========================================================
-     DISCOUNT / PREVIEW
-  ========================================================= */
-  const [discountCode, setDiscountCode] = useState("")
-  const [preview, setPreview] = useState<BillingPreview | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
-
-  /* =========================================================
-     ADMIN
-  ========================================================= */
-  const [ownerFirstName, setOwnerFirstName] = useState("")
-  const [ownerLastName, setOwnerLastName] = useState("")
-  const [ownerEmail, setOwnerEmail] = useState("")
-  const [ownerPhone, setOwnerPhone] = useState("")
-  const [ownerPassword, setOwnerPassword] = useState("")
-  const [ownerUsername, setOwnerUsername] = useState("")
-
-  /* =========================================================
-     PAYMENT
-  ========================================================= */
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CREDIT_CARD")
-
-  /* =========================================================
-     STATE
-  ========================================================= */
-  const [loading, setLoading] = useState(false)
-  const [plansError, setPlansError] = useState("")
-  const [draftId, setDraftId] = useState(initialDraftId)
-  const [draftConfirmed, setDraftConfirmed] = useState(false)
-  const [lastActionMessage, setLastActionMessage] = useState("")
-  const [gatewayConfirming, setGatewayConfirming] = useState(false)
-  const [registrationCompleted, setRegistrationCompleted] = useState(false)
-  const [successData, setSuccessData] = useState<RegistrationSuccessState | null>(null)
-  const [redirectCountdown, setRedirectCountdown] = useState(SUCCESS_REDIRECT_SECONDS)
-  const [draftSnapshot, setDraftSnapshot] = useState<RegistrationDraftSnapshot | null>(null)
-
-  const isArabic = locale === "ar"
-  const strength = passwordStrength(ownerPassword, locale)
-  const BackIcon = isArabic ? ArrowRight : ArrowLeft
-
-  const goToLogin = () => {
-    router.push(LOGIN_PATH)
-  }
-
-  const markRegistrationCompleted = (data: RegistrationSuccessState) => {
-    persistSuccessState(data)
-    setSuccessData(data)
-    setRegistrationCompleted(true)
-    setRedirectCountdown(SUCCESS_REDIRECT_SECONDS)
-  }
-
-  const saveDraftSnapshot = (nextDraftId: string) => {
-    const snapshot = buildDraftSnapshot({
-      draftId: nextDraftId,
-      companyName: name.trim(),
-      adminUsername: ownerUsername.trim(),
-      adminEmail: ownerEmail.trim(),
-      adminPhone: ownerPhone.trim(),
-      planName: selectedPlan?.name || initialPlanName || "",
-      paymentMethod,
-      billingCycle,
-    })
-
-    persistDraftSnapshot(snapshot)
-    setDraftSnapshot(snapshot)
-  }
+  const [form, setForm] = useState<RegisterFormState>({
+    fullName: "",
+    phone: "",
+    email: "",
+    city: "",
+    program: "individual_card",
+    contactPreference: "whatsapp",
+    message: "",
+  });
 
   useEffect(() => {
+    const nextLocale = getCurrentLocale();
+    setLocale(nextLocale);
+
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.setAttribute("dir", nextLocale === "ar" ? "rtl" : "ltr");
+    }
+
+    const updateLocale = () => {
+      const updatedLocale = getCurrentLocale();
+      setLocale(updatedLocale);
+    };
+
+    window.addEventListener("primey-locale-changed", updateLocale);
+    window.addEventListener("storage", updateLocale);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", updateLocale);
+      window.removeEventListener("storage", updateLocale);
+    };
+  }, []);
+
+  const isArabic = locale === "ar";
+  const dir = isArabic ? "rtl" : "ltr";
+  const t = content[locale];
+  const BackIcon = isArabic ? ArrowRight : ArrowLeft;
+  const ForwardIcon = isArabic ? ArrowLeft : ArrowRight;
+
+  const selectedProgram = useMemo(
+    () => programOptions.find((item) => item.value === form.program),
+    [form.program]
+  );
+
+  function updateForm<K extends keyof RegisterFormState>(
+    key: K,
+    value: RegisterFormState[K]
+  ) {
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  function validateForm(): boolean {
+    if (!form.fullName.trim() || form.fullName.trim().length < 3) {
+      toast.error(t.validation.fullName);
+      return false;
+    }
+
+    if (!isValidPhone(form.phone)) {
+      toast.error(t.validation.phone);
+      return false;
+    }
+
+    if (!isValidEmail(form.email)) {
+      toast.error(t.validation.email);
+      return false;
+    }
+
+    if (!form.city.trim() || form.city.trim().length < 2) {
+      toast.error(t.validation.city);
+      return false;
+    }
+
+    if (!form.program) {
+      toast.error(t.validation.program);
+      return false;
+    }
+
+    return true;
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!validateForm()) return;
+
+    setIsSubmitting(true);
+
     try {
-      const savedLocale =
-        typeof window !== "undefined"
-          ? (window.localStorage.getItem("primey-locale") as AppLocale | null)
-          : null
-
-      const nextLocale: AppLocale = savedLocale === "en" ? "en" : "ar"
-      setLocale(nextLocale)
-
-      if (typeof document !== "undefined") {
-        document.documentElement.lang = nextLocale
-        document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr"
-        document.body.setAttribute("dir", nextLocale === "ar" ? "rtl" : "ltr")
-      }
-    } catch (error) {
-      console.error("Register locale initialization error:", error)
-    }
-  }, [])
-
-  const toggleLanguage = () => {
-    try {
-      const nextLocale: AppLocale = locale === "ar" ? "en" : "ar"
-      setLocale(nextLocale)
-
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("primey-locale", nextLocale)
-      }
-
-      if (typeof document !== "undefined") {
-        document.documentElement.lang = nextLocale
-        document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr"
-        document.body.setAttribute("dir", nextLocale === "ar" ? "rtl" : "ltr")
-      }
-    } catch (error) {
-      console.error("Register language toggle error:", error)
-    }
-  }
-
-  /* =========================================================
-     RESTORE DRAFT SNAPSHOT
-  ========================================================= */
-  useEffect(() => {
-    if (!initialDraftId) return
-
-    const restored = restoreDraftSnapshot(initialDraftId)
-    if (!restored) return
-
-    setDraftSnapshot(restored)
-
-    if (!name.trim() && restored.companyName) {
-      setName(restored.companyName)
-    }
-
-    if (!ownerUsername.trim() && restored.adminUsername) {
-      setOwnerUsername(restored.adminUsername)
-    }
-
-    if (!ownerEmail.trim() && restored.adminEmail) {
-      setOwnerEmail(restored.adminEmail)
-    }
-
-    if (!ownerPhone.trim() && restored.adminPhone) {
-      setOwnerPhone(restored.adminPhone)
-    }
-
-    if (!initialPlanName && restored.planName) {
-      // لا حاجة لتخزين مستقل لأن العرض يستخدم draftSnapshot كـ fallback
-    }
-
-    if (restored.paymentMethod) {
-      setPaymentMethod(restored.paymentMethod)
-    }
-
-    if (restored.billingCycle) {
-      setBillingCycle(restored.billingCycle)
-    }
-  }, [initialDraftId])
-
-  /* =========================================================
-     RESTORE SUCCESS STATE AFTER REFRESH
-  ========================================================= */
-  useEffect(() => {
-    const paymentStatus = searchParams.get("payment")
-    const returnedDraftId = searchParams.get("draft_id")
-
-    if (paymentStatus !== "success" || !returnedDraftId) return
-
-    const restored = restoreSuccessState(returnedDraftId)
-    if (!restored) return
-
-    const restoredDraft = restoreDraftSnapshot(returnedDraftId)
-
-    const mergedState: RegistrationSuccessState = {
-      ...restored,
-      companyName: restored.companyName || restoredDraft?.companyName,
-      adminUsername: restored.adminUsername || restoredDraft?.adminUsername,
-      paymentMethod: restored.paymentMethod || restoredDraft?.paymentMethod,
-    }
-
-    if (restoredDraft) {
-      setDraftSnapshot(restoredDraft)
-    }
-
-    setDraftId(mergedState.draftId)
-    setDraftConfirmed(true)
-    setLastActionMessage(
-      mergedState.message ||
-        (isArabic
-          ? "تم تفعيل شركتك بنجاح. يمكنك الآن تسجيل الدخول."
-          : "Your company has been activated successfully. You can now sign in.")
-    )
-    setSuccessData(mergedState)
-    setRegistrationCompleted(true)
-    setRedirectCountdown(SUCCESS_REDIRECT_SECONDS)
-  }, [searchParams, isArabic])
-
-  /* =========================================================
-     AUTO REDIRECT AFTER SUCCESS
-  ========================================================= */
-  useEffect(() => {
-    if (!registrationCompleted) return
-
-    if (redirectCountdown <= 0) {
-      goToLogin()
-      return
-    }
-
-    const timer = window.setTimeout(() => {
-      setRedirectCountdown((current) => current - 1)
-    }, 1000)
-
-    return () => window.clearTimeout(timer)
-  }, [registrationCompleted, redirectCountdown])
-
-  /* =========================================================
-     LOAD PLANS
-  ========================================================= */
-  useEffect(() => {
-    async function loadPlans() {
-      try {
-        if (!API) throw new Error("NEXT_PUBLIC_API_URL is not configured")
-
-        setPlansError("")
-
-        const res = await fetch(`${API}/api/system/plans/`, {
-          method: "GET",
+      const response = await fetch(
+        buildApiUrl("/api/public/register-interest/"),
+        {
+          method: "POST",
           headers: {
+            "Content-Type": "application/json",
             Accept: "application/json",
           },
-          cache: "no-store",
-        })
-
-        if (!res.ok) {
-          throw new Error("Failed to load plans")
-        }
-
-        const data: PlansResponse = await res.json()
-
-        const normalized = Array.isArray(data?.plans)
-          ? data.plans
-              .filter((plan) => plan?.is_active !== false)
-              .map((plan) => ({
-                ...plan,
-                id: normalizeNumber(plan.id),
-                price_monthly: normalizeNumber(plan.price_monthly),
-                price_yearly: normalizeNumber(plan.price_yearly),
-                max_companies: normalizeNumber(plan.max_companies),
-                max_employees: normalizeNumber(plan.max_employees),
-                apps: Array.isArray(plan.apps) ? plan.apps : [],
-              }))
-          : []
-
-        setPlans(normalized)
-
-        if (!initialPlanId && normalized.length > 0) {
-          setPlanId(String(normalized[0].id))
-        }
-      } catch (error) {
-        console.error(error)
-        setPlansError(isArabic ? "فشل تحميل الباقات" : "Failed to load plans")
-        toast.error(isArabic ? "فشل تحميل الباقات" : "Failed to load plans")
-      } finally {
-        setPlansLoading(false)
-      }
-    }
-
-    loadPlans()
-  }, [initialPlanId, isArabic])
-
-  /* =========================================================
-     COUNTRY
-  ========================================================= */
-  useEffect(() => {
-    const found = countries.find((c) => c.name === country)
-    if (found) {
-      setCurrency(found.currency)
-    }
-  }, [country])
-
-  /* =========================================================
-     SELECTED PLAN
-  ========================================================= */
-  const selectedPlan = useMemo(
-    () => plans.find((p) => String(p.id) === String(planId)),
-    [plans, planId]
-  )
-
-  /* =========================================================
-     PREVIEW
-  ========================================================= */
-  useEffect(() => {
-    if (!planId || !API || registrationCompleted) return
-
-    async function loadPreview() {
-      setPreviewLoading(true)
-
-      try {
-        const params = new URLSearchParams({
-          plan_id: String(planId),
-          billing_cycle: billingCycle,
-        })
-
-        if (discountCode.trim()) {
-          params.append("discount_code", discountCode.trim())
-        }
-
-        const res = await fetch(`${API}/api/system/billing/preview/?${params}`, {
-          credentials: "include",
-          cache: "no-store",
-        })
-
-        const data = await res.json().catch(() => null)
-
-        if (res.ok && data) {
-          setPreview(data)
-        } else {
-          setPreview(null)
-        }
-      } catch (error) {
-        console.error("Preview error:", error)
-        setPreview(null)
-      } finally {
-        setPreviewLoading(false)
-      }
-    }
-
-    loadPreview()
-  }, [planId, billingCycle, discountCode, registrationCompleted])
-
-  const localBasePrice =
-    billingCycle === "monthly"
-      ? normalizeNumber(selectedPlan?.price_monthly)
-      : normalizeNumber(selectedPlan?.price_yearly)
-
-  const basePrice = normalizeNumber(preview?.price ?? localBasePrice)
-  const discountAmountPreview = normalizeNumber(preview?.discount ?? 0)
-  const subtotal = normalizeNumber(
-    preview?.subtotal ?? Math.max(localBasePrice - discountAmountPreview, 0)
-  )
-  const vatAmount = normalizeNumber(preview?.vat ?? subtotal * 0.15)
-  const totalWithVat = normalizeNumber(preview?.total ?? subtotal + vatAmount)
-
-  /* =========================================================
-     PAYMENT RESULT TOAST
-  ========================================================= */
-  useEffect(() => {
-    const paymentStatus = searchParams.get("payment")
-    if (!paymentStatus || paymentToastShownRef.current) return
-
-    paymentToastShownRef.current = true
-
-    if (paymentStatus === "success") {
-      toast.success(
-        isArabic ? "تمت عملية الدفع بنجاح" : "Payment completed successfully"
-      )
-      setLastActionMessage(
-        isArabic
-          ? "تم الدفع بنجاح. جارٍ التحقق النهائي من تأكيد العملية."
-          : "Payment completed successfully. Final payment confirmation is being checked."
-      )
-      return
-    }
-
-    if (paymentStatus === "cancelled") {
-      toast.error(isArabic ? "تم إلغاء عملية الدفع" : "Payment was cancelled")
-      setLastActionMessage(
-        isArabic
-          ? "تم إلغاء الدفع قبل الإكمال."
-          : "Payment was cancelled before completion."
-      )
-      return
-    }
-
-    if (paymentStatus === "failed") {
-      toast.error(isArabic ? "فشلت عملية الدفع" : "Payment failed")
-      setLastActionMessage(
-        isArabic ? "فشلت عملية الدفع. حاول مرة أخرى." : "Payment failed. Please try again."
-      )
-    }
-  }, [searchParams, isArabic])
-
-  /* =========================================================
-     GATEWAY RETURN -> CONFIRM PAYMENT
-  ========================================================= */
-  useEffect(() => {
-    async function confirmGatewayReturn() {
-      if (!API) return
-      if (gatewayConfirmRunRef.current) return
-
-      const paymentStatus = searchParams.get("payment")
-      const returnedDraftId = searchParams.get("draft_id")
-      const returnedPaymentMethod = searchParams.get("payment_method")
-      const returnedGatewayStatus = searchParams.get("gateway_status")
-      const returnedGatewayTransactionId =
-        searchParams.get("gateway_transaction_id") ||
-        searchParams.get("transaction_id") ||
-        searchParams.get("checkout_id") ||
-        searchParams.get("tap_charge_id") ||
-        searchParams.get("tap_id") ||
-        ""
-
-      const confirmationPayload = buildGatewayConfirmationPayload({
-        returnedDraftId,
-        returnedPaymentMethod,
-        returnedGatewayStatus,
-        returnedGatewayTransactionId,
-        paymentStatus,
-      })
-
-      if (!confirmationPayload) {
-        return
-      }
-
-      gatewayConfirmRunRef.current = true
-      setGatewayConfirming(true)
-
-      try {
-        const csrfToken = await ensureCsrf()
-        const restoredDraft = restoreDraftSnapshot(confirmationPayload.draft_id)
-
-        if (restoredDraft) {
-          setDraftSnapshot(restoredDraft)
-        }
-
-        const res = await fetch(`${API}/api/system/onboarding/confirm-payment/`, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": csrfToken || "",
-          },
-          body: JSON.stringify(confirmationPayload),
-        })
-
-        const data: ConfirmPaymentResponse | null = await res.json().catch(() => null)
-
-        if (res.status === 409) {
-          const completedState: RegistrationSuccessState = {
-            draftId: confirmationPayload.draft_id,
-            companyName: restoredDraft?.companyName,
-            adminUsername: restoredDraft?.adminUsername,
-            paymentMethod:
-              restoredDraft?.paymentMethod || confirmationPayload.payment_method,
-            gatewayStatus: confirmationPayload.gateway_status,
-            gatewayTransactionId: confirmationPayload.gateway_transaction_id,
-            message: isArabic
-              ? "تم اعتماد هذه العملية مسبقًا. يمكنك الآن تسجيل الدخول إلى حساب الشركة."
-              : "This payment was already confirmed earlier. You can now log in to the company account.",
-          }
-
-          setDraftId(confirmationPayload.draft_id)
-          setDraftConfirmed(true)
-
-          toast.success(
-            isArabic ? "تم اعتماد الدفع مسبقًا" : "Payment already confirmed"
-          )
-
-          setLastActionMessage(completedState.message || "")
-          markRegistrationCompleted(completedState)
-
-          router.replace(
-            buildRegisterUrl({
-              plan_id: planId || initialPlanId,
-              plan_name:
-                selectedPlan?.name ||
-                initialPlanName ||
-                restoredDraft?.planName ||
-                "",
-              draft_id: confirmationPayload.draft_id,
-              payment: "success",
-            })
-          )
-          return
-        }
-
-        if (!res.ok || !data) {
-          toast.error(
-            data?.details ||
-              data?.error ||
-              (isArabic
-                ? "فشل تأكيد الدفع بعد العودة من البوابة"
-                : "Failed to confirm payment after gateway return")
-          )
-          setLastActionMessage(
-            data?.details ||
-              data?.error ||
-              (isArabic
-                ? "فشل تأكيد الدفع بعد العودة من بوابة الدفع."
-                : "Failed to confirm payment after returning from the gateway.")
-          )
-          gatewayConfirmRunRef.current = false
-          return
-        }
-
-        setDraftId(confirmationPayload.draft_id)
-        setDraftConfirmed(true)
-
-        const successMessage = data.company_name
-          ? isArabic
-            ? `تم تأكيد الدفع بنجاح وتم تفعيل الشركة "${data.company_name}". يمكنك الآن تسجيل الدخول بالحساب الذي أنشأته.`
-            : `Payment confirmed successfully and company "${data.company_name}" has been activated. You can now sign in with the account you created.`
-          : data.message
-          ? data.message
-          : isArabic
-          ? "تم تأكيد الدفع بنجاح واكتمل إعداد التسجيل."
-          : "Payment confirmed successfully and onboarding has been completed."
-
-        const completedState: RegistrationSuccessState = {
-          draftId: confirmationPayload.draft_id,
-          companyId: data.company_id,
-          companyName: data.company_name || restoredDraft?.companyName,
-          adminUsername: data.admin_username || restoredDraft?.adminUsername,
-          invoiceId: data.invoice_id,
-          paymentMethod:
-            data.payment_method ||
-            restoredDraft?.paymentMethod ||
-            confirmationPayload.payment_method,
-          gatewayStatus: data.gateway_status || confirmationPayload.gateway_status,
-          gatewayTransactionId:
-            data.gateway_transaction_id ?? confirmationPayload.gateway_transaction_id,
-          message: successMessage,
-        }
-
-        if (data.company_name) {
-          toast.success(
-            isArabic ? "تم تفعيل الشركة بنجاح" : "Company activated successfully"
-          )
-        } else {
-          toast.success(
-            isArabic ? "تم تأكيد الدفع بنجاح" : "Payment confirmed successfully"
-          )
-        }
-
-        setLastActionMessage(successMessage)
-        markRegistrationCompleted(completedState)
-
-        router.replace(
-          buildRegisterUrl({
-            plan_id: planId || initialPlanId,
-            plan_name:
-              selectedPlan?.name ||
-              initialPlanName ||
-              restoredDraft?.planName ||
-              "",
-            draft_id: confirmationPayload.draft_id,
-            payment: "success",
-          })
-        )
-      } catch (error) {
-        console.error("Gateway confirmation error:", error)
-        toast.error(
-          isArabic
-            ? "حدث خطأ غير متوقع أثناء تأكيد الدفع"
-            : "Unexpected error while confirming payment"
-        )
-        setLastActionMessage(
-          isArabic
-            ? "حدث خطأ غير متوقع أثناء تأكيد الدفع."
-            : "Unexpected error while confirming payment."
-        )
-        gatewayConfirmRunRef.current = false
-      } finally {
-        setGatewayConfirming(false)
-      }
-    }
-
-    confirmGatewayReturn()
-  }, [
-    searchParams,
-    router,
-    planId,
-    initialPlanId,
-    selectedPlan?.name,
-    initialPlanName,
-    isArabic,
-  ])
-
-  /* =========================================================
-     APPLY DISCOUNT
-  ========================================================= */
-  const applyDiscount = async () => {
-    if (!discountCode.trim()) {
-      toast.error(isArabic ? "أدخل كود الخصم" : "Enter discount code")
-      return
-    }
-
-    if (!planId) {
-      toast.error(isArabic ? "اختر الباقة أولًا" : "Select plan first")
-      return
-    }
-
-    if (!API) {
-      toast.error(isArabic ? "إعداد API غير موجود" : "API not configured")
-      return
-    }
-
-    try {
-      const params = new URLSearchParams({
-        plan_id: String(planId),
-        billing_cycle: billingCycle,
-        discount_code: discountCode.trim(),
-      })
-
-      const res = await fetch(`${API}/api/system/billing/preview/?${params}`, {
-        credentials: "include",
-        cache: "no-store",
-      })
-
-      const data = await res.json().catch(() => null)
-
-      if (!res.ok || !data) {
-        toast.error(isArabic ? "كود الخصم غير صالح" : "Invalid discount code")
-        return
-      }
-
-      setPreview(data)
-      toast.success(isArabic ? "تم تطبيق الخصم" : "Discount applied")
-    } catch (error) {
-      console.error("Discount validation error:", error)
-      toast.error(
-        isArabic ? "فشل التحقق من كود الخصم" : "Failed to validate code"
-      )
-    }
-  }
-
-  /* =========================================================
-     VALIDATION
-  ========================================================= */
-  function validateBeforeSubmit() {
-    if (!API) {
-      toast.error(isArabic ? "إعداد API غير موجود" : "API not configured")
-      return false
-    }
-
-    if (!name.trim()) {
-      toast.error(isArabic ? "اسم الشركة مطلوب" : "Company name required")
-      return false
-    }
-
-    if (!planId) {
-      toast.error(isArabic ? "اختر الباقة" : "Select plan")
-      return false
-    }
-
-    if (!ownerFirstName.trim()) {
-      toast.error(isArabic ? "الاسم الأول للمدير مطلوب" : "Owner first name required")
-      return false
-    }
-
-    if (!ownerLastName.trim()) {
-      toast.error(isArabic ? "اسم العائلة للمدير مطلوب" : "Owner last name required")
-      return false
-    }
-
-    if (!ownerEmail.trim()) {
-      toast.error(isArabic ? "بريد المدير مطلوب" : "Admin email required")
-      return false
-    }
-
-    if (!ownerPhone.trim()) {
-      toast.error(isArabic ? "رقم جوال المدير مطلوب" : "Admin phone required")
-      return false
-    }
-
-    if (!ownerUsername.trim()) {
-      toast.error(isArabic ? "اسم المستخدم مطلوب" : "Username required")
-      return false
-    }
-
-    if (!ownerPassword.trim()) {
-      toast.error(isArabic ? "كلمة المرور مطلوبة" : "Password required")
-      return false
-    }
-
-    if (ownerPassword.trim().length < 8) {
-      toast.error(
-        isArabic
-          ? "يجب أن تكون كلمة المرور 8 أحرف على الأقل"
-          : "Password must be at least 8 characters"
-      )
-      return false
-    }
-
-    return true
-  }
-
-  /* =========================================================
-     START PAYMENT ONLY
-  ========================================================= */
-  async function startPaymentAfterDraft(args: {
-    currentDraftId: string
-    selectedPaymentMethod: PaymentMethod
-    csrfToken: string
-  }) {
-    if (!API) return false
-
-    const { currentDraftId, selectedPaymentMethod, csrfToken } = args
-
-    saveDraftSnapshot(currentDraftId)
-
-    if (selectedPaymentMethod === "BANK_TRANSFER") {
-      setLastActionMessage(
-        isArabic
-          ? "تم إنشاء طلب التسجيل بنجاح. سيبقى التحويل البنكي معلقًا حتى يتم التحقق المالي."
-          : "Registration request created successfully. Bank transfer will remain pending until finance verification is completed."
-      )
-      toast.success(
-        isArabic
-          ? "تم إنشاء طلب التسجيل بنجاح"
-          : "Registration request created successfully"
-      )
-      return true
-    }
-
-    if (selectedPaymentMethod === "CREDIT_CARD") {
-      try {
-        const res = await fetch(`${API}/api/system/payments/tap/create-checkout/`, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": csrfToken || "",
-          },
           body: JSON.stringify({
-            draft_id: currentDraftId,
-            payment_method: "CREDIT_CARD",
-            billing_cycle: billingCycle,
-            discount_code: discountCode || null,
+            full_name: form.fullName.trim(),
+            phone: form.phone.trim(),
+            email: form.email.trim(),
+            city: form.city.trim(),
+            requested_program: form.program,
+            requested_program_label:
+              selectedProgram?.title[locale] || form.program,
+            contact_preference: form.contactPreference,
+            message: form.message.trim(),
+            source: "primey_care_landing_register",
           }),
-        })
-
-        const data: StartPaymentResponse | null = await res.json().catch(() => null)
-
-        if (!res.ok || !data) {
-          toast.error(
-            data?.message ||
-              (isArabic
-                ? "فشل إنشاء رابط الدفع عبر البطاقات"
-                : "Failed to create card checkout URL")
-          )
-          return false
         }
+      );
 
-        const checkoutUrl =
-          data.checkout_url ||
-          data.payment_url ||
-          data.redirect_url ||
-          data.url ||
-          null
+      const data = await response.json().catch(() => null);
 
-        const returnedDraftId = String(data.draft_id || currentDraftId)
-
-        if (returnedDraftId) {
-          setDraftId(returnedDraftId)
-          saveDraftSnapshot(returnedDraftId)
-        }
-
-        if (typeof data.message === "string" && data.message.trim()) {
-          setLastActionMessage(data.message)
-        }
-
-        if (checkoutUrl && typeof window !== "undefined") {
-          toast.success(
-            isArabic
-              ? "جارٍ تحويلك إلى بوابة الدفع..."
-              : "Redirecting to payment gateway..."
-          )
-          window.location.href = checkoutUrl
-          return true
-        }
-
-        toast.error(
-          isArabic
-            ? "لم يتم استلام رابط الدفع من الخادم"
-            : "No checkout URL was returned from the server"
-        )
-        return false
-      } catch (error) {
-        console.error("Card payment start failed:", error)
-        toast.error(
-          isArabic
-            ? "حدث خطأ أثناء بدء الدفع بالبطاقة"
-            : "An error occurred while starting card payment"
-        )
-        return false
-      }
-    }
-
-    if (selectedPaymentMethod === "TAMARA") {
-      try {
-        const res = await fetch(`${API}/api/system/payments/tamara/create-checkout/`, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": csrfToken || "",
-          },
-          body: JSON.stringify({
-            draft_id: currentDraftId,
-            payment_method: "TAMARA",
-            billing_cycle: billingCycle,
-            discount_code: discountCode || null,
-          }),
-        })
-
-        const data: StartPaymentResponse | null = await res.json().catch(() => null)
-
-        if (!res.ok || !data) {
-          toast.error(
-            data?.message ||
-              (isArabic
-                ? "فشل إنشاء رابط الدفع عبر تمارا"
-                : "Failed to create Tamara checkout URL")
-          )
-          return false
-        }
-
-        const checkoutUrl =
-          data.checkout_url ||
-          data.payment_url ||
-          data.redirect_url ||
-          data.url ||
-          null
-
-        const returnedDraftId = String(data.draft_id || currentDraftId)
-
-        if (returnedDraftId) {
-          setDraftId(returnedDraftId)
-          saveDraftSnapshot(returnedDraftId)
-        }
-
-        if (typeof data.message === "string" && data.message.trim()) {
-          setLastActionMessage(data.message)
-        }
-
-        if (checkoutUrl && typeof window !== "undefined") {
-          toast.success(
-            isArabic
-              ? "جارٍ تحويلك إلى بوابة تمارا..."
-              : "Redirecting to Tamara..."
-          )
-          window.location.href = checkoutUrl
-          return true
-        }
-
-        toast.error(
-          isArabic
-            ? "لم يتم استلام رابط تمارا من الخادم"
-            : "No Tamara checkout URL was returned from the server"
-        )
-        return false
-      } catch (error) {
-        console.error("Tamara payment start failed:", error)
-        toast.error(
-          isArabic
-            ? "حدث خطأ أثناء بدء الدفع عبر تمارا"
-            : "An error occurred while starting Tamara payment"
-        )
-        return false
-      }
-    }
-
-    return false
-  }
-
-  /* =========================================================
-     CREATE REGISTRATION DRAFT + PAYMENT START
-  ========================================================= */
-  const createRegistrationDraft = async () => {
-    if (!validateBeforeSubmit()) return
-
-    setLoading(true)
-
-    try {
-      const csrfToken = await ensureCsrf()
-
-      const payload = {
-        company_name: name.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        city: city.trim(),
-        country,
-        currency,
-        commercial_number: commercialNumber.trim(),
-        vat_number: vatNumber.trim(),
-        national_address: {
-          building_number: buildingNumber.trim(),
-          street: street.trim(),
-          district: district.trim(),
-          city: city.trim(),
-          postal_code: postalCode.trim(),
-          short_address: shortAddress.trim(),
-        },
-
-        plan_id: planId,
-        duration: billingCycle,
-        discount_code: discountCode.trim() || null,
-        payment_method: paymentMethod,
-
-        admin_username: ownerUsername.trim(),
-        admin_name: `${ownerFirstName} ${ownerLastName}`.trim(),
-        admin_email: ownerEmail.trim(),
-        admin_phone: ownerPhone.trim(),
-        admin_password: ownerPassword,
+      if (!response.ok) {
+        throw new Error(data?.message || t.validation.submitError);
       }
 
-      const createRes = await fetch(`${API}/api/system/onboarding/create-draft/`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRFToken": csrfToken || "",
-        },
-        body: JSON.stringify(payload),
-      })
+      toast.success(t.validation.submitSuccess);
 
-      const createData = await createRes.json().catch(() => null)
-
-      if (!createRes.ok || !createData) {
-        toast.error(
-          createData?.details ||
-            createData?.error ||
-            (isArabic
-              ? "فشل إنشاء مسودة التسجيل"
-              : "Failed to create registration draft")
-        )
-        return
-      }
-
-      const newDraftId = String(createData.draft_id)
-      setDraftId(newDraftId)
-      saveDraftSnapshot(newDraftId)
-
-      const confirmRes = await fetch(`${API}/api/system/onboarding/confirm-draft/`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRFToken": csrfToken || "",
-        },
-        body: JSON.stringify({
-          draft_id: createData.draft_id,
-        }),
-      })
-
-      const confirmData = await confirmRes.json().catch(() => null)
-
-      if (!confirmRes.ok) {
-        toast.error(
-          confirmData?.error ||
-            (isArabic ? "فشل تأكيد المسودة" : "Failed to confirm draft")
-        )
-        return
-      }
-
-      setDraftConfirmed(true)
-
-      const directCheckoutUrl =
-        createData?.checkout_url ||
-        createData?.payment_url ||
-        createData?.redirect_url ||
-        confirmData?.checkout_url ||
-        confirmData?.payment_url ||
-        confirmData?.redirect_url ||
-        null
-
-      if (typeof confirmData?.message === "string" && confirmData.message.trim()) {
-        setLastActionMessage(confirmData.message)
-      } else {
-        setLastActionMessage(
-          paymentMethod === "BANK_TRANSFER"
-            ? isArabic
-              ? "تم إنشاء طلب التسجيل بنجاح. سيبقى الطلب معلقًا حتى يتم التحقق من التحويل البنكي."
-              : "Registration request created successfully. It will remain pending until the bank transfer is verified."
-            : isArabic
-            ? "تم إنشاء طلب التسجيل بنجاح. أكمل الدفع لتفعيل شركتك."
-            : "Registration request created successfully. Continue with payment to activate your company."
-        )
-      }
-
-      router.replace(
-        buildRegisterUrl({
-          plan_id: planId,
-          plan_name: selectedPlan?.name || initialPlanName,
-          draft_id: createData.draft_id ? String(createData.draft_id) : newDraftId,
-        })
-      )
-
-      toast.success(
-        isArabic
-          ? "تم إنشاء طلب التسجيل بنجاح"
-          : "Registration request created successfully"
-      )
-
-      if (
-        paymentMethod !== "BANK_TRANSFER" &&
-        directCheckoutUrl &&
-        typeof window !== "undefined"
-      ) {
-        toast.success(
-          isArabic
-            ? "جارٍ تحويلك إلى بوابة الدفع..."
-            : "Redirecting to payment gateway..."
-        )
-        window.location.href = directCheckoutUrl
-        return
-      }
-
-      const paymentStarted = await startPaymentAfterDraft({
-        currentDraftId: newDraftId,
-        selectedPaymentMethod: paymentMethod,
-        csrfToken: csrfToken || "",
-      })
-
-      if (!paymentStarted) {
-        if (paymentMethod === "TAMARA" || paymentMethod === "CREDIT_CARD") {
-          toast.info(
-            isArabic
-              ? "تم إنشاء المسودة بنجاح، لكن لم يتم إرجاع رابط الدفع من الخادم بعد."
-              : "Draft created successfully, but no payment redirect URL was returned from the backend."
-          )
-          setLastActionMessage(
-            isArabic
-              ? "تم إنشاء المسودة بنجاح، لكن الخادم لم يُرجع رابط بوابة الدفع بعد."
-              : "Draft created successfully, but the backend did not return a checkout URL yet."
-          )
-        } else {
-          toast.info(
-            isArabic
-              ? "تم إنشاء المسودة بنجاح وهي الآن بانتظار التحقق من التحويل البنكي."
-              : "Draft created successfully and is awaiting bank transfer verification."
-          )
-        }
-      }
+      setForm({
+        fullName: "",
+        phone: "",
+        email: "",
+        city: "",
+        program: "individual_card",
+        contactPreference: "whatsapp",
+        message: "",
+      });
     } catch (error) {
-      console.error(error)
-      toast.error(isArabic ? "حدث خطأ غير متوقع" : "Unexpected error")
+      const message =
+        error instanceof Error ? error.message : t.validation.submitError;
+
+      toast.error(message);
     } finally {
-      setLoading(false)
+      setIsSubmitting(false);
     }
   }
 
-  const resolvedCompanyName =
-    successData?.companyName || draftSnapshot?.companyName || name || "—"
+  return (
+    <main
+      lang={locale}
+      dir={dir}
+      className="relative min-h-screen overflow-hidden bg-background"
+      suppressHydrationWarning
+    >
+      {/* خلفيات ناعمة */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-1/2 top-0 h-[460px] w-[460px] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
+        <div className="absolute bottom-20 left-0 h-[320px] w-[320px] rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="absolute right-0 top-1/3 h-[280px] w-[280px] rounded-full bg-sky-500/10 blur-3xl" />
+      </div>
 
-  const resolvedAdminUsername =
-    successData?.adminUsername || draftSnapshot?.adminUsername || ownerUsername || "—"
+      <section className="container relative mx-auto px-4 py-10 md:px-6 md:py-16">
+        {/* Header */}
+        <div
+          className={cn(
+            "mb-10 flex flex-col gap-4 md:flex-row md:items-center md:justify-between",
+            isArabic && "md:flex-row-reverse"
+          )}
+        >
+          <Link
+            href="/"
+            className="inline-flex w-fit items-center transition hover:opacity-80"
+            aria-label="Primey Care"
+          >
+            <Image
+              src="/hero logo.png"
+              alt="Primey Care"
+              width={1200}
+              height={420}
+              priority
+              unoptimized
+              className="h-auto w-full max-w-[170px] object-contain"
+            />
+          </Link>
 
-  const resolvedPaymentMethod =
-    normalizeReturnedPaymentMethod(successData?.paymentMethod || null) ||
-    draftSnapshot?.paymentMethod ||
-    paymentMethod
-
-  const resolvedPlanName =
-    selectedPlan?.name || initialPlanName || draftSnapshot?.planName || ""
-
-  if (registrationCompleted) {
-    return (
-      <div
-        className="mx-auto max-w-6xl space-y-6 p-6"
-        dir={isArabic ? "rtl" : "ltr"}
-      >
-        <div className="flex flex-col gap-4 rounded-3xl border bg-background p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-          <div className={`space-y-2 ${isArabic ? "text-right" : "text-left"}`}>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Sparkles className="h-4 w-4" />
-              {isArabic ? "اكتمل التسجيل بنجاح" : "Registration Completed"}
-            </div>
-
-            <h1 className="text-3xl font-bold tracking-tight">
-              {isArabic ? "تم تفعيل شركتك بنجاح" : "Your Company Has Been Activated"}
-            </h1>
-
-            <p className="text-sm text-muted-foreground">
-              {isArabic
-                ? "تم تأكيد الدفع وإنشاء الاشتراك والفاتورة وربط حساب الشركة بنجاح."
-                : "Payment was confirmed successfully, and the company, subscription, and invoice were created successfully."}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={toggleLanguage}
-              className="h-9 rounded-xl"
-            >
-              <Languages className="h-4 w-4" />
-              <span>{isArabic ? "EN" : "عربي"}</span>
+          <div
+            className={cn(
+              "flex flex-wrap gap-3",
+              isArabic && "justify-start md:justify-end"
+            )}
+          >
+            <Button asChild variant="outline" className="rounded-2xl">
+              <Link href="/">
+                <BackIcon className="size-4" />
+                {t.backHome}
+              </Link>
             </Button>
 
-            {resolvedPlanName ? (
-              <Badge className="rounded-full px-4 py-1.5 text-sm">
-                {isArabic ? "الباقة:" : "Plan:"} {resolvedPlanName}
-              </Badge>
-            ) : null}
+            <Button asChild variant="outline" className="rounded-2xl">
+              <Link href="/pricing">{t.viewPricing}</Link>
+            </Button>
+
+            <Button asChild className="rounded-2xl">
+              <Link href="/contact">
+                <MessageCircle className="size-4" />
+                {t.contactUs}
+              </Link>
+            </Button>
           </div>
         </div>
 
-        <Card className="overflow-hidden border-emerald-200 bg-gradient-to-br from-emerald-50 via-background to-background shadow-sm">
-          <CardContent className="p-0">
-            <div className="grid gap-0 lg:grid-cols-[1.2fr_0.8fr]">
-              <div className="space-y-6 p-6 md:p-8">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-3xl bg-emerald-100">
-                    <CheckCircle2 className="h-8 w-8 text-emerald-600" />
-                  </div>
+        {/* Hero */}
+        <div className="mx-auto max-w-5xl text-center">
+          <Badge
+            variant="outline"
+            className="mb-5 rounded-full bg-background/70 px-4 py-2 text-sm backdrop-blur"
+          >
+            <Sparkles className="size-4 text-primary" />
+            {t.badge}
+          </Badge>
 
-                  <div className={`space-y-2 ${isArabic ? "text-right" : "text-left"}`}>
-                    <h2 className="text-2xl font-bold text-emerald-700">
-                      {isArabic ? "تم كل شيء بنجاح" : "Everything Is Ready"}
-                    </h2>
-
-                    <p className="text-sm leading-6 text-muted-foreground">
-                      {successData?.message ||
-                        (isArabic
-                          ? "تم تفعيل الحساب بنجاح ويمكنك الآن الانتقال إلى صفحة تسجيل الدخول للدخول إلى لوحة شركتك."
-                          : "Your account has been activated successfully. You can now go to the login page and access your company account.")}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="rounded-2xl border bg-background p-4">
-                    <div className="text-xs text-muted-foreground">
-                      {isArabic ? "اسم الشركة" : "Company Name"}
-                    </div>
-                    <div className="mt-2 text-base font-semibold">
-                      {resolvedCompanyName}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border bg-background p-4">
-                    <div className="text-xs text-muted-foreground">
-                      {isArabic ? "اسم المستخدم" : "Username"}
-                    </div>
-                    <div className="mt-2 text-base font-semibold">
-                      {resolvedAdminUsername}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border bg-background p-4">
-                    <div className="text-xs text-muted-foreground">
-                      {isArabic ? "رقم الفاتورة" : "Invoice ID"}
-                    </div>
-                    <div className="mt-2 text-base font-semibold">
-                      {successData?.invoiceId ?? "—"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border bg-background p-4">
-                    <div className="text-xs text-muted-foreground">
-                      {isArabic ? "رقم المسودة" : "Draft ID"}
-                    </div>
-                    <div className="mt-2 text-base font-semibold">
-                      {successData?.draftId || draftId || "—"}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <ShieldCheck className="h-4 w-4" />
-                    {isArabic
-                      ? "الخطوة التالية: تسجيل الدخول"
-                      : "Next Step: Sign In"}
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {isArabic
-                      ? `سيتم تحويلك تلقائيًا إلى صفحة تسجيل الدخول خلال ${redirectCountdown} ثانية.`
-                      : `You will be redirected automatically to the sign-in page in ${redirectCountdown} seconds.`}
-                  </p>
-                </div>
-
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <Button onClick={goToLogin} className="gap-2">
-                    <LogIn className="h-4 w-4" />
-                    {isArabic ? "الانتقال إلى تسجيل الدخول الآن" : "Go to Login Now"}
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => router.push("/#pricing")}
-                  >
-                    {isArabic ? "العودة إلى الأسعار" : "Back to Pricing"}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="border-t bg-muted/20 p-6 md:p-8 lg:border-t-0 lg:border-s">
-                <div className="space-y-4">
-                  <div className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}>
-                    <div className="text-sm font-semibold">
-                      {isArabic ? "ملخص العملية" : "Activation Summary"}
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {isArabic
-                        ? "تم إنهاء رحلة التسجيل والدفع والتفعيل بنجاح."
-                        : "The registration, payment, and activation flow has completed successfully."}
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {[
-                      isArabic ? "إنشاء الشركة" : "Company created",
-                      isArabic ? "إنشاء الاشتراك" : "Subscription created",
-                      isArabic ? "إنشاء الفاتورة" : "Invoice created",
-                      isArabic ? "تسجيل عملية الدفع" : "Payment recorded",
-                    ].map((item) => (
-                      <div
-                        key={item}
-                        className="flex items-center gap-3 rounded-2xl border bg-background px-4 py-3"
-                      >
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                        <span className="text-sm font-medium">{item}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="rounded-2xl border bg-background p-4">
-                    <div className="text-xs text-muted-foreground">
-                      {isArabic ? "طريقة الدفع" : "Payment Method"}
-                    </div>
-                    <div className="mt-2 font-semibold">
-                      {getMethodLabel(resolvedPaymentMethod, locale)}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border bg-background p-4">
-                    <div className="text-xs text-muted-foreground">
-                      {isArabic ? "حالة البوابة" : "Gateway Status"}
-                    </div>
-                    <div className="mt-2 font-semibold">
-                      {successData?.gatewayStatus || "SUCCESS"}
-                    </div>
-                  </div>
-
-                  {successData?.gatewayTransactionId ? (
-                    <div className="rounded-2xl border bg-background p-4">
-                      <div className="text-xs text-muted-foreground">
-                        {isArabic ? "مرجع العملية" : "Transaction Reference"}
-                      </div>
-                      <div className="mt-2 break-all text-sm font-semibold">
-                        {successData.gatewayTransactionId}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  return (
-    <div
-      className="mx-auto max-w-7xl space-y-6 p-6"
-      dir={isArabic ? "rtl" : "ltr"}
-    >
-      <div className="flex flex-col gap-4 rounded-3xl border bg-background p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-        <div className={`space-y-2 ${isArabic ? "text-right" : "text-left"}`}>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <ReceiptText className="h-4 w-4" />
-            {isArabic ? "التسجيل العام" : "Public Registration"}
-          </div>
-
-          <h1 className="text-3xl font-bold tracking-tight">
-            {isArabic ? "سجل شركتك" : "Register Your Company"}
+          <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
+            {t.title}
           </h1>
 
-          <p className="text-sm text-muted-foreground">
-            {isArabic
-              ? "أنشئ طلب تسجيل شركتك، وراجع ملخص الفاتورة، واختر طريقة الدفع، ثم أكمل بأمان."
-              : "Create your company registration request, review the invoice summary, choose your payment method, and continue securely."}
+          <p className="text-muted-foreground mx-auto mt-5 max-w-3xl text-base leading-8 md:text-lg">
+            {t.description}
           </p>
+
+          <div className="mx-auto mt-6 max-w-3xl rounded-2xl border bg-background/70 px-5 py-4 text-sm leading-7 text-muted-foreground backdrop-blur">
+            <div
+              className={cn(
+                "flex items-start justify-center gap-2",
+                isArabic && "flex-row-reverse text-right"
+              )}
+            >
+              <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
+              <span>{t.primaryNote}</span>
+            </div>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={toggleLanguage}
-            className="h-9 rounded-xl"
-          >
-            <Languages className="h-4 w-4" />
-            <span>{isArabic ? "EN" : "عربي"}</span>
-          </Button>
+        {/* Content */}
+        <div className="mt-12 grid gap-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
+          {/* Side Info */}
+          <div className="space-y-6">
+            <Card className="overflow-hidden border-primary/15 bg-background/80 backdrop-blur">
+              <CardContent className="p-0">
+                <div className="relative min-h-[320px] overflow-hidden">
+                  <Image
+                    src="/hero.png"
+                    alt="Primey Care benefits"
+                    fill
+                    priority
+                    unoptimized
+                    className="object-cover"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
 
-          {resolvedPlanName ? (
-            <Badge className="rounded-full px-4 py-1.5 text-sm">
-              {isArabic ? "الباقة:" : "Plan:"} {resolvedPlanName}
-            </Badge>
-          ) : null}
+                  <div className="absolute bottom-0 p-6">
+                    <Badge className="mb-3 rounded-full">
+                      <HeartPulse className="size-4" />
+                      Primey Care
+                    </Badge>
 
-          <Button
-            variant="outline"
-            onClick={() => router.push("/#pricing")}
-            className="gap-2"
-          >
-            <BackIcon className="h-4 w-4" />
-            {isArabic ? "العودة إلى الأسعار" : "Back to Pricing"}
-          </Button>
-        </div>
-      </div>
+                    <h2
+                      className={cn(
+                        "text-2xl font-bold",
+                        isArabic && "text-right"
+                      )}
+                    >
+                      {t.sideTitle}
+                    </h2>
 
-      {draftId ? (
-        <Card className="border-emerald-200 bg-emerald-50/60">
-          <CardContent className="flex flex-col gap-3 py-5 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-600" />
-              <div className={isArabic ? "text-right" : "text-left"}>
-                <p className="font-medium text-emerald-700">
-                  {isArabic
-                    ? "تم إنشاء مسودة التسجيل بنجاح"
-                    : "Registration draft created successfully"}
-                </p>
-                <p className="text-sm text-emerald-700/80">
-                  {isArabic ? "رقم المسودة:" : "Draft ID:"} {draftId}
-                  {draftConfirmed
-                    ? isArabic
-                      ? " • الحالة: تم التأكيد"
-                      : " • Status: CONFIRMED"
-                    : ""}
-                </p>
-              </div>
-            </div>
-
-            <div className={`text-sm text-emerald-700/90 ${isArabic ? "text-right" : "text-left"}`}>
-              {isArabic
-                ? "لن يتم تفعيل الشركة إلا بعد نجاح تأكيد الدفع من البوابة."
-                : "Company activation will happen only after successful gateway confirmation."}
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <div className="grid gap-6 xl:grid-cols-12">
-        <div className="space-y-6 xl:col-span-8">
-          <Card className="overflow-hidden">
-            <CardHeader className="border-b bg-muted/30 pb-6">
-              <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-                <div className={`space-y-4 ${isArabic ? "text-right" : "text-left"}`}>
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
-                    <Building2 className="h-7 w-7 text-primary" />
-                  </div>
-
-                  <div>
-                    <CardTitle className="text-2xl font-bold">
-                      {isArabic ? "طلب تسجيل شركة" : "Company Registration Request"}
-                    </CardTitle>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {isArabic
-                        ? "أدخل بيانات الشركة وحساب المدير وإعدادات الاشتراك."
-                        : "Enter the company details, admin account, and billing setup."}
+                    <p
+                      className={cn(
+                        "text-muted-foreground mt-3 max-w-xl leading-7",
+                        isArabic && "text-right"
+                      )}
+                    >
+                      {t.sideDescription}
                     </p>
                   </div>
                 </div>
+              </CardContent>
+            </Card>
 
-                <div className="grid gap-3 text-sm lg:min-w-[280px]">
-                  <div className="flex items-center justify-between rounded-xl border bg-background px-4 py-3">
-                    <span className="text-muted-foreground">
-                      {isArabic ? "الباقة المختارة" : "Selected Plan"}
-                    </span>
-                    <span className="font-semibold">
-                      {resolvedPlanName || "-"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-xl border bg-background px-4 py-3">
-                    <span className="text-muted-foreground">
-                      {isArabic ? "دورة الفوترة" : "Billing Cycle"}
-                    </span>
-                    <span className="font-medium capitalize">
-                      {billingCycle === "monthly"
-                        ? isArabic
-                          ? "شهري"
-                          : "monthly"
-                        : isArabic
-                        ? "سنوي"
-                        : "yearly"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-xl border bg-background px-4 py-3">
-                    <span className="text-muted-foreground">
-                      {isArabic ? "طريقة الدفع" : "Payment Method"}
-                    </span>
-                    <span className="font-medium">
-                      {getMethodLabel(paymentMethod, locale)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="space-y-6 p-6">
-              <div className="rounded-2xl border">
-                <div className="border-b bg-muted/30 px-5 py-4">
-                  <div className="flex items-center gap-2">
-                    <Building2 className="h-4 w-4 text-primary" />
-                    <h3 className="font-semibold">
-                      {isArabic ? "معلومات الشركة" : "Company Information"}
-                    </h3>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 p-5 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "اسم الشركة" : "Company Name"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "اسم الشركة" : "Company Name"}
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "بريد الشركة" : "Company Email"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "بريد الشركة" : "Company Email"}
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "رقم الجوال" : "Phone"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "رقم الجوال" : "Phone"}
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "المدينة" : "City"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "المدينة" : "City"}
-                      value={city}
-                      onChange={(e) => setCity(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "الدولة" : "Country"}
-                    </label>
-                    <select
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={`flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm ${
-                        isArabic ? "text-right" : "text-left"
-                      }`}
-                      value={country}
-                      onChange={(e) => setCountry(e.target.value)}
-                    >
-                      {countries.map((c) => (
-                        <option key={c.name} value={c.name}>
-                          {isArabic ? c.label.ar : c.label.en}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "العملة" : "Currency"}
-                    </label>
-                    <Input
-                      value={currency}
-                      readOnly
-                      className={isArabic ? "text-right" : "text-left"}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border">
-                <div className="border-b bg-muted/30 px-5 py-4">
-                  <div className="flex items-center gap-2">
-                    <Landmark className="h-4 w-4 text-primary" />
-                    <h3 className="font-semibold">
-                      {isArabic ? "البيانات التجارية والضريبية" : "Commercial & Tax Information"}
-                    </h3>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 p-5 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "السجل التجاري" : "Commercial Number"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "السجل التجاري" : "Commercial Number"}
-                      value={commercialNumber}
-                      onChange={(e) => setCommercialNumber(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "الرقم الضريبي" : "VAT Number"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "الرقم الضريبي" : "VAT Number"}
-                      value={vatNumber}
-                      onChange={(e) => setVatNumber(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border">
-                <div className="border-b bg-muted/30 px-5 py-4">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-4 w-4 text-primary" />
-                    <h3 className="font-semibold">
-                      {isArabic ? "العنوان الوطني" : "National Address"}
-                    </h3>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 p-5 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "رقم المبنى" : "Building Number"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "رقم المبنى" : "Building Number"}
-                      value={buildingNumber}
-                      onChange={(e) => setBuildingNumber(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "الشارع" : "Street"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "الشارع" : "Street"}
-                      value={street}
-                      onChange={(e) => setStreet(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "الحي" : "District"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "الحي" : "District"}
-                      value={district}
-                      onChange={(e) => setDistrict(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "الرمز البريدي" : "Postal Code"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "الرمز البريدي" : "Postal Code"}
-                      value={postalCode}
-                      onChange={(e) => setPostalCode(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2 md:col-span-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "العنوان المختصر" : "Short Address"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "العنوان المختصر" : "Short Address"}
-                      value={shortAddress}
-                      onChange={(e) => setShortAddress(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border">
-                <div className="border-b bg-muted/30 px-5 py-4">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-primary" />
-                    <h3 className="font-semibold">
-                      {isArabic ? "باقة الاشتراك" : "Subscription Plan"}
-                    </h3>
-                  </div>
-                </div>
-
-                <div className="p-5">
-                  {plansLoading ? (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      {isArabic ? "جارٍ تحميل الباقات..." : "Loading plans..."}
-                    </div>
-                  ) : plansError ? (
-                    <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-600">
-                      {plansError}
-                    </div>
-                  ) : (
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      {plans.map((plan) => {
-                        const planPrice =
-                          billingCycle === "monthly"
-                            ? normalizeNumber(plan.price_monthly)
-                            : normalizeNumber(plan.price_yearly)
-
-                        const isSelected = planId === String(plan.id)
-
-                        return (
-                          <button
-                            key={plan.id}
-                            type="button"
-                            onClick={() => setPlanId(String(plan.id))}
-                            className={`rounded-2xl border p-4 transition ${
-                              isSelected
-                                ? "border-primary bg-primary/5 shadow-sm"
-                                : "hover:border-primary/40 hover:bg-muted/30"
-                            } ${isArabic ? "text-right" : "text-left"}`}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="font-semibold">{plan.name}</div>
-                                <div className="mt-1 text-sm text-muted-foreground">
-                                  {formatMoney(planPrice, currency, locale)}
-                                </div>
-                              </div>
-
-                              {isSelected ? (
-                                <div className="h-2.5 w-2.5 rounded-full bg-primary" />
-                              ) : null}
-                            </div>
-
-                            {plan.description ? (
-                              <div className="mt-3 text-xs text-muted-foreground">
-                                {plan.description}
-                              </div>
-                            ) : null}
-
-                            {plan.apps?.length > 0 ? (
-                              <div className="mt-3 text-xs text-muted-foreground">
-                                {isArabic ? "التطبيقات:" : "Apps:"} {plan.apps.join(", ")}
-                              </div>
-                            ) : null}
-
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              <Badge variant="secondary" className="rounded-full">
-                                {isArabic
-                                  ? `الحد الأقصى للموظفين: ${normalizeNumber(plan.max_employees)}`
-                                  : `Max Employees: ${normalizeNumber(plan.max_employees)}`}
-                              </Badge>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
+            <Card className="bg-muted/50">
+              <CardContent className="p-6">
+                <h3
+                  className={cn(
+                    "mb-5 text-xl font-bold",
+                    isArabic && "text-right"
                   )}
+                >
+                  {t.benefitsTitle}
+                </h3>
+
+                <div className="space-y-5">
+                  {t.steps.map((step, index) => (
+                    <div
+                      key={step.title}
+                      className={cn(
+                        "flex gap-4",
+                        isArabic && "flex-row-reverse text-right"
+                      )}
+                    >
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary ring-8 ring-primary/5">
+                        {index + 1}
+                      </div>
+
+                      <div>
+                        <h4 className="font-semibold">{step.title}</h4>
+                        <p className="text-muted-foreground mt-1 leading-7">
+                          {step.description}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-amber-500/20 bg-amber-500/5">
+              <CardContent className="p-6">
+                <div
+                  className={cn(
+                    "flex gap-3",
+                    isArabic && "flex-row-reverse text-right"
+                  )}
+                >
+                  <ShieldCheck className="mt-1 size-5 shrink-0 text-amber-600" />
+
+                  <div>
+                    <h3 className="font-bold">{t.disclaimerTitle}</h3>
+                    <p className="text-muted-foreground mt-2 leading-7">
+                      {t.disclaimerText}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Form */}
+          <Card className="relative overflow-hidden border-primary/15 bg-background/85 shadow-xl backdrop-blur">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary/20 via-primary to-primary/20" />
+
+            <CardContent className="p-6 md:p-8">
+              <div className={cn("mb-8", isArabic && "text-right")}>
+                <Badge variant="secondary" className="mb-4 rounded-full">
+                  <CheckCircle2 className="size-4 text-primary" />
+                  {t.formTitle}
+                </Badge>
+
+                <h2 className="text-2xl font-bold md:text-3xl">
+                  {t.formTitle}
+                </h2>
+
+                <p className="text-muted-foreground mt-3 leading-7">
+                  {t.formDescription}
+                </p>
               </div>
 
-              <div className="rounded-2xl border">
-                <div className="border-b bg-muted/30 px-5 py-4">
-                  <div className="flex items-center gap-2">
-                    <User2 className="h-4 w-4 text-primary" />
-                    <h3 className="font-semibold">
-                      {isArabic ? "مدير النظام الأساسي" : "Owner Admin"}
-                    </h3>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 p-5 md:grid-cols-2">
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="grid gap-5 md:grid-cols-2">
                   <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "الاسم الأول" : "First Name"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "الاسم الأول" : "First Name"}
-                      value={ownerFirstName}
-                      onChange={(e) => setOwnerFirstName(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "اسم العائلة" : "Last Name"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "اسم العائلة" : "Last Name"}
-                      value={ownerLastName}
-                      onChange={(e) => setOwnerLastName(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "بريد المدير" : "Admin Email"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "بريد المدير" : "Admin Email"}
-                      type="email"
-                      value={ownerEmail}
-                      onChange={(e) => setOwnerEmail(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Phone className="h-4 w-4" />
-                      <span>{isArabic ? "جوال المدير" : "Admin Phone"}</span>
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "05xxxxxxxx" : "05xxxxxxxx"}
-                      value={ownerPhone}
-                      onChange={(e) => setOwnerPhone(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2 md:col-span-2">
-                    <div className="rounded-xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
-                      {isArabic
-                        ? "سيُستخدم هذا الرقم لإشعارات واتساب الخاصة بصاحب الحساب أو الأدمن الأساسي."
-                        : "This number will be used for WhatsApp notifications for the account owner / primary admin."}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "اسم المستخدم" : "Username"}
-                    </label>
-                    <Input
-                      dir={isArabic ? "rtl" : "ltr"}
-                      className={isArabic ? "text-right" : "text-left"}
-                      placeholder={isArabic ? "اسم المستخدم" : "Username"}
-                      value={ownerUsername}
-                      onChange={(e) => setOwnerUsername(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2 md:col-span-2">
-                    <label className="text-sm text-muted-foreground">
-                      {isArabic ? "كلمة المرور" : "Password"}
+                    <label
+                      htmlFor="fullName"
+                      className={cn(
+                        "text-sm font-semibold",
+                        isArabic && "block text-right"
+                      )}
+                    >
+                      {t.fullName}
                     </label>
 
-                    <div className="flex gap-2">
+                    <div className="relative">
+                      <UserRound
+                        className={cn(
+                          "text-muted-foreground absolute top-1/2 size-4 -translate-y-1/2",
+                          isArabic ? "right-3" : "left-3"
+                        )}
+                      />
+
                       <Input
-                        type="password"
-                        dir={isArabic ? "rtl" : "ltr"}
-                        className={isArabic ? "text-right" : "text-left"}
-                        value={ownerPassword}
-                        onChange={(e) => setOwnerPassword(e.target.value)}
-                        placeholder={isArabic ? "كلمة المرور" : "Password"}
-                      />
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setOwnerPassword(generatePassword())}
-                      >
-                        {isArabic ? "توليد" : "Generate"}
-                      </Button>
-                    </div>
-
-                    <div className="mt-3 h-2 overflow-hidden rounded bg-gray-200">
-                      <div
-                        className={`h-2 ${strength.color}`}
-                        style={{ width: strength.width }}
+                        id="fullName"
+                        value={form.fullName}
+                        onChange={(event) =>
+                          updateForm("fullName", event.target.value)
+                        }
+                        placeholder={t.fullNamePlaceholder}
+                        className={cn(isArabic ? "pr-10 text-right" : "pl-10")}
+                        dir={dir}
+                        autoComplete="name"
                       />
                     </div>
+                  </div>
 
-                    <div className={`mt-2 text-xs ${strength.textClass}`}>
-                      {isArabic ? "قوة كلمة المرور:" : "Strength:"} {strength.label}
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="phone"
+                      className={cn(
+                        "text-sm font-semibold",
+                        isArabic && "block text-right"
+                      )}
+                    >
+                      {t.phone}
+                    </label>
+
+                    <div className="relative">
+                      <Phone
+                        className={cn(
+                          "text-muted-foreground absolute top-1/2 size-4 -translate-y-1/2",
+                          isArabic ? "right-3" : "left-3"
+                        )}
+                      />
+
+                      <Input
+                        id="phone"
+                        value={form.phone}
+                        onChange={(event) =>
+                          updateForm("phone", event.target.value)
+                        }
+                        placeholder={t.phonePlaceholder}
+                        className={cn(isArabic ? "pr-10 text-right" : "pl-10")}
+                        dir="ltr"
+                        inputMode="tel"
+                        autoComplete="tel"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="email"
+                      className={cn(
+                        "text-sm font-semibold",
+                        isArabic && "block text-right"
+                      )}
+                    >
+                      {t.email}
+                    </label>
+
+                    <div className="relative">
+                      <Mail
+                        className={cn(
+                          "text-muted-foreground absolute top-1/2 size-4 -translate-y-1/2",
+                          isArabic ? "right-3" : "left-3"
+                        )}
+                      />
+
+                      <Input
+                        id="email"
+                        type="email"
+                        value={form.email}
+                        onChange={(event) =>
+                          updateForm("email", event.target.value)
+                        }
+                        placeholder={t.emailPlaceholder}
+                        className={cn(isArabic ? "pr-10 text-left" : "pl-10")}
+                        dir="ltr"
+                        autoComplete="email"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="city"
+                      className={cn(
+                        "text-sm font-semibold",
+                        isArabic && "block text-right"
+                      )}
+                    >
+                      {t.city}
+                    </label>
+
+                    <div className="relative">
+                      <MapPin
+                        className={cn(
+                          "text-muted-foreground absolute top-1/2 size-4 -translate-y-1/2",
+                          isArabic ? "right-3" : "left-3"
+                        )}
+                      />
+
+                      <Input
+                        id="city"
+                        value={form.city}
+                        onChange={(event) =>
+                          updateForm("city", event.target.value)
+                        }
+                        placeholder={t.cityPlaceholder}
+                        className={cn(isArabic ? "pr-10 text-right" : "pl-10")}
+                        dir={dir}
+                        autoComplete="address-level2"
+                      />
                     </div>
                   </div>
                 </div>
-              </div>
+
+                <div className="space-y-3">
+                  <label
+                    className={cn(
+                      "text-sm font-semibold",
+                      isArabic && "block text-right"
+                    )}
+                  >
+                    {t.program}
+                  </label>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {programOptions.map((option) => {
+                      const Icon = option.icon;
+                      const isSelected = form.program === option.value;
+
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => updateForm("program", option.value)}
+                          className={cn(
+                            "rounded-2xl border bg-background/80 p-4 text-start transition",
+                            "hover:border-primary/50 hover:bg-primary/5",
+                            isSelected &&
+                              "border-primary bg-primary/10 ring-2 ring-primary/15",
+                            isArabic && "text-right"
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "flex gap-3",
+                              isArabic && "flex-row-reverse"
+                            )}
+                          >
+                            <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                              <Icon className="size-5" />
+                            </div>
+
+                            <div>
+                              <div className="font-bold">
+                                {option.title[locale]}
+                              </div>
+
+                              <p className="text-muted-foreground mt-1 text-sm leading-6">
+                                {option.description[locale]}
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label
+                    className={cn(
+                      "text-sm font-semibold",
+                      isArabic && "block text-right"
+                    )}
+                  >
+                    {t.contactPreference}
+                  </label>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {(
+                      Object.keys(t.contactPreferences) as ContactPreference[]
+                    ).map((preference) => {
+                      const isSelected = form.contactPreference === preference;
+
+                      return (
+                        <button
+                          key={preference}
+                          type="button"
+                          onClick={() =>
+                            updateForm("contactPreference", preference)
+                          }
+                          className={cn(
+                            "rounded-2xl border bg-background/80 px-4 py-3 text-sm font-semibold transition",
+                            "hover:border-primary/50 hover:bg-primary/5",
+                            isSelected &&
+                              "border-primary bg-primary/10 text-primary ring-2 ring-primary/15"
+                          )}
+                        >
+                          {t.contactPreferences[preference]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label
+                    htmlFor="message"
+                    className={cn(
+                      "text-sm font-semibold",
+                      isArabic && "block text-right"
+                    )}
+                  >
+                    {t.message}
+                  </label>
+
+                  <Textarea
+                    id="message"
+                    value={form.message}
+                    onChange={(event) =>
+                      updateForm("message", event.target.value)
+                    }
+                    placeholder={t.messagePlaceholder}
+                    rows={5}
+                    className={cn("resize-none", isArabic && "text-right")}
+                    dir={dir}
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={isSubmitting}
+                  className="w-full rounded-2xl"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" />
+                      {t.submitting}
+                    </>
+                  ) : (
+                    <>
+                      {t.submit}
+                      <ForwardIcon className="size-4" />
+                    </>
+                  )}
+                </Button>
+              </form>
             </CardContent>
           </Card>
         </div>
+      </section>
 
-        <div className="space-y-6 xl:col-span-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>{isArabic ? "إعداد الفوترة" : "Billing Setup"}</CardTitle>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Button
-                  type="button"
-                  variant={billingCycle === "monthly" ? "default" : "outline"}
-                  onClick={() => setBillingCycle("monthly")}
-                  className={isArabic ? "justify-center" : "justify-start"}
-                >
-                  {isArabic ? "شهري" : "Monthly"}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant={billingCycle === "yearly" ? "default" : "outline"}
-                  onClick={() => setBillingCycle("yearly")}
-                  className={isArabic ? "justify-center" : "justify-start"}
-                >
-                  {isArabic ? "سنوي" : "Yearly"}
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm text-muted-foreground">
-                  {isArabic ? "كود الخصم" : "Discount Code"}
-                </label>
-                <div className="flex gap-2">
-                  <Input
-                    dir={isArabic ? "rtl" : "ltr"}
-                    className={isArabic ? "text-right" : "text-left"}
-                    placeholder={isArabic ? "كود الخصم" : "Discount code"}
-                    value={discountCode}
-                    onChange={(e) => setDiscountCode(e.target.value)}
-                  />
-                  <Button type="button" variant="outline" onClick={applyDiscount}>
-                    {isArabic ? "تطبيق" : "Apply"}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4 text-sm text-muted-foreground">
-                {isArabic
-                  ? "سيبقى طلب التسجيل معلقًا حتى تؤكد بوابة الدفع نجاح العملية."
-                  : "The registration request remains pending until the gateway confirms the payment successfully."}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{isArabic ? "اختر طريقة الدفع" : "Select Payment Method"}</CardTitle>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("CREDIT_CARD")}
-                className={`flex w-full items-center justify-between rounded-2xl border p-4 transition ${
-                  paymentMethod === "CREDIT_CARD"
-                    ? "border-primary bg-primary/5"
-                    : "hover:bg-muted/40"
-                } ${isArabic ? "text-right" : "text-left"}`}
-              >
-                <div className="flex items-center gap-3">
-                  <CreditCard className="h-5 w-5" />
-                  <div>
-                    <div className="font-medium">
-                      {isArabic ? "بطاقة ائتمانية" : "Credit Card"}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {isArabic
-                        ? "دفع آمن عبر Tap"
-                        : "Secure online payment via Tap"}
-                    </div>
-                  </div>
-                </div>
-
-                {paymentMethod === "CREDIT_CARD" ? (
-                  <div className="h-2.5 w-2.5 rounded-full bg-primary" />
-                ) : null}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("TAMARA")}
-                className={`flex w-full items-center justify-between rounded-2xl border p-4 transition ${
-                  paymentMethod === "TAMARA"
-                    ? "border-primary bg-primary/5"
-                    : "hover:bg-muted/40"
-                } ${isArabic ? "text-right" : "text-left"}`}
-              >
-                <div className="flex items-center gap-3">
-                  <Wallet className="h-5 w-5" />
-                  <div>
-                    <div className="font-medium">Tamara</div>
-                    <div className="text-xs text-muted-foreground">
-                      {isArabic ? "قسّم الدفع مع تمارا" : "Split payment with Tamara"}
-                    </div>
-                  </div>
-                </div>
-
-                {paymentMethod === "TAMARA" ? (
-                  <div className="h-2.5 w-2.5 rounded-full bg-primary" />
-                ) : null}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("BANK_TRANSFER")}
-                className={`flex w-full items-center justify-between rounded-2xl border p-4 transition ${
-                  paymentMethod === "BANK_TRANSFER"
-                    ? "border-primary bg-primary/5"
-                    : "hover:bg-muted/40"
-                } ${isArabic ? "text-right" : "text-left"}`}
-              >
-                <div className="flex items-center gap-3">
-                  <Landmark className="h-5 w-5" />
-                  <div>
-                    <div className="font-medium">
-                      {isArabic ? "تحويل بنكي" : "Bank Transfer"}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {isArabic
-                        ? "أنشئ الطلب ثم أكمل مع الإدارة المالية"
-                        : "Create the request and continue with finance"}
-                    </div>
-                  </div>
-                </div>
-
-                {paymentMethod === "BANK_TRANSFER" ? (
-                  <div className="h-2.5 w-2.5 rounded-full bg-primary" />
-                ) : null}
-              </button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>{isArabic ? "معاينة الفاتورة" : "Invoice Preview"}</CardTitle>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              {previewLoading || gatewayConfirming ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {gatewayConfirming
-                    ? isArabic
-                      ? "جارٍ إنهاء تأكيد الدفع..."
-                      : "Finalizing payment confirmation..."
-                    : isArabic
-                    ? "جارٍ تحديث المعاينة..."
-                    : "Updating preview..."}
-                </div>
-              ) : null}
-
-              <div className="flex items-center gap-3 rounded-2xl border bg-muted/20 p-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-background">
-                  <Image
-                    src="/currency/sar.svg"
-                    alt="SAR"
-                    width={26}
-                    height={26}
-                    className="object-contain"
-                  />
-                </div>
-
-                <div className={isArabic ? "text-right" : "text-left"}>
-                  <div className="text-sm text-muted-foreground">
-                    {isArabic ? "الإجمالي المستحق" : "Total Due"}
-                  </div>
-                  <div className="text-2xl font-bold">
-                    {formatMoney(totalWithVat, currency, locale)}
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3 rounded-2xl border p-4">
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">{isArabic ? "الباقة" : "Plan"}</span>
-                  <span className="font-medium">
-                    {resolvedPlanName || "-"}
-                  </span>
-                </div>
-
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">
-                    {isArabic ? "دورة الفوترة" : "Billing Cycle"}
-                  </span>
-                  <span className="font-medium capitalize">
-                    {billingCycle === "monthly"
-                      ? isArabic
-                        ? "شهري"
-                        : "monthly"
-                      : isArabic
-                      ? "سنوي"
-                      : "yearly"}
-                  </span>
-                </div>
-
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">
-                    {isArabic ? "طريقة الدفع" : "Payment Method"}
-                  </span>
-                  <span className="font-medium">{getMethodLabel(paymentMethod, locale)}</span>
-                </div>
-
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">{isArabic ? "السعر" : "Price"}</span>
-                  <span className="font-medium">
-                    {formatMoney(basePrice, currency, locale)}
-                  </span>
-                </div>
-
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">{isArabic ? "الخصم" : "Discount"}</span>
-                  <span className="font-medium">
-                    - {formatMoney(discountAmountPreview, currency, locale)}
-                  </span>
-                </div>
-
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">
-                    {isArabic ? "الإجمالي قبل الضريبة" : "Subtotal"}
-                  </span>
-                  <span className="font-medium">
-                    {formatMoney(subtotal, currency, locale)}
-                  </span>
-                </div>
-
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">
-                    {isArabic ? "ضريبة القيمة المضافة 15%" : "VAT 15%"}
-                  </span>
-                  <span className="font-medium">
-                    {formatMoney(vatAmount, currency, locale)}
-                  </span>
-                </div>
-
-                <div className="border-t pt-3">
-                  <div className="flex justify-between gap-4 text-lg font-bold">
-                    <span>{isArabic ? "الإجمالي شامل الضريبة" : "Total + VAT"}</span>
-                    <span>{formatMoney(totalWithVat, currency, locale)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4 text-sm text-muted-foreground">
-                <div className="mb-1 flex items-center gap-2 font-medium text-foreground">
-                  <ShieldCheck className="h-4 w-4" />
-                  {isArabic
-                    ? `الطريقة المختارة: ${getMethodLabel(paymentMethod, locale)}`
-                    : `Selected Method: ${getMethodLabel(paymentMethod, locale)}`}
-                </div>
-                <div>{getMethodDescription(paymentMethod, locale)}</div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-[1fr_110px]">
-                <div className="rounded-2xl border p-4 text-sm text-muted-foreground">
-                  {isArabic
-                    ? "من المتوقع أن يرسل النظام إشعارات التسجيل والدفع عبر البريد الإلكتروني بعد نجاح إنشاء الطلب وتقدم حالة الدفع."
-                    : "The backend flow is expected to send registration/payment notifications by email after successful request creation and gateway progress."}
-                </div>
-
-                <div className="flex flex-col items-center justify-center rounded-2xl border bg-white p-4">
-                  <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                    <QrCode className="h-4 w-4" />
-                    QR
-                  </div>
-
-                  <div className="flex h-[70px] w-[70px] items-center justify-center rounded-xl border bg-muted/20">
-                    <QrCode className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                </div>
-              </div>
-
-              {lastActionMessage ? (
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                  {lastActionMessage}
-                </div>
-              ) : null}
-
-              <div className="flex flex-col gap-3">
-                <Button
-                  onClick={createRegistrationDraft}
-                  disabled={loading || plansLoading || gatewayConfirming}
-                  className="w-full gap-2"
-                >
-                  {loading || gatewayConfirming ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : null}
-
-                  {loading
-                    ? isArabic
-                      ? "جارٍ المعالجة..."
-                      : "Processing..."
-                    : gatewayConfirming
-                    ? isArabic
-                      ? "جارٍ تأكيد الدفع..."
-                      : "Confirming Payment..."
-                    : paymentMethod === "BANK_TRANSFER"
-                    ? isArabic
-                      ? "إنشاء الطلب"
-                      : "Create Request"
-                    : isArabic
-                    ? `المتابعة إلى ${getMethodLabel(paymentMethod, locale)}`
-                    : `Continue to ${getMethodLabel(paymentMethod, locale)}`}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => router.push("/#pricing")}
-                  className="w-full"
-                  disabled={loading || gatewayConfirming}
-                >
-                  {isArabic ? "إلغاء" : "Cancel"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-export default function RegisterCompanyPage() {
-  return (
-    <Suspense fallback={<RegisterCompanyPageFallback />}>
-      <RegisterCompanyPageContent />
-    </Suspense>
-  )
+      {/* الدعم العائم */}
+      <ChatWidget />
+    </main>
+  );
 }

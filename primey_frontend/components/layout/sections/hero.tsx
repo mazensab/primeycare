@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import Image from "next/image";
+import Link from "next/link";
 import { CheckIcon, ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -46,28 +47,28 @@ async function getPageLang(): Promise<AppLang> {
 ========================================================= */
 const content: Record<AppLang, HeroContent> = {
   ar: {
-    badgeNew: "جديد",
-    badgeText: "تحسين مدعوم بالذكاء الاصطناعي",
-    title: "طوّر موقعك بدعم الذكاء الاصطناعي",
+    badgeNew: "Primey Care",
+    badgeText: "بطاقة وبرامج رعاية صحية بخصومات مختارة",
+    title: "رعاية صحية أذكى وخصومات طبية أقرب لك",
     description:
-      "تعرّف على حلّنا السحابي المدعوم بالذكاء الاصطناعي لتخفيف عبء العمل، ورفع الكفاءة، ومساعدتك على اتخاذ قرارات أكثر دقة.",
-    primaryButton: "ابدأ التجربة المجانية",
-    secondaryButton: "احجز عرضًا تجريبيًا",
-    benefits: ["بدون بطاقة ائتمانية", "تجربة لمدة 14 يومًا", "إلغاء في أي وقت"],
-    imageAlt: "الواجهة الرئيسية للمنصة",
-    heroLogoAlt: "شعار Primey الرئيسي",
+      "استمتع بمزايا وخصومات طبية على الكشف، التحاليل، الأشعة، الأسنان، الجلدية، التجميل، الولادة وخدمات صحية متنوعة لدى شبكة مختارة من مزودي الخدمة.",
+    primaryButton: "اشترك الآن",
+    secondaryButton: "استعرض المزايا",
+    benefits: ["اشتراك سهل", "خصومات طبية", "دعم عبر واتساب"],
+    imageAlt: "بطاقة Primey Care ومزايا الرعاية الصحية",
+    heroLogoAlt: "شعار Primey Care الرئيسي",
   },
   en: {
-    badgeNew: "New",
-    badgeText: "AI-Powered Optimization",
-    title: "Optimize Your Website with AI Support",
+    badgeNew: "Primey Care",
+    badgeText: "Healthcare cards and programs with selected discounts",
+    title: "Smarter healthcare with medical savings closer to you",
     description:
-      "Meet our AI-powered SaaS solution to lighten your workload, increase efficiency and make more accurate decisions.",
-    primaryButton: "Start Free Trial",
-    secondaryButton: "Book a Demo",
-    benefits: ["No credit card", "14-day trial", "Cancel anytime"],
-    imageAlt: "shadcn landing page",
-    heroLogoAlt: "Primey main hero logo",
+      "Enjoy medical benefits and selected discounts on consultations, lab tests, scans, dental care, dermatology, beauty, maternity and other healthcare services through a trusted provider network.",
+    primaryButton: "Join Now",
+    secondaryButton: "Explore Benefits",
+    benefits: ["Easy subscription", "Medical discounts", "WhatsApp support"],
+    imageAlt: "Primey Care card and healthcare benefits",
+    heroLogoAlt: "Primey Care main hero logo",
   },
 };
 
@@ -97,7 +98,7 @@ export const HeroSection = async () => {
             </Badge>
 
             {/* =========================================================
-                🖼️ استبدال العنوان النصي بصورة الشعار فقط
+                🖼️ شعار Primey Care الرئيسي
             ========================================================= */}
             <div className="mx-auto flex max-w-(--breakpoint-md) justify-center">
               <h1 className="sr-only">{t.title}</h1>
@@ -122,9 +123,15 @@ export const HeroSection = async () => {
               />
             </div>
 
-            <p className="text-muted-foreground mx-auto max-w-(--breakpoint-sm) text-xl">
-              {t.description}
-            </p>
+            <div className="mx-auto max-w-(--breakpoint-md) space-y-4">
+              <h2 className="text-foreground text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
+                {t.title}
+              </h2>
+
+              <p className="text-muted-foreground mx-auto max-w-(--breakpoint-sm) text-lg leading-8 md:text-xl">
+                {t.description}
+              </p>
+            </div>
 
             <div
               className={cn(
@@ -132,13 +139,15 @@ export const HeroSection = async () => {
                 isArabic && "md:flex-row-reverse!"
               )}
             >
-              <Button className="h-12 px-10 text-base">
-                {t.primaryButton}
-                {isArabic ? <ChevronLeft /> : <ChevronRight />}
+              <Button asChild className="h-12 px-10 text-base">
+                <Link href="/register">
+                  {t.primaryButton}
+                  {isArabic ? <ChevronLeft /> : <ChevronRight />}
+                </Link>
               </Button>
 
-              <Button variant="outline" className="h-12 px-10 text-base">
-                {t.secondaryButton}
+              <Button asChild variant="outline" className="h-12 px-10 text-base">
+                <Link href="#benefits">{t.secondaryButton}</Link>
               </Button>
             </div>
 
@@ -167,6 +176,7 @@ export const HeroSection = async () => {
             className="relative mx-auto flex w-full items-center rounded-lg mask-b-from-20% mask-b-to-90% leading-none"
             src="/hero.png"
             alt={t.imageAlt}
+            priority
             unoptimized
           />
         </div>

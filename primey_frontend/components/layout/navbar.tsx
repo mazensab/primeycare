@@ -4,17 +4,22 @@ import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  HeartPulse,
   Languages,
   Menu,
+  Stethoscope,
+  Syringe,
+  Smile,
+  Sparkles,
+  TestTube2,
+  UsersRound,
 } from "lucide-react";
 
-import { productList, routeList } from "@/@data/navbar";
+import { cn } from "@/lib/utils";
 
-import Icon from "@/components/icon";
 import {
   Sheet,
   SheetContent,
@@ -36,12 +41,151 @@ import {
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
 
+/* =========================================================
+   🌐 Types
+========================================================= */
 type AppLocale = "ar" | "en";
 
 type NavbarProps = {
   initialLocale?: AppLocale;
 };
 
+type LocalizedText = {
+  ar: string;
+  en: string;
+};
+
+type LandingRoute = {
+  href: string;
+  label: LocalizedText;
+};
+
+type LandingProgram = {
+  href: string;
+  title: LocalizedText;
+  description: LocalizedText;
+  icon: React.ElementType;
+};
+
+/* =========================================================
+   🧭 Landing Navigation Content
+========================================================= */
+const landingRoutes: LandingRoute[] = [
+  {
+    href: "/#benefits",
+    label: {
+      ar: "المزايا",
+      en: "Benefits",
+    },
+  },
+  {
+    href: "/#features",
+    label: {
+      ar: "الخدمات الصحية",
+      en: "Services",
+    },
+  },
+  {
+    href: "/pricing",
+    label: {
+      ar: "الاشتراكات",
+      en: "Subscriptions",
+    },
+  },
+  {
+    href: "/#faq",
+    label: {
+      ar: "الأسئلة الشائعة",
+      en: "FAQ",
+    },
+  },
+  {
+    href: "/contact",
+    label: {
+      ar: "تواصل معنا",
+      en: "Contact",
+    },
+  },
+];
+
+const landingPrograms: LandingProgram[] = [
+  {
+    href: "/#solutions",
+    title: {
+      ar: "بطاقة الرعاية السنوية",
+      en: "Annual Care Card",
+    },
+    description: {
+      ar: "مزايا وخصومات طبية طوال العام للأفراد والعائلات.",
+      en: "Year-round healthcare benefits for individuals and families.",
+    },
+    icon: HeartPulse,
+  },
+  {
+    href: "/#solutions",
+    title: {
+      ar: "برنامج الأسنان",
+      en: "Dental Program",
+    },
+    description: {
+      ar: "خصومات على الكشف، التنظيف، الحشوات وخدمات العناية بالفم.",
+      en: "Savings on consultations, cleaning, fillings, and oral care.",
+    },
+    icon: Smile,
+  },
+  {
+    href: "/#solutions",
+    title: {
+      ar: "الفحوصات والتحاليل",
+      en: "Checkups & Lab Tests",
+    },
+    description: {
+      ar: "مزايا على التحاليل، الفحوصات الدورية والخدمات التشخيصية.",
+      en: "Benefits on lab tests, routine checkups, and diagnostics.",
+    },
+    icon: TestTube2,
+  },
+  {
+    href: "/#solutions",
+    title: {
+      ar: "الجلدية والتجميل",
+      en: "Dermatology & Beauty",
+    },
+    description: {
+      ar: "عروض ومزايا على العناية بالبشرة والخدمات التجميلية المختارة.",
+      en: "Selected benefits for skincare and beauty services.",
+    },
+    icon: Sparkles,
+  },
+  {
+    href: "/#features",
+    title: {
+      ar: "العيادات والاستشارات",
+      en: "Clinics & Consultations",
+    },
+    description: {
+      ar: "استفد من مزايا طبية لدى عيادات ومراكز مشاركة.",
+      en: "Use healthcare benefits through participating clinics.",
+    },
+    icon: Stethoscope,
+  },
+  {
+    href: "/#features",
+    title: {
+      ar: "النساء والولادة",
+      en: "Maternity Care",
+    },
+    description: {
+      ar: "خيارات وبرامج مساندة للمتابعة والولادة حسب الباقات المتاحة.",
+      en: "Supportive options for maternity care based on available programs.",
+    },
+    icon: Syringe,
+  },
+];
+
+/* =========================================================
+   🌐 Locale Helpers
+========================================================= */
 function normalizeLocale(value?: string | null): AppLocale {
   const normalized = (value || "").trim().toLowerCase();
 
@@ -64,6 +208,9 @@ function setLocaleCookie(locale: AppLocale) {
   document.cookie = `NEXT_LOCALE=${locale}; path=/; max-age=${oneYearInSeconds}; samesite=lax`;
 }
 
+/* =========================================================
+   🧩 Navbar
+========================================================= */
 export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
   const router = useRouter();
   const [isOpen, setIsOpen] = React.useState(false);
@@ -107,6 +254,15 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
   const isArabic = locale === "ar";
   const ArrowIcon = isArabic ? ChevronLeftIcon : ChevronRightIcon;
 
+  const text = {
+    logoAlt: isArabic ? "Primey Care" : "Primey Care",
+    programs: isArabic ? "البرامج والبطاقات" : "Cards & Programs",
+    login: isArabic ? "تسجيل الدخول" : "Log in",
+    register: isArabic ? "اشترك الآن" : "Join Now",
+    switchLanguage: isArabic ? "التبديل إلى الإنجليزية" : "Switch to Arabic",
+    mobileMenu: isArabic ? "قائمة Primey Care" : "Primey Care Menu",
+  };
+
   const toggleLanguage = () => {
     try {
       const nextLocale: AppLocale = locale === "ar" ? "en" : "ar";
@@ -114,6 +270,7 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
 
       if (typeof window !== "undefined") {
         window.localStorage.setItem("primey-locale", nextLocale);
+        window.dispatchEvent(new Event("primey-locale-changed"));
       }
 
       if (typeof document !== "undefined") {
@@ -143,15 +300,16 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
             "sm:min-h-[68px] sm:px-5",
             "lg:min-h-[74px] lg:px-6"
           )}
+          dir={isArabic ? "rtl" : "ltr"}
         >
           <Link
-            href="/login"
+            href="/"
             className="flex shrink-0 cursor-pointer items-center transition hover:opacity-85"
-            aria-label="Mham Cloud"
+            aria-label={text.logoAlt}
           >
             <Image
               src="/hero logo.png"
-              alt="Mham Cloud"
+              alt={text.logoAlt}
               width={1200}
               height={420}
               priority
@@ -167,7 +325,9 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
             />
           </Link>
 
-          {/* Mobile */}
+          {/* =========================================================
+              📱 Mobile
+          ========================================================= */}
           <div className="flex items-center gap-2 lg:hidden">
             <Button
               type="button"
@@ -198,6 +358,7 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
                     "lg:hidden"
                   )}
                   onClick={() => setIsOpen(!isOpen)}
+                  aria-label={text.mobileMenu}
                 >
                   <Menu className="h-4 w-4" />
                 </Button>
@@ -207,24 +368,29 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
                 side={isArabic ? "right" : "left"}
                 className={cn(
                   "flex flex-col justify-between",
-                  "rounded-tl-2xl rounded-bl-2xl",
+                  isArabic
+                    ? "rounded-tl-2xl rounded-bl-2xl"
+                    : "rounded-tr-2xl rounded-br-2xl",
                   "border-white/30 bg-white/80",
                   "backdrop-blur-xl",
                   "data-[state=open]:duration-300"
                 )}
+                dir={isArabic ? "rtl" : "ltr"}
               >
                 <div>
-                  <SheetHeader className={cn("mb-4", isArabic ? "mr-4" : "ml-4")}>
+                  <SheetHeader
+                    className={cn("mb-4", isArabic ? "mr-4" : "ml-4")}
+                  >
                     <SheetTitle className="flex items-center">
                       <Link
-                        href="/login"
+                        href="/"
                         onClick={() => setIsOpen(false)}
                         className="flex cursor-pointer items-center transition hover:opacity-85"
-                        aria-label="Mham Cloud"
+                        aria-label={text.logoAlt}
                       >
                         <Image
                           src="/hero logo.png"
-                          alt="Mham Cloud"
+                          alt={text.logoAlt}
                           width={1200}
                           height={420}
                           priority
@@ -248,10 +414,43 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
                       onClick={toggleLanguage}
                     >
                       <Languages className="h-4 w-4" />
-                      {isArabic ? "التبديل إلى الإنجليزية" : "Switch to Arabic"}
+                      {text.switchLanguage}
                     </Button>
 
-                    {routeList.map(({ href, label }) => (
+                    <Separator className="my-2 bg-white/40" />
+
+                    <div
+                      className={cn(
+                        "px-3 text-xs font-semibold text-muted-foreground",
+                        isArabic ? "text-right" : "text-left"
+                      )}
+                    >
+                      {text.programs}
+                    </div>
+
+                    {landingPrograms.slice(0, 4).map(({ href, title, icon: Icon }) => (
+                      <Button
+                        key={title.en}
+                        onClick={() => setIsOpen(false)}
+                        asChild
+                        variant="ghost"
+                        className={cn(
+                          "gap-3 text-base hover:bg-white/55",
+                          isArabic
+                            ? "justify-end text-right"
+                            : "justify-start text-left"
+                        )}
+                      >
+                        <Link href={href}>
+                          <Icon className="h-4 w-4 text-primary" />
+                          {isArabic ? title.ar : title.en}
+                        </Link>
+                      </Button>
+                    ))}
+
+                    <Separator className="my-2 bg-white/40" />
+
+                    {landingRoutes.map(({ href, label }) => (
                       <Button
                         key={href}
                         onClick={() => setIsOpen(false)}
@@ -269,6 +468,28 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
                         </Link>
                       </Button>
                     ))}
+
+                    <Separator className="my-2 bg-white/40" />
+
+                    <Button
+                      onClick={() => setIsOpen(false)}
+                      asChild
+                      className="rounded-xl"
+                    >
+                      <Link href="/register">
+                        {text.register}
+                        <ArrowIcon className="h-4 w-4" />
+                      </Link>
+                    </Button>
+
+                    <Button
+                      onClick={() => setIsOpen(false)}
+                      asChild
+                      variant="outline"
+                      className="rounded-xl border-white/40 bg-white/60"
+                    >
+                      <Link href="/login">{text.login}</Link>
+                    </Button>
                   </div>
                 </div>
 
@@ -285,7 +506,9 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
             </Sheet>
           </div>
 
-          {/* Desktop */}
+          {/* =========================================================
+              🖥️ Desktop
+          ========================================================= */}
           <NavigationMenu className="mx-auto hidden lg:block">
             <NavigationMenuList className="gap-1 xl:gap-2">
               <NavigationMenuItem>
@@ -297,43 +520,49 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
                     "data-[state=open]:bg-white/55"
                   )}
                 >
-                  {isArabic ? "المنتجات" : "Products"}
+                  {text.programs}
                 </NavigationMenuTrigger>
 
                 <NavigationMenuContent className="border-white/30 bg-white/90 backdrop-blur-xl">
-                  <div className="w-72 gap-4">
+                  <div className="w-80 gap-4">
                     <ul className="flex flex-col">
-                      {productList.map(({ title, description, icon }) => (
-                        <li key={title.en}>
-                          <Link
-                            href="/"
-                            className="flex items-center gap-4 rounded-md p-4 text-sm hover:bg-white/60"
-                          >
-                            <div className="bg-primary/15 ring-primary/10 flex size-8 items-center justify-center rounded-full p-2 ring-8">
-                              <Icon
-                                name={icon}
-                                className="text-primary size-5 shrink-0"
-                              />
-                            </div>
+                      {landingPrograms.map(
+                        ({ href, title, description, icon: Icon }) => (
+                          <li key={title.en}>
+                            <Link
+                              href={href}
+                              className={cn(
+                                "flex items-center gap-4 rounded-md p-4 text-sm hover:bg-white/60",
+                                isArabic && "flex-row-reverse"
+                              )}
+                            >
+                              <div className="bg-primary/15 ring-primary/10 flex size-8 items-center justify-center rounded-full p-2 ring-8">
+                                <Icon className="text-primary size-5 shrink-0" />
+                              </div>
 
-                            <div className={isArabic ? "text-right" : "text-left"}>
-                              <p className="text-foreground mb-1 leading-none font-semibold">
-                                {isArabic ? title.ar : title.en}
-                              </p>
-                              <p className="text-muted-foreground line-clamp-2">
-                                {isArabic ? description.ar : description.en}
-                              </p>
-                            </div>
-                          </Link>
-                        </li>
-                      ))}
+                              <div
+                                className={isArabic ? "text-right" : "text-left"}
+                              >
+                                <p className="text-foreground mb-1 leading-none font-semibold">
+                                  {isArabic ? title.ar : title.en}
+                                </p>
+                                <p className="text-muted-foreground line-clamp-2">
+                                  {isArabic
+                                    ? description.ar
+                                    : description.en}
+                                </p>
+                              </div>
+                            </Link>
+                          </li>
+                        )
+                      )}
                     </ul>
                   </div>
                 </NavigationMenuContent>
               </NavigationMenuItem>
 
               <NavigationMenuItem className="flex items-center gap-1 xl:gap-2">
-                {routeList.map(({ href, label }) => (
+                {landingRoutes.map(({ href, label }) => (
                   <NavigationMenuLink
                     key={href}
                     asChild
@@ -380,9 +609,7 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
                 asChild
                 className="h-9 rounded-xl px-4 text-sm hover:bg-white/45"
               >
-                <Link href="/login">
-                  {isArabic ? "تسجيل الدخول" : "Log in"}
-                </Link>
+                <Link href="/login">{text.login}</Link>
               </Button>
 
               <Button
@@ -391,7 +618,7 @@ export const Navbar = ({ initialLocale = "ar" }: NavbarProps) => {
                 className="h-9 rounded-xl px-4 text-sm shadow-sm xl:px-5"
               >
                 <Link href="/register">
-                  {isArabic ? "ابدأ الآن" : "Get Started"}
+                  {text.register}
                   <ArrowIcon className="h-4 w-4" />
                 </Link>
               </Button>

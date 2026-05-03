@@ -34,9 +34,12 @@ async function getPageLang(): Promise<AppLang> {
   const cookieLang =
     cookieStore.get("lang")?.value ||
     cookieStore.get("locale")?.value ||
-    cookieStore.get("NEXT_LOCALE")?.value;
+    cookieStore.get("NEXT_LOCALE")?.value ||
+    "";
 
-  return cookieLang === "ar" ? "ar" : "en";
+  const normalizedLang = cookieLang.toLowerCase();
+
+  return normalizedLang.startsWith("ar") ? "ar" : "en";
 }
 
 /* =========================================================
@@ -44,60 +47,60 @@ async function getPageLang(): Promise<AppLang> {
 ========================================================= */
 const content: Record<AppLang, ServicesContent> = {
   ar: {
-    subTitle: "الخدمات",
-    title: "نمِّ أعمالك",
+    subTitle: "البرامج والبطاقات",
+    title: "اختر الرعاية التي تناسب احتياجك",
     description:
-      "من التسويق والمبيعات إلى العمليات والاستراتيجية، لدينا الخبرة التي تساعدك على تحقيق أهدافك بثقة وكفاءة.",
-    proLabel: "احترافي",
+      "سواء كنت تبحث عن بطاقة رعاية صحية طوال العام أو برنامج طبي محدد، تمنحك Primey Care خيارات مرنة تساعدك على الاستفادة من خصومات ومزايا مختارة لدى مزودي خدمة مشاركين.",
+    proLabel: "مميز",
     items: [
       {
-        title: "الاستراتيجية والنمو",
+        title: "بطاقة الرعاية السنوية",
         description:
-          "نساعدك على بناء مسار نمو أوضح من خلال حلول عملية واستراتيجيات تدعم توسع أعمالك واستدامتها.",
+          "بطاقة مناسبة للأفراد والعائلات تمنحك مزايا وخصومات طبية طوال العام على مجموعة من الخدمات الصحية لدى الشبكة المشاركة.",
       },
       {
-        title: "تحسين العمليات",
+        title: "برنامج الأسنان",
         description:
-          "قم بتبسيط إجراءاتك اليومية ورفع الكفاءة التشغيلية عبر خدمات مصممة لتقليل التعقيد وتحسين الأداء.",
+          "استفد من خصومات مختارة على الكشف، تنظيف الأسنان، الحشوات، التقويم وبعض خدمات العناية بالفم حسب مقدم الخدمة والعرض المتاح.",
       },
       {
-        title: "المبيعات والتفاعل",
+        title: "برنامج الجلدية والتجميل",
         description:
-          "عزّز تواصلك مع العملاء وادعم فرص التحويل والنمو من خلال تجارب أكثر فاعلية وتنظيمًا.",
+          "خيارات ومزايا على خدمات الجلدية، العناية بالبشرة، الجلسات التجميلية، والبرامج المختارة لدى مزودي خدمة معتمدين.",
       },
       {
-        title: "الدعم والتطوير",
+        title: "برنامج الفحوصات والتحاليل",
         description:
-          "نوفر لك دعمًا متواصلًا وخدمات تطوير تساعدك على تحسين التجربة العامة وتوسيع قدرات المنصة.",
+          "باقات ومزايا للفحوصات الدورية، التحاليل الطبية، الأشعة والخدمات التشخيصية لمتابعة صحتك بتكلفة أوضح.",
       },
     ],
   },
   en: {
-    subTitle: "Services",
-    title: "Grow Your Business",
+    subTitle: "Cards & Programs",
+    title: "Choose the care that fits your needs",
     description:
-      "From marketing and sales to operations and strategy, we have the expertise to help you achieve your goals.",
-    proLabel: "PRO",
+      "Whether you need an annual healthcare card or a specific medical program, Primey Care gives you flexible options to access selected benefits and discounts through participating providers.",
+    proLabel: "Popular",
     items: [
       {
-        title: "Strategy & Growth",
+        title: "Annual Care Card",
         description:
-          "We help you build a clearer growth path through practical solutions and strategies that support sustainable expansion.",
+          "A flexible card for individuals and families that gives you year-round medical benefits and selected discounts across participating healthcare providers.",
       },
       {
-        title: "Operations Optimization",
+        title: "Dental Program",
         description:
-          "Streamline your daily workflows and improve operational efficiency with services designed to reduce complexity.",
+          "Enjoy selected discounts on dental consultations, cleaning, fillings, orthodontics, and other oral care services depending on the provider and available offer.",
       },
       {
-        title: "Sales & Engagement",
+        title: "Dermatology & Beauty Program",
         description:
-          "Strengthen customer interaction and improve conversion opportunities through more effective and organized experiences.",
+          "Access benefits on dermatology, skincare, beauty sessions, and selected cosmetic services through approved healthcare providers.",
       },
       {
-        title: "Support & Development",
+        title: "Checkups & Lab Tests Program",
         description:
-          "We provide ongoing support and development services that help you improve the overall experience and expand platform capabilities.",
+          "Packages and benefits for routine checkups, lab tests, scans, and diagnostic services to help you follow up on your health with clearer costs.",
       },
     ],
   },
@@ -127,13 +130,20 @@ export const ServicesSection = async () => {
             return (
               <Card key={title} className="bg-muted relative h-full gap-2">
                 <CardHeader>
-                  <CardTitle className={cn("text-lg", isArabic && "text-right")}>
+                  <CardTitle
+                    className={cn("text-lg", isArabic && "text-right")}
+                  >
                     {translatedItem?.title || title}
                   </CardTitle>
                 </CardHeader>
 
                 <CardContent>
-                  <p className={cn("text-muted-foreground", isArabic && "text-right")}>
+                  <p
+                    className={cn(
+                      "text-muted-foreground leading-7",
+                      isArabic && "text-right"
+                    )}
+                  >
                     {translatedItem?.description || description}
                   </p>
                 </CardContent>
