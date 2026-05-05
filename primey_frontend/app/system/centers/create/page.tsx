@@ -5,26 +5,38 @@
    🧠 Primey Care | Create Center
    ------------------------------------------------------------
    ✅ المسار: /system/centers/create
-   ✅ الإصدار: v1.0.0
-   ✅ العمل: إنشاء مركز / مقدم خدمة جديد
-   ✅ API: POST /api/providers/
+   ✅ الإصدار: v1.1.0 - UX Refinement
+
+   ✅ العمل:
+      إنشاء مركز / مقدم خدمة جديد.
+
+   ✅ API:
+      POST /api/providers/
+
    ✅ متوافق مع:
       - /system/centers
       - /system/centers/list
       - /system/centers/[id]
-   ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-   - توثيق مختصر أعلى الملف
-   - استخدام lib/api.ts مع CSRF
-   - دعم عربي / إنجليزي عبر primey-locale
-   - استخدام sonner للتنبيهات
-   - تحقق آمن من الحقول والرابط والبريد
-   - بدون localhost hardcoded
-   - الحفاظ على التصميم السابق بدون كسر الواجهة
+
+   ✅ ملاحظات UX:
+      - لا يتم إظهار المسارات التقنية أو أسماء API داخل الواجهة.
+      - الصفحة تستخدم عرض المساحة بالكامل بدل التمركز الضيق.
+      - النموذج قابل للاستخدام كقالب لباقي صفحات الإنشاء.
+      - يتم تحذير المستخدم عند وجود بيانات غير محفوظة.
+      - يتم تعطيل الحقول أثناء الحفظ.
+      - يتم عرض خطأ الحفظ داخل الصفحة بجانب toast.
+
+   ✅ الوظائف:
+      - استخدام lib/api.ts مع CSRF
+      - دعم عربي / إنجليزي عبر primey-locale
+      - استخدام sonner للتنبيهات
+      - تحقق آمن من الحقول والرابط والبريد
+      - تنظيف الكود وأرقام التواصل
+      - بدون localhost hardcoded
+      - الحفاظ على تصميم Primey Care الرسمي
 ============================================================ */
 
 import type { ComponentType, ReactNode } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -41,12 +53,12 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { apiPost, API_PATHS } from "@/lib/api";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -151,17 +163,15 @@ function dictionary(locale: AppLocale) {
   return {
     title: isArabic ? "إنشاء مركز جديد" : "Create New Center",
     subtitle: isArabic
-      ? "إضافة مركز أو مقدم خدمة جديد داخل Primey Care وربطه لاحقًا بالعقود والخدمات والطلبات."
-      : "Create a new center/provider in Primey Care and later connect it with contracts, services, and orders.",
+      ? "إضافة مركز أو مقدم خدمة جديد وربطه لاحقًا بالعقود والخدمات والطلبات."
+      : "Create a new center/provider and later connect it with contracts, services, and orders.",
 
     back: isArabic ? "العودة للمراكز" : "Back to Centers",
     saveDraft: isArabic ? "حفظ كمسودة" : "Save Draft",
     create: isArabic ? "إنشاء المركز" : "Create Center",
+    saving: isArabic ? "جاري الحفظ..." : "Saving...",
 
-    liveApi: isArabic ? "ربط حقيقي" : "Live API",
-    route: "/api/providers/",
-
-    stepsTitle: isArabic ? "خطوات الإنشاء" : "Creation Steps",
+    stepsTitle: isArabic ? "إرشادات قبل الحفظ" : "Before Saving",
     summaryTitle: isArabic ? "ملخص المركز" : "Center Summary",
     summaryDesc: isArabic
       ? "مراجعة سريعة للبيانات قبل الحفظ."
@@ -264,24 +274,38 @@ function dictionary(locale: AppLocale) {
     apiError: isArabic
       ? "تعذر إنشاء المركز. تحقق من البيانات وحاول مرة أخرى."
       : "Unable to create center. Please check the data and try again.",
+    apiErrorTitle: isArabic ? "تعذر حفظ البيانات" : "Unable to save data",
 
     validationToast: isArabic
       ? "يرجى تصحيح الحقول المطلوبة قبل المتابعة."
       : "Please fix the required fields before continuing.",
 
+    confirmLeave: isArabic
+      ? "لديك بيانات غير محفوظة. هل تريد المغادرة؟"
+      : "You have unsaved changes. Do you want to leave?",
+
+    completion: isArabic ? "نسبة الاكتمال" : "Completion",
+    ready: isArabic ? "جاهز للحفظ" : "Ready to save",
+    missingData: isArabic ? "ينقصه بيانات أساسية" : "Missing required data",
+
+    featuredHelp: isArabic
+      ? "يستخدم لإبراز المركز في القوائم والصفحات التشغيلية."
+      : "Used to highlight this center in operational lists and pages.",
+    featuredSummary: isArabic ? "سيظهر كمركز مميز." : "Will appear as featured.",
+
     quickNotes: [
       isArabic
-        ? "الكود يجب أن يكون فريدًا داخل النظام."
-        : "The code must be unique in the system.",
+        ? "تأكد أن كود المركز واضح وفريد لتسهيل البحث والربط."
+        : "Make sure the center code is clear and unique for easier search and linking.",
       isArabic
-        ? "يمكن إنشاء المركز كمسودة ثم تفعيله لاحقًا."
-        : "You can save the center as a draft and activate it later.",
+        ? "يمكن حفظ المركز كمسودة ثم استكمال بياناته لاحقًا."
+        : "You can save the center as a draft and complete it later.",
       isArabic
-        ? "المركز هنا يعتمد على موديول providers في الباكند."
-        : "This center is backed by the providers module.",
+        ? "أضف وسيلة تواصل صحيحة لتسهيل المتابعة التشغيلية."
+        : "Add accurate contact details for smoother operational follow-up.",
       isArabic
-        ? "لاحقًا سيتم ربط المركز بالعقود والخدمات والطلبات."
-        : "Later it will be connected with contracts, services, and orders.",
+        ? "سيتم استخدام بيانات المدينة والعنوان لاحقًا في التقارير والفرز."
+        : "City and address details will be useful later for reports and filtering.",
     ],
   };
 }
@@ -318,16 +342,28 @@ function isValidOptionalUrl(value: string) {
   return value.startsWith("https://") || value.startsWith("http://");
 }
 
+function normalizeCenterCode(value: string) {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Z0-9-_]/g, "");
+}
+
+function normalizePhoneValue(value: string) {
+  return value.replace(/[^\d+]/g, "");
+}
+
 function normalizePayload(formData: CenterFormData, status?: ProviderStatus) {
   return {
     name: formData.name.trim(),
-    code: formData.code.trim().toUpperCase(),
+    code: normalizeCenterCode(formData.code),
     provider_type: formData.provider_type,
     status: status || formData.status,
     contact_person: formData.contact_person.trim(),
-    phone: formData.phone.trim(),
-    mobile: formData.mobile.trim(),
-    email: formData.email.trim(),
+    phone: normalizePhoneValue(formData.phone),
+    mobile: normalizePhoneValue(formData.mobile),
+    email: formData.email.trim().toLowerCase(),
     website: formData.website.trim(),
     city: formData.city.trim(),
     area: formData.area.trim(),
@@ -336,6 +372,10 @@ function normalizePayload(formData: CenterFormData, status?: ProviderStatus) {
     notes: formData.notes.trim(),
     is_featured: formData.is_featured,
   };
+}
+
+function hasFormChanges(formData: CenterFormData) {
+  return JSON.stringify(formData) !== JSON.stringify(initialFormData);
 }
 
 function resolveCreatedId(result: unknown) {
@@ -361,11 +401,13 @@ export default function SystemCreateCenterPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [formData, setFormData] = useState<CenterFormData>(initialFormData);
   const [errors, setErrors] = useState<CenterFormErrors>({});
+  const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMode, setSubmitMode] = useState<"CREATE" | "DRAFT" | null>(null);
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
+  const isDirty = useMemo(() => hasFormChanges(formData), [formData]);
 
   const completedFields = useMemo(() => {
     const keys: Array<keyof CenterFormData> = [
@@ -391,6 +433,7 @@ export default function SystemCreateCenterPage() {
   }, [formData]);
 
   const progressPercent = Math.round((completedFields / 11) * 100);
+  const isReadyToSave = formData.name.trim().length > 0 && formData.code.trim().length > 0;
 
   function updateField<K extends keyof CenterFormData>(
     key: K,
@@ -405,6 +448,10 @@ export default function SystemCreateCenterPage() {
       ...current,
       [key]: undefined,
     }));
+
+    if (submitError) {
+      setSubmitError("");
+    }
   }
 
   function validateForm(nextStatus?: ProviderStatus) {
@@ -438,6 +485,8 @@ export default function SystemCreateCenterPage() {
   async function submitForm(mode: "CREATE" | "DRAFT") {
     const nextStatus: ProviderStatus = mode === "DRAFT" ? "DRAFT" : formData.status;
 
+    setSubmitError("");
+
     if (!validateForm(nextStatus)) {
       toast.error(t.validationToast);
       return;
@@ -453,7 +502,9 @@ export default function SystemCreateCenterPage() {
       );
 
       if (!result.ok) {
-        toast.error(result.message || t.apiError);
+        const message = result.message || t.apiError;
+        setSubmitError(message);
+        toast.error(message);
         return;
       }
 
@@ -469,11 +520,20 @@ export default function SystemCreateCenterPage() {
       router.push("/system/centers/list");
     } catch (error) {
       console.error("Create center error:", error);
+      setSubmitError(t.apiError);
       toast.error(t.apiError);
     } finally {
       setIsSubmitting(false);
       setSubmitMode(null);
     }
+  }
+
+  function handleBack() {
+    if (isDirty && !window.confirm(t.confirmLeave)) {
+      return;
+    }
+
+    router.push("/system/centers");
   }
 
   useEffect(() => {
@@ -503,34 +563,45 @@ export default function SystemCreateCenterPage() {
     };
   }, []);
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-4">
-      {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="rounded-full">
-              /system/centers/create
-            </Badge>
-            <Badge className="rounded-full">{t.liveApi}</Badge>
-          </div>
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirty || isSubmitting) return;
 
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [isDirty, isSubmitting]);
+
+  return (
+    <div className="w-full space-y-4">
+      {/* Header */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
             {t.title}
           </h1>
 
-          <p className="text-muted-foreground mt-1 max-w-3xl text-sm">
+          <p className="text-muted-foreground mt-1 max-w-4xl text-sm">
             {t.subtitle}
           </p>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/centers">
-            <Button variant="outline" className="h-10 w-full rounded-xl sm:w-auto">
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
+          <Button
+            variant="outline"
+            className="h-10 w-full rounded-xl sm:w-auto"
+            onClick={handleBack}
+            disabled={isSubmitting}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span>{t.back}</span>
+          </Button>
 
           <Button
             variant="outline"
@@ -543,7 +614,9 @@ export default function SystemCreateCenterPage() {
             ) : (
               <Save className="h-4 w-4" />
             )}
-            <span>{t.saveDraft}</span>
+            <span>
+              {isSubmitting && submitMode === "DRAFT" ? t.saving : t.saveDraft}
+            </span>
           </Button>
 
           <Button
@@ -556,14 +629,35 @@ export default function SystemCreateCenterPage() {
             ) : (
               <CheckCircle2 className="h-4 w-4" />
             )}
-            <span>{t.create}</span>
+            <span>
+              {isSubmitting && submitMode === "CREATE" ? t.saving : t.create}
+            </span>
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+      {submitError ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.apiErrorTitle}
+              </p>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {submitError}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid w-full gap-4 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
         {/* Form */}
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base font-bold">
@@ -580,6 +674,7 @@ export default function SystemCreateCenterPage() {
                   onChange={(event) => updateField("name", event.target.value)}
                   placeholder={t.placeholders.name}
                   className="h-10 rounded-xl"
+                  disabled={isSubmitting}
                 />
               </FieldBlock>
 
@@ -587,11 +682,12 @@ export default function SystemCreateCenterPage() {
                 <Input
                   value={formData.code}
                   onChange={(event) =>
-                    updateField("code", event.target.value.toUpperCase())
+                    updateField("code", normalizeCenterCode(event.target.value))
                   }
                   placeholder={t.placeholders.code}
                   className="h-10 rounded-xl"
                   dir="ltr"
+                  disabled={isSubmitting}
                 />
               </FieldBlock>
 
@@ -604,7 +700,8 @@ export default function SystemCreateCenterPage() {
                       event.target.value as ProviderType,
                     )
                   }
-                  className="border-input bg-background ring-offset-background focus-visible:ring-ring h-10 w-full rounded-xl border px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                  className="border-input bg-background ring-offset-background focus-visible:ring-ring h-10 w-full rounded-xl border px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isSubmitting}
                 >
                   {Object.entries(t.providerTypes).map(([value, label]) => (
                     <option key={value} value={value}>
@@ -620,7 +717,8 @@ export default function SystemCreateCenterPage() {
                   onChange={(event) =>
                     updateField("status", event.target.value as ProviderStatus)
                   }
-                  className="border-input bg-background ring-offset-background focus-visible:ring-ring h-10 w-full rounded-xl border px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                  className="border-input bg-background ring-offset-background focus-visible:ring-ring h-10 w-full rounded-xl border px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isSubmitting}
                 >
                   {Object.entries(t.statuses).map(([value, label]) => (
                     <option key={value} value={value}>
@@ -650,26 +748,33 @@ export default function SystemCreateCenterPage() {
                   }
                   placeholder={t.placeholders.contactPerson}
                   className="h-10 rounded-xl"
+                  disabled={isSubmitting}
                 />
               </FieldBlock>
 
               <FieldBlock label={t.labels.mobile}>
                 <Input
                   value={formData.mobile}
-                  onChange={(event) => updateField("mobile", event.target.value)}
+                  onChange={(event) =>
+                    updateField("mobile", normalizePhoneValue(event.target.value))
+                  }
                   placeholder={t.placeholders.mobile}
                   className="h-10 rounded-xl"
                   dir="ltr"
+                  disabled={isSubmitting}
                 />
               </FieldBlock>
 
               <FieldBlock label={t.labels.phone}>
                 <Input
                   value={formData.phone}
-                  onChange={(event) => updateField("phone", event.target.value)}
+                  onChange={(event) =>
+                    updateField("phone", normalizePhoneValue(event.target.value))
+                  }
                   placeholder={t.placeholders.phone}
                   className="h-10 rounded-xl"
                   dir="ltr"
+                  disabled={isSubmitting}
                 />
               </FieldBlock>
 
@@ -677,9 +782,13 @@ export default function SystemCreateCenterPage() {
                 <Input
                   value={formData.email}
                   onChange={(event) => updateField("email", event.target.value)}
+                  onBlur={() =>
+                    updateField("email", formData.email.trim().toLowerCase())
+                  }
                   placeholder={t.placeholders.email}
                   className="h-10 rounded-xl"
                   dir="ltr"
+                  disabled={isSubmitting}
                 />
               </FieldBlock>
 
@@ -688,11 +797,12 @@ export default function SystemCreateCenterPage() {
                   <Input
                     value={formData.website}
                     onChange={(event) =>
-                      updateField("website", event.target.value)
+                      updateField("website", event.target.value.trim())
                     }
                     placeholder={t.placeholders.website}
                     className="h-10 rounded-xl"
                     dir="ltr"
+                    disabled={isSubmitting}
                   />
                 </FieldBlock>
               </div>
@@ -715,6 +825,7 @@ export default function SystemCreateCenterPage() {
                   onChange={(event) => updateField("city", event.target.value)}
                   placeholder={t.placeholders.city}
                   className="h-10 rounded-xl"
+                  disabled={isSubmitting}
                 />
               </FieldBlock>
 
@@ -724,6 +835,7 @@ export default function SystemCreateCenterPage() {
                   onChange={(event) => updateField("area", event.target.value)}
                   placeholder={t.placeholders.area}
                   className="h-10 rounded-xl"
+                  disabled={isSubmitting}
                 />
               </FieldBlock>
 
@@ -736,6 +848,7 @@ export default function SystemCreateCenterPage() {
                     }
                     placeholder={t.placeholders.address}
                     className="min-h-24 rounded-xl"
+                    disabled={isSubmitting}
                   />
                 </FieldBlock>
               </div>
@@ -748,11 +861,12 @@ export default function SystemCreateCenterPage() {
                   <Input
                     value={formData.google_maps_link}
                     onChange={(event) =>
-                      updateField("google_maps_link", event.target.value)
+                      updateField("google_maps_link", event.target.value.trim())
                     }
                     placeholder={t.placeholders.googleMaps}
                     className="h-10 rounded-xl"
                     dir="ltr"
+                    disabled={isSubmitting}
                   />
                 </FieldBlock>
               </div>
@@ -775,14 +889,13 @@ export default function SystemCreateCenterPage() {
                   onCheckedChange={(checked) =>
                     updateField("is_featured", Boolean(checked))
                   }
+                  disabled={isSubmitting}
                 />
 
                 <div>
                   <p className="text-sm font-semibold">{t.labels.featured}</p>
                   <p className="text-muted-foreground mt-1 text-xs">
-                    {isArabic
-                      ? "يستخدم لإبراز المركز في الواجهات والتقارير."
-                      : "Used to highlight this center in interfaces and reports."}
+                    {t.featuredHelp}
                   </p>
                 </div>
               </label>
@@ -793,6 +906,7 @@ export default function SystemCreateCenterPage() {
                   onChange={(event) => updateField("notes", event.target.value)}
                   placeholder={t.placeholders.notes}
                   className="min-h-28 rounded-xl"
+                  disabled={isSubmitting}
                 />
               </FieldBlock>
             </CardContent>
@@ -800,7 +914,7 @@ export default function SystemCreateCenterPage() {
         </div>
 
         {/* Sidebar Summary */}
-        <aside className="space-y-4">
+        <aside className="min-w-0 space-y-4">
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-bold">
@@ -814,7 +928,7 @@ export default function SystemCreateCenterPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-muted-foreground text-xs">
-                      {isArabic ? "نسبة الاكتمال" : "Completion"}
+                      {t.completion}
                     </p>
                     <p className="mt-1 text-2xl font-bold">{progressPercent}%</p>
                   </div>
@@ -829,6 +943,19 @@ export default function SystemCreateCenterPage() {
                     className="h-full rounded-full bg-primary transition-all"
                     style={{ width: `${progressPercent}%` }}
                   />
+                </div>
+
+                <div className="mt-3 flex items-center gap-2">
+                  <CheckCircle2
+                    className={`h-4 w-4 ${
+                      isReadyToSave
+                        ? "text-emerald-600"
+                        : "text-muted-foreground"
+                    }`}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    {isReadyToSave ? t.ready : t.missingData}
+                  </p>
                 </div>
               </div>
 
@@ -863,6 +990,12 @@ export default function SystemCreateCenterPage() {
               />
 
               <SummaryItem
+                icon={Phone}
+                label={t.labels.mobile}
+                value={formData.mobile || formData.phone || "-"}
+              />
+
+              <SummaryItem
                 icon={Mail}
                 label={t.labels.email}
                 value={formData.email || "-"}
@@ -877,7 +1010,7 @@ export default function SystemCreateCenterPage() {
                   <div>
                     <p className="text-sm font-semibold">{t.labels.featured}</p>
                     <p className="text-muted-foreground mt-1 text-xs">
-                      {isArabic ? "سيظهر كمركز مميز." : "Will appear as featured."}
+                      {t.featuredSummary}
                     </p>
                   </div>
                 </div>
@@ -890,7 +1023,11 @@ export default function SystemCreateCenterPage() {
               <CardTitle className="text-base font-bold">
                 {t.stepsTitle}
               </CardTitle>
-              <CardDescription>{t.route}</CardDescription>
+              <CardDescription>
+                {isArabic
+                  ? "نقاط تساعدك على إدخال بيانات دقيقة."
+                  : "Helpful points for entering accurate data."}
+              </CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-3">
@@ -923,7 +1060,7 @@ export default function SystemCreateCenterPage() {
                 ) : (
                   <CheckCircle2 className="h-4 w-4" />
                 )}
-                {t.create}
+                {isSubmitting && submitMode === "CREATE" ? t.saving : t.create}
               </Button>
 
               <Button
@@ -937,7 +1074,9 @@ export default function SystemCreateCenterPage() {
                 ) : (
                   <Save className="h-4 w-4" />
                 )}
-                {t.saveDraft}
+                {isSubmitting && submitMode === "DRAFT"
+                  ? t.saving
+                  : t.saveDraft}
               </Button>
             </CardContent>
           </Card>

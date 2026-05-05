@@ -1,10 +1,42 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/customers/list/page.tsx
+   🧠 Primey Care | Customers List
+   ------------------------------------------------------------
+   ✅ المسار: /system/customers/list
+   ✅ الإصدار: v1.1.0 - UX Refinement
+
+   ✅ العمل:
+      قائمة كاملة للعملاء مع البحث والفلاتر والفرز وإدارة الأعمدة
+      والتصدير والطباعة.
+
+   ✅ API:
+      GET customers list through lib/api.ts
+
+   ✅ ملاحظات UX المعتمدة:
+      - لا يتم إظهار المسارات التقنية أو أسماء API داخل الواجهة.
+      - البحث في صف مستقل.
+      - الفلاتر وإدارة الأعمدة في صف مستقل تحت البحث.
+      - التصدير Excel بصيغة .xls HTML Workbook وليس CSV أو XLSX.
+      - Web PDF Print للقائمة.
+      - Error State مستقل عن Empty State.
+      - Skeleton Loading.
+      - Empty State ذكي حسب البحث والفلاتر.
+      - روابط التفاصيل آمنة وتتحقق من id.
+      - عدم عرض أزرار وهمية مثل كشف الحساب إذا لم توجد صفحة مخصصة.
+      - الصفحة ممتدة على عرض المساحة.
+      - دعم عربي / إنجليزي عبر primey-locale.
+      - استخدام sonner للتنبيهات.
+      - الأرقام تبقى بالإنجليزية.
+============================================================ */
+
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import * as XLSX from "xlsx";
 import {
   ArrowDownUp,
+  ArrowLeft,
+  BadgeCheck,
   Building2,
   ColumnsIcon,
   Download,
@@ -12,13 +44,17 @@ import {
   FileText,
   Loader2,
   Mail,
+  MapPin,
   MoreHorizontal,
   Phone,
-  Plus,
+  PlusCircle,
   Printer,
   RefreshCcw,
   Search,
+  ShieldCheck,
   UserRound,
+  Users,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -26,6 +62,13 @@ import { apiGet, API_PATHS } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -37,13 +80,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Table,
   TableBody,
   TableCell,
@@ -53,15 +89,7 @@ import {
 } from "@/components/ui/table";
 
 /* ============================================================
-   📂 app/system/customers/list/page.tsx
-   🧠 Primey Care | Customers List
-   ------------------------------------------------------------
-   ✅ ربط فعلي مع API Layer
-   ✅ فلترة + بحث + ترتيب
-   ✅ تحديد الصفوف
-   ✅ تصدير Excel للقائمة فقط
-   ✅ طباعة / Web PDF للقائمة فقط
-   ✅ نفس أسلوب Primey Care الرسمي
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
@@ -105,12 +133,18 @@ type CustomersApiResponse = {
   message?: string;
   results?: unknown[];
   customers?: unknown[];
-  data?: unknown[] | { results?: unknown[]; customers?: unknown[] };
+  items?: unknown[];
+  data?:
+    | unknown[]
+    | {
+        results?: unknown[];
+        customers?: unknown[];
+        items?: unknown[];
+      };
   count?: number;
 };
 
 type VisibleColumns = {
-  select: boolean;
   customer: boolean;
   code: boolean;
   customerType: boolean;
@@ -121,41 +155,100 @@ type VisibleColumns = {
   actions: boolean;
 };
 
+type ExcelSheetOptions = {
+  filename: string;
+  worksheetName: string;
+  title: string;
+  locale: AppLocale;
+  summaryRows: Array<[string, string | number]>;
+  filterRows: Array<[string, string | number]>;
+  headers: string[];
+  rows: Array<Array<string | number>>;
+};
+
 const PAGE_SIZE = 10;
+
+/* ============================================================
+   Locale Helpers
+============================================================ */
 
 function readLocale(): AppLocale {
   try {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
+  } catch (error) {
+    console.error("Read locale error:", error);
     return "ar";
   }
 }
 
 function applyDocumentLocale(locale: AppLocale) {
-  if (typeof document === "undefined") return;
+  try {
+    if (typeof document === "undefined") return;
 
-  document.documentElement.lang = locale;
-  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-  document.body.dir = locale === "ar" ? "rtl" : "ltr";
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch (error) {
+    console.error("Apply locale error:", error);
+  }
 }
+
+function formatNumber(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0";
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(numericValue);
+}
+
+function formatDateForExport(value: string) {
+  if (!value) return "-";
+
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
 
 function dictionary(locale: AppLocale) {
   const ar = locale === "ar";
 
   return {
-    title: ar ? "قائمة العملاء" : "Customers",
+    title: ar ? "قائمة العملاء" : "Customers List",
+    subtitle: ar
+      ? "إدارة العملاء مع البحث والفلاتر والأعمدة والفرز."
+      : "Manage customers with search, filters, columns, and sorting.",
+
+    back: ar ? "لوحة العملاء" : "Customers Overview",
     addCustomer: ar ? "إضافة عميل" : "Add Customer",
     refresh: ar ? "تحديث" : "Refresh",
-    export: ar ? "تصدير Excel" : "Export Excel",
-    printPdf: ar ? "طباعة / Web PDF" : "Print / Web PDF",
+    exportExcel: ar ? "تصدير Excel" : "Export Excel",
+    printPdf: ar ? "طباعة PDF" : "Print PDF",
     columns: ar ? "الأعمدة" : "Columns",
-    search: ar ? "ابحث في العملاء..." : "Search customers...",
+    retry: ar ? "إعادة المحاولة" : "Retry",
+    clearFilters: ar ? "مسح الفلاتر" : "Clear Filters",
+
+    search: ar ? "ابحث باسم العميل أو الكود أو الجوال أو المدينة..." : "Search by customer name, code, mobile, or city...",
     all: ar ? "الكل" : "All",
 
     totalCustomers: ar ? "إجمالي العملاء" : "Total Customers",
@@ -165,31 +258,49 @@ function dictionary(locale: AppLocale) {
 
     customersData: ar ? "بيانات العملاء" : "Customers Data",
     customersDataDesc: ar
-      ? "جدول العملاء مرتبط مباشرة بواجهة العملاء API."
-      : "Customers table connected directly to customers API.",
+      ? "استعرض العملاء، رتّب البيانات، وخصص الأعمدة حسب احتياجك."
+      : "Browse customers, sort data, and customize columns as needed.",
 
     selectedRows: ar ? "صفوف محددة" : "row(s) selected",
     previous: ar ? "السابق" : "Previous",
     next: ar ? "التالي" : "Next",
-    loading: ar ? "جاري تحميل العملاء..." : "Loading customers...",
-    noResults: ar ? "لا توجد نتائج." : "No results.",
+    page: ar ? "صفحة" : "Page",
+    from: ar ? "من" : "of",
+    showing: ar ? "المعروض" : "Showing",
+
+    emptyTitle: ar ? "لا يوجد عملاء بعد" : "No customers yet",
+    emptyText: ar
+      ? "عند إضافة عملاء جدد ستظهر بياناتهم هنا مباشرة."
+      : "New customers will appear here once they are added.",
+    noResultsTitle: ar ? "لا توجد نتائج مطابقة" : "No matching results",
+    noResultsText: ar
+      ? "جرّب تغيير كلمات البحث أو فلتر الحالة أو فلتر النوع."
+      : "Try changing the search keywords, status filter, or type filter.",
 
     actions: ar ? "الإجراءات" : "Actions",
     viewDetails: ar ? "عرض التفاصيل" : "View details",
-    statement: ar ? "كشف الحساب" : "Statement",
     copyCode: ar ? "نسخ كود العميل" : "Copy customer code",
     copyId: ar ? "نسخ المعرف" : "Copy ID",
 
-    loadError: ar ? "تعذر تحميل قائمة العملاء." : "Failed to load customers.",
+    loadError: ar ? "تعذر تحميل قائمة العملاء." : "Unable to load customers list.",
+    loadErrorHint: ar
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
     refreshSuccess: ar
       ? "تم تحديث قائمة العملاء بنجاح."
-      : "Customers refreshed successfully.",
+      : "Customers list refreshed successfully.",
     exportSuccess: ar
-      ? "تم تصدير القائمة بنجاح."
-      : "List exported successfully.",
+      ? "تم تجهيز ملف Excel بنجاح."
+      : "Excel file prepared successfully.",
+    exportEmpty: ar
+      ? "لا توجد بيانات قابلة للتصدير."
+      : "No data available to export.",
     printReady: ar
-      ? "تم تجهيز نافذة الطباعة للقائمة فقط."
-      : "Print window prepared for the list only.",
+      ? "تم تجهيز نافذة الطباعة."
+      : "Print window prepared.",
+    printError: ar
+      ? "تعذر فتح نافذة الطباعة."
+      : "Unable to open print window.",
     copied: ar ? "تم النسخ بنجاح." : "Copied successfully.",
 
     active: ar ? "نشط" : "Active",
@@ -201,14 +312,33 @@ function dictionary(locale: AppLocale) {
     individual: ar ? "فرد" : "Individual",
     corporate: ar ? "شركة" : "Corporate",
 
+    generatedAt: ar ? "تاريخ التصدير" : "Generated At",
+    reportScope: ar ? "نطاق التقرير" : "Report Scope",
+    currentFilteredData: ar
+      ? "حسب الفلاتر الحالية"
+      : "Current filtered data",
+    selectedScope: ar ? "الصفوف المحددة" : "Selected rows",
+    filterSearch: ar ? "البحث" : "Search",
+    filterStatus: ar ? "فلتر الحالة" : "Status Filter",
+    filterType: ar ? "فلتر النوع" : "Type Filter",
+
     table: {
+      id: ar ? "المعرف" : "ID",
       customer: ar ? "العميل" : "Customer",
       code: ar ? "الكود" : "Code",
       customerType: ar ? "النوع" : "Type",
       city: ar ? "المدينة" : "City",
+      district: ar ? "الحي" : "District",
       contact: ar ? "التواصل" : "Contact",
+      email: ar ? "البريد الإلكتروني" : "Email",
+      phone: ar ? "الهاتف" : "Phone",
+      whatsapp: ar ? "واتساب" : "WhatsApp",
       status: ar ? "الحالة" : "Status",
       source: ar ? "المصدر" : "Source",
+      nationalId: ar ? "رقم الهوية" : "National ID",
+      nationality: ar ? "الجنسية" : "Nationality",
+      createdAt: ar ? "تاريخ الإنشاء" : "Created At",
+      updatedAt: ar ? "آخر تحديث" : "Updated At",
       actions: ar ? "الإجراء" : "Action",
     },
 
@@ -217,12 +347,17 @@ function dictionary(locale: AppLocale) {
       generatedAt: ar ? "تاريخ الطباعة" : "Printed At",
       scope: ar ? "النطاق" : "Scope",
       filteredOnly: ar
-        ? "القائمة حسب الفلاتر الحالية فقط"
-        : "Current filtered list only",
+        ? "القائمة حسب الفلاتر الحالية"
+        : "Current filtered list",
+      selectedOnly: ar ? "الصفوف المحددة فقط" : "Selected rows only",
       totalRows: ar ? "عدد السجلات" : "Rows Count",
     },
   };
 }
+
+/* ============================================================
+   API Normalizers
+============================================================ */
 
 function pickString(
   obj: Record<string, unknown>,
@@ -253,16 +388,15 @@ function normalizeApiList(payload: CustomersApiResponse | unknown): unknown[] {
 
   if (Array.isArray(data.results)) return data.results;
   if (Array.isArray(data.customers)) return data.customers;
+  if (Array.isArray(data.items)) return data.items;
   if (Array.isArray(data.data)) return data.data;
 
   if (data.data && typeof data.data === "object") {
-    const nested = data.data as {
-      results?: unknown[];
-      customers?: unknown[];
-    };
+    const nested = data.data;
 
     if (Array.isArray(nested.results)) return nested.results;
     if (Array.isArray(nested.customers)) return nested.customers;
+    if (Array.isArray(nested.items)) return nested.items;
   }
 
   return [];
@@ -275,6 +409,9 @@ function normalizeStatus(value: unknown): CustomerStatus {
   if (status === "INACTIVE") return "INACTIVE";
   if (status === "BLOCKED") return "BLOCKED";
   if (status === "LEAD") return "LEAD";
+
+  if (value === true) return "ACTIVE";
+  if (value === false) return "INACTIVE";
 
   return "UNKNOWN";
 }
@@ -313,7 +450,7 @@ function normalizeCustomer(item: unknown): Customer {
   ]);
 
   return {
-    id: (obj.id ?? obj.pk ?? "-") as number | string,
+    id: (obj.id ?? obj.pk ?? "") as number | string,
     name: pickString(
       obj,
       ["display_name", "displayName", "name", "full_name", "fullName"],
@@ -321,7 +458,7 @@ function normalizeCustomer(item: unknown): Customer {
     ),
     code: pickString(obj, ["customer_code", "customerCode", "code"], "-"),
     customerType,
-    status: normalizeStatus(obj.status),
+    status: normalizeStatus(obj.status ?? obj.is_active),
     source: pickString(obj, ["source"], "-"),
     email,
     phone,
@@ -331,7 +468,7 @@ function normalizeCustomer(item: unknown): Customer {
       whatsapp ||
       phone ||
       email,
-    city: pickString(obj, ["city"], "-"),
+    city: pickString(obj, ["city"], ""),
     district: pickString(obj, ["district"], ""),
     nationalId: pickString(obj, ["national_id", "nationalId"], ""),
     nationality: pickString(obj, ["nationality"], ""),
@@ -339,6 +476,10 @@ function normalizeCustomer(item: unknown): Customer {
     updatedAt: pickString(obj, ["updated_at", "updatedAt"], ""),
   };
 }
+
+/* ============================================================
+   UI Helpers
+============================================================ */
 
 function statusLabel(status: CustomerStatus, locale: AppLocale) {
   const t = dictionary(locale);
@@ -371,7 +512,7 @@ function statusBadge(status: CustomerStatus, locale: AppLocale) {
 
   if (status === "ACTIVE") {
     return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50">
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
         {label}
       </Badge>
     );
@@ -379,7 +520,7 @@ function statusBadge(status: CustomerStatus, locale: AppLocale) {
 
   if (status === "LEAD") {
     return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50">
+      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
         {label}
       </Badge>
     );
@@ -387,21 +528,36 @@ function statusBadge(status: CustomerStatus, locale: AppLocale) {
 
   if (status === "BLOCKED") {
     return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50">
+      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "INACTIVE") {
+    return (
+      <Badge variant="outline" className="rounded-full px-3 py-1">
         {label}
       </Badge>
     );
   }
 
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
+    <Badge variant="secondary" className="rounded-full px-3 py-1">
       {label}
     </Badge>
   );
 }
 
-function safeSheetName(name: string) {
-  return name.replace(/[\\/?*[\]:]/g, "").slice(0, 31) || "Report";
+function calculatePercent(value: number, total: number) {
+  if (!total) return 0;
+  return Math.round((value / total) * 100);
+}
+
+function isValidCustomerId(id: Customer["id"]) {
+  const value = String(id || "").trim();
+
+  return value.length > 0 && value !== "-" && value !== "undefined";
 }
 
 function escapeHtml(value: string | number) {
@@ -413,29 +569,165 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
+function downloadExcel(options: ExcelSheetOptions) {
+  const dir = options.locale === "ar" ? "rtl" : "ltr";
+  const align = options.locale === "ar" ? "right" : "left";
+  const colspan = Math.max(options.headers.length, 2);
+
+  const summaryHtml = options.summaryRows
+    .map(
+      ([label, value]) => `
+        <tr>
+          <td class="summary-label">${escapeHtml(label)}</td>
+          <td class="summary-value">${escapeHtml(value)}</td>
+        </tr>`,
+    )
+    .join("");
+
+  const filterHtml = options.filterRows
+    .map(
+      ([label, value]) => `
+        <tr>
+          <td class="summary-label">${escapeHtml(label)}</td>
+          <td class="summary-value">${escapeHtml(value)}</td>
+        </tr>`,
+    )
+    .join("");
+
+  const headerHtml = options.headers
+    .map((header) => `<th>${escapeHtml(header)}</th>`)
+    .join("");
+
+  const rowsHtml = options.rows
+    .map(
+      (row) => `
+        <tr>
+          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
+        </tr>`,
+    )
+    .join("");
+
+  const workbook = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office"
+          xmlns:x="urn:schemas-microsoft-com:office:excel"
+          xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="UTF-8" />
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>${escapeHtml(options.worksheetName)}</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayRightToLeft>${options.locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <style>
+          body {
+            direction: ${dir};
+            font-family: Arial, sans-serif;
+          }
+          table {
+            border-collapse: collapse;
+            width: 100%;
+          }
+          th,
+          td {
+            border: 1px solid #d9e2ef;
+            padding: 8px;
+            text-align: ${align};
+            vertical-align: top;
+            mso-number-format: "\\@";
+          }
+          th {
+            background: #d8ecfb;
+            color: #000000;
+            font-weight: 700;
+          }
+          .title {
+            font-size: 20px;
+            font-weight: 700;
+            text-align: center;
+            background: #ffffff;
+          }
+          .section {
+            font-weight: 700;
+            background: #eef6ff;
+          }
+          .summary-label {
+            font-weight: 700;
+            background: #f8fafc;
+            width: 240px;
+          }
+          .summary-value {
+            font-weight: 700;
+          }
+        </style>
+      </head>
+      <body dir="${dir}">
+        <table>
+          <tr>
+            <td class="title" colspan="${colspan}">
+              ${escapeHtml(options.title)}
+            </td>
+          </tr>
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr><td class="section" colspan="${colspan}">${options.locale === "ar" ? "ملخص القائمة" : "List Summary"}</td></tr>
+          ${summaryHtml}
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr><td class="section" colspan="${colspan}">${options.locale === "ar" ? "الفلاتر المستخدمة" : "Applied Filters"}</td></tr>
+          ${filterHtml}
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr>${headerHtml}</tr>
+          ${rowsHtml}
+        </table>
+      </body>
+    </html>`;
+
+  const blob = new Blob([workbook], {
+    type: "application/vnd.ms-excel;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = options.filename;
+  anchor.click();
+
+  URL.revokeObjectURL(url);
+}
+
 function buildPrintHtml({
   title,
   locale,
   rows,
   t,
+  selectedOnly,
 }: {
   title: string;
   locale: AppLocale;
   rows: Customer[];
   t: ReturnType<typeof dictionary>;
+  selectedOnly: boolean;
 }) {
   const isArabic = locale === "ar";
-  const now = new Date().toLocaleString(isArabic ? "ar-SA" : "en-US");
+  const now = new Date().toLocaleString("en-US");
 
   const tableRows = rows
     .map(
       (customer, index) => `
         <tr>
           <td>${index + 1}</td>
-          <td>${escapeHtml(customer.code)}</td>
-          <td>${escapeHtml(customer.name)}</td>
+          <td>${escapeHtml(customer.code || "-")}</td>
+          <td>${escapeHtml(customer.name || "-")}</td>
           <td>${escapeHtml(typeLabel(customer.customerType, locale))}</td>
-          <td>${escapeHtml(customer.city || "-")}</td>
+          <td>${escapeHtml(customer.city || customer.district || "-")}</td>
           <td>${escapeHtml(customer.primaryContact || "-")}</td>
           <td>${escapeHtml(statusLabel(customer.status, locale))}</td>
           <td>${escapeHtml(customer.source || "-")}</td>
@@ -461,6 +753,8 @@ function buildPrintHtml({
             font-family: Arial, Tahoma, sans-serif;
             color: #111827;
             background: #ffffff;
+            direction: ${isArabic ? "rtl" : "ltr"};
+            text-align: ${isArabic ? "right" : "left"};
           }
 
           .print-header {
@@ -528,10 +822,6 @@ function buildPrintHtml({
             body {
               padding: 0;
             }
-
-            .no-print {
-              display: none !important;
-            }
           }
         </style>
       </head>
@@ -542,8 +832,8 @@ function buildPrintHtml({
             <h1>${escapeHtml(title)}</h1>
             <div class="meta">
               <div>${escapeHtml(t.print.generatedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.print.scope)}: ${escapeHtml(t.print.filteredOnly)}</div>
-              <div>${escapeHtml(t.print.totalRows)}: ${rows.length}</div>
+              <div>${escapeHtml(t.print.scope)}: ${escapeHtml(selectedOnly ? t.print.selectedOnly : t.print.filteredOnly)}</div>
+              <div>${escapeHtml(t.print.totalRows)}: ${formatNumber(rows.length)}</div>
             </div>
           </div>
           <div class="badge">Primey Care</div>
@@ -565,26 +855,77 @@ function buildPrintHtml({
           <tbody>
             ${
               tableRows ||
-              `<tr><td colspan="8">${escapeHtml(t.noResults)}</td></tr>`
+              `<tr><td colspan="8" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
             }
           </tbody>
         </table>
 
         <script>
-          window.onload = function () {
+          window.addEventListener("load", () => {
             window.focus();
             window.print();
-          };
+          });
         </script>
       </body>
     </html>
   `;
 }
 
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+}
+
+function StatCardSkeleton() {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-2">
+            <SkeletonLine className="h-7 w-16" />
+            <SkeletonLine className="h-4 w-28" />
+          </div>
+          <SkeletonLine className="h-10 w-10 rounded-xl" />
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          <SkeletonLine className="h-3 w-8" />
+          <SkeletonLine className="h-2 flex-1" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
+  return (
+    <>
+      {Array.from({ length: 8 }).map((_, rowIndex) => (
+        <TableRow key={rowIndex}>
+          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
+            <TableCell key={columnIndex}>
+              <SkeletonLine
+                className={
+                  columnIndex === 1
+                    ? "h-9 w-52 rounded-lg"
+                    : "h-4 w-24 rounded-lg"
+                }
+              />
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
+/* ============================================================
+   Page
+============================================================ */
+
 export default function SystemCustomersListPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
@@ -596,7 +937,6 @@ export default function SystemCustomersListPage() {
   const [pageIndex, setPageIndex] = useState(0);
 
   const [visibleColumns, setVisibleColumns] = useState<VisibleColumns>({
-    select: true,
     customer: true,
     code: true,
     customerType: true,
@@ -630,13 +970,34 @@ export default function SystemCustomersListPage() {
     [t],
   );
 
+  const columnLabels = useMemo(
+    () =>
+      ({
+        customer: t.table.customer,
+        code: t.table.code,
+        customerType: t.table.customerType,
+        city: t.table.city,
+        contact: t.table.contact,
+        status: t.table.status,
+        source: t.table.source,
+        actions: t.actions,
+      }) satisfies Record<keyof VisibleColumns, string>,
+    [t],
+  );
+
   const stats = useMemo(() => {
+    const total = customers.length;
+    const active = customers.filter((item) => item.status === "ACTIVE").length;
+    const corporate = customers.filter(
+      (item) => item.customerType === "CORPORATE",
+    ).length;
+    const lead = customers.filter((item) => item.status === "LEAD").length;
+
     return {
-      total: customers.length,
-      active: customers.filter((item) => item.status === "ACTIVE").length,
-      corporate: customers.filter((item) => item.customerType === "CORPORATE")
-        .length,
-      lead: customers.filter((item) => item.status === "LEAD").length,
+      total,
+      active,
+      corporate,
+      lead,
     };
   }, [customers]);
 
@@ -654,8 +1015,12 @@ export default function SystemCustomersListPage() {
           customer.whatsapp,
           customer.primaryContact,
           customer.city,
+          customer.district,
           customer.source,
           customer.nationalId,
+          customer.nationality,
+          customer.status,
+          customer.customerType,
         ]
           .join(" ")
           .toLowerCase()
@@ -705,6 +1070,12 @@ export default function SystemCustomersListPage() {
   const allPageSelected =
     pageRows.length > 0 && selectedOnPage === pageRows.length;
 
+  const hasSearchOrFilter =
+    query.trim().length > 0 || statusFilter !== "ALL" || typeFilter !== "ALL";
+
+  const visibleTableColumnsCount =
+    1 + Object.values(visibleColumns).filter(Boolean).length;
+
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
@@ -736,74 +1107,137 @@ export default function SystemCustomersListPage() {
     setSelectedIds((current) => Array.from(new Set([...current, ...pageIds])));
   }
 
+  function clearFilters() {
+    setQuery("");
+    setStatusFilter("ALL");
+    setTypeFilter("ALL");
+  }
+
   async function loadCustomers(showSuccessToast = false) {
-    setIsLoading(true);
+    try {
+      setIsLoading(true);
+      setErrorMessage("");
 
-    const response = await apiGet<CustomersApiResponse>(API_PATHS.customers.list, {
-      page_size: 200,
-    });
+      const response = await apiGet<CustomersApiResponse>(
+        API_PATHS.customers.list,
+        {
+          page_size: 200,
+        },
+      );
 
-    if (!response.ok) {
+      if (!response.ok) {
+        throw new Error(response.message || t.loadError);
+      }
+
+      const normalized = normalizeApiList(response.data).map(normalizeCustomer);
+
+      setCustomers(normalized);
+
+      if (showSuccessToast) {
+        toast.success(t.refreshSuccess);
+      }
+    } catch (error) {
+      console.error("Failed to load customers list:", error);
       setCustomers([]);
+      setErrorMessage(t.loadError);
+      toast.error(t.loadError);
+    } finally {
       setIsLoading(false);
-      return;
-    }
-
-    const normalized = normalizeApiList(response.data).map(normalizeCustomer);
-
-    setCustomers(normalized);
-    setIsLoading(false);
-
-    if (showSuccessToast) {
-      toast.success(t.refreshSuccess);
     }
   }
 
   function exportExcel() {
-    const rows = exportRows.map((customer) => ({
-      [t.table.code]: customer.code,
-      [t.table.customer]: customer.name,
-      [t.table.customerType]: typeLabel(customer.customerType, locale),
-      [t.table.city]: customer.city,
-      [t.table.contact]: customer.primaryContact,
-      [t.table.status]: statusLabel(customer.status, locale),
-      [t.table.source]: customer.source,
-    }));
+    if (exportRows.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
 
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    worksheet["!cols"] = [
-      { wch: 18 },
-      { wch: 32 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 26 },
-      { wch: 16 },
-      { wch: 18 },
-    ];
+    const generatedAt = new Date();
 
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(
-      workbook,
-      worksheet,
-      safeSheetName(t.print.title),
-    );
-    XLSX.writeFile(
-      workbook,
-      `primey-care-customers-list-${new Date().toISOString().slice(0, 10)}.xlsx`,
-      {
-        bookType: "xlsx",
-        compression: true,
-      },
-    );
+    const statusFilterLabel =
+      statusOptions.find((item) => item.value === statusFilter)?.label || t.all;
+
+    const typeFilterLabel =
+      typeOptions.find((item) => item.value === typeFilter)?.label || t.all;
+
+    downloadExcel({
+      filename: `primey-care-customers-list-${generatedAt
+        .toISOString()
+        .slice(0, 10)}.xls`,
+      worksheetName: isArabic ? "قائمة العملاء" : "Customers List",
+      title: t.title,
+      locale,
+      summaryRows: [
+        [t.generatedAt, generatedAt.toLocaleString("en-US")],
+        [
+          t.reportScope,
+          selectedIds.length > 0 ? t.selectedScope : t.currentFilteredData,
+        ],
+        [
+          t.showing,
+          `${formatNumber(exportRows.length)} / ${formatNumber(customers.length)}`,
+        ],
+        [t.totalCustomers, stats.total],
+        [t.activeCustomers, stats.active],
+        [t.corporateCustomers, stats.corporate],
+        [t.leadCustomers, stats.lead],
+      ],
+      filterRows: [
+        [t.filterSearch, query || t.all],
+        [t.filterStatus, statusFilterLabel],
+        [t.filterType, typeFilterLabel],
+      ],
+      headers: [
+        t.table.id,
+        t.table.code,
+        t.table.customer,
+        t.table.customerType,
+        t.table.city,
+        t.table.district,
+        t.table.contact,
+        t.table.email,
+        t.table.phone,
+        t.table.whatsapp,
+        t.table.status,
+        t.table.source,
+        t.table.nationalId,
+        t.table.nationality,
+        t.table.createdAt,
+        t.table.updatedAt,
+      ],
+      rows: exportRows.map((customer) => [
+        String(customer.id || "-"),
+        customer.code || "-",
+        customer.name || "-",
+        typeLabel(customer.customerType, locale),
+        customer.city || "-",
+        customer.district || "-",
+        customer.primaryContact || "-",
+        customer.email || "-",
+        customer.phone || "-",
+        customer.whatsapp || "-",
+        statusLabel(customer.status, locale),
+        customer.source || "-",
+        customer.nationalId || "-",
+        customer.nationality || "-",
+        formatDateForExport(customer.createdAt),
+        formatDateForExport(customer.updatedAt),
+      ]),
+    });
 
     toast.success(t.exportSuccess);
   }
 
   function printListOnly() {
+    if (exportRows.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.loadError);
+      toast.error(t.printError);
       return;
     }
 
@@ -814,6 +1248,7 @@ export default function SystemCustomersListPage() {
         locale,
         rows: exportRows,
         t,
+        selectedOnly: selectedIds.length > 0,
       }),
     );
     printWindow.document.close();
@@ -824,18 +1259,27 @@ export default function SystemCustomersListPage() {
   useEffect(() => {
     const syncLocale = () => {
       const nextLocale = readLocale();
+
       applyDocumentLocale(nextLocale);
       setLocale(nextLocale);
     };
 
-    syncLocale();
+    const syncAfterPaint = () => {
+      syncLocale();
 
-    window.addEventListener("primey-locale-changed", syncLocale);
-    window.addEventListener("storage", syncLocale);
+      window.setTimeout(() => {
+        syncLocale();
+      }, 0);
+    };
+
+    syncAfterPaint();
+
+    window.addEventListener("primey-locale-changed", syncAfterPaint);
+    window.addEventListener("storage", syncAfterPaint);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncLocale);
-      window.removeEventListener("storage", syncLocale);
+      window.removeEventListener("primey-locale-changed", syncAfterPaint);
+      window.removeEventListener("storage", syncAfterPaint);
     };
   }, []);
 
@@ -850,106 +1294,258 @@ export default function SystemCustomersListPage() {
   }, [query, statusFilter, typeFilter]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight">{t.title}</h1>
+    <div className="w-full space-y-4">
+      {/* Header */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+            {t.title}
+          </h1>
 
-        <Button asChild>
-          <Link href="/system/customers/create">
-            <Plus className="h-4 w-4" />
-            {t.addCustomer}
+          <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
+            {t.subtitle}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Link href="/system/customers">
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>{t.back}</span>
+            </Button>
           </Link>
-        </Button>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={() => loadCustomers(true)}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+            <span>{t.refresh}</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={exportExcel}
+            disabled={isLoading || exportRows.length === 0}
+          >
+            <Download className="h-4 w-4" />
+            <span>{t.exportExcel}</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={printListOnly}
+            disabled={isLoading || exportRows.length === 0}
+          >
+            <Printer className="h-4 w-4" />
+            <span>{t.printPdf}</span>
+          </Button>
+
+          <Link href="/system/customers/create">
+            <Button className="h-10 w-full rounded-xl sm:w-auto">
+              <PlusCircle className="h-4 w-4" />
+              <span>{t.addCustomer}</span>
+            </Button>
+          </Link>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title={t.totalCustomers}
-          value={stats.total}
-          growth="+12.5%"
-          tone="positive"
-        />
-        <StatCard
-          title={t.activeCustomers}
-          value={stats.active}
-          growth="+8.2%"
-          tone="positive"
-        />
-        <StatCard
-          title={t.corporateCustomers}
-          value={stats.corporate}
-          growth="+4.1%"
-          tone="positive"
-        />
-        <StatCard
-          title={t.leadCustomers}
-          value={stats.lead}
-          growth="-2.4%"
-          tone="negative"
-        />
-      </div>
-
-      <div className="pt-4">
-        <Card className="rounded-2xl">
-          <CardHeader className="gap-4">
-            <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
-              <div>
-                <CardTitle>{t.customersData}</CardTitle>
-                <CardDescription>{t.customersDataDesc}</CardDescription>
+      {/* Error State */}
+      {!isLoading && errorMessage ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                <XCircle className="h-5 w-5" />
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="outline"
-                  className="rounded-xl"
-                  onClick={() => loadCustomers(true)}
-                  disabled={isLoading}
-                >
-                  {isLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="h-4 w-4" />
-                  )}
-                  {t.refresh}
-                </Button>
+              <div>
+                <p className="font-semibold text-destructive">
+                  {errorMessage}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t.loadErrorHint}
+                </p>
+              </div>
+            </div>
 
-                <Button
-                  variant="outline"
-                  className="rounded-xl"
-                  onClick={exportExcel}
-                  disabled={isLoading || exportRows.length === 0}
-                >
-                  <Download className="h-4 w-4" />
-                  {t.export}
-                </Button>
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => loadCustomers(true)}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              {t.retry}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
-                <Button
-                  variant="outline"
-                  className="rounded-xl"
-                  onClick={printListOnly}
-                  disabled={isLoading || exportRows.length === 0}
+      {/* Stats */}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {isLoading
+          ? Array.from({ length: 4 }).map((_, index) => (
+              <StatCardSkeleton key={index} />
+            ))
+          : [
+              {
+                title: t.totalCustomers,
+                value: stats.total,
+                percent: stats.total > 0 ? 100 : 0,
+                icon: Users,
+              },
+              {
+                title: t.activeCustomers,
+                value: stats.active,
+                percent: calculatePercent(stats.active, stats.total),
+                icon: BadgeCheck,
+              },
+              {
+                title: t.corporateCustomers,
+                value: stats.corporate,
+                percent: calculatePercent(stats.corporate, stats.total),
+                icon: Building2,
+              },
+              {
+                title: t.leadCustomers,
+                value: stats.lead,
+                percent: calculatePercent(stats.lead, stats.total),
+                icon: FileText,
+              },
+            ].map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <Card
+                  key={item.title}
+                  className="rounded-2xl border bg-card shadow-sm"
                 >
-                  <Printer className="h-4 w-4" />
-                  {t.printPdf}
-                </Button>
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-2xl font-bold">
+                          {formatNumber(item.value)}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {item.title}
+                        </p>
+                      </div>
+
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                        <Icon className="h-5 w-5" />
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center gap-2">
+                      <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                        {formatNumber(item.percent)}%
+                      </span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${item.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+      </div>
+
+      {/* Table */}
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-bold">
+            {t.customersData}
+          </CardTitle>
+          <CardDescription>{t.customersDataDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent>
+          <div className="w-full space-y-4">
+            {/* Search Row */}
+            <div className="relative w-full">
+              <Search
+                className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+                  isArabic ? "right-3" : "left-3"
+                }`}
+              />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t.search}
+                className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+              />
+            </div>
+
+            {/* Filters Row */}
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center">
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {statusOptions.map((item) => (
+                    <Button
+                      key={item.value}
+                      variant={
+                        statusFilter === item.value ? "default" : "outline"
+                      }
+                      className="h-10 shrink-0 rounded-xl"
+                      onClick={() => setStatusFilter(item.value)}
+                    >
+                      {item.label}
+                    </Button>
+                  ))}
+                </div>
+
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {typeOptions.map((item) => (
+                    <Button
+                      key={item.value}
+                      variant={typeFilter === item.value ? "default" : "outline"}
+                      className="h-10 shrink-0 rounded-xl"
+                      onClick={() => setTypeFilter(item.value)}
+                    >
+                      {item.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                {hasSearchOrFilter ? (
+                  <Button
+                    variant="outline"
+                    className="h-10 rounded-xl"
+                    onClick={clearFilters}
+                  >
+                    {t.clearFilters}
+                  </Button>
+                ) : null}
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="rounded-xl">
+                    <Button variant="outline" className="h-10 rounded-xl">
                       <ColumnsIcon className="h-4 w-4" />
-                      {t.columns}
+                      <span>{t.columns}</span>
                     </Button>
                   </DropdownMenuTrigger>
 
                   <DropdownMenuContent align={isArabic ? "start" : "end"}>
-                    {(
-                      Object.keys(visibleColumns) as Array<
-                        keyof VisibleColumns
-                      >
-                    ).map((key) => (
+                    {Object.entries(visibleColumns).map(([key, value]) => (
                       <DropdownMenuCheckboxItem
                         key={key}
-                        checked={visibleColumns[key]}
+                        checked={value}
                         onCheckedChange={(checked) =>
                           setVisibleColumns((current) => ({
                             ...current,
@@ -957,23 +1553,7 @@ export default function SystemCustomersListPage() {
                           }))
                         }
                       >
-                        {key === "select"
-                          ? "#"
-                          : key === "customer"
-                            ? t.table.customer
-                            : key === "code"
-                              ? t.table.code
-                              : key === "customerType"
-                                ? t.table.customerType
-                                : key === "city"
-                                  ? t.table.city
-                                  : key === "contact"
-                                    ? t.table.contact
-                                    : key === "status"
-                                      ? t.table.status
-                                      : key === "source"
-                                        ? t.table.source
-                                        : t.table.actions}
+                        {columnLabels[key as keyof VisibleColumns]}
                       </DropdownMenuCheckboxItem>
                     ))}
                   </DropdownMenuContent>
@@ -981,299 +1561,277 @@ export default function SystemCustomersListPage() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-              <div className="relative w-full lg:max-w-sm">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.search}
-                  className={`rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                />
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {statusOptions.map((item) => (
-                  <Button
-                    key={item.value}
-                    variant={
-                      statusFilter === item.value ? "default" : "outline"
-                    }
-                    className="rounded-xl"
-                    onClick={() => setStatusFilter(item.value)}
-                  >
-                    {item.label}
-                  </Button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {typeOptions.map((item) => (
-                  <Button
-                    key={item.value}
-                    variant={typeFilter === item.value ? "default" : "outline"}
-                    className="rounded-xl"
-                    onClick={() => setTypeFilter(item.value)}
-                  >
-                    {item.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent>
             <div className="overflow-hidden rounded-xl border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {visibleColumns.select ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
                       <TableHead className="w-12">
                         <Checkbox
                           checked={allPageSelected}
                           onCheckedChange={toggleAllPageRows}
+                          aria-label="Select all"
                         />
                       </TableHead>
-                    ) : null}
 
-                    {visibleColumns.customer ? (
-                      <SortableHead
-                        label={t.table.customer}
-                        onClick={() => toggleSort("name")}
-                      />
-                    ) : null}
+                      {visibleColumns.customer ? (
+                        <SortableHead
+                          label={t.table.customer}
+                          onClick={() => toggleSort("name")}
+                        />
+                      ) : null}
 
-                    {visibleColumns.code ? (
-                      <SortableHead
-                        label={t.table.code}
-                        onClick={() => toggleSort("code")}
-                      />
-                    ) : null}
+                      {visibleColumns.code ? (
+                        <SortableHead
+                          label={t.table.code}
+                          onClick={() => toggleSort("code")}
+                        />
+                      ) : null}
 
-                    {visibleColumns.customerType ? (
-                      <SortableHead
-                        label={t.table.customerType}
-                        onClick={() => toggleSort("customerType")}
-                      />
-                    ) : null}
+                      {visibleColumns.customerType ? (
+                        <SortableHead
+                          label={t.table.customerType}
+                          onClick={() => toggleSort("customerType")}
+                        />
+                      ) : null}
 
-                    {visibleColumns.city ? (
-                      <SortableHead
-                        label={t.table.city}
-                        onClick={() => toggleSort("city")}
-                      />
-                    ) : null}
+                      {visibleColumns.city ? (
+                        <SortableHead
+                          label={t.table.city}
+                          onClick={() => toggleSort("city")}
+                        />
+                      ) : null}
 
-                    {visibleColumns.contact ? (
-                      <TableHead>{t.table.contact}</TableHead>
-                    ) : null}
+                      {visibleColumns.contact ? (
+                        <TableHead>{t.table.contact}</TableHead>
+                      ) : null}
 
-                    {visibleColumns.status ? (
-                      <SortableHead
-                        label={t.table.status}
-                        onClick={() => toggleSort("status")}
-                      />
-                    ) : null}
+                      {visibleColumns.status ? (
+                        <SortableHead
+                          label={t.table.status}
+                          onClick={() => toggleSort("status")}
+                        />
+                      ) : null}
 
-                    {visibleColumns.source ? (
-                      <TableHead>{t.table.source}</TableHead>
-                    ) : null}
+                      {visibleColumns.source ? (
+                        <TableHead>{t.table.source}</TableHead>
+                      ) : null}
 
-                    {visibleColumns.actions ? (
-                      <TableHead>{t.table.actions}</TableHead>
-                    ) : null}
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={9} className="h-32">
-                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {t.loading}
-                        </div>
-                      </TableCell>
+                      {visibleColumns.actions ? (
+                        <TableHead>{t.table.actions}</TableHead>
+                      ) : null}
                     </TableRow>
-                  ) : pageRows.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={9} className="h-32 text-center">
-                        {t.noResults}
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    pageRows.map((customer) => (
-                      <TableRow
-                        key={customer.id}
-                        data-state={
-                          selectedIds.includes(customer.id)
-                            ? "selected"
-                            : undefined
-                        }
-                      >
-                        {visibleColumns.select ? (
+                  </TableHeader>
+
+                  <TableBody>
+                    {isLoading ? (
+                      <TableRowsSkeleton
+                        columnsCount={visibleTableColumnsCount}
+                      />
+                    ) : pageRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={visibleTableColumnsCount}
+                          className="h-36 text-center"
+                        >
+                          <div className="mx-auto max-w-md space-y-2">
+                            <p className="font-semibold">
+                              {hasSearchOrFilter
+                                ? t.noResultsTitle
+                                : t.emptyTitle}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {hasSearchOrFilter ? t.noResultsText : t.emptyText}
+                            </p>
+
+                            {hasSearchOrFilter ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-2 rounded-xl"
+                                onClick={clearFilters}
+                              >
+                                {t.clearFilters}
+                              </Button>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      pageRows.map((customer) => (
+                        <TableRow
+                          key={`${customer.id}-${customer.code}-${customer.name}`}
+                          data-state={
+                            selectedIds.includes(customer.id)
+                              ? "selected"
+                              : undefined
+                          }
+                        >
                           <TableCell>
                             <Checkbox
                               checked={selectedIds.includes(customer.id)}
                               onCheckedChange={() => toggleRow(customer.id)}
+                              aria-label="Select row"
                             />
                           </TableCell>
-                        ) : null}
 
-                        {visibleColumns.customer ? (
-                          <TableCell>
-                            <div className="flex min-w-[240px] items-center gap-4">
-                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border bg-muted">
-                                {customer.customerType === "CORPORATE" ? (
-                                  <Building2 className="h-5 w-5" />
+                          {visibleColumns.customer ? (
+                            <TableCell>
+                              <div className="flex min-w-[240px] items-center gap-4">
+                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border bg-muted">
+                                  {customer.customerType === "CORPORATE" ? (
+                                    <Building2 className="h-5 w-5" />
+                                  ) : (
+                                    <UserRound className="h-5 w-5" />
+                                  )}
+                                </div>
+
+                                <div className="min-w-0">
+                                  <div className="truncate font-medium">
+                                    {customer.name}
+                                  </div>
+                                  <div className="truncate text-xs text-muted-foreground">
+                                    {customer.email ||
+                                      customer.primaryContact ||
+                                      customer.code}
+                                  </div>
+                                </div>
+                              </div>
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.code ? (
+                            <TableCell className="font-medium">
+                              {customer.code || `#${customer.id}`}
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.customerType ? (
+                            <TableCell>
+                              <Badge variant="secondary" className="rounded-full">
+                                {typeLabel(customer.customerType, locale)}
+                              </Badge>
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.city ? (
+                            <TableCell>
+                              <div className="flex min-w-[120px] items-center gap-2">
+                                <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>
+                                  {customer.city || customer.district || "-"}
+                                </span>
+                              </div>
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.contact ? (
+                            <TableCell>
+                              <div className="flex min-w-[160px] items-center gap-2">
+                                {customer.email ? (
+                                  <Mail className="h-3.5 w-3.5 text-muted-foreground" />
                                 ) : (
-                                  <UserRound className="h-5 w-5" />
+                                  <Phone className="h-3.5 w-3.5 text-muted-foreground" />
                                 )}
+                                <span>
+                                  {customer.primaryContact ||
+                                    customer.whatsapp ||
+                                    customer.phone ||
+                                    customer.email ||
+                                    "-"}
+                                </span>
                               </div>
+                            </TableCell>
+                          ) : null}
 
-                              <div className="min-w-0">
-                                <div className="truncate font-medium">
-                                  {customer.name}
-                                </div>
-                                <div className="truncate text-xs text-muted-foreground">
-                                  {customer.email ||
-                                    customer.primaryContact ||
-                                    customer.code}
-                                </div>
-                              </div>
-                            </div>
-                          </TableCell>
-                        ) : null}
+                          {visibleColumns.status ? (
+                            <TableCell>
+                              {statusBadge(customer.status, locale)}
+                            </TableCell>
+                          ) : null}
 
-                        {visibleColumns.code ? (
-                          <TableCell className="font-medium">
-                            {customer.code}
-                          </TableCell>
-                        ) : null}
+                          {visibleColumns.source ? (
+                            <TableCell>
+                              <Badge variant="outline" className="rounded-full">
+                                {customer.source || "-"}
+                              </Badge>
+                            </TableCell>
+                          ) : null}
 
-                        {visibleColumns.customerType ? (
-                          <TableCell>
-                            <Badge variant="secondary" className="rounded-full">
-                              {typeLabel(customer.customerType, locale)}
-                            </Badge>
-                          </TableCell>
-                        ) : null}
+                          {visibleColumns.actions ? (
+                            <TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" className="h-8 w-8 p-0">
+                                    <span className="sr-only">{t.actions}</span>
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
 
-                        {visibleColumns.city ? (
-                          <TableCell>{customer.city || "-"}</TableCell>
-                        ) : null}
-
-                        {visibleColumns.contact ? (
-                          <TableCell>
-                            <div className="flex min-w-[160px] items-center gap-2">
-                              {customer.email ? (
-                                <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-                              ) : (
-                                <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                              )}
-                              <span>
-                                {customer.primaryContact ||
-                                  customer.whatsapp ||
-                                  customer.phone ||
-                                  customer.email ||
-                                  "-"}
-                              </span>
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.status ? (
-                          <TableCell>
-                            {statusBadge(customer.status, locale)}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.source ? (
-                          <TableCell>
-                            <Badge variant="outline" className="rounded-full">
-                              {customer.source || "-"}
-                            </Badge>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.actions ? (
-                          <TableCell>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-
-                              <DropdownMenuContent
-                                align={isArabic ? "start" : "end"}
-                              >
-                                <DropdownMenuLabel>
-                                  {t.actions}
-                                </DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/system/customers/${customer.id}`}>
-                                    <Eye className="h-4 w-4" />
-                                    {t.viewDetails}
-                                  </Link>
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/system/customers/${customer.id}`}>
-                                    <FileText className="h-4 w-4" />
-                                    {t.statement}
-                                  </Link>
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(
-                                      String(customer.code),
-                                    );
-                                    toast.success(t.copied);
-                                  }}
+                                <DropdownMenuContent
+                                  align={isArabic ? "start" : "end"}
                                 >
-                                  {t.copyCode}
-                                </DropdownMenuItem>
+                                  <DropdownMenuLabel>
+                                    {t.actions}
+                                  </DropdownMenuLabel>
+                                  <DropdownMenuSeparator />
 
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(
-                                      String(customer.id),
-                                    );
-                                    toast.success(t.copied);
-                                  }}
-                                >
-                                  {t.copyId}
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
-                        ) : null}
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                                  {isValidCustomerId(customer.id) ? (
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/system/customers/${customer.id}`}
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                        {t.viewDetails}
+                                      </Link>
+                                    </DropdownMenuItem>
+                                  ) : null}
+
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(
+                                        String(customer.code || "-"),
+                                      );
+                                      toast.success(t.copied);
+                                    }}
+                                  >
+                                    {t.copyCode}
+                                  </DropdownMenuItem>
+
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(
+                                        String(customer.id || "-"),
+                                      );
+                                      toast.success(t.copied);
+                                    }}
+                                  >
+                                    {t.copyId}
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          ) : null}
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
 
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-muted-foreground">
-                {selectedIds.length} / {filteredCustomers.length}{" "}
-                {t.selectedRows}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <div className="flex-1 text-sm text-muted-foreground">
+                {formatNumber(selectedIds.length)} /{" "}
+                {formatNumber(filteredCustomers.length)} {t.selectedRows}
               </div>
 
-              <div className="flex items-center gap-3">
-                <div className="text-sm text-muted-foreground">
-                  {pageIndex + 1} / {pageCount}
-                </div>
+              <div className="text-sm text-muted-foreground">
+                {t.page} {formatNumber(pageIndex + 1)} {t.from}{" "}
+                {formatNumber(pageCount)}
+              </div>
 
+              <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -1301,44 +1859,16 @@ export default function SystemCustomersListPage() {
                 </Button>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-function StatCard({
-  title,
-  value,
-  growth,
-  tone,
-}: {
-  title: string;
-  value: number | string;
-  growth: string;
-  tone: "positive" | "negative";
-}) {
-  return (
-    <Card className="relative overflow-hidden rounded-2xl">
-      <CardHeader>
-        <CardDescription>{title}</CardDescription>
-        <CardTitle className="font-display text-2xl lg:text-3xl">
-          {value}
-        </CardTitle>
-        <div className="absolute end-6 top-6">
-          <Badge variant="outline">
-            <span
-              className={tone === "positive" ? "text-green-600" : "text-red-600"}
-            >
-              {growth}
-            </span>
-          </Badge>
-        </div>
-      </CardHeader>
-    </Card>
-  );
-}
+/* ============================================================
+   Small Components
+============================================================ */
 
 function SortableHead({
   label,

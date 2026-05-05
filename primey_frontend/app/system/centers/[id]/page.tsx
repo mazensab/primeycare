@@ -5,29 +5,38 @@
    🧠 Primey Care | Center Details
    ------------------------------------------------------------
    ✅ المسار: /system/centers/[id]
-   ✅ الإصدار: v1.0.0
-   ✅ العمل: عرض تفاصيل مركز / مقدم خدمة
-   ✅ API: GET /api/providers/{id}/
-   ✅ متوافق مع:
-      - /system/centers
-      - /system/centers/list
-      - /system/centers/create
-      - /system/centers/[id]
-   ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-   - توثيق مختصر أعلى الملف
-   - عرض تفاصيل المركز من API فعلي
-   - تجهيز أقسام الخدمات والعقود والمدفوعات والطلبات
-   - دعم عربي / إنجليزي عبر primey-locale
-   - الأرقام والتواريخ دائمًا بالإنجليزية
-   - استخدام sonner للتنبيهات
-   - بدون localhost hardcoded
-   - الحفاظ على التصميم السابق بدون كسر الواجهة
+   ✅ الإصدار: v1.1.0 - UX Refinement
+
+   ✅ العمل:
+      عرض تفاصيل مركز / مقدم خدمة.
+
+   ✅ API:
+      GET /api/providers/{id}/
+
+   ✅ ملاحظات UX:
+      - لا يتم إظهار المسارات التقنية أو أسماء API داخل واجهة المستخدم.
+      - لا يتم عرض زر حذف نهائي داخل صفحة التفاصيل.
+      - لا يتم عرض زر تعديل معطل إلى حين اعتماد صفحة التعديل.
+      - الصفحة تستخدم عرض المساحة بالكامل.
+      - يوجد Error State مستقل عن Not Found.
+      - يوجد Skeleton Loading كامل.
+      - يوجد نسخ سريع للكود والجوال والبريد.
+      - الأقسام المرتبطة تظهر كأقسام تشغيلية واضحة وليست أزرار وهمية.
+
+   ✅ الوظائف:
+      - عرض بيانات المركز
+      - تحديث البيانات
+      - نسخ الكود / الجوال / البريد
+      - فتح الموقع والخرائط إذا كانت الروابط صالحة
+      - دعم عربي / إنجليزي عبر primey-locale
+      - استخدام sonner للتنبيهات
+      - بدون localhost hardcoded
+      - الحفاظ على تصميم Primey Care الرسمي
 ============================================================ */
 
 import type { ComponentType } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
@@ -36,7 +45,7 @@ import {
   Building2,
   CalendarDays,
   CheckCircle2,
-  Edit3Icon,
+  Copy,
   ExternalLink,
   FileText,
   Globe,
@@ -47,8 +56,8 @@ import {
   RefreshCcw,
   ShieldCheck,
   Star,
-  Trash2Icon,
   Wallet,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -163,6 +172,20 @@ function formatNumber(value: number | string): string {
   }).format(numericValue);
 }
 
+function formatDate(value: string): string {
+  if (!value) return "-";
+
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value || "-";
+  }
+}
+
 /* ============================================================
    API Normalizers
 ============================================================ */
@@ -204,7 +227,7 @@ function normalizeCenterDetail(payload: unknown): CenterDetail {
     {}) as Record<string, unknown>);
 
   return {
-    id: (obj.id ?? "-") as number | string,
+    id: (obj.id ?? "") as number | string,
     name: String(obj.name ?? obj.title ?? "-"),
     code: String(obj.code ?? obj.provider_code ?? "-"),
     providerType: normalizeProviderType(
@@ -238,56 +261,58 @@ function dictionary(locale: AppLocale) {
   return {
     title: isArabic ? "تفاصيل المركز" : "Center Details",
     subtitle: isArabic
-      ? "عرض الملف الكامل للمركز أو مقدم الخدمة مع بيانات التواصل، الموقع، الحالة، والروابط التشغيلية."
-      : "View the full center/provider profile with contact, location, status, and operational links.",
+      ? "مراجعة بيانات المركز الأساسية ومعلومات التواصل والموقع والحالة التشغيلية."
+      : "Review center information, contact details, location, and operational status.",
 
     back: isArabic ? "قائمة المراكز" : "Centers List",
     refresh: isArabic ? "تحديث" : "Refresh",
-    edit: isArabic ? "تعديل" : "Edit",
-    delete: isArabic ? "حذف" : "Delete",
-
-    confirmDelete: isArabic
-      ? "هل أنت متأكد من حذف هذا المركز؟"
-      : "Are you sure you want to delete this center?",
+    retry: isArabic ? "إعادة المحاولة" : "Retry",
 
     apiError: isArabic
       ? "تعذر تحميل تفاصيل المركز."
       : "Unable to load center details.",
-    deleteError: isArabic
-      ? "تعذر حذف المركز."
-      : "Unable to delete center.",
-    deleteSuccess: isArabic
-      ? "تم حذف المركز بنجاح."
-      : "Center deleted successfully.",
+    apiErrorHint: isArabic
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
     refreshSuccess: isArabic
       ? "تم تحديث بيانات المركز بنجاح."
       : "Center details refreshed successfully.",
 
-    loading: isArabic
-      ? "جاري تحميل بيانات المركز..."
-      : "Loading center details...",
     notFound: isArabic
       ? "لم يتم العثور على بيانات المركز"
       : "Center data was not found",
+    notFoundHint: isArabic
+      ? "قد يكون السجل غير موجود أو لم يعد متاحًا."
+      : "The record may not exist or may no longer be available.",
 
-    seller: isArabic ? "المسؤول" : "Contact",
-    published: isArabic ? "تاريخ الإنشاء" : "Published",
-    sku: isArabic ? "الكود" : "Code",
+    contact: isArabic ? "المسؤول" : "Contact",
+    createdAtShort: isArabic ? "تاريخ الإنشاء" : "Created At",
+    codeShort: isArabic ? "الكود" : "Code",
 
     profileDesc: isArabic
-      ? "البيانات الأساسية للمركز كما هي محفوظة في providers API."
-      : "Core center data stored in providers API.",
+      ? "مراجعة بيانات المركز الأساسية ومعلومات التواصل والموقع."
+      : "Review basic center information, contact details, and location.",
 
     details: isArabic ? "البيانات التفصيلية" : "Detailed Information",
-    operationalLinks: isArabic ? "الروابط التشغيلية" : "Operational Links",
-    operationalDesc: isArabic
-      ? "أقسام تشغيلية جاهزة للربط مع العقود والخدمات والمدفوعات والطلبات."
-      : "Operational sections ready to connect with contracts, services, payments, and orders.",
+    basicSection: isArabic ? "البيانات الأساسية" : "Basic Information",
+    contactSection: isArabic ? "بيانات التواصل" : "Contact Information",
+    locationSection: isArabic ? "بيانات الموقع" : "Location Information",
+    systemSection: isArabic ? "بيانات السجل" : "Record Information",
+
+    relatedSections: isArabic ? "الأقسام المرتبطة" : "Related Sections",
+    relatedDesc: isArabic
+      ? "أقسام تساعدك على متابعة ارتباطات المركز داخل النظام."
+      : "Sections that help you follow this center's operational connections.",
 
     notes: isArabic ? "ملاحظات" : "Notes",
     noNotes: isArabic ? "لا توجد ملاحظات." : "No notes available.",
 
     profileCompletion: isArabic ? "اكتمال الملف" : "Profile Completion",
+
+    copied: isArabic ? "تم النسخ بنجاح" : "Copied successfully",
+    unavailable: isArabic ? "غير متوفر" : "Unavailable",
+    open: isArabic ? "فتح" : "Open",
+    copy: isArabic ? "نسخ" : "Copy",
 
     fields: {
       id: isArabic ? "رقم المركز" : "Center ID",
@@ -331,21 +356,24 @@ function dictionary(locale: AppLocale) {
 
     cards: {
       contracts: isArabic ? "العقود" : "Contracts",
-      services: isArabic ? "الخدمات" : "Services",
-      payments: isArabic ? "المدفوعات" : "Payments",
-      orders: isArabic ? "الطلبات" : "Orders",
       contractsDesc: isArabic
-        ? "عرض وربط عقود المركز مع النظام."
-        : "View and link center contracts with the system.",
+        ? "متابعة العقود المرتبطة بهذا المركز."
+        : "Track contracts connected to this center.",
+
+      services: isArabic ? "الخدمات" : "Services",
       servicesDesc: isArabic
-        ? "عرض الخدمات المرتبطة بالمركز."
-        : "View services connected to this center.",
+        ? "متابعة الخدمات والباقات المتاحة من هذا المركز."
+        : "Track services and packages available from this center.",
+
+      payments: isArabic ? "المدفوعات" : "Payments",
       paymentsDesc: isArabic
-        ? "متابعة مدفوعات ومعاملات المركز."
-        : "Track center payments and transactions.",
+        ? "متابعة المدفوعات والحركات المالية المرتبطة."
+        : "Track related payments and financial activity.",
+
+      orders: isArabic ? "الطلبات" : "Orders",
       ordersDesc: isArabic
-        ? "متابعة الطلبات المرتبطة بالمركز."
-        : "Track orders connected to this center.",
+        ? "متابعة الطلبات التشغيلية المرتبطة بالمركز."
+        : "Track operational orders connected to this center.",
     },
   };
 }
@@ -410,68 +438,130 @@ function statusBadge(status: ProviderStatus, locale: AppLocale) {
   );
 }
 
-function formatDate(value: string) {
-  if (!value) return "-";
-
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
+function isValidExternalLink(value?: string) {
+  if (!value) return false;
+  return value.startsWith("https://") || value.startsWith("http://");
 }
 
-function isValidExternalLink(value: string) {
-  return value.startsWith("https://") || value.startsWith("http://");
+function isValidCenterId(id: CenterDetail["id"]) {
+  const value = String(id || "").trim();
+  return value.length > 0 && value !== "-" && value !== "undefined";
+}
+
+function calculateProfileCompleteness(center: CenterDetail) {
+  const fields = [
+    center.name,
+    center.code,
+    center.providerType,
+    center.status,
+    center.contactPerson,
+    center.phone || center.mobile,
+    center.email,
+    center.city,
+    center.area,
+    center.address,
+    center.website,
+    center.googleMapsLink,
+  ];
+
+  const completed = fields.filter((field) => {
+    const value = String(field || "").trim();
+    return value.length > 0 && value !== "-" && value !== "UNKNOWN";
+  }).length;
+
+  return Math.round((completed / fields.length) * 100);
+}
+
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+}
+
+function DetailsSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="space-y-3">
+          <SkeletonLine className="h-8 w-56" />
+          <SkeletonLine className="h-4 w-[420px] max-w-full" />
+          <SkeletonLine className="h-4 w-72 max-w-full" />
+        </div>
+
+        <div className="flex gap-2">
+          <SkeletonLine className="h-10 w-28 rounded-xl" />
+          <SkeletonLine className="h-10 w-24 rounded-xl" />
+        </div>
+      </div>
+
+      <div className="grid w-full gap-4 xl:grid-cols-[380px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)]">
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="space-y-4 p-4">
+            <SkeletonLine className="h-56 w-full rounded-2xl" />
+            <div className="space-y-2">
+              <SkeletonLine className="mx-auto h-5 w-44" />
+              <SkeletonLine className="mx-auto h-4 w-28" />
+              <SkeletonLine className="mx-auto h-7 w-20" />
+            </div>
+            <SkeletonLine className="h-24 w-full rounded-xl" />
+            {Array.from({ length: 4 }).map((_, index) => (
+              <SkeletonLine key={index} className="h-16 w-full rounded-xl" />
+            ))}
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <SkeletonLine key={index} className="h-24 rounded-xl" />
+            ))}
+          </div>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="space-y-3 p-4">
+              {Array.from({ length: 12 }).map((_, index) => (
+                <SkeletonLine key={index} className="h-9 w-full rounded-lg" />
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ============================================================
    Page
 ============================================================ */
 
-export default function SystemCenterDetailPage() {
+export default function SystemCenterDetailsPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
 
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [center, setCenter] = useState<CenterDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const t = useMemo(() => dictionary(locale), [locale]);
 
   const profileCompleteness = useMemo(() => {
     if (!center) return 0;
-
-    const fields = [
-      center.name,
-      center.code,
-      center.providerType,
-      center.status,
-      center.contactPerson,
-      center.mobile || center.phone,
-      center.email,
-      center.city,
-      center.area,
-      center.address,
-      center.website,
-    ];
-
-    const completed = fields.filter((item) => String(item || "").trim()).length;
-
-    return Math.round((completed / fields.length) * 100);
+    return calculateProfileCompleteness(center);
   }, [center]);
 
   async function loadCenter(showToast = false) {
-    if (!params?.id) return;
+    const id = String(params?.id || "").trim();
+
+    if (!id) {
+      setCenter(null);
+      setErrorMessage(t.apiError);
+      setIsLoading(false);
+      return;
+    }
 
     try {
       setIsLoading(true);
+      setErrorMessage("");
 
-      const response = await fetch(`/api/providers/${params.id}/`, {
+      const response = await fetch(`/api/providers/${id}/`, {
         method: "GET",
         credentials: "include",
         headers: {
@@ -479,13 +569,20 @@ export default function SystemCenterDetailPage() {
         },
       });
 
+      if (response.status === 404) {
+        setCenter(null);
+        setErrorMessage("");
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
 
       const payload = (await response.json()) as ProviderDetailResponse;
+      const normalized = normalizeCenterDetail(payload);
 
-      setCenter(normalizeCenterDetail(payload));
+      setCenter(normalized);
 
       if (showToast) {
         toast.success(t.refreshSuccess);
@@ -493,40 +590,27 @@ export default function SystemCenterDetailPage() {
     } catch (error) {
       console.error("Failed to load center details:", error);
       setCenter(null);
+      setErrorMessage(t.apiError);
       toast.error(t.apiError);
     } finally {
       setIsLoading(false);
     }
   }
 
-  async function deleteCenter() {
-    if (!params?.id) return;
+  async function copyToClipboard(value: string) {
+    const cleanValue = value.trim();
 
-    const confirmed = window.confirm(t.confirmDelete);
-    if (!confirmed) return;
+    if (!cleanValue || cleanValue === "-") {
+      toast.error(t.unavailable);
+      return;
+    }
 
     try {
-      setIsDeleting(true);
-
-      const response = await fetch(`/api/providers/${params.id}/`, {
-        method: "DELETE",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      toast.success(t.deleteSuccess);
-      router.push("/system/centers/list");
+      await navigator.clipboard.writeText(cleanValue);
+      toast.success(t.copied);
     } catch (error) {
-      console.error("Failed to delete center:", error);
-      toast.error(t.deleteError);
-    } finally {
-      setIsDeleting(false);
+      console.error("Copy error:", error);
+      toast.error(t.unavailable);
     }
   }
 
@@ -563,29 +647,101 @@ export default function SystemCenterDetailPage() {
   }, [params?.id, locale]);
 
   if (isLoading) {
+    return <DetailsSkeleton />;
+  }
+
+  if (errorMessage) {
     return (
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          {t.loading}
-        </CardContent>
-      </Card>
+      <div className="w-full space-y-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+              {t.title}
+            </h1>
+            <p className="text-muted-foreground mt-1 max-w-4xl text-sm">
+              {t.subtitle}
+            </p>
+          </div>
+
+          <Link href="/system/centers/list">
+            <Button variant="outline" className="h-10 rounded-xl">
+              <ArrowLeft className="h-4 w-4" />
+              {t.back}
+            </Button>
+          </Link>
+        </div>
+
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                <XCircle className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="font-semibold text-destructive">
+                  {errorMessage}
+                </p>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  {t.apiErrorHint}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => loadCenter(true)}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              {t.retry}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   if (!center) {
     return (
-      <div className="space-y-4">
-        <Link href="/system/centers/list">
-          <Button variant="outline" className="rounded-xl">
-            <ArrowLeft className="h-4 w-4" />
-            {t.back}
-          </Button>
-        </Link>
+      <div className="w-full space-y-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+              {t.title}
+            </h1>
+            <p className="text-muted-foreground mt-1 max-w-4xl text-sm">
+              {t.subtitle}
+            </p>
+          </div>
+
+          <Link href="/system/centers/list">
+            <Button variant="outline" className="h-10 rounded-xl">
+              <ArrowLeft className="h-4 w-4" />
+              {t.back}
+            </Button>
+          </Link>
+        </div>
 
         <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-12 text-center">
-            <p className="font-semibold">{t.notFound}</p>
+          <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted">
+              <Building2 className="h-7 w-7 text-muted-foreground" />
+            </div>
+
+            <div>
+              <p className="font-semibold">{t.notFound}</p>
+              <p className="text-muted-foreground mt-1 text-sm">
+                {t.notFoundHint}
+              </p>
+            </div>
+
+            <Link href="/system/centers/list">
+              <Button className="mt-2 rounded-xl">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Button>
+            </Link>
           </CardContent>
         </Card>
       </div>
@@ -593,15 +749,11 @@ export default function SystemCenterDetailPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="w-full space-y-4">
       {/* Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="rounded-full">
-              /system/centers/{center.id}
-            </Badge>
-
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             {statusBadge(center.status, locale)}
 
             {center.isFeatured ? (
@@ -612,72 +764,60 @@ export default function SystemCenterDetailPage() {
             ) : null}
           </div>
 
-          <h1 className="font-display text-xl font-bold tracking-tight lg:text-2xl">
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
             {center.name}
           </h1>
 
-          <div className="text-muted-foreground inline-flex flex-col gap-2 text-sm lg:flex-row lg:gap-4">
+          <div className="text-muted-foreground mt-2 flex flex-col gap-2 text-sm lg:flex-row lg:flex-wrap lg:gap-4">
             <div>
-              <span className="text-foreground font-semibold">{t.seller} :</span>{" "}
+              <span className="text-foreground font-semibold">
+                {t.contact}:
+              </span>{" "}
               {center.contactPerson || "-"}
             </div>
 
             <div>
               <span className="text-foreground font-semibold">
-                {t.published} :
+                {t.createdAtShort}:
               </span>{" "}
               {formatDate(center.createdAt)}
             </div>
 
             <div>
-              <span className="text-foreground font-semibold">{t.sku} :</span>{" "}
+              <span className="text-foreground font-semibold">
+                {t.codeShort}:
+              </span>{" "}
               {center.code}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Link href="/system/centers/list">
-            <Button variant="outline" className="rounded-xl">
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
               <ArrowLeft className="h-4 w-4" />
-              <span className="hidden lg:inline">{t.back}</span>
+              <span>{t.back}</span>
             </Button>
           </Link>
 
           <Button
             variant="outline"
-            className="rounded-xl"
+            className="h-10 rounded-xl"
             onClick={() => loadCenter(true)}
           >
             <RefreshCcw className="h-4 w-4" />
-            <span className="hidden lg:inline">{t.refresh}</span>
-          </Button>
-
-          <Button className="rounded-xl" disabled>
-            <Edit3Icon className="h-4 w-4" />
-            <span className="hidden lg:inline">{t.edit}</span>
-          </Button>
-
-          <Button
-            variant="destructive"
-            size="icon"
-            className="rounded-xl"
-            onClick={deleteCenter}
-            disabled={isDeleting}
-            aria-label={t.delete}
-          >
-            {isDeleting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2Icon className="h-4 w-4" />
-            )}
+            <span>{t.refresh}</span>
           </Button>
         </div>
       </div>
 
       {/* Main Grid */}
-      <div className="grid gap-4 xl:grid-cols-3">
-        <div className="min-w-0 xl:col-span-1">
+      <div className="grid w-full gap-4 xl:grid-cols-[380px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)]">
+        {/* Profile */}
+        <aside className="min-w-0 space-y-4">
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardContent className="space-y-4 p-4">
               <div className="flex aspect-[4/3] items-center justify-center rounded-2xl border bg-muted">
@@ -700,7 +840,9 @@ export default function SystemCenterDetailPage() {
 
               <div className="rounded-xl border bg-background p-4">
                 <div className="mb-3 flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold">{t.profileCompletion}</p>
+                  <p className="text-sm font-semibold">
+                    {t.profileCompletion}
+                  </p>
 
                   <Badge variant="outline" className="rounded-full">
                     {formatNumber(profileCompleteness)}%
@@ -709,42 +851,74 @@ export default function SystemCenterDetailPage() {
 
                 <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-full rounded-full bg-primary"
+                    className="h-full rounded-full bg-primary transition-all"
                     style={{ width: `${profileCompleteness}%` }}
                   />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <MiniInfo
+              <div className="grid gap-2">
+                <QuickInfo
+                  icon={ShieldCheck}
+                  label={t.fields.code}
+                  value={center.code || "-"}
+                  onCopy={() => copyToClipboard(center.code)}
+                />
+
+                <QuickInfo
                   icon={Phone}
                   label={t.fields.mobile}
                   value={center.mobile || center.phone || "-"}
+                  onCopy={() =>
+                    copyToClipboard(center.mobile || center.phone || "")
+                  }
                 />
 
-                <MiniInfo
+                <QuickInfo
                   icon={Mail}
                   label={t.fields.email}
                   value={center.email || "-"}
+                  onCopy={() => copyToClipboard(center.email)}
                 />
 
-                <MiniInfo
+                <QuickInfo
                   icon={MapPin}
                   label={t.fields.city}
                   value={center.city || center.area || "-"}
                 />
+              </div>
 
-                <MiniInfo
-                  icon={Globe}
-                  label={t.fields.website}
-                  value={center.website || "-"}
-                />
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                {isValidExternalLink(center.website) ? (
+                  <a
+                    href={center.website}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border bg-background px-3 text-sm font-medium transition hover:bg-muted"
+                  >
+                    <Globe className="h-4 w-4" />
+                    {t.fields.website}
+                  </a>
+                ) : null}
+
+                {isValidExternalLink(center.googleMapsLink) ? (
+                  <a
+                    href={center.googleMapsLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border bg-background px-3 text-sm font-medium transition hover:bg-muted"
+                  >
+                    <MapPin className="h-4 w-4" />
+                    {t.fields.maps}
+                  </a>
+                ) : null}
               </div>
             </CardContent>
           </Card>
-        </div>
+        </aside>
 
-        <div className="space-y-4 xl:col-span-2">
+        {/* Content */}
+        <main className="min-w-0 space-y-4">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon={ShieldCheck}
@@ -777,79 +951,93 @@ export default function SystemCenterDetailPage() {
               <CardDescription>{t.profileDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent>
-              <div className="overflow-hidden rounded-xl border">
-                <Table>
-                  <TableBody>
-                    <DetailRow label={t.fields.id} value={String(center.id)} />
-                    <DetailRow label={t.fields.name} value={center.name} />
-                    <DetailRow label={t.fields.code} value={center.code} />
+            <CardContent className="space-y-4">
+              <DetailsSection title={t.basicSection}>
+                <DetailRow label={t.fields.id} value={String(center.id || "-")} />
+                <DetailRow label={t.fields.name} value={center.name || "-"} />
+                <DetailRow
+                  label={t.fields.code}
+                  value={center.code || "-"}
+                  copyValue={center.code}
+                  onCopy={copyToClipboard}
+                />
+                <DetailRow
+                  label={t.fields.providerType}
+                  value={t.typeLabels[center.providerType]}
+                />
+                <DetailRow
+                  label={t.fields.status}
+                  value={getStatusLabel(center.status, locale)}
+                />
+                <DetailRow
+                  label={t.fields.featured}
+                  value={center.isFeatured ? t.yes : t.no}
+                />
+              </DetailsSection>
 
-                    <DetailRow
-                      label={t.fields.providerType}
-                      value={t.typeLabels[center.providerType]}
-                    />
+              <DetailsSection title={t.contactSection}>
+                <DetailRow
+                  label={t.fields.contactPerson}
+                  value={center.contactPerson || "-"}
+                />
+                <DetailRow
+                  label={t.fields.phone}
+                  value={center.phone || "-"}
+                  copyValue={center.phone}
+                  onCopy={copyToClipboard}
+                />
+                <DetailRow
+                  label={t.fields.mobile}
+                  value={center.mobile || "-"}
+                  copyValue={center.mobile}
+                  onCopy={copyToClipboard}
+                />
+                <DetailRow
+                  label={t.fields.email}
+                  value={center.email || "-"}
+                  copyValue={center.email}
+                  onCopy={copyToClipboard}
+                />
+                <DetailRow
+                  label={t.fields.website}
+                  value={center.website || "-"}
+                  link={center.website}
+                />
+              </DetailsSection>
 
-                    <DetailRow
-                      label={t.fields.status}
-                      value={getStatusLabel(center.status, locale)}
-                    />
+              <DetailsSection title={t.locationSection}>
+                <DetailRow label={t.fields.city} value={center.city || "-"} />
+                <DetailRow label={t.fields.area} value={center.area || "-"} />
+                <DetailRow
+                  label={t.fields.address}
+                  value={center.address || "-"}
+                />
+                <DetailRow
+                  label={t.fields.maps}
+                  value={center.googleMapsLink || "-"}
+                  link={center.googleMapsLink}
+                />
+              </DetailsSection>
 
-                    <DetailRow
-                      label={t.fields.contactPerson}
-                      value={center.contactPerson || "-"}
-                    />
-
-                    <DetailRow label={t.fields.phone} value={center.phone || "-"} />
-
-                    <DetailRow
-                      label={t.fields.mobile}
-                      value={center.mobile || "-"}
-                    />
-
-                    <DetailRow label={t.fields.email} value={center.email || "-"} />
-
-                    <DetailRow
-                      label={t.fields.website}
-                      value={center.website || "-"}
-                      link={center.website}
-                    />
-
-                    <DetailRow label={t.fields.city} value={center.city || "-"} />
-                    <DetailRow label={t.fields.area} value={center.area || "-"} />
-
-                    <DetailRow
-                      label={t.fields.address}
-                      value={center.address || "-"}
-                    />
-
-                    <DetailRow
-                      label={t.fields.maps}
-                      value={center.googleMapsLink || "-"}
-                      link={center.googleMapsLink}
-                    />
-
-                    <DetailRow
-                      label={t.fields.createdAt}
-                      value={formatDate(center.createdAt)}
-                    />
-
-                    <DetailRow
-                      label={t.fields.updatedAt}
-                      value={formatDate(center.updatedAt)}
-                    />
-                  </TableBody>
-                </Table>
-              </div>
+              <DetailsSection title={t.systemSection}>
+                <DetailRow
+                  label={t.fields.createdAt}
+                  value={formatDate(center.createdAt)}
+                />
+                <DetailRow
+                  label={t.fields.updatedAt}
+                  value={formatDate(center.updatedAt)}
+                />
+              </DetailsSection>
             </CardContent>
           </Card>
 
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-bold">
-                {t.operationalLinks}
+                {t.relatedSections}
               </CardTitle>
-              <CardDescription>{t.operationalDesc}</CardDescription>
+              <CardDescription>{t.relatedDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -890,7 +1078,7 @@ export default function SystemCenterDetailPage() {
               </div>
             </CardContent>
           </Card>
-        </div>
+        </main>
       </div>
     </div>
   );
@@ -910,36 +1098,71 @@ function MetricCard({
   value: string;
 }) {
   return (
-    <div className="hover:border-primary/30 grid auto-cols-max grid-flow-col gap-4 rounded-lg border bg-muted p-4">
-      <Icon className="size-6 opacity-40" />
-
-      <div className="flex min-w-0 flex-col gap-1">
-        <span className="text-muted-foreground text-sm">{label}</span>
-        <span className="truncate text-lg font-semibold">{value}</span>
+    <div className="rounded-xl border bg-background p-4 transition hover:bg-muted/40">
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+        <Icon className="h-5 w-5" />
       </div>
+
+      <p className="text-muted-foreground text-sm">{label}</p>
+      <p className="mt-1 truncate text-lg font-semibold">{value}</p>
     </div>
   );
 }
 
-function MiniInfo({
+function QuickInfo({
   icon: Icon,
   label,
   value,
+  onCopy,
 }: {
   icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
+  onCopy?: () => void;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border bg-background p-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <Icon className="h-4 w-4" />
+    <div className="flex items-start justify-between gap-3 rounded-xl border bg-background p-3">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+          <Icon className="h-4 w-4" />
+        </div>
+
+        <div className="min-w-0">
+          <p className="text-muted-foreground text-xs">{label}</p>
+          <p className="mt-1 truncate text-sm font-semibold">{value}</p>
+        </div>
       </div>
 
-      <div className="min-w-0">
-        <p className="text-muted-foreground text-xs">{label}</p>
-        <p className="mt-1 truncate text-sm font-semibold">{value}</p>
+      {onCopy ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0 rounded-lg"
+          onClick={onCopy}
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function DetailsSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl border">
+      <div className="border-b bg-muted/40 px-4 py-3 text-sm font-semibold">
+        {title}
       </div>
+
+      <Table>
+        <TableBody>{children}</TableBody>
+      </Table>
     </div>
   );
 }
@@ -948,33 +1171,53 @@ function DetailRow({
   label,
   value,
   link,
+  copyValue,
+  onCopy,
 }: {
   label: string;
   value: string;
   link?: string;
+  copyValue?: string;
+  onCopy?: (value: string) => void;
 }) {
   const hasLink = Boolean(link && isValidExternalLink(link));
+  const hasCopy = Boolean(copyValue && onCopy);
 
   return (
     <TableRow>
-      <TableCell className="w-[220px] bg-muted/50 font-medium">
+      <TableCell className="w-[220px] bg-muted/30 font-medium">
         {label}
       </TableCell>
 
       <TableCell>
-        {hasLink ? (
-          <a
-            href={link}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 text-primary hover:underline"
-          >
-            <span className="max-w-[420px] truncate">{value}</span>
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-        ) : (
-          <span>{value}</span>
-        )}
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0">
+            {hasLink ? (
+              <a
+                href={link}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex max-w-full items-center gap-2 text-primary hover:underline"
+              >
+                <span className="truncate">{value}</span>
+                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+              </a>
+            ) : (
+              <span className="break-words">{value}</span>
+            )}
+          </div>
+
+          {hasCopy ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 rounded-lg"
+              onClick={() => onCopy?.(copyValue || "")}
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
+        </div>
       </TableCell>
     </TableRow>
   );

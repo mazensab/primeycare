@@ -5,29 +5,49 @@
    🧠 Primey Care | Centers List
    ------------------------------------------------------------
    ✅ المسار: /system/centers/list
-   ✅ الإصدار: v1.0.0
-   ✅ العمل: قائمة المراكز / مقدمي الخدمة مع البحث والفلاتر والفرز
-   ✅ API: GET /api/providers/?page_size=100
+   ✅ الإصدار: v1.1.1 - UX Refinement
+
+   ✅ العمل:
+      قائمة كاملة للمراكز / مقدمي الخدمة مع البحث والفلاتر والفرز
+      وإدارة الأعمدة والتصدير والطباعة.
+
+   ✅ API:
+      GET /api/providers/?page_size=100
+
    ✅ متوافق مع:
       - /system/centers
       - /system/centers/list
       - /system/centers/create
       - /system/centers/[id]
-   ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-   - توثيق مختصر أعلى الملف
-   - دعم Excel للقائمة الحالية فقط
-   - دعم طباعة Web PDF للقائمة الحالية فقط
-   - دعم عربي / إنجليزي عبر primey-locale
-   - الأرقام دائمًا بالإنجليزي
-   - استخدام sonner للتنبيهات
-   - استخدام UI الداخلي فقط
-   - بدون localhost hardcoded
+
+   ✅ ملاحظات UX:
+      - لا يتم إظهار المسارات التقنية أو أسماء API في واجهة المستخدم.
+      - البحث في صف مستقل.
+      - الفلاتر وإدارة الأعمدة في صف مستقل تحت البحث.
+
+   ✅ الوظائف:
+      - بحث سريع
+      - فلترة حسب الحالة
+      - فلترة حسب النوع
+      - فرز الأعمدة
+      - إظهار / إخفاء الأعمدة
+      - تحديد الصفوف
+      - Pagination محلي
+      - تصدير Excel بصيغة .xls متوافقة مع Microsoft Excel
+      - Web PDF Print
+      - Error State حقيقي
+      - Empty State ذكي
+      - Loading Skeleton
+      - حماية روابط التفاصيل عند غياب id صالح
+      - دعم عربي / إنجليزي عبر primey-locale
+      - استخدام toast من sonner
+      - بدون localhost hardcoded
+      - استخدام UI الداخلي فقط
+      - الأرقام تبقى بالإنجليزية
 ============================================================ */
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import * as XLSX from "xlsx";
 import {
   ArrowDownUp,
   ArrowLeft,
@@ -48,12 +68,20 @@ import {
   ShieldCheck,
   Star,
   Stethoscope,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -64,13 +92,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -152,6 +173,17 @@ type VisibleColumns = {
   actions: boolean;
 };
 
+type ExcelSheetOptions = {
+  filename: string;
+  worksheetName: string;
+  title: string;
+  locale: AppLocale;
+  summaryRows: Array<[string, string | number]>;
+  filterRows: Array<[string, string | number]>;
+  headers: string[];
+  rows: Array<Array<string | number>>;
+};
+
 /* ============================================================
    Locale Helpers
 ============================================================ */
@@ -192,6 +224,22 @@ function formatNumber(value: number | string): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(numericValue);
+}
+
+function formatDateForExport(value: string) {
+  if (!value) return "-";
+
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
 }
 
 /* ============================================================
@@ -262,7 +310,7 @@ function normalizeCenter(item: unknown): Center {
   const obj = (item || {}) as Record<string, unknown>;
 
   return {
-    id: (obj.id ?? "-") as number | string,
+    id: (obj.id ?? "") as number | string,
     name: String(obj.name ?? obj.title ?? "-"),
     code: String(obj.code ?? obj.provider_code ?? "-"),
     providerType: normalizeProviderType(
@@ -296,19 +344,21 @@ function dictionary(locale: AppLocale) {
   return {
     title: isArabic ? "قائمة المراكز" : "Centers List",
     subtitle: isArabic
-      ? "إدارة المراكز ومقدمي الخدمة من بيانات حقيقية مع جدول احترافي، فلاتر، أعمدة، وفرز."
-      : "Manage centers and providers from live data with a professional table, filters, columns, and sorting.",
+      ? "إدارة المراكز ومقدمي الخدمة مع البحث والفلاتر والأعمدة والفرز."
+      : "Manage centers and providers with search, filters, columns, and sorting.",
 
     back: isArabic ? "لوحة المراكز" : "Centers Overview",
     createCenter: isArabic ? "إنشاء مركز" : "Create Center",
     refresh: isArabic ? "تحديث" : "Refresh",
-    export: isArabic ? "تصدير Excel" : "Export Excel",
+    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
     print: isArabic ? "طباعة PDF" : "Print PDF",
+    retry: isArabic ? "إعادة المحاولة" : "Retry",
+    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
 
     tableTitle: isArabic ? "بيانات المراكز" : "Centers Data",
     tableSubtitle: isArabic
-      ? "جدول تشغيلي مرتبط مباشرة بواجهة providers API."
-      : "Operational table connected directly to providers API.",
+      ? "استعرض المراكز، رتّب البيانات، وخصص الأعمدة حسب احتياجك."
+      : "Browse centers, sort data, and customize columns as needed.",
 
     searchPlaceholder: isArabic
       ? "ابحث باسم المركز أو الكود أو المدينة..."
@@ -324,11 +374,24 @@ function dictionary(locale: AppLocale) {
     draft: isArabic ? "مسودة" : "Draft",
     unknown: isArabic ? "غير محدد" : "Unknown",
 
-    noResults: isArabic ? "لا توجد نتائج." : "No results.",
+    emptyTitle: isArabic ? "لا توجد مراكز بعد" : "No centers yet",
+    emptyText: isArabic
+      ? "عند إضافة مراكز جديدة ستظهر هنا مباشرة."
+      : "New centers will appear here once they are added.",
+    noResultsTitle: isArabic
+      ? "لا توجد نتائج مطابقة"
+      : "No matching results",
+    noResultsText: isArabic
+      ? "جرّب تغيير كلمات البحث أو فلتر الحالة أو فلتر النوع."
+      : "Try changing the search keywords, status filter, or type filter.",
+
     loading: isArabic ? "جاري تحميل بيانات المراكز..." : "Loading centers data...",
     selectedRows: isArabic ? "صفوف محددة" : "row(s) selected",
     previous: isArabic ? "السابق" : "Previous",
     next: isArabic ? "التالي" : "Next",
+    page: isArabic ? "صفحة" : "Page",
+    from: isArabic ? "من" : "of",
+    showing: isArabic ? "المعروض" : "Showing",
 
     actions: isArabic ? "الإجراءات" : "Actions",
     viewDetails: isArabic ? "عرض التفاصيل" : "View details",
@@ -338,15 +401,24 @@ function dictionary(locale: AppLocale) {
     apiError: isArabic
       ? "تعذر تحميل قائمة المراكز."
       : "Unable to load centers list.",
+    apiErrorHint: isArabic
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
     refreshSuccess: isArabic
       ? "تم تحديث قائمة المراكز بنجاح"
       : "Centers list refreshed successfully",
     exportSuccess: isArabic
       ? "تم تجهيز ملف Excel بنجاح"
       : "Excel file prepared successfully",
+    exportEmpty: isArabic
+      ? "لا توجد بيانات قابلة للتصدير"
+      : "No data available to export",
     printSuccess: isArabic
       ? "تم تجهيز نافذة الطباعة"
       : "Print window prepared",
+    printError: isArabic
+      ? "تعذر فتح نافذة الطباعة"
+      : "Unable to open print window",
     copied: isArabic ? "تم النسخ بنجاح" : "Copied successfully",
 
     excelSummary: isArabic ? "ملخص القائمة" : "List Summary",
@@ -357,10 +429,14 @@ function dictionary(locale: AppLocale) {
     currentFilteredData: isArabic
       ? "حسب الفلاتر الحالية"
       : "Current filtered data",
-    showing: isArabic ? "المعروض" : "Showing",
     filterSearch: isArabic ? "البحث" : "Search",
     filterStatus: isArabic ? "فلتر الحالة" : "Status Filter",
     filterType: isArabic ? "فلتر النوع" : "Type Filter",
+
+    yes: isArabic ? "نعم" : "Yes",
+    no: isArabic ? "لا" : "No",
+    featuredLabel: isArabic ? "مميز" : "Featured",
+    normalLabel: isArabic ? "عادي" : "Normal",
 
     stats: {
       total: isArabic ? "إجمالي المراكز" : "Total Centers",
@@ -467,33 +543,199 @@ function calculatePercent(value: number, total: number) {
   return Math.round((value / total) * 100);
 }
 
-function formatDateForExport(value: string) {
-  if (!value) return "-";
+function isValidCenterId(id: Center["id"]) {
+  const value = String(id || "").trim();
 
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
+  return value.length > 0 && value !== "-" && value !== "undefined";
 }
 
-function safeSheetName(name: string) {
-  return name.replace(/[\\/?*[\]:]/g, "").slice(0, 31) || "Report";
-}
-
-function escapeHtml(value: string) {
-  return value
+function escapeHtml(value: string | number) {
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function downloadExcel(options: ExcelSheetOptions) {
+  const dir = options.locale === "ar" ? "rtl" : "ltr";
+  const align = options.locale === "ar" ? "right" : "left";
+  const colspan = Math.max(options.headers.length, 2);
+
+  const summaryHtml = options.summaryRows
+    .map(
+      ([label, value]) => `
+        <tr>
+          <td class="summary-label">${escapeHtml(label)}</td>
+          <td class="summary-value">${escapeHtml(value)}</td>
+        </tr>`,
+    )
+    .join("");
+
+  const filterHtml = options.filterRows
+    .map(
+      ([label, value]) => `
+        <tr>
+          <td class="summary-label">${escapeHtml(label)}</td>
+          <td class="summary-value">${escapeHtml(value)}</td>
+        </tr>`,
+    )
+    .join("");
+
+  const headerHtml = options.headers
+    .map((header) => `<th>${escapeHtml(header)}</th>`)
+    .join("");
+
+  const rowsHtml = options.rows
+    .map(
+      (row) => `
+        <tr>
+          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
+        </tr>`,
+    )
+    .join("");
+
+  const workbook = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office"
+          xmlns:x="urn:schemas-microsoft-com:office:excel"
+          xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="UTF-8" />
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>${escapeHtml(options.worksheetName)}</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayRightToLeft>${options.locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <style>
+          body {
+            direction: ${dir};
+            font-family: Arial, sans-serif;
+          }
+          table {
+            border-collapse: collapse;
+            width: 100%;
+          }
+          th,
+          td {
+            border: 1px solid #d9e2ef;
+            padding: 8px;
+            text-align: ${align};
+            vertical-align: top;
+            mso-number-format: "\\@";
+          }
+          th {
+            background: #d8ecfb;
+            color: #000000;
+            font-weight: 700;
+          }
+          .title {
+            font-size: 20px;
+            font-weight: 700;
+            text-align: center;
+            background: #ffffff;
+          }
+          .section {
+            font-weight: 700;
+            background: #eef6ff;
+          }
+          .summary-label {
+            font-weight: 700;
+            background: #f8fafc;
+            width: 240px;
+          }
+          .summary-value {
+            font-weight: 700;
+          }
+        </style>
+      </head>
+      <body dir="${dir}">
+        <table>
+          <tr>
+            <td class="title" colspan="${colspan}">
+              ${escapeHtml(options.title)}
+            </td>
+          </tr>
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr><td class="section" colspan="${colspan}">${options.locale === "ar" ? "ملخص القائمة" : "List Summary"}</td></tr>
+          ${summaryHtml}
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr><td class="section" colspan="${colspan}">${options.locale === "ar" ? "الفلاتر المستخدمة" : "Applied Filters"}</td></tr>
+          ${filterHtml}
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr>${headerHtml}</tr>
+          ${rowsHtml}
+        </table>
+      </body>
+    </html>`;
+
+  const blob = new Blob([workbook], {
+    type: "application/vnd.ms-excel;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = options.filename;
+  anchor.click();
+
+  URL.revokeObjectURL(url);
+}
+
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+}
+
+function StatCardSkeleton() {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-2">
+            <SkeletonLine className="h-7 w-16" />
+            <SkeletonLine className="h-4 w-28" />
+          </div>
+          <SkeletonLine className="h-10 w-10 rounded-xl" />
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          <SkeletonLine className="h-3 w-8" />
+          <SkeletonLine className="h-2 flex-1" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
+  return (
+    <>
+      {Array.from({ length: 8 }).map((_, rowIndex) => (
+        <TableRow key={rowIndex}>
+          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
+            <TableCell key={columnIndex}>
+              <SkeletonLine
+                className={
+                  columnIndex === 1
+                    ? "h-9 w-52 rounded-lg"
+                    : "h-4 w-24 rounded-lg"
+                }
+              />
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </>
+  );
 }
 
 /* ============================================================
@@ -504,6 +746,7 @@ export default function SystemCentersListPage() {
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [centers, setCenters] = useState<Center[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
@@ -555,6 +798,21 @@ export default function SystemCentersListPage() {
       { value: "PARTNER" as TypeFilter, label: t.typeLabels.PARTNER },
       { value: "OTHER" as TypeFilter, label: t.typeLabels.OTHER },
     ],
+    [t],
+  );
+
+  const columnLabels = useMemo(
+    () =>
+      ({
+        code: t.table.code,
+        name: t.table.name,
+        providerType: t.table.providerType,
+        city: t.table.city,
+        contact: t.table.contact,
+        status: t.table.status,
+        featured: t.table.featured,
+        actions: t.actions,
+      }) satisfies Record<keyof VisibleColumns, string>,
     [t],
   );
 
@@ -628,6 +886,12 @@ export default function SystemCentersListPage() {
   const allPageSelected =
     pageRows.length > 0 && selectedOnPage === pageRows.length;
 
+  const hasSearchOrFilter =
+    query.trim().length > 0 || statusFilter !== "ALL" || typeFilter !== "ALL";
+
+  const visibleTableColumnsCount =
+    1 + Object.values(visibleColumns).filter(Boolean).length;
+
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
@@ -659,9 +923,16 @@ export default function SystemCentersListPage() {
     setSelectedIds((current) => Array.from(new Set([...current, ...pageIds])));
   }
 
+  function clearFilters() {
+    setQuery("");
+    setStatusFilter("ALL");
+    setTypeFilter("ALL");
+  }
+
   async function loadCenters(showToast = false) {
     try {
       setIsLoading(true);
+      setErrorMessage("");
 
       const response = await fetch("/api/providers/?page_size=100", {
         method: "GET",
@@ -686,6 +957,7 @@ export default function SystemCentersListPage() {
     } catch (error) {
       console.error("Failed to load centers list:", error);
       setCenters([]);
+      setErrorMessage(t.apiError);
       toast.error(t.apiError);
     } finally {
       setIsLoading(false);
@@ -693,6 +965,11 @@ export default function SystemCentersListPage() {
   }
 
   function exportExcel() {
+    if (filteredCenters.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
     const generatedAt = new Date();
 
     const statusLabel =
@@ -701,25 +978,33 @@ export default function SystemCentersListPage() {
     const typeLabel =
       typeOptions.find((item) => item.value === typeFilter)?.label || t.all;
 
-    const worksheetData: Array<Array<string | number>> = [
-      [t.title],
-      [],
-      [t.excelSummary, ""],
-      [t.generatedAt, generatedAt.toLocaleString("en-US")],
-      [t.reportScope, t.currentFilteredData],
-      [t.showing, `${formatNumber(filteredCenters.length)} / ${formatNumber(centers.length)}`],
-      [t.stats.total, stats.total],
-      [t.stats.active, stats.active],
-      [t.stats.draft, stats.draft],
-      [t.stats.stopped, stats.stopped],
-      [],
-      [t.excelFilters, ""],
-      [t.filterSearch, query || t.all],
-      [t.filterStatus, statusLabel],
-      [t.filterType, typeLabel],
-      [],
-      [t.excelTable],
-      [
+    downloadExcel({
+      filename: `primey-care-centers-list-${generatedAt
+        .toISOString()
+        .slice(0, 10)}.xls`,
+      worksheetName: isArabic ? "قائمة المراكز" : "Centers List",
+      title: t.title,
+      locale,
+      summaryRows: [
+        [t.generatedAt, generatedAt.toLocaleString("en-US")],
+        [t.reportScope, t.currentFilteredData],
+        [
+          t.showing,
+          `${formatNumber(filteredCenters.length)} / ${formatNumber(
+            centers.length,
+          )}`,
+        ],
+        [t.stats.total, stats.total],
+        [t.stats.active, stats.active],
+        [t.stats.draft, stats.draft],
+        [t.stats.stopped, stats.stopped],
+      ],
+      filterRows: [
+        [t.filterSearch, query || t.all],
+        [t.filterStatus, statusLabel],
+        [t.filterType, typeLabel],
+      ],
+      headers: [
         t.table.id,
         t.table.code,
         t.table.name,
@@ -737,8 +1022,8 @@ export default function SystemCentersListPage() {
         t.table.createdAt,
         t.table.updatedAt,
       ],
-      ...filteredCenters.map((center) => [
-        String(center.id),
+      rows: filteredCenters.map((center) => [
+        String(center.id || "-"),
         center.code || "-",
         center.name || "-",
         t.typeLabels[center.providerType],
@@ -750,61 +1035,12 @@ export default function SystemCentersListPage() {
         center.email || "-",
         center.website || "-",
         getStatusLabel(center.status, locale),
-        center.isFeatured ? (isArabic ? "نعم" : "Yes") : isArabic ? "لا" : "No",
+        center.isFeatured ? t.yes : t.no,
         center.address || "-",
         formatDateForExport(center.createdAt),
         formatDateForExport(center.updatedAt),
       ]),
-    ];
-
-    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
-
-    worksheet["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 15 } },
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 15 } },
-      { s: { r: 11, c: 0 }, e: { r: 11, c: 15 } },
-      { s: { r: 16, c: 0 }, e: { r: 16, c: 15 } },
-    ];
-
-    worksheet["!cols"] = [
-      { wch: 12 },
-      { wch: 20 },
-      { wch: 34 },
-      { wch: 18 },
-      { wch: 16 },
-      { wch: 16 },
-      { wch: 22 },
-      { wch: 16 },
-      { wch: 16 },
-      { wch: 28 },
-      { wch: 28 },
-      { wch: 14 },
-      { wch: 12 },
-      { wch: 36 },
-      { wch: 22 },
-      { wch: 22 },
-    ];
-
-    worksheet["!autofilter"] = {
-      ref: `A18:P${Math.max(18 + filteredCenters.length, 18)}`,
-    };
-
-    const workbook = XLSX.utils.book_new();
-
-    XLSX.utils.book_append_sheet(
-      workbook,
-      worksheet,
-      safeSheetName(isArabic ? "قائمة المراكز" : "Centers List"),
-    );
-
-    XLSX.writeFile(
-      workbook,
-      `primey-care-centers-list-${generatedAt.toISOString().slice(0, 10)}.xlsx`,
-      {
-        bookType: "xlsx",
-        compression: true,
-      },
-    );
+    });
 
     toast.success(t.exportSuccess);
   }
@@ -818,14 +1054,14 @@ export default function SystemCentersListPage() {
       .map((center) => {
         return `
           <tr>
-            <td>${escapeHtml(String(center.id))}</td>
+            <td>${escapeHtml(String(center.id || "-"))}</td>
             <td>${escapeHtml(center.code || "-")}</td>
             <td>${escapeHtml(center.name || "-")}</td>
             <td>${escapeHtml(t.typeLabels[center.providerType])}</td>
             <td>${escapeHtml(center.city || center.area || "-")}</td>
             <td>${escapeHtml(center.mobile || center.phone || "-")}</td>
             <td>${escapeHtml(getStatusLabel(center.status, locale))}</td>
-            <td>${escapeHtml(center.isFeatured ? (isArabic ? "نعم" : "Yes") : isArabic ? "لا" : "No")}</td>
+            <td>${escapeHtml(center.isFeatured ? t.yes : t.no)}</td>
           </tr>
         `;
       })
@@ -915,10 +1151,6 @@ export default function SystemCentersListPage() {
                 padding: 12px;
               }
 
-              .no-print {
-                display: none;
-              }
-
               .summary {
                 grid-template-columns: repeat(4, 1fr);
               }
@@ -933,7 +1165,9 @@ export default function SystemCentersListPage() {
             </div>
             <div class="meta">
               <div>${escapeHtml(t.generatedAt)}: ${escapeHtml(generatedAt)}</div>
-              <div>${escapeHtml(t.showing)}: ${formatNumber(filteredCenters.length)} / ${formatNumber(centers.length)}</div>
+              <div>${escapeHtml(t.showing)}: ${formatNumber(
+                filteredCenters.length,
+              )} / ${formatNumber(centers.length)}</div>
             </div>
           </div>
 
@@ -972,7 +1206,9 @@ export default function SystemCentersListPage() {
             <tbody>
               ${
                 rows ||
-                `<tr><td colspan="8" style="text-align:center">${escapeHtml(t.noResults)}</td></tr>`
+                `<tr><td colspan="8" style="text-align:center">${escapeHtml(
+                  hasSearchOrFilter ? t.noResultsTitle : t.emptyTitle,
+                )}</td></tr>`
               }
             </tbody>
           </table>
@@ -989,7 +1225,7 @@ export default function SystemCentersListPage() {
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(isArabic ? "تعذر فتح نافذة الطباعة" : "Unable to open print window");
+      toast.error(t.printError);
       return;
     }
 
@@ -1042,15 +1278,6 @@ export default function SystemCentersListPage() {
       {/* Header */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="rounded-full">
-              /system/centers/list
-            </Badge>
-            <Badge className="rounded-full">
-              {isArabic ? "بيانات حقيقية" : "Live Data"}
-            </Badge>
-          </div>
-
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
             {t.title}
           </h1>
@@ -1089,7 +1316,7 @@ export default function SystemCentersListPage() {
             disabled={isLoading || filteredCenters.length === 0}
           >
             <Download className="h-4 w-4" />
-            <span>{t.export}</span>
+            <span>{t.exportExcel}</span>
           </Button>
 
           <Button
@@ -1111,69 +1338,105 @@ export default function SystemCentersListPage() {
         </div>
       </div>
 
+      {/* Error State */}
+      {!isLoading && errorMessage ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                <XCircle className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="font-semibold text-destructive">{errorMessage}</p>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  {t.apiErrorHint}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => loadCenters(true)}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              {t.retry}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {/* Stats */}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          {
-            label: t.stats.total,
-            value: stats.total,
-            percent: 100,
-            icon: Building2,
-          },
-          {
-            label: t.stats.active,
-            value: stats.active,
-            percent: calculatePercent(stats.active, stats.total),
-            icon: BadgeCheck,
-          },
-          {
-            label: t.stats.draft,
-            value: stats.draft,
-            percent: calculatePercent(stats.draft, stats.total),
-            icon: FileText,
-          },
-          {
-            label: t.stats.stopped,
-            value: stats.stopped,
-            percent: calculatePercent(stats.stopped, stats.total),
-            icon: ShieldCheck,
-          },
-        ].map((item) => {
-          const Icon = item.icon;
+        {isLoading
+          ? Array.from({ length: 4 }).map((_, index) => (
+              <StatCardSkeleton key={index} />
+            ))
+          : [
+              {
+                label: t.stats.total,
+                value: stats.total,
+                percent: stats.total > 0 ? 100 : 0,
+                icon: Building2,
+              },
+              {
+                label: t.stats.active,
+                value: stats.active,
+                percent: calculatePercent(stats.active, stats.total),
+                icon: BadgeCheck,
+              },
+              {
+                label: t.stats.draft,
+                value: stats.draft,
+                percent: calculatePercent(stats.draft, stats.total),
+                icon: FileText,
+              },
+              {
+                label: t.stats.stopped,
+                value: stats.stopped,
+                percent: calculatePercent(stats.stopped, stats.total),
+                icon: ShieldCheck,
+              },
+            ].map((item) => {
+              const Icon = item.icon;
 
-          return (
-            <Card key={item.label} className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-2xl font-bold">
-                      {isLoading ? "..." : formatNumber(item.value)}
-                    </p>
-                    <p className="text-muted-foreground mt-1 text-sm">
-                      {item.label}
-                    </p>
-                  </div>
+              return (
+                <Card
+                  key={item.label}
+                  className="rounded-2xl border bg-card shadow-sm"
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-2xl font-bold">
+                          {formatNumber(item.value)}
+                        </p>
+                        <p className="text-muted-foreground mt-1 text-sm">
+                          {item.label}
+                        </p>
+                      </div>
 
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                    <Icon className="h-5 w-5" />
-                  </div>
-                </div>
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                        <Icon className="h-5 w-5" />
+                      </div>
+                    </div>
 
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                    {formatNumber(item.percent)}%
-                  </span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${item.percent}%` }}
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+                    <div className="mt-3 flex items-center gap-2">
+                      <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                        {formatNumber(item.percent)}%
+                      </span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${item.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
       </div>
 
       {/* Table */}
@@ -1185,55 +1448,71 @@ export default function SystemCentersListPage() {
 
         <CardContent>
           <div className="w-full space-y-4">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-              <div className="relative w-full md:max-w-sm">
-                <Search
-                  className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  placeholder={t.searchPlaceholder}
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  className={`h-10 rounded-xl ${
-                    isArabic ? "pr-10" : "pl-10"
-                  }`}
-                />
+            {/* Search Row */}
+            <div className="relative w-full">
+              <Search
+                className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
+                  isArabic ? "right-3" : "left-3"
+                }`}
+              />
+              <Input
+                placeholder={t.searchPlaceholder}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className={`h-11 rounded-xl ${
+                  isArabic ? "pr-10" : "pl-10"
+                }`}
+              />
+            </div>
+
+            {/* Filters Row */}
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center">
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {statusOptions.map((item) => (
+                    <Button
+                      key={item.value}
+                      variant={
+                        statusFilter === item.value ? "default" : "outline"
+                      }
+                      className="h-10 shrink-0 rounded-xl"
+                      onClick={() => setStatusFilter(item.value)}
+                    >
+                      {item.label}
+                    </Button>
+                  ))}
+                </div>
+
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {typeOptions.map((item) => (
+                    <Button
+                      key={item.value}
+                      variant={typeFilter === item.value ? "default" : "outline"}
+                      className="h-10 shrink-0 rounded-xl"
+                      onClick={() => setTypeFilter(item.value)}
+                    >
+                      {item.label}
+                    </Button>
+                  ))}
+                </div>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {statusOptions.map((item) => (
+              <div className="flex shrink-0 items-center gap-2">
+                {hasSearchOrFilter ? (
                   <Button
-                    key={item.value}
-                    variant={statusFilter === item.value ? "default" : "outline"}
+                    variant="outline"
                     className="h-10 rounded-xl"
-                    onClick={() => setStatusFilter(item.value)}
+                    onClick={clearFilters}
                   >
-                    {item.label}
+                    {t.clearFilters}
                   </Button>
-                ))}
-              </div>
+                ) : null}
 
-              <div className="flex flex-wrap gap-2">
-                {typeOptions.slice(0, 5).map((item) => (
-                  <Button
-                    key={item.value}
-                    variant={typeFilter === item.value ? "default" : "outline"}
-                    className="h-10 rounded-xl"
-                    onClick={() => setTypeFilter(item.value)}
-                  >
-                    {item.label}
-                  </Button>
-                ))}
-              </div>
-
-              <div className="ms-auto flex gap-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" className="h-10 rounded-xl">
-                      <span className="hidden lg:inline">{t.columns}</span>
                       <ColumnsIcon className="h-4 w-4" />
+                      <span>{t.columns}</span>
                     </Button>
                   </DropdownMenuTrigger>
 
@@ -1249,7 +1528,7 @@ export default function SystemCentersListPage() {
                           }))
                         }
                       >
-                        {key}
+                        {columnLabels[key as keyof VisibleColumns]}
                       </DropdownMenuCheckboxItem>
                     ))}
                   </DropdownMenuContent>
@@ -1258,255 +1537,287 @@ export default function SystemCentersListPage() {
             </div>
 
             <div className="overflow-hidden rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12">
-                      <Checkbox
-                        checked={allPageSelected}
-                        onCheckedChange={toggleAllPageRows}
-                        aria-label="Select all"
-                      />
-                    </TableHead>
-
-                    {visibleColumns.name ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3"
-                          variant="ghost"
-                          onClick={() => toggleSort("name")}
-                        >
-                          {t.table.name}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.code ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3"
-                          variant="ghost"
-                          onClick={() => toggleSort("code")}
-                        >
-                          {t.table.code}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.providerType ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3"
-                          variant="ghost"
-                          onClick={() => toggleSort("providerType")}
-                        >
-                          {t.table.providerType}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.city ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3"
-                          variant="ghost"
-                          onClick={() => toggleSort("city")}
-                        >
-                          {t.table.city}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.contact ? (
-                      <TableHead>{t.table.contact}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.status ? (
-                      <TableHead>
-                        <Button
-                          className="-ms-3"
-                          variant="ghost"
-                          onClick={() => toggleSort("status")}
-                        >
-                          {t.table.status}
-                          <ArrowDownUp className="h-3 w-3" />
-                        </Button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.featured ? (
-                      <TableHead>{t.table.featured}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.actions ? (
-                      <TableHead>{t.actions}</TableHead>
-                    ) : null}
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {isLoading ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={9} className="h-28">
-                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {t.loading}
-                        </div>
-                      </TableCell>
+                      <TableHead className="w-12">
+                        <Checkbox
+                          checked={allPageSelected}
+                          onCheckedChange={toggleAllPageRows}
+                          aria-label="Select all"
+                        />
+                      </TableHead>
+
+                      {visibleColumns.name ? (
+                        <TableHead>
+                          <Button
+                            className="-ms-3"
+                            variant="ghost"
+                            onClick={() => toggleSort("name")}
+                          >
+                            {t.table.name}
+                            <ArrowDownUp className="h-3 w-3" />
+                          </Button>
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.code ? (
+                        <TableHead>
+                          <Button
+                            className="-ms-3"
+                            variant="ghost"
+                            onClick={() => toggleSort("code")}
+                          >
+                            {t.table.code}
+                            <ArrowDownUp className="h-3 w-3" />
+                          </Button>
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.providerType ? (
+                        <TableHead>
+                          <Button
+                            className="-ms-3"
+                            variant="ghost"
+                            onClick={() => toggleSort("providerType")}
+                          >
+                            {t.table.providerType}
+                            <ArrowDownUp className="h-3 w-3" />
+                          </Button>
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.city ? (
+                        <TableHead>
+                          <Button
+                            className="-ms-3"
+                            variant="ghost"
+                            onClick={() => toggleSort("city")}
+                          >
+                            {t.table.city}
+                            <ArrowDownUp className="h-3 w-3" />
+                          </Button>
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.contact ? (
+                        <TableHead>{t.table.contact}</TableHead>
+                      ) : null}
+
+                      {visibleColumns.status ? (
+                        <TableHead>
+                          <Button
+                            className="-ms-3"
+                            variant="ghost"
+                            onClick={() => toggleSort("status")}
+                          >
+                            {t.table.status}
+                            <ArrowDownUp className="h-3 w-3" />
+                          </Button>
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.featured ? (
+                        <TableHead>{t.table.featured}</TableHead>
+                      ) : null}
+
+                      {visibleColumns.actions ? (
+                        <TableHead>{t.actions}</TableHead>
+                      ) : null}
                     </TableRow>
-                  ) : pageRows.length ? (
-                    pageRows.map((center) => (
-                      <TableRow
-                        key={center.id}
-                        data-state={
-                          selectedIds.includes(center.id) ? "selected" : undefined
-                        }
-                      >
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedIds.includes(center.id)}
-                            onCheckedChange={() => toggleRow(center.id)}
-                            aria-label="Select row"
-                          />
-                        </TableCell>
+                  </TableHeader>
 
-                        {visibleColumns.name ? (
+                  <TableBody>
+                    {isLoading ? (
+                      <TableRowsSkeleton columnsCount={visibleTableColumnsCount} />
+                    ) : pageRows.length ? (
+                      pageRows.map((center) => (
+                        <TableRow
+                          key={`${center.id}-${center.code}-${center.name}`}
+                          data-state={
+                            selectedIds.includes(center.id)
+                              ? "selected"
+                              : undefined
+                          }
+                        >
                           <TableCell>
-                            <div className="flex min-w-[240px] items-center gap-4">
-                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border bg-muted">
-                                {center.providerType === "HOSPITAL" ? (
-                                  <Stethoscope className="h-5 w-5" />
-                                ) : (
-                                  <Building2 className="h-5 w-5" />
-                                )}
+                            <Checkbox
+                              checked={selectedIds.includes(center.id)}
+                              onCheckedChange={() => toggleRow(center.id)}
+                              aria-label="Select row"
+                            />
+                          </TableCell>
+
+                          {visibleColumns.name ? (
+                            <TableCell>
+                              <div className="flex min-w-[240px] items-center gap-4">
+                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border bg-muted">
+                                  {center.providerType === "HOSPITAL" ? (
+                                    <Stethoscope className="h-5 w-5" />
+                                  ) : (
+                                    <Building2 className="h-5 w-5" />
+                                  )}
+                                </div>
+
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="truncate font-medium">
+                                      {center.name}
+                                    </span>
+
+                                    {center.isFeatured ? (
+                                      <Star className="size-4 fill-orange-400 text-orange-400" />
+                                    ) : null}
+                                  </div>
+
+                                  <div className="text-muted-foreground mt-1 truncate text-xs">
+                                    {center.contactPerson ||
+                                      center.email ||
+                                      center.code}
+                                  </div>
+                                </div>
                               </div>
+                            </TableCell>
+                          ) : null}
 
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="truncate font-medium">
-                                    {center.name}
-                                  </span>
+                          {visibleColumns.code ? (
+                            <TableCell className="font-medium">
+                              {center.code || `#${center.id}`}
+                            </TableCell>
+                          ) : null}
 
-                                  {center.isFeatured ? (
-                                    <Star className="size-4 fill-orange-400 text-orange-400" />
+                          {visibleColumns.providerType ? (
+                            <TableCell>
+                              <Badge variant="secondary" className="rounded-full">
+                                {t.typeLabels[center.providerType]}
+                              </Badge>
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.city ? (
+                            <TableCell>
+                              <div className="flex min-w-[120px] items-center gap-2">
+                                <MapPin className="text-muted-foreground h-3.5 w-3.5" />
+                                <span>{center.city || center.area || "-"}</span>
+                              </div>
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.contact ? (
+                            <TableCell>
+                              <div className="flex min-w-[130px] items-center gap-2">
+                                <Phone className="text-muted-foreground h-3.5 w-3.5" />
+                                <span>{center.mobile || center.phone || "-"}</span>
+                              </div>
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.status ? (
+                            <TableCell>
+                              {statusBadge(center.status, locale)}
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.featured ? (
+                            <TableCell>
+                              {center.isFeatured ? (
+                                <Badge className="rounded-full">
+                                  {t.featuredLabel}
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="rounded-full">
+                                  {t.normalLabel}
+                                </Badge>
+                              )}
+                            </TableCell>
+                          ) : null}
+
+                          {visibleColumns.actions ? (
+                            <TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" className="h-8 w-8 p-0">
+                                    <span className="sr-only">{t.actions}</span>
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+
+                                <DropdownMenuContent
+                                  align={isArabic ? "start" : "end"}
+                                >
+                                  <DropdownMenuLabel>{t.actions}</DropdownMenuLabel>
+                                  <DropdownMenuSeparator />
+
+                                  {isValidCenterId(center.id) ? (
+                                    <DropdownMenuItem asChild>
+                                      <Link href={`/system/centers/${center.id}`}>
+                                        <Eye className="h-4 w-4" />
+                                        {t.viewDetails}
+                                      </Link>
+                                    </DropdownMenuItem>
                                   ) : null}
-                                </div>
 
-                                <div className="text-muted-foreground mt-1 truncate text-xs">
-                                  {center.contactPerson || center.email || center.code}
-                                </div>
-                              </div>
-                            </div>
-                          </TableCell>
-                        ) : null}
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(
+                                        String(center.code || "-"),
+                                      );
+                                      toast.success(t.copied);
+                                    }}
+                                  >
+                                    {t.copyCode}
+                                  </DropdownMenuItem>
 
-                        {visibleColumns.code ? (
-                          <TableCell className="font-medium">
-                            {center.code || `#${center.id}`}
-                          </TableCell>
-                        ) : null}
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(
+                                        String(center.id || "-"),
+                                      );
+                                      toast.success(t.copied);
+                                    }}
+                                  >
+                                    {t.copyId}
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          ) : null}
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell
+                          colSpan={visibleTableColumnsCount}
+                          className="h-36 text-center"
+                        >
+                          <div className="mx-auto max-w-md space-y-2">
+                            <p className="font-semibold">
+                              {hasSearchOrFilter
+                                ? t.noResultsTitle
+                                : t.emptyTitle}
+                            </p>
+                            <p className="text-muted-foreground text-sm">
+                              {hasSearchOrFilter ? t.noResultsText : t.emptyText}
+                            </p>
 
-                        {visibleColumns.providerType ? (
-                          <TableCell>
-                            <Badge variant="secondary" className="rounded-full">
-                              {t.typeLabels[center.providerType]}
-                            </Badge>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.city ? (
-                          <TableCell>
-                            <div className="flex min-w-[120px] items-center gap-2">
-                              <MapPin className="text-muted-foreground h-3.5 w-3.5" />
-                              <span>{center.city || center.area || "-"}</span>
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.contact ? (
-                          <TableCell>
-                            <div className="flex min-w-[130px] items-center gap-2">
-                              <Phone className="text-muted-foreground h-3.5 w-3.5" />
-                              <span>{center.mobile || center.phone || "-"}</span>
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.status ? (
-                          <TableCell>{statusBadge(center.status, locale)}</TableCell>
-                        ) : null}
-
-                        {visibleColumns.featured ? (
-                          <TableCell>
-                            {center.isFeatured ? (
-                              <Badge className="rounded-full">
-                                {isArabic ? "مميز" : "Featured"}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="rounded-full">
-                                {isArabic ? "عادي" : "Normal"}
-                              </Badge>
-                            )}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.actions ? (
-                          <TableCell>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                  <span className="sr-only">{t.actions}</span>
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-
-                              <DropdownMenuContent align={isArabic ? "start" : "end"}>
-                                <DropdownMenuLabel>{t.actions}</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/system/centers/${center.id}`}>
-                                    <Eye className="h-4 w-4" />
-                                    {t.viewDetails}
-                                  </Link>
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(String(center.code));
-                                    toast.success(t.copied);
-                                  }}
-                                >
-                                  {t.copyCode}
-                                </DropdownMenuItem>
-
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(String(center.id));
-                                    toast.success(t.copied);
-                                  }}
-                                >
-                                  {t.copyId}
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
-                        ) : null}
+                            {hasSearchOrFilter ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-2 rounded-xl"
+                                onClick={clearFilters}
+                              >
+                                {t.clearFilters}
+                              </Button>
+                            ) : null}
+                          </div>
+                        </TableCell>
                       </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={9} className="h-28 text-center">
-                        {t.noResults}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
@@ -1516,7 +1827,8 @@ export default function SystemCentersListPage() {
               </div>
 
               <div className="text-muted-foreground text-sm">
-                {formatNumber(pageIndex + 1)} / {formatNumber(pageCount)}
+                {t.page} {formatNumber(pageIndex + 1)} {t.from}{" "}
+                {formatNumber(pageCount)}
               </div>
 
               <div className="flex items-center gap-2">
@@ -1524,7 +1836,9 @@ export default function SystemCentersListPage() {
                   variant="outline"
                   size="sm"
                   className="rounded-xl"
-                  onClick={() => setPageIndex((current) => Math.max(current - 1, 0))}
+                  onClick={() =>
+                    setPageIndex((current) => Math.max(current - 1, 0))
+                  }
                   disabled={pageIndex === 0}
                 >
                   {t.previous}

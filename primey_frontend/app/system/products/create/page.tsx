@@ -1,30 +1,72 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/products/create/page.tsx
+   🧠 Primey Care | Create Product
+   ------------------------------------------------------------
+   ✅ المسار: /system/products/create
+   ✅ الإصدار: v2.0.0 - Centers Pattern + Safe Permissions
+
+   ✅ العمل:
+      إنشاء منتج / بطاقة / برنامج / خدمة جديدة.
+
+   ✅ Backend:
+      POST /api/products/create/
+
+   ✅ المعيار:
+      - مبني بصريًا على نمط المراكز والعملاء المعتمد.
+      - دمج UX Refinement مع حماية المرحلة 2.
+      - لا يتم إظهار مسارات تقنية أو API داخل الواجهة.
+      - الصفحة ممتدة على عرض المساحة وليست متمركزة.
+      - Main Form + Sidebar Summary.
+      - حماية زر الإنشاء حسب صلاحية products.create.
+      - إخفاء روابط غير مصرح بها بدل تعطيلها.
+      - عدم كسر system_admin / superadmin.
+      - تحذير عند مغادرة الصفحة وفيها بيانات غير محفوظة.
+      - beforeunload protection.
+      - Error Alert داخلي عند فشل الحفظ.
+      - Field-level validation.
+      - تعطيل الحقول أثناء الحفظ.
+      - تنظيف البيانات قبل الإرسال.
+      - حفظ واستعادة مسودة محلية.
+      - تأكيد تفريغ النموذج.
+      - دعم عربي / إنجليزي عبر primey-locale.
+      - استخدام sonner للتنبيهات.
+      - استخدام /currency/sar.svg.
+      - الأرقام بالإنجليزية.
+      - بدون localhost hardcoded.
+============================================================ */
+
 import Image from "next/image";
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { ComponentType, ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   BadgeCheck,
   Boxes,
   CheckCircle2,
+  CircleDollarSign,
+  ClipboardList,
   CreditCard,
   FileText,
   Layers3,
   Loader2,
   Package,
-  Plus,
+  Percent,
+  RotateCcw,
   Save,
   ShieldCheck,
   Sparkles,
-  Star,
   Stethoscope,
   Tag,
   Trash2,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -37,2001 +79,2020 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 /* ============================================================
-   📂 app/system/products/create/page.tsx
-   🧠 Primey Care | Create Product
-   ------------------------------------------------------------
-   ✅ Create Card / Membership / Program / Service
-   ✅ Backend المرحلة 5:
-      - fulfillment_type
-      - allow_agent_sale
-      - allow_provider_sale
-      - can_be_ordered
-      - can_be_used_in_contracts
-      - requires_provider
-      - max_discount_rate
-      - default_agent_commission_rate
-      - pricing_tiers expanded
-      - service_items
-   ✅ Arabic / English via primey-locale
-   ✅ English numbers always
-   ✅ SAR icon from /currency/sar.svg
-   ✅ sonner toast
-   ✅ no localhost hardcoded
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
+type AuthRecord = Record<string, unknown>;
 
 type ProductType = "membership" | "card" | "program" | "service" | "other";
 type ProductStatus = "draft" | "active" | "inactive" | "archived";
 type BillingType = "one_time" | "recurring";
-type DurationUnit = "none" | "day" | "month" | "year";
 type FulfillmentType = "digital" | "physical" | "both" | "service_based" | "none";
-type PricingType =
-  | "standard"
-  | "customer"
-  | "agent"
-  | "provider"
-  | "contract"
-  | "promotional";
+type DurationUnit = "day" | "month" | "year" | "visit" | "none";
 
-type ProductCategory = {
-  id: number | string;
-  code?: string | null;
-  name?: string | null;
-  category_type?: string | null;
-  status?: string | null;
-};
-
-type CategoriesApiResponse = {
-  ok?: boolean;
-  message?: string;
-  results?: ProductCategory[];
-  data?: ProductCategory[];
-};
-
-type ProductApiResponse = {
-  ok?: boolean;
-  message?: string;
-  data?: {
-    id?: number | string;
-  };
-  errors?: string[] | Record<string, string[]>;
-};
-
-type BenefitForm = {
-  title: string;
-  description: string;
-  sort_order: string;
-  is_active: boolean;
-};
-
-type PricingTierForm = {
+type ProductFormData = {
   name: string;
-  pricing_type: PricingType;
-  currency_code: string;
-  price: string;
-  sale_price: string;
-  min_quantity: string;
-  max_quantity: string;
-  discount_rate: string;
-  agent_commission_rate: string;
-  provider_share_rate: string;
-  system_share_rate: string;
-  starts_at: string;
-  ends_at: string;
-  sort_order: string;
-  is_active: boolean;
-};
-
-type ServiceItemForm = {
-  name: string;
-  description: string;
-  included_quantity: string;
-  unit_price: string;
-  discount_rate: string;
-  requires_provider: boolean;
-  is_optional: boolean;
-  is_active: boolean;
-  sort_order: string;
-};
-
-type ProductForm = {
-  name: string;
-  category_id: string;
+  code: string;
+  slug: string;
   product_type: ProductType;
   status: ProductStatus;
-  billing_type: BillingType;
-  fulfillment_type: FulfillmentType;
-
+  category_name: string;
   short_description: string;
   description: string;
-  terms_and_conditions: string;
-  features: string;
   tags: string;
 
-  currency_code: string;
   price: string;
   sale_price: string;
-  cost_price: string;
-  is_taxable: boolean;
-  tax_rate: string;
-
+  billing_type: BillingType;
+  fulfillment_type: FulfillmentType;
   duration_value: string;
   duration_unit: DurationUnit;
+
+  is_taxable: boolean;
+  tax_rate: string;
 
   is_public: boolean;
   is_featured: boolean;
   requires_approval: boolean;
+
   allow_online_purchase: boolean;
   allow_agent_sale: boolean;
   allow_provider_sale: boolean;
+
   can_be_ordered: boolean;
   can_be_used_in_contracts: boolean;
   requires_provider: boolean;
 
   max_discount_rate: string;
   default_agent_commission_rate: string;
-  sort_order: string;
 
-  benefits: BenefitForm[];
-  pricing_tiers: PricingTierForm[];
-  service_items: ServiceItemForm[];
+  pricing_tiers_text: string;
+  service_items_text: string;
+  notes: string;
+};
+
+type ProductFormErrors = Partial<Record<keyof ProductFormData, string>>;
+
+type CreateProductApiResponse = {
+  ok?: boolean;
+  message?: string;
+  errors?: Record<string, string[] | string>;
+  id?: number | string;
+  product?: {
+    id?: number | string;
+  };
+  data?: {
+    id?: number | string;
+    product?: {
+      id?: number | string;
+    };
+  };
 };
 
 const SAR_ICON_PATH = "/currency/sar.svg";
+const DRAFT_STORAGE_KEY = "primey-care-product-create-draft";
 
-const initialForm: ProductForm = {
+/* ============================================================
+   Locale Helpers
+============================================================ */
+
+function readLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
+
+    const savedLocale = window.localStorage.getItem("primey-locale");
+
+    if (savedLocale === "en") return "en";
+    if (savedLocale === "ar") return "ar";
+
+    return document.documentElement.lang === "en" ? "en" : "ar";
+  } catch (error) {
+    console.error("Read locale error:", error);
+    return "ar";
+  }
+}
+
+function applyDocumentLocale(locale: AppLocale) {
+  try {
+    if (typeof document === "undefined") return;
+
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch (error) {
+    console.error("Apply locale error:", error);
+  }
+}
+
+/* ============================================================
+   API Helpers
+============================================================ */
+
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
+
+  if (!base) return path;
+
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
+function readCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const match = document.cookie
+    .split("; ")
+    .find((cookie) => cookie.startsWith(`${name}=`));
+
+  return match ? decodeURIComponent(match.split("=")[1] || "") : "";
+}
+
+/* ============================================================
+   Permission Helpers
+============================================================ */
+
+function asRecord(value: unknown): AuthRecord {
+  return value && typeof value === "object" ? (value as AuthRecord) : {};
+}
+
+function getNestedRecord(source: AuthRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+
+    if (value && typeof value === "object") {
+      return value as AuthRecord;
+    }
+  }
+
+  return {};
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
+
+          if (typeof value === "string") return [value];
+
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
+
+              if (item && typeof item === "object") {
+                const obj = item as AuthRecord;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as AuthRecord;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getAuthUser(authValue: unknown): AuthRecord {
+  const auth = asRecord(authValue);
+
+  return getNestedRecord(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
+}
+
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asRecord(authValue);
+  const user = getAuthUser(authValue);
+
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asRecord(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asRecord(auth.permissions);
+  const userPermissions = asRecord(user.permissions);
+  const authProfilePermissions = asRecord(auth.profile_permissions);
+  const userProfilePermissions = asRecord(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asRecord(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
+  );
+}
+
+function isSystemAdmin(authValue: unknown) {
+  const auth = asRecord(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
+
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
+}
+
+function hasKnownPermissionSignal(authValue: unknown) {
+  return (
+    getAuthRoles(authValue).length > 0 ||
+    getAuthPermissionCodes(authValue).length > 0
+  );
+}
+
+function hasPermissionCode(authValue: unknown, codes: string[]) {
+  const permissions = getAuthPermissionCodes(authValue);
+
+  if (permissions.length === 0) return undefined;
+
+  return codes.some((code) => permissions.includes(code));
+}
+
+function hasSafePermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const explicitPermission = hasPermissionCode(authValue, codes);
+
+  if (typeof explicitPermission === "boolean") {
+    return explicitPermission;
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "support",
+          "accountant",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin"].includes(role),
+    );
+  }
+
+  if (!hasKnownPermissionSignal(authValue)) {
+    return true;
+  }
+
+  return mode === "view";
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
+
+function dictionary(locale: AppLocale) {
+  const isArabic = locale === "ar";
+
+  return {
+    title: isArabic ? "إنشاء منتج جديد" : "Create New Product",
+    subtitle: isArabic
+      ? "إضافة بطاقة أو عضوية أو برنامج أو خدمة وربطها لاحقًا بالطلبات والعقود."
+      : "Add a card, membership, program, or service and later connect it with orders and contracts.",
+
+    back: isArabic ? "العودة للمنتجات" : "Back to Products",
+    productsList: isArabic ? "قائمة المنتجات" : "Products List",
+    create: isArabic ? "إنشاء المنتج" : "Create Product",
+    saving: isArabic ? "جاري الحفظ..." : "Saving...",
+    saveDraft: isArabic ? "حفظ كمسودة محلية" : "Save Local Draft",
+    restoreDraft: isArabic ? "استعادة المسودة" : "Restore Draft",
+    clearForm: isArabic ? "تفريغ النموذج" : "Clear Form",
+
+    basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
+    basicDesc: isArabic
+      ? "اسم المنتج، الكود، النوع، التصنيف، وحالة التشغيل."
+      : "Product name, code, type, category, and operational status.",
+
+    descriptionInfo: isArabic ? "الوصف والوسوم" : "Description & Tags",
+    descriptionDesc: isArabic
+      ? "وصف مختصر، وصف تفصيلي، ووسوم تساعد في البحث."
+      : "Short description, full description, and tags for search.",
+
+    pricingInfo: isArabic ? "التسعير والفوترة" : "Pricing & Billing",
+    pricingDesc: isArabic
+      ? "السعر الأساسي، الخصم، الفوترة، الضريبة، والمدة."
+      : "Base price, sale price, billing, tax, and duration.",
+
+    availabilityInfo: isArabic ? "الجاهزية وقنوات البيع" : "Readiness & Sales Channels",
+    availabilityDesc: isArabic
+      ? "تحديد جاهزية المنتج للطلبات والعقود وقنوات البيع."
+      : "Define product readiness for orders, contracts, and sales channels.",
+
+    limitsInfo: isArabic ? "الخصومات والعمولات" : "Discounts & Commissions",
+    limitsDesc: isArabic
+      ? "الحد الأعلى للخصم وعمولة المندوب الافتراضية."
+      : "Maximum discount and default agent commission.",
+
+    advancedInfo: isArabic ? "بيانات متقدمة" : "Advanced Data",
+    advancedDesc: isArabic
+      ? "شرائح التسعير وعناصر الخدمات للبرامج والخدمات المركبة."
+      : "Pricing tiers and service items for programs and bundled services.",
+
+    notesInfo: isArabic ? "ملاحظات تشغيلية" : "Operational Notes",
+    notesDesc: isArabic
+      ? "أي ملاحظات داخلية مرتبطة بالمنتج."
+      : "Any internal notes related to this product.",
+
+    summaryTitle: isArabic ? "ملخص المنتج" : "Product Summary",
+    summaryDesc: isArabic
+      ? "مراجعة سريعة للبيانات قبل الحفظ."
+      : "Quick review before saving.",
+
+    stepsTitle: isArabic ? "إرشادات قبل الحفظ" : "Before Saving",
+    stepsDesc: isArabic
+      ? "نقاط تساعدك على إدخال بيانات دقيقة."
+      : "Helpful points for entering accurate data.",
+
+    formErrorTitle: isArabic ? "تعذر حفظ البيانات" : "Unable to save data",
+
+    accessDeniedTitle: isArabic ? "غير مصرح بإنشاء منتج" : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية إنشاء المنتجات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to create products. Contact your system administrator if you need access.",
+
+    fields: {
+      name: isArabic ? "اسم المنتج" : "Product Name",
+      code: isArabic ? "كود المنتج" : "Product Code",
+      slug: isArabic ? "الرابط المختصر" : "Slug",
+      type: isArabic ? "نوع المنتج" : "Product Type",
+      status: isArabic ? "الحالة" : "Status",
+      category: isArabic ? "التصنيف" : "Category",
+      shortDescription: isArabic ? "الوصف المختصر" : "Short Description",
+      description: isArabic ? "الوصف التفصيلي" : "Full Description",
+      tags: isArabic ? "الوسوم" : "Tags",
+      price: isArabic ? "السعر الأساسي" : "Base Price",
+      salePrice: isArabic ? "سعر الخصم" : "Sale Price",
+      billingType: isArabic ? "نوع الفوترة" : "Billing Type",
+      fulfillmentType: isArabic ? "نوع التسليم" : "Fulfillment Type",
+      durationValue: isArabic ? "مدة المنتج" : "Duration",
+      durationUnit: isArabic ? "وحدة المدة" : "Duration Unit",
+      taxable: isArabic ? "خاضع للضريبة" : "Taxable",
+      taxRate: isArabic ? "نسبة الضريبة" : "Tax Rate",
+      public: isArabic ? "منتج عام" : "Public Product",
+      featured: isArabic ? "منتج مميز" : "Featured Product",
+      requiresApproval: isArabic ? "يتطلب موافقة" : "Requires Approval",
+      onlinePurchase: isArabic ? "الشراء الإلكتروني" : "Online Purchase",
+      agentSale: isArabic ? "بيع المندوب" : "Agent Sale",
+      providerSale: isArabic ? "بيع مقدم الخدمة" : "Provider Sale",
+      canBeOrdered: isArabic ? "جاهز للطلبات" : "Order Ready",
+      contractsReady: isArabic ? "جاهز للعقود" : "Contracts Ready",
+      requiresProvider: isArabic ? "يتطلب مقدم خدمة" : "Requires Provider",
+      maxDiscount: isArabic ? "الحد الأعلى للخصم" : "Max Discount",
+      agentCommission: isArabic ? "عمولة المندوب الافتراضية" : "Default Agent Commission",
+      pricingTiers: isArabic ? "شرائح التسعير" : "Pricing Tiers",
+      serviceItems: isArabic ? "عناصر الخدمات" : "Service Items",
+      notes: isArabic ? "الملاحظات" : "Notes",
+    },
+
+    placeholders: {
+      name: isArabic ? "مثال: بطاقة Primey Care الذهبية" : "Example: Primey Care Gold Card",
+      code: isArabic ? "مثال: PRD-001" : "Example: PRD-001",
+      slug: isArabic ? "primey-care-gold-card" : "primey-care-gold-card",
+      category: isArabic ? "مثال: بطاقات الرعاية" : "Example: Care Cards",
+      shortDescription: isArabic
+        ? "وصف مختصر يظهر في القوائم..."
+        : "Short description shown in lists...",
+      description: isArabic
+        ? "اكتب وصفًا تفصيليًا للمنتج..."
+        : "Write a detailed product description...",
+      tags: isArabic ? "بطاقة، رعاية، خصومات" : "card, care, discounts",
+      price: isArabic ? "مثال: 199" : "Example: 199",
+      salePrice: isArabic ? "مثال: 149" : "Example: 149",
+      durationValue: isArabic ? "مثال: 12" : "Example: 12",
+      taxRate: isArabic ? "مثال: 15" : "Example: 15",
+      maxDiscount: isArabic ? "مثال: 20" : "Example: 20",
+      agentCommission: isArabic ? "مثال: 10" : "Example: 10",
+      pricingTiers: isArabic
+        ? "اكتب كل شريحة في سطر: الاسم | السعر | المدة"
+        : "One tier per line: name | price | duration",
+      serviceItems: isArabic
+        ? "اكتب كل خدمة في سطر: اسم الخدمة | الكمية | الملاحظات"
+        : "One service per line: service name | quantity | notes",
+      notes: isArabic
+        ? "أي ملاحظات تشغيلية عن المنتج..."
+        : "Any operational notes about this product...",
+    },
+
+    productTypes: {
+      membership: isArabic ? "عضوية" : "Membership",
+      card: isArabic ? "بطاقة" : "Card",
+      program: isArabic ? "برنامج" : "Program",
+      service: isArabic ? "خدمة" : "Service",
+      other: isArabic ? "أخرى" : "Other",
+    } satisfies Record<ProductType, string>,
+
+    statuses: {
+      draft: isArabic ? "مسودة" : "Draft",
+      active: isArabic ? "نشط" : "Active",
+      inactive: isArabic ? "غير نشط" : "Inactive",
+      archived: isArabic ? "مؤرشف" : "Archived",
+    } satisfies Record<ProductStatus, string>,
+
+    billingTypes: {
+      one_time: isArabic ? "مرة واحدة" : "One Time",
+      recurring: isArabic ? "متكرر" : "Recurring",
+    } satisfies Record<BillingType, string>,
+
+    fulfillmentTypes: {
+      digital: isArabic ? "رقمي" : "Digital",
+      physical: isArabic ? "فعلي" : "Physical",
+      both: isArabic ? "رقمي وفعلي" : "Digital & Physical",
+      service_based: isArabic ? "مرتبط بخدمة" : "Service Based",
+      none: isArabic ? "بدون" : "None",
+    } satisfies Record<FulfillmentType, string>,
+
+    durationUnits: {
+      day: isArabic ? "يوم" : "Day",
+      month: isArabic ? "شهر" : "Month",
+      year: isArabic ? "سنة" : "Year",
+      visit: isArabic ? "زيارة" : "Visit",
+      none: isArabic ? "بدون" : "None",
+    } satisfies Record<DurationUnit, string>,
+
+    validation: {
+      name: isArabic ? "اسم المنتج مطلوب." : "Product name is required.",
+      code: isArabic ? "كود المنتج مطلوب." : "Product code is required.",
+      price: isArabic ? "السعر يجب أن يكون رقمًا صحيحًا." : "Price must be a valid number.",
+      salePrice: isArabic ? "سعر الخصم يجب أن يكون رقمًا صحيحًا." : "Sale price must be a valid number.",
+      saleGreater: isArabic
+        ? "سعر الخصم لا يجب أن يكون أكبر من السعر الأساسي."
+        : "Sale price must not be greater than base price.",
+      percent: isArabic
+        ? "النسبة يجب أن تكون بين 0 و 100."
+        : "Percentage must be between 0 and 100.",
+      duration: isArabic ? "المدة يجب أن تكون رقمًا صحيحًا." : "Duration must be a valid number.",
+    },
+
+    success: isArabic ? "تم إنشاء المنتج بنجاح." : "Product created successfully.",
+    draftSaved: isArabic ? "تم حفظ المسودة محليًا." : "Draft saved locally.",
+    draftRestored: isArabic ? "تمت استعادة المسودة." : "Draft restored.",
+    noDraft: isArabic ? "لا توجد مسودة محفوظة." : "No saved draft found.",
+    formCleared: isArabic ? "تم تفريغ النموذج." : "Form cleared.",
+    apiError: isArabic
+      ? "تعذر إنشاء المنتج. تحقق من البيانات وحاول مرة أخرى."
+      : "Unable to create product. Please check the data and try again.",
+    validationToast: isArabic
+      ? "يرجى تصحيح الحقول المطلوبة قبل المتابعة."
+      : "Please fix the required fields before continuing.",
+    confirmLeave: isArabic
+      ? "لديك بيانات غير محفوظة. هل تريد المغادرة؟"
+      : "You have unsaved changes. Do you want to leave?",
+    confirmClear: isArabic
+      ? "سيتم تفريغ النموذج الحالي. هل تريد المتابعة؟"
+      : "The current form will be cleared. Do you want to continue?",
+
+    completion: isArabic ? "نسبة الاكتمال" : "Completion",
+    ready: isArabic ? "جاهز للحفظ" : "Ready to save",
+    missingData: isArabic ? "ينقصه بيانات أساسية" : "Missing required data",
+    priceSummary: isArabic ? "التسعير" : "Pricing",
+    saleChannelsSummary: isArabic ? "قنوات البيع" : "Sales Channels",
+    readinessSummary: isArabic ? "الجاهزية" : "Readiness",
+
+    yes: isArabic ? "نعم" : "Yes",
+    no: isArabic ? "لا" : "No",
+
+    quickNotes: [
+      isArabic
+        ? "كود المنتج يجب أن يكون فريدًا وواضحًا."
+        : "Product code must be unique and clear.",
+      isArabic
+        ? "فعّل جاهزية الطلبات فقط عندما يكون المنتج قابلًا للبيع."
+        : "Enable order readiness only when the product is sellable.",
+      isArabic
+        ? "استخدم جاهزية العقود للمنتجات التي تدخل في عقود المراكز."
+        : "Use contracts readiness for products that can be used in provider contracts.",
+      isArabic
+        ? "يمكن حفظ البيانات كمسودة محلية قبل الإرسال."
+        : "You can save the form as a local draft before submitting.",
+    ],
+  };
+}
+
+/* ============================================================
+   Defaults / Validation
+============================================================ */
+
+const initialFormData: ProductFormData = {
   name: "",
-  category_id: "",
-  product_type: "program",
-  status: "draft",
-  billing_type: "one_time",
-  fulfillment_type: "digital",
-
+  code: "",
+  slug: "",
+  product_type: "card",
+  status: "active",
+  category_name: "",
   short_description: "",
   description: "",
-  terms_and_conditions: "",
-  features: "",
   tags: "",
 
-  currency_code: "SAR",
   price: "",
   sale_price: "",
-  cost_price: "",
-  is_taxable: false,
-  tax_rate: "0",
+  billing_type: "one_time",
+  fulfillment_type: "digital",
+  duration_value: "",
+  duration_unit: "month",
 
-  duration_value: "0",
-  duration_unit: "none",
+  is_taxable: true,
+  tax_rate: "15",
 
   is_public: true,
   is_featured: false,
   requires_approval: false,
+
   allow_online_purchase: true,
   allow_agent_sale: true,
   allow_provider_sale: false,
+
   can_be_ordered: true,
   can_be_used_in_contracts: true,
   requires_provider: false,
 
   max_discount_rate: "0",
   default_agent_commission_rate: "0",
-  sort_order: "0",
 
-  benefits: [],
-  pricing_tiers: [],
-  service_items: [],
+  pricing_tiers_text: "",
+  service_items_text: "",
+  notes: "",
 };
 
-function readStoredLocale(): AppLocale {
-  if (typeof window === "undefined") return "ar";
-
-  const saved = window.localStorage.getItem("primey-locale");
-  if (saved === "en" || saved === "ar") return saved;
-
-  const htmlLang = document.documentElement.lang;
-  if (htmlLang === "en") return "en";
-
-  return "ar";
+function normalizeCode(value: string) {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Z0-9-_]/g, "");
 }
 
-function getCookie(name: string) {
-  if (typeof document === "undefined") return "";
-
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-
-  if (parts.length === 2) {
-    return parts.pop()?.split(";").shift() || "";
-  }
-
-  return "";
+function normalizeSlug(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u0600-\u06FF\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
 }
 
-function formatMoneyPreview(value: string) {
-  const numeric = Number(value || 0);
+function normalizeNumberString(value: string, fallback = "0.00") {
+  const clean = value.replace(/,/g, "").replace(/[^\d.]/g, "");
+  const parsed = Number(clean);
 
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(numeric) ? numeric : 0);
+  if (!Number.isFinite(parsed)) return fallback;
+
+  return parsed.toFixed(2);
 }
 
-function normalizeDecimal(value: string) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) return null;
-  return trimmed;
+function toNumber(value: string) {
+  const parsed = Number(value.replace(/,/g, ""));
+
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function normalizeInt(value: string, fallback = 0) {
-  const numeric = Number.parseInt(String(value || ""), 10);
-  return Number.isFinite(numeric) ? numeric : fallback;
+function isValidNumber(value: string) {
+  if (!value.trim()) return true;
+
+  const parsed = Number(value.replace(/,/g, ""));
+
+  return Number.isFinite(parsed);
 }
 
-function normalizeDateTimeLocal(value: string) {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) return null;
-  return trimmed;
+function isPercent(value: string) {
+  if (!value.trim()) return true;
+
+  const parsed = Number(value.replace(/,/g, ""));
+
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100;
 }
 
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
+function parseLines(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name = "", valueA = "", valueB = ""] = line
+        .split("|")
+        .map((part) => part.trim());
+
+      return {
+        name,
+        value: valueA,
+        notes: valueB,
+      };
+    })
+    .filter((item) => item.name);
+}
+
+function normalizePayload(formData: ProductFormData) {
+  const price = normalizeNumberString(formData.price);
+  const salePrice = formData.sale_price.trim()
+    ? normalizeNumberString(formData.sale_price)
+    : "";
 
   return {
-    badge1: "System Products",
-    badge2: "Create Product",
+    name: formData.name.trim(),
+    code: normalizeCode(formData.code),
+    slug: normalizeSlug(formData.slug || formData.name),
+    product_type: formData.product_type,
+    type: formData.product_type,
+    status: formData.status,
+    category_name: formData.category_name.trim(),
+    short_description: formData.short_description.trim(),
+    description: formData.description.trim(),
+    tags: formData.tags.trim(),
 
-    title: isArabic ? "إضافة منتج جديد" : "Create New Product",
-    subtitle: isArabic
-      ? "إضافة بطاقة أو عضوية أو برنامج أو خدمة وربطها بالتصنيف والتسعير وخيارات البيع والطلبات والعقود."
-      : "Add a card, membership, program, or service and connect it to category, pricing, sales, orders, and contracts.",
+    price,
+    base_price: price,
+    sale_price: salePrice,
+    billing_type: formData.billing_type,
+    fulfillment_type: formData.fulfillment_type,
+    duration_value: formData.duration_value.trim()
+      ? String(toNumber(formData.duration_value))
+      : "",
+    duration_unit: formData.duration_unit,
 
-    back: isArabic ? "رجوع" : "Back",
-    dashboard: isArabic ? "لوحة المنتجات" : "Products Dashboard",
-    list: isArabic ? "قائمة المنتجات" : "Products List",
-    save: isArabic ? "حفظ المنتج" : "Save Product",
-    saving: isArabic ? "جاري الحفظ..." : "Saving...",
+    is_taxable: formData.is_taxable,
+    tax_rate: formData.tax_rate.trim()
+      ? String(toNumber(formData.tax_rate))
+      : "0",
 
-    mainInfo: isArabic ? "بيانات المنتج الأساسية" : "Main Product Information",
-    mainInfoDesc: isArabic
-      ? "الاسم، النوع، التصنيف، الحالة، طريقة الفوترة وطريقة التسليم."
-      : "Name, type, category, status, billing method, and fulfillment method.",
+    is_public: formData.is_public,
+    is_featured: formData.is_featured,
+    requires_approval: formData.requires_approval,
 
-    marketingInfo: isArabic ? "الوصف والمحتوى التسويقي" : "Description & Marketing Content",
-    marketingInfoDesc: isArabic
-      ? "النصوص التي تظهر في الواجهات والتقارير."
-      : "Text displayed in interfaces and reports.",
+    allow_online_purchase: formData.allow_online_purchase,
+    allow_agent_sale: formData.allow_agent_sale,
+    allow_provider_sale: formData.allow_provider_sale,
 
-    pricingInfo: isArabic ? "التسعير والضريبة" : "Pricing & Tax",
-    pricingInfoDesc: isArabic
-      ? "إعداد سعر المنتج والخصم والتكلفة والضريبة."
-      : "Configure product price, discount, cost, and tax.",
+    can_be_ordered: formData.can_be_ordered,
+    can_be_used_in_contracts: formData.can_be_used_in_contracts,
+    requires_provider: formData.requires_provider,
 
-    durationInfo: isArabic ? "المدة والصلاحية" : "Duration & Validity",
-    durationInfoDesc: isArabic
-      ? "إعداد مدة المنتج للبطاقات والعضويات والاشتراكات المتكررة."
-      : "Configure duration for cards, memberships, and recurring products.",
+    max_discount_rate: formData.max_discount_rate.trim()
+      ? String(toNumber(formData.max_discount_rate))
+      : "0",
+    default_agent_commission_rate: formData.default_agent_commission_rate.trim()
+      ? String(toNumber(formData.default_agent_commission_rate))
+      : "0",
 
-    salesInfo: isArabic ? "خيارات البيع والربط" : "Sales & Binding Options",
-    salesInfoDesc: isArabic
-      ? "تحكم في الظهور والشراء الإلكتروني والطلب والعقود ومقدم الخدمة."
-      : "Control visibility, online purchase, ordering, contracts, and provider requirements.",
-
-    commissionsInfo: isArabic ? "الخصومات والعمولات" : "Discounts & Commissions",
-    commissionsInfoDesc: isArabic
-      ? "إعداد الحد الأعلى للخصم وعمولة المندوب الافتراضية."
-      : "Configure maximum discount and default agent commission.",
-
-    benefitsInfo: isArabic ? "مزايا المنتج" : "Product Benefits",
-    benefitsInfoDesc: isArabic
-      ? "إضافة مزايا تظهر ضمن تفاصيل المنتج."
-      : "Add benefits shown in product details.",
-
-    tiersInfo: isArabic ? "شرائح التسعير" : "Pricing Tiers",
-    tiersInfoDesc: isArabic
-      ? "إضافة أسعار متعددة للعميل أو المندوب أو مقدم الخدمة أو العقد."
-      : "Add multiple pricing options for customer, agent, provider, or contract.",
-
-    serviceItemsInfo: isArabic ? "عناصر الخدمات داخل المنتج" : "Product Service Items",
-    serviceItemsInfoDesc: isArabic
-      ? "إضافة الخدمات الداخلية للبرامج والباقات مثل الكشف أو المتابعة أو الخصومات."
-      : "Add internal service items for programs and packages, such as visits, follow-ups, or discounts.",
-
-    previewTitle: isArabic ? "معاينة المنتج" : "Product Preview",
-    previewDesc: isArabic ? "ملخص سريع قبل الحفظ." : "Quick summary before saving.",
-
-    name: isArabic ? "اسم المنتج" : "Product Name",
-    category: isArabic ? "التصنيف" : "Category",
-    productType: isArabic ? "نوع المنتج" : "Product Type",
-    status: isArabic ? "الحالة" : "Status",
-    billingType: isArabic ? "طريقة الفوترة" : "Billing Type",
-    fulfillmentType: isArabic ? "طريقة التسليم" : "Fulfillment Type",
-
-    shortDescription: isArabic ? "وصف مختصر" : "Short Description",
-    description: isArabic ? "الوصف التفصيلي" : "Description",
-    terms: isArabic ? "الشروط والأحكام" : "Terms & Conditions",
-    features: isArabic ? "الخصائص" : "Features",
-    tags: isArabic ? "الوسوم" : "Tags",
-
-    price: isArabic ? "السعر الأساسي" : "Base Price",
-    salePrice: isArabic ? "سعر العرض" : "Sale Price",
-    costPrice: isArabic ? "التكلفة" : "Cost Price",
-    taxRate: isArabic ? "نسبة الضريبة %" : "Tax Rate %",
-    currency: isArabic ? "العملة" : "Currency",
-
-    durationValue: isArabic ? "قيمة المدة" : "Duration Value",
-    durationUnit: isArabic ? "وحدة المدة" : "Duration Unit",
-    sortOrder: isArabic ? "ترتيب العرض" : "Sort Order",
-
-    isTaxable: isArabic ? "خاضع للضريبة" : "Taxable",
-    isPublic: isArabic ? "ظاهر للعامة" : "Public",
-    isFeatured: isArabic ? "منتج مميز" : "Featured",
-    requiresApproval: isArabic ? "يتطلب اعتماد" : "Requires Approval",
-    allowOnlinePurchase: isArabic ? "السماح بالشراء الإلكتروني" : "Allow Online Purchase",
-    allowAgentSale: isArabic ? "السماح ببيع المندوب" : "Allow Agent Sale",
-    allowProviderSale: isArabic ? "السماح ببيع مقدم الخدمة" : "Allow Provider Sale",
-    canBeOrdered: isArabic ? "قابل للطلب" : "Can Be Ordered",
-    canBeUsedInContracts: isArabic ? "قابل للاستخدام في العقود" : "Can Be Used In Contracts",
-    requiresProvider: isArabic ? "يتطلب مقدم خدمة" : "Requires Provider",
-
-    maxDiscountRate: isArabic ? "أعلى نسبة خصم %" : "Max Discount Rate %",
-    defaultAgentCommissionRate: isArabic
-      ? "عمولة المندوب الافتراضية %"
-      : "Default Agent Commission %",
-
-    addBenefit: isArabic ? "إضافة ميزة" : "Add Benefit",
-    benefitTitle: isArabic ? "عنوان الميزة" : "Benefit Title",
-    benefitDescription: isArabic ? "وصف الميزة" : "Benefit Description",
-
-    addTier: isArabic ? "إضافة شريحة" : "Add Tier",
-    tierName: isArabic ? "اسم الشريحة" : "Tier Name",
-    tierType: isArabic ? "نوع الشريحة" : "Tier Type",
-    tierPrice: isArabic ? "سعر الشريحة" : "Tier Price",
-    tierSalePrice: isArabic ? "سعر العرض للشريحة" : "Tier Sale Price",
-    minQuantity: isArabic ? "أقل كمية" : "Min Quantity",
-    maxQuantity: isArabic ? "أعلى كمية" : "Max Quantity",
-    discountRate: isArabic ? "نسبة الخصم %" : "Discount Rate %",
-    agentCommissionRate: isArabic ? "عمولة المندوب %" : "Agent Commission %",
-    providerShareRate: isArabic ? "حصة مقدم الخدمة %" : "Provider Share %",
-    systemShareRate: isArabic ? "حصة النظام %" : "System Share %",
-    startsAt: isArabic ? "تبدأ في" : "Starts At",
-    endsAt: isArabic ? "تنتهي في" : "Ends At",
-
-    addServiceItem: isArabic ? "إضافة خدمة" : "Add Service Item",
-    serviceItemName: isArabic ? "اسم الخدمة" : "Service Item Name",
-    serviceItemDescription: isArabic ? "وصف الخدمة" : "Service Item Description",
-    includedQuantity: isArabic ? "الكمية المشمولة" : "Included Quantity",
-    unitPrice: isArabic ? "سعر الوحدة" : "Unit Price",
-    isOptional: isArabic ? "اختياري" : "Optional",
-
-    noCategory: isArabic ? "بدون تصنيف" : "No Category",
-    chooseCategory: isArabic ? "اختر التصنيف" : "Choose Category",
-    loadingCategories: isArabic ? "جاري تحميل التصنيفات..." : "Loading categories...",
-
-    membership: isArabic ? "عضوية" : "Membership",
-    card: isArabic ? "بطاقة" : "Card",
-    program: isArabic ? "برنامج" : "Program",
-    service: isArabic ? "خدمة" : "Service",
-    other: isArabic ? "أخرى" : "Other",
-
-    draft: isArabic ? "مسودة" : "Draft",
-    active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    archived: isArabic ? "مؤرشف" : "Archived",
-
-    oneTime: isArabic ? "مرة واحدة" : "One Time",
-    recurring: isArabic ? "متكرر" : "Recurring",
-
-    digital: isArabic ? "رقمي" : "Digital",
-    physical: isArabic ? "فعلي" : "Physical",
-    both: isArabic ? "رقمي وفعلي" : "Digital & Physical",
-    serviceBased: isArabic ? "حسب الخدمة" : "Service Based",
-    fulfillmentNone: isArabic ? "بدون" : "None",
-
-    none: isArabic ? "بدون مدة" : "No Duration",
-    day: isArabic ? "يوم" : "Day",
-    month: isArabic ? "شهر" : "Month",
-    year: isArabic ? "سنة" : "Year",
-
-    standard: isArabic ? "قياسي" : "Standard",
-    customer: isArabic ? "عميل" : "Customer",
-    agent: isArabic ? "مندوب" : "Agent",
-    provider: isArabic ? "مقدم خدمة" : "Provider",
-    contract: isArabic ? "عقد" : "Contract",
-    promotional: isArabic ? "ترويجي" : "Promotional",
-
-    remove: isArabic ? "حذف" : "Remove",
-    activeItem: isArabic ? "نشط" : "Active",
-
-    requiredName: isArabic ? "اسم المنتج مطلوب" : "Product name is required",
-    requiredPrice: isArabic ? "السعر الأساسي مطلوب" : "Base price is required",
-    invalidRecurring: isArabic
-      ? "المنتج المتكرر يحتاج مدة ووحدة مدة صحيحة"
-      : "Recurring product requires a valid duration value and unit",
-    invalidCardDuration: isArabic
-      ? "البطاقة أو العضوية تحتاج مدة ووحدة مدة صحيحة"
-      : "Card or membership requires a valid duration value and unit",
-    invalidProviderBinding: isArabic
-      ? "المنتج الذي يتطلب مقدم خدمة يجب أن يكون قابلًا للاستخدام في العقود"
-      : "Product requiring provider must be usable in contracts",
-    loadCategoriesError: isArabic
-      ? "تعذر تحميل تصنيفات المنتجات"
-      : "Could not load product categories",
-    createSuccess: isArabic ? "تم إنشاء المنتج بنجاح" : "Product created successfully",
-    createError: isArabic ? "تعذر إنشاء المنتج" : "Could not create product",
-
-    placeholderName: isArabic ? "مثال: بطاقة الرعاية الذهبية" : "Example: Gold Care Card",
-    placeholderShort: isArabic
-      ? "وصف مختصر يظهر في القائمة..."
-      : "Short description shown in list...",
-    placeholderDescription: isArabic
-      ? "اكتب وصف المنتج التفصيلي..."
-      : "Write detailed product description...",
-    placeholderTerms: isArabic ? "اكتب الشروط والأحكام..." : "Write terms and conditions...",
-    placeholderFeatures: isArabic
-      ? "اكتب الخصائص، كل خاصية في سطر..."
-      : "Write features, one per line...",
-    placeholderTags: isArabic ? "بطاقة، رعاية، خصومات" : "card, care, discounts",
-    unnamed: isArabic ? "منتج جديد" : "New Product",
+    pricing_tiers: parseLines(formData.pricing_tiers_text),
+    service_items: parseLines(formData.service_items_text),
+    notes: formData.notes.trim(),
   };
 }
 
-function TextAreaField({
-  value,
-  onChange,
-  placeholder,
-  rows = 4,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  rows?: number;
-}) {
+function hasFormChanges(formData: ProductFormData) {
+  return JSON.stringify(formData) !== JSON.stringify(initialFormData);
+}
+
+function resolveCreatedId(result: CreateProductApiResponse) {
   return (
-    <textarea
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      rows={rows}
-      className="min-h-[110px] w-full rounded-2xl border border-input bg-background/70 px-3 py-2 text-sm shadow-sm outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-    />
+    result.product?.id ||
+    result.data?.product?.id ||
+    result.data?.id ||
+    result.id ||
+    null
   );
 }
 
-function SelectField({
-  value,
-  onChange,
+function mapApiFieldErrors(
+  errors: CreateProductApiResponse["errors"],
+): ProductFormErrors {
+  const nextErrors: ProductFormErrors = {};
+
+  if (!errors) return nextErrors;
+
+  Object.entries(errors).forEach(([key, value]) => {
+    const message = Array.isArray(value) ? value[0] : value;
+
+    if (!message) return;
+
+    if (key === "name") nextErrors.name = String(message);
+    if (key === "code") nextErrors.code = String(message);
+    if (key === "slug") nextErrors.slug = String(message);
+    if (key === "product_type" || key === "type") {
+      nextErrors.product_type = String(message);
+    }
+    if (key === "status") nextErrors.status = String(message);
+    if (key === "price" || key === "base_price") nextErrors.price = String(message);
+    if (key === "sale_price") nextErrors.sale_price = String(message);
+    if (key === "tax_rate") nextErrors.tax_rate = String(message);
+    if (key === "duration_value") nextErrors.duration_value = String(message);
+    if (key === "max_discount_rate") nextErrors.max_discount_rate = String(message);
+    if (key === "default_agent_commission_rate") {
+      nextErrors.default_agent_commission_rate = String(message);
+    }
+  });
+
+  return nextErrors;
+}
+
+function formatNumber(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0";
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(numericValue);
+}
+
+function formatMoney(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0.00";
+
+  return numericValue.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function SarAmount({ value }: { value: number | string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span>{formatMoney(value)}</span>
+      <Image
+        src={SAR_ICON_PATH}
+        alt=""
+        width={14}
+        height={14}
+        className="h-3.5 w-3.5"
+      />
+    </span>
+  );
+}
+
+/* ============================================================
+   Small UI
+============================================================ */
+
+function FieldBlock({
+  label,
+  error,
+  required,
   children,
 }: {
-  value: string;
-  onChange: (value: string) => void;
-  children: React.ReactNode;
+  label: string;
+  error?: string;
+  required?: boolean;
+  children: ReactNode;
 }) {
   return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="h-10 w-full rounded-2xl border border-input bg-background/70 px-3 text-sm shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
-    >
+    <div className="space-y-2">
+      <Label className="text-sm font-medium">
+        {label}
+        {required ? <span className="ms-1 text-destructive">*</span> : null}
+      </Label>
+
       {children}
-    </select>
+
+      {error ? <p className="text-xs font-medium text-destructive">{error}</p> : null}
+    </div>
   );
 }
 
-export default function SystemProductsCreatePage() {
+function ToggleBox({
+  checked,
+  disabled,
+  title,
+  description,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  title: string;
+  description: string;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-xl border bg-background p-4">
+      <Checkbox
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(value) => onChange(Boolean(value))}
+      />
+
+      <div>
+        <p className="text-sm font-semibold">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </label>
+  );
+}
+
+function SummaryItem({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border bg-background p-3">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+        <Icon className="h-4 w-4" />
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="mt-1 truncate text-sm font-semibold">{value || "-"}</p>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Page
+============================================================ */
+
+export default function SystemCreateProductPage() {
   const router = useRouter();
+  const auth = useAuth() as unknown;
 
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [form, setForm] = useState<ProductForm>(initialForm);
-  const [categories, setCategories] = useState<ProductCategory[]>([]);
-  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const [formData, setFormData] = useState<ProductFormData>(initialFormData);
+  const [errors, setErrors] = useState<ProductFormErrors>({});
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const t = dictionary(locale);
+  const t = useMemo(() => dictionary(locale), [locale]);
+  const isArabic = locale === "ar";
+  const isDirty = useMemo(() => hasFormChanges(formData), [formData]);
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readStoredLocale();
+  const authResolving = isAuthResolving(auth);
 
-      setLocale(nextLocale);
+  const canCreateProducts = hasSafePermission(
+    auth,
+    ["products.create"],
+    "action",
+  );
 
-      document.documentElement.lang = nextLocale;
-      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
-      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
-    };
+  const canViewProducts = hasSafePermission(
+    auth,
+    ["products.view", "products.list"],
+    "view",
+  );
 
-    syncLocale();
+  const completedFields = useMemo(() => {
+    const keys: Array<keyof ProductFormData> = [
+      "name",
+      "code",
+      "slug",
+      "product_type",
+      "status",
+      "category_name",
+      "price",
+      "billing_type",
+      "fulfillment_type",
+      "duration_value",
+      "tax_rate",
+      "max_discount_rate",
+      "default_agent_commission_rate",
+    ];
 
-    window.addEventListener("primey-locale-changed", syncLocale);
-    window.addEventListener("storage", syncLocale);
+    return keys.filter((key) => {
+      const value = formData[key];
 
-    const timer = window.setTimeout(syncLocale, 100);
+      if (typeof value === "boolean") return value;
+      return String(value || "").trim().length > 0;
+    }).length;
+  }, [formData]);
 
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncLocale);
-      window.removeEventListener("storage", syncLocale);
-      window.clearTimeout(timer);
-    };
-  }, []);
+  const progressPercent = Math.round((completedFields / 13) * 100);
 
-  useEffect(() => {
-    async function loadCategories() {
-      setIsLoadingCategories(true);
+  const effectivePrice = useMemo(() => {
+    const salePrice = toNumber(formData.sale_price);
+    const basePrice = toNumber(formData.price);
 
-      try {
-        const response = await fetch("/api/products/categories/?page_size=100", {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-          },
-        });
+    return salePrice > 0 ? salePrice : basePrice;
+  }, [formData.price, formData.sale_price]);
 
-        const payload = (await response.json().catch(() => ({}))) as CategoriesApiResponse;
+  const isReadyToSave =
+    formData.name.trim().length > 0 &&
+    formData.code.trim().length > 0 &&
+    isValidNumber(formData.price);
 
-        if (!response.ok || payload.ok === false) {
-          throw new Error(payload.message || t.loadCategoriesError);
-        }
-
-        const rows = Array.isArray(payload.results)
-          ? payload.results
-          : Array.isArray(payload.data)
-            ? payload.data
-            : [];
-
-        setCategories(rows);
-      } catch (error) {
-        console.error("Failed to load product categories:", error);
-        toast.error(t.loadCategoriesError);
-        setCategories([]);
-      } finally {
-        setIsLoadingCategories(false);
-      }
-    }
-
-    loadCategories();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const selectedCategory = useMemo(() => {
-    return categories.find((item) => String(item.id) === String(form.category_id));
-  }, [categories, form.category_id]);
-
-  const productTypeOptions: Array<{ value: ProductType; label: string }> = [
-    { value: "membership", label: t.membership },
-    { value: "card", label: t.card },
-    { value: "program", label: t.program },
-    { value: "service", label: t.service },
-    { value: "other", label: t.other },
-  ];
-
-  const statusOptions: Array<{ value: ProductStatus; label: string }> = [
-    { value: "draft", label: t.draft },
-    { value: "active", label: t.active },
-    { value: "inactive", label: t.inactive },
-    { value: "archived", label: t.archived },
-  ];
-
-  const billingOptions: Array<{ value: BillingType; label: string }> = [
-    { value: "one_time", label: t.oneTime },
-    { value: "recurring", label: t.recurring },
-  ];
-
-  const durationOptions: Array<{ value: DurationUnit; label: string }> = [
-    { value: "none", label: t.none },
-    { value: "day", label: t.day },
-    { value: "month", label: t.month },
-    { value: "year", label: t.year },
-  ];
-
-  const fulfillmentOptions: Array<{ value: FulfillmentType; label: string }> = [
-    { value: "digital", label: t.digital },
-    { value: "physical", label: t.physical },
-    { value: "both", label: t.both },
-    { value: "service_based", label: t.serviceBased },
-    { value: "none", label: t.fulfillmentNone },
-  ];
-
-  const pricingTypeOptions: Array<{ value: PricingType; label: string }> = [
-    { value: "standard", label: t.standard },
-    { value: "customer", label: t.customer },
-    { value: "agent", label: t.agent },
-    { value: "provider", label: t.provider },
-    { value: "contract", label: t.contract },
-    { value: "promotional", label: t.promotional },
-  ];
-
-  function updateField<K extends keyof ProductForm>(key: K, value: ProductForm[K]) {
-    setForm((current) => ({
+  function updateField<K extends keyof ProductFormData>(
+    key: K,
+    value: ProductFormData[K],
+  ) {
+    setFormData((current) => ({
       ...current,
       [key]: value,
     }));
-  }
 
-  function addBenefit() {
-    setForm((current) => ({
+    setErrors((current) => ({
       ...current,
-      benefits: [
-        ...current.benefits,
-        {
-          title: "",
-          description: "",
-          sort_order: String(current.benefits.length),
-          is_active: true,
-        },
-      ],
+      [key]: undefined,
     }));
-  }
 
-  function updateBenefit(index: number, patch: Partial<BenefitForm>) {
-    setForm((current) => ({
-      ...current,
-      benefits: current.benefits.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, ...patch } : item
-      ),
-    }));
-  }
-
-  function removeBenefit(index: number) {
-    setForm((current) => ({
-      ...current,
-      benefits: current.benefits.filter((_, itemIndex) => itemIndex !== index),
-    }));
-  }
-
-  function addTier() {
-    setForm((current) => ({
-      ...current,
-      pricing_tiers: [
-        ...current.pricing_tiers,
-        {
-          name: "",
-          pricing_type: "standard",
-          currency_code: "SAR",
-          price: "",
-          sale_price: "",
-          min_quantity: "1",
-          max_quantity: "",
-          discount_rate: "0",
-          agent_commission_rate: "0",
-          provider_share_rate: "0",
-          system_share_rate: "0",
-          starts_at: "",
-          ends_at: "",
-          sort_order: String(current.pricing_tiers.length),
-          is_active: true,
-        },
-      ],
-    }));
-  }
-
-  function updateTier(index: number, patch: Partial<PricingTierForm>) {
-    setForm((current) => ({
-      ...current,
-      pricing_tiers: current.pricing_tiers.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, ...patch } : item
-      ),
-    }));
-  }
-
-  function removeTier(index: number) {
-    setForm((current) => ({
-      ...current,
-      pricing_tiers: current.pricing_tiers.filter((_, itemIndex) => itemIndex !== index),
-    }));
-  }
-
-  function addServiceItem() {
-    setForm((current) => ({
-      ...current,
-      service_items: [
-        ...current.service_items,
-        {
-          name: "",
-          description: "",
-          included_quantity: "1",
-          unit_price: "0",
-          discount_rate: "0",
-          requires_provider: true,
-          is_optional: false,
-          is_active: true,
-          sort_order: String(current.service_items.length),
-        },
-      ],
-    }));
-  }
-
-  function updateServiceItem(index: number, patch: Partial<ServiceItemForm>) {
-    setForm((current) => ({
-      ...current,
-      service_items: current.service_items.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, ...patch } : item
-      ),
-    }));
-  }
-
-  function removeServiceItem(index: number) {
-    setForm((current) => ({
-      ...current,
-      service_items: current.service_items.filter((_, itemIndex) => itemIndex !== index),
-    }));
+    if (submitError) {
+      setSubmitError("");
+    }
   }
 
   function validateForm() {
-    if (!form.name.trim()) {
-      toast.error(t.requiredName);
-      return false;
+    const nextErrors: ProductFormErrors = {};
+
+    const basePrice = toNumber(formData.price);
+    const salePrice = toNumber(formData.sale_price);
+
+    if (!formData.name.trim()) {
+      nextErrors.name = t.validation.name;
     }
 
-    if (!form.price.trim()) {
-      toast.error(t.requiredPrice);
-      return false;
+    if (!formData.code.trim()) {
+      nextErrors.code = t.validation.code;
+    }
+
+    if (!isValidNumber(formData.price)) {
+      nextErrors.price = t.validation.price;
+    }
+
+    if (!isValidNumber(formData.sale_price)) {
+      nextErrors.sale_price = t.validation.salePrice;
     }
 
     if (
-      form.billing_type === "recurring" &&
-      (normalizeInt(form.duration_value, 0) <= 0 || form.duration_unit === "none")
+      formData.sale_price.trim() &&
+      salePrice > 0 &&
+      basePrice > 0 &&
+      salePrice > basePrice
     ) {
-      toast.error(t.invalidRecurring);
-      return false;
+      nextErrors.sale_price = t.validation.saleGreater;
     }
 
-    if (
-      (form.product_type === "card" || form.product_type === "membership") &&
-      (normalizeInt(form.duration_value, 0) <= 0 || form.duration_unit === "none")
-    ) {
-      toast.error(t.invalidCardDuration);
-      return false;
+    if (!isValidNumber(formData.duration_value)) {
+      nextErrors.duration_value = t.validation.duration;
     }
 
-    if (form.requires_provider && !form.can_be_used_in_contracts) {
-      toast.error(t.invalidProviderBinding);
-      return false;
+    if (!isPercent(formData.tax_rate)) {
+      nextErrors.tax_rate = t.validation.percent;
     }
 
-    return true;
+    if (!isPercent(formData.max_discount_rate)) {
+      nextErrors.max_discount_rate = t.validation.percent;
+    }
+
+    if (!isPercent(formData.default_agent_commission_rate)) {
+      nextErrors.default_agent_commission_rate = t.validation.percent;
+    }
+
+    setErrors(nextErrors);
+
+    return Object.keys(nextErrors).length === 0;
   }
 
-  function buildPayload() {
-    const benefits = form.benefits
-      .filter((item) => item.title.trim())
-      .map((item) => ({
-        title: item.title.trim(),
-        description: item.description.trim(),
-        sort_order: normalizeInt(item.sort_order, 0),
-        is_active: item.is_active,
-      }));
+  async function submitForm() {
+    setSubmitError("");
 
-    const pricingTiers = form.pricing_tiers
-      .filter((item) => item.name.trim())
-      .map((item) => ({
-        name: item.name.trim(),
-        pricing_type: item.pricing_type,
-        currency_code: "SAR",
-        price: normalizeDecimal(item.price) || "0",
-        sale_price: normalizeDecimal(item.sale_price),
-        min_quantity: normalizeInt(item.min_quantity, 1),
-        max_quantity: item.max_quantity.trim() ? normalizeInt(item.max_quantity, 0) : null,
-        discount_rate: normalizeDecimal(item.discount_rate) || "0",
-        agent_commission_rate: normalizeDecimal(item.agent_commission_rate) || "0",
-        provider_share_rate: normalizeDecimal(item.provider_share_rate) || "0",
-        system_share_rate: normalizeDecimal(item.system_share_rate) || "0",
-        starts_at: normalizeDateTimeLocal(item.starts_at),
-        ends_at: normalizeDateTimeLocal(item.ends_at),
-        sort_order: normalizeInt(item.sort_order, 0),
-        is_active: item.is_active,
-      }));
-
-    const serviceItems = form.service_items
-      .filter((item) => item.name.trim())
-      .map((item) => ({
-        name: item.name.trim(),
-        description: item.description.trim(),
-        included_quantity: normalizeInt(item.included_quantity, 1),
-        unit_price: normalizeDecimal(item.unit_price) || "0",
-        discount_rate: normalizeDecimal(item.discount_rate) || "0",
-        requires_provider: item.requires_provider,
-        is_optional: item.is_optional,
-        is_active: item.is_active,
-        sort_order: normalizeInt(item.sort_order, 0),
-      }));
-
-    return {
-      name: form.name.trim(),
-      category_id: form.category_id || null,
-      product_type: form.product_type,
-      status: form.status,
-      billing_type: form.billing_type,
-      fulfillment_type: form.fulfillment_type,
-
-      short_description: form.short_description.trim(),
-      description: form.description.trim(),
-      terms_and_conditions: form.terms_and_conditions.trim(),
-      features: form.features.trim(),
-      tags: form.tags.trim(),
-
-      currency_code: "SAR",
-      price: normalizeDecimal(form.price) || "0",
-      sale_price: normalizeDecimal(form.sale_price),
-      cost_price: normalizeDecimal(form.cost_price),
-      is_taxable: form.is_taxable,
-      tax_rate: normalizeDecimal(form.tax_rate) || "0",
-
-      duration_value: normalizeInt(form.duration_value, 0),
-      duration_unit: form.duration_unit,
-
-      is_public: form.is_public,
-      is_featured: form.is_featured,
-      requires_approval: form.requires_approval,
-      allow_online_purchase: form.allow_online_purchase,
-      allow_agent_sale: form.allow_agent_sale,
-      allow_provider_sale: form.allow_provider_sale,
-      can_be_ordered: form.can_be_ordered,
-      can_be_used_in_contracts: form.can_be_used_in_contracts,
-      requires_provider: form.requires_provider,
-
-      max_discount_rate: normalizeDecimal(form.max_discount_rate) || "0",
-      default_agent_commission_rate: normalizeDecimal(form.default_agent_commission_rate) || "0",
-      sort_order: normalizeInt(form.sort_order, 0),
-
-      benefits,
-      pricing_tiers: pricingTiers,
-      service_items: serviceItems,
-    };
-  }
-
-  async function handleSubmit() {
-    if (!validateForm()) return;
-
-    setIsSaving(true);
+    if (!validateForm()) {
+      toast.error(t.validationToast);
+      return;
+    }
 
     try {
-      const response = await fetch("/api/products/", {
+      setIsSubmitting(true);
+
+      const csrfToken = readCookie("csrftoken");
+
+      const response = await fetch(apiUrl("/api/products/create/"), {
         method: "POST",
         credentials: "include",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          "X-CSRFToken": getCookie("csrftoken"),
+          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
         },
-        body: JSON.stringify(buildPayload()),
+        body: JSON.stringify(normalizePayload(formData)),
       });
 
-      const payload = (await response.json().catch(() => ({}))) as ProductApiResponse;
+      const result = (await response.json().catch(() => null)) as
+        | CreateProductApiResponse
+        | null;
 
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.message || t.createError);
+      if (!response.ok || result?.ok === false) {
+        const apiErrors = mapApiFieldErrors(result?.errors);
+        const message = result?.message || t.apiError;
+
+        setErrors((current) => ({
+          ...current,
+          ...apiErrors,
+        }));
+
+        setSubmitError(message);
+        toast.error(message);
+        return;
       }
 
-      toast.success(payload.message || t.createSuccess);
+      const createdId = result ? resolveCreatedId(result) : null;
+
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+      toast.success(t.success);
+
+      if (createdId) {
+        router.push(`/system/products/${createdId}`);
+        return;
+      }
+
       router.push("/system/products/list");
-      router.refresh();
     } catch (error) {
-      console.error("Failed to create product:", error);
-      toast.error(error instanceof Error ? error.message : t.createError);
+      console.error("Create product error:", error);
+      setSubmitError(t.apiError);
+      toast.error(t.apiError);
     } finally {
-      setIsSaving(false);
+      setIsSubmitting(false);
     }
   }
 
-  const selectedTypeLabel =
-    productTypeOptions.find((item) => item.value === form.product_type)?.label || t.program;
+  function saveDraft() {
+    try {
+      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(formData));
+      toast.success(t.draftSaved);
+    } catch (error) {
+      console.error("Save product draft error:", error);
+      toast.error(t.apiError);
+    }
+  }
 
-  const selectedStatusLabel =
-    statusOptions.find((item) => item.value === form.status)?.label || t.draft;
+  function restoreDraft() {
+    try {
+      const rawDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
 
-  const selectedBillingLabel =
-    billingOptions.find((item) => item.value === form.billing_type)?.label || t.oneTime;
+      if (!rawDraft) {
+        toast.error(t.noDraft);
+        return;
+      }
 
-  const selectedFulfillmentLabel =
-    fulfillmentOptions.find((item) => item.value === form.fulfillment_type)?.label || t.digital;
+      const parsed = JSON.parse(rawDraft) as ProductFormData;
+
+      setFormData({
+        ...initialFormData,
+        ...parsed,
+      });
+
+      setErrors({});
+      setSubmitError("");
+      toast.success(t.draftRestored);
+    } catch (error) {
+      console.error("Restore product draft error:", error);
+      toast.error(t.apiError);
+    }
+  }
+
+  function clearForm() {
+    if (isDirty && !window.confirm(t.confirmClear)) return;
+
+    setFormData(initialFormData);
+    setErrors({});
+    setSubmitError("");
+    toast.success(t.formCleared);
+  }
+
+  function confirmNavigate(path: string) {
+    if (isSubmitting) return;
+
+    if (isDirty && !window.confirm(t.confirmLeave)) {
+      return;
+    }
+
+    router.push(path);
+  }
+
+  useEffect(() => {
+    const syncLocale = () => {
+      const nextLocale = readLocale();
+
+      applyDocumentLocale(nextLocale);
+      setLocale(nextLocale);
+    };
+
+    const syncAfterPaint = () => {
+      syncLocale();
+
+      window.setTimeout(() => {
+        syncLocale();
+      }, 0);
+    };
+
+    syncAfterPaint();
+
+    window.addEventListener("primey-locale-changed", syncAfterPaint);
+    window.addEventListener("storage", syncAfterPaint);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", syncAfterPaint);
+      window.removeEventListener("storage", syncAfterPaint);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirty || isSubmitting) return;
+
+      event.preventDefault();
+      event.returnValue = t.confirmLeave;
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [isDirty, isSubmitting, t.confirmLeave]);
+
+  if (!authResolving && !canCreateProducts) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <Card className="overflow-hidden rounded-3xl border-white/20 bg-white/70 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-        <CardContent className="p-6 md:p-7">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge className="rounded-full px-3 py-1">{t.badge1}</Badge>
-                <Badge variant="secondary" className="rounded-full px-3 py-1">
-                  {t.badge2}
-                </Badge>
-              </div>
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      {/* Header */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+            {t.title}
+          </h1>
 
-              <div className="space-y-2">
-                <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-                  {t.title}
-                </h1>
-                <p className="max-w-3xl text-sm leading-7 text-muted-foreground">
-                  {t.subtitle}
-                </p>
-              </div>
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-xl sm:w-auto"
+            disabled={isSubmitting}
+            onClick={() => confirmNavigate("/system/products")}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span>{t.back}</span>
+          </Button>
+
+          {canViewProducts ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+              disabled={isSubmitting}
+              onClick={() => confirmNavigate("/system/products/list")}
+            >
+              <ClipboardList className="h-4 w-4" />
+              <span>{t.productsList}</span>
+            </Button>
+          ) : null}
+
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-xl sm:w-auto"
+            disabled={isSubmitting}
+            onClick={saveDraft}
+          >
+            <Save className="h-4 w-4" />
+            <span>{t.saveDraft}</span>
+          </Button>
+
+          <Button
+            type="button"
+            className="h-10 w-full rounded-xl sm:w-auto"
+            disabled={isSubmitting}
+            onClick={submitForm}
+          >
+            {isSubmitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            <span>{isSubmitting ? t.saving : t.create}</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* Submit Error */}
+      {submitError ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5 text-destructive">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <p className="font-semibold">{t.formErrorTitle}</p>
+              <p className="mt-1 text-sm">{submitError}</p>
             </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
-            <div className="flex flex-wrap gap-2">
-              <Button asChild variant="outline" className="rounded-2xl">
-                <Link href="/system/products">
-                  <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
-                  {t.dashboard}
-                </Link>
-              </Button>
-
-              <Button asChild variant="outline" className="rounded-2xl">
-                <Link href="/system/products/list">
-                  <Layers3 className="h-4 w-4" />
-                  {t.list}
-                </Link>
-              </Button>
-
-              <Button
-                type="button"
-                className="rounded-2xl"
-                onClick={handleSubmit}
-                disabled={isSaving}
-              >
-                {isSaving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4" />
-                )}
-                {isSaving ? t.saving : t.save}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-        <div className="space-y-6">
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Package className="h-5 w-5 text-primary" />
-                {t.mainInfo}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        {/* Main Form */}
+        <div className="space-y-4">
+          {/* Basic Info */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <Package className="h-4 w-4" />
+                {t.basicInfo}
               </CardTitle>
-              <CardDescription>{t.mainInfoDesc}</CardDescription>
+              <CardDescription>{t.basicDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2 md:col-span-2">
-                <Label>{t.name}</Label>
+              <FieldBlock label={t.fields.name} error={errors.name} required>
                 <Input
-                  value={form.name}
+                  value={formData.name}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.name}
+                  className="h-10 rounded-xl"
                   onChange={(event) => updateField("name", event.target.value)}
-                  placeholder={t.placeholderName}
-                  className="rounded-2xl bg-background/70"
                 />
-              </div>
+              </FieldBlock>
 
-              <div className="space-y-2">
-                <Label>{t.category}</Label>
-                <SelectField
-                  value={form.category_id}
-                  onChange={(value) => updateField("category_id", value)}
-                >
-                  <option value="">
-                    {isLoadingCategories ? t.loadingCategories : t.chooseCategory}
-                  </option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={String(category.id)}>
-                      {category.name || category.code || category.id}
-                    </option>
-                  ))}
-                </SelectField>
-              </div>
+              <FieldBlock label={t.fields.code} error={errors.code} required>
+                <Input
+                  value={formData.code}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.code}
+                  className="h-10 rounded-xl"
+                  onChange={(event) => updateField("code", event.target.value)}
+                  onBlur={() => updateField("code", normalizeCode(formData.code))}
+                />
+              </FieldBlock>
 
-              <div className="space-y-2">
-                <Label>{t.productType}</Label>
-                <SelectField
-                  value={form.product_type}
-                  onChange={(value) => {
-                    const nextType = value as ProductType;
+              <FieldBlock label={t.fields.slug} error={errors.slug}>
+                <Input
+                  value={formData.slug}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.slug}
+                  className="h-10 rounded-xl"
+                  dir="ltr"
+                  onChange={(event) => updateField("slug", event.target.value)}
+                  onBlur={() =>
+                    updateField("slug", normalizeSlug(formData.slug || formData.name))
+                  }
+                />
+              </FieldBlock>
 
-                    setForm((current) => ({
-                      ...current,
-                      product_type: nextType,
-                      fulfillment_type:
-                        nextType === "service" ? "service_based" : current.fulfillment_type,
-                      requires_provider:
-                        nextType === "service" || nextType === "program"
-                          ? true
-                          : current.requires_provider,
-                      can_be_used_in_contracts:
-                        nextType === "service" || nextType === "program"
-                          ? true
-                          : current.can_be_used_in_contracts,
-                    }));
-                  }}
-                >
-                  {productTypeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </SelectField>
-              </div>
+              <FieldBlock label={t.fields.category} error={errors.category_name}>
+                <Input
+                  value={formData.category_name}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.category}
+                  className="h-10 rounded-xl"
+                  onChange={(event) =>
+                    updateField("category_name", event.target.value)
+                  }
+                />
+              </FieldBlock>
 
-              <div className="space-y-2">
-                <Label>{t.status}</Label>
-                <SelectField
-                  value={form.status}
-                  onChange={(value) => updateField("status", value as ProductStatus)}
-                >
-                  {statusOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </SelectField>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.billingType}</Label>
-                <SelectField
-                  value={form.billing_type}
-                  onChange={(value) => {
-                    const nextValue = value as BillingType;
-                    setForm((current) => ({
-                      ...current,
-                      billing_type: nextValue,
-                      duration_unit:
-                        nextValue === "one_time" &&
-                        current.product_type !== "card" &&
-                        current.product_type !== "membership"
-                          ? "none"
-                          : current.duration_unit,
-                      duration_value:
-                        nextValue === "one_time" &&
-                        current.product_type !== "card" &&
-                        current.product_type !== "membership"
-                          ? "0"
-                          : current.duration_value,
-                    }));
-                  }}
-                >
-                  {billingOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </SelectField>
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label>{t.fulfillmentType}</Label>
-                <SelectField
-                  value={form.fulfillment_type}
-                  onChange={(value) =>
-                    updateField("fulfillment_type", value as FulfillmentType)
+              <FieldBlock label={t.fields.type} error={errors.product_type}>
+                <select
+                  value={formData.product_type}
+                  disabled={isSubmitting}
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  onChange={(event) =>
+                    updateField("product_type", event.target.value as ProductType)
                   }
                 >
-                  {fulfillmentOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
+                  {Object.entries(t.productTypes).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
                     </option>
                   ))}
-                </SelectField>
-              </div>
+                </select>
+              </FieldBlock>
+
+              <FieldBlock label={t.fields.status} error={errors.status}>
+                <select
+                  value={formData.status}
+                  disabled={isSubmitting}
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  onChange={(event) =>
+                    updateField("status", event.target.value as ProductStatus)
+                  }
+                >
+                  {Object.entries(t.statuses).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </FieldBlock>
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-primary" />
-                {t.marketingInfo}
+          {/* Description */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <FileText className="h-4 w-4" />
+                {t.descriptionInfo}
               </CardTitle>
-              <CardDescription>{t.marketingInfoDesc}</CardDescription>
+              <CardDescription>{t.descriptionDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="grid gap-4">
-              <div className="space-y-2">
-                <Label>{t.shortDescription}</Label>
+              <FieldBlock
+                label={t.fields.shortDescription}
+                error={errors.short_description}
+              >
                 <Input
-                  value={form.short_description}
+                  value={formData.short_description}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.shortDescription}
+                  className="h-10 rounded-xl"
                   onChange={(event) =>
                     updateField("short_description", event.target.value)
                   }
-                  placeholder={t.placeholderShort}
-                  className="rounded-2xl bg-background/70"
                 />
-              </div>
+              </FieldBlock>
 
-              <div className="space-y-2">
-                <Label>{t.description}</Label>
-                <TextAreaField
-                  value={form.description}
-                  onChange={(value) => updateField("description", value)}
-                  placeholder={t.placeholderDescription}
-                  rows={5}
-                />
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>{t.features}</Label>
-                  <TextAreaField
-                    value={form.features}
-                    onChange={(value) => updateField("features", value)}
-                    placeholder={t.placeholderFeatures}
-                    rows={4}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>{t.terms}</Label>
-                  <TextAreaField
-                    value={form.terms_and_conditions}
-                    onChange={(value) => updateField("terms_and_conditions", value)}
-                    placeholder={t.placeholderTerms}
-                    rows={4}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.tags}</Label>
-                <Input
-                  value={form.tags}
-                  onChange={(event) => updateField("tags", event.target.value)}
-                  placeholder={t.placeholderTags}
-                  className="rounded-2xl bg-background/70"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BadgeCheck className="h-5 w-5 text-primary" />
-                {t.pricingInfo}
-              </CardTitle>
-              <CardDescription>{t.pricingInfoDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>{t.price}</Label>
-                <div className="relative">
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.price}
-                    onChange={(event) => updateField("price", event.target.value)}
-                    className="rounded-2xl bg-background/70 ltr:pr-10 rtl:pl-10"
-                  />
-                  <Image
-                    src={SAR_ICON_PATH}
-                    alt="SAR"
-                    width={16}
-                    height={16}
-                    className="absolute top-1/2 -translate-y-1/2 opacity-70 ltr:right-3 rtl:left-3"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.salePrice}</Label>
-                <div className="relative">
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.sale_price}
-                    onChange={(event) => updateField("sale_price", event.target.value)}
-                    className="rounded-2xl bg-background/70 ltr:pr-10 rtl:pl-10"
-                  />
-                  <Image
-                    src={SAR_ICON_PATH}
-                    alt="SAR"
-                    width={16}
-                    height={16}
-                    className="absolute top-1/2 -translate-y-1/2 opacity-70 ltr:right-3 rtl:left-3"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.costPrice}</Label>
-                <div className="relative">
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.cost_price}
-                    onChange={(event) => updateField("cost_price", event.target.value)}
-                    className="rounded-2xl bg-background/70 ltr:pr-10 rtl:pl-10"
-                  />
-                  <Image
-                    src={SAR_ICON_PATH}
-                    alt="SAR"
-                    width={16}
-                    height={16}
-                    className="absolute top-1/2 -translate-y-1/2 opacity-70 ltr:right-3 rtl:left-3"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.taxRate}</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  value={form.tax_rate}
-                  onChange={(event) => updateField("tax_rate", event.target.value)}
-                  className="rounded-2xl bg-background/70"
-                />
-              </div>
-
-              <div className="flex items-center gap-3 rounded-2xl border bg-background/50 p-4 md:col-span-2">
-                <Checkbox
-                  checked={form.is_taxable}
-                  onCheckedChange={(checked) =>
-                    updateField("is_taxable", Boolean(checked))
+              <FieldBlock label={t.fields.description} error={errors.description}>
+                <Textarea
+                  value={formData.description}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.description}
+                  className="min-h-28 rounded-xl"
+                  onChange={(event) =>
+                    updateField("description", event.target.value)
                   }
                 />
-                <Label className="cursor-pointer">{t.isTaxable}</Label>
-              </div>
-            </CardContent>
-          </Card>
+              </FieldBlock>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Boxes className="h-5 w-5 text-primary" />
-                {t.durationInfo}
-              </CardTitle>
-              <CardDescription>{t.durationInfoDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label>{t.durationValue}</Label>
+              <FieldBlock label={t.fields.tags} error={errors.tags}>
                 <Input
-                  type="number"
-                  min="0"
-                  value={form.duration_value}
-                  onChange={(event) => updateField("duration_value", event.target.value)}
-                  className="rounded-2xl bg-background/70"
+                  value={formData.tags}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.tags}
+                  className="h-10 rounded-xl"
+                  onChange={(event) => updateField("tags", event.target.value)}
                 />
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.durationUnit}</Label>
-                <SelectField
-                  value={form.duration_unit}
-                  onChange={(value) => updateField("duration_unit", value as DurationUnit)}
-                >
-                  {durationOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </SelectField>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.sortOrder}</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  value={form.sort_order}
-                  onChange={(event) => updateField("sort_order", event.target.value)}
-                  className="rounded-2xl bg-background/70"
-                />
-              </div>
+              </FieldBlock>
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-primary" />
-                {t.salesInfo}
+          {/* Pricing */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <CircleDollarSign className="h-4 w-4" />
+                {t.pricingInfo}
               </CardTitle>
-              <CardDescription>{t.salesInfoDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-3 md:grid-cols-2">
-              {[
-                ["is_public", t.isPublic],
-                ["is_featured", t.isFeatured],
-                ["requires_approval", t.requiresApproval],
-                ["allow_online_purchase", t.allowOnlinePurchase],
-                ["allow_agent_sale", t.allowAgentSale],
-                ["allow_provider_sale", t.allowProviderSale],
-                ["can_be_ordered", t.canBeOrdered],
-                ["can_be_used_in_contracts", t.canBeUsedInContracts],
-                ["requires_provider", t.requiresProvider],
-              ].map(([key, label]) => (
-                <div
-                  key={key}
-                  className="flex items-center gap-3 rounded-2xl border bg-background/50 p-4"
-                >
-                  <Checkbox
-                    checked={Boolean(form[key as keyof ProductForm])}
-                    onCheckedChange={(checked) =>
-                      updateField(key as keyof ProductForm, Boolean(checked) as never)
-                    }
-                  />
-                  <Label className="cursor-pointer">{label}</Label>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CreditCard className="h-5 w-5 text-primary" />
-                {t.commissionsInfo}
-              </CardTitle>
-              <CardDescription>{t.commissionsInfoDesc}</CardDescription>
+              <CardDescription>{t.pricingDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>{t.maxDiscountRate}</Label>
+              <FieldBlock label={t.fields.price} error={errors.price} required>
+                <div className="relative">
+                  <Input
+                    value={formData.price}
+                    disabled={isSubmitting}
+                    placeholder={t.placeholders.price}
+                    className={`h-10 rounded-xl ${isArabic ? "pl-10" : "pr-10"}`}
+                    onChange={(event) => updateField("price", event.target.value)}
+                    onBlur={() =>
+                      updateField("price", normalizeNumberString(formData.price))
+                    }
+                  />
+                  <Image
+                    src={SAR_ICON_PATH}
+                    alt=""
+                    width={16}
+                    height={16}
+                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
+                      isArabic ? "left-3" : "right-3"
+                    }`}
+                  />
+                </div>
+              </FieldBlock>
+
+              <FieldBlock label={t.fields.salePrice} error={errors.sale_price}>
+                <div className="relative">
+                  <Input
+                    value={formData.sale_price}
+                    disabled={isSubmitting}
+                    placeholder={t.placeholders.salePrice}
+                    className={`h-10 rounded-xl ${isArabic ? "pl-10" : "pr-10"}`}
+                    onChange={(event) =>
+                      updateField("sale_price", event.target.value)
+                    }
+                    onBlur={() =>
+                      updateField(
+                        "sale_price",
+                        formData.sale_price.trim()
+                          ? normalizeNumberString(formData.sale_price)
+                          : "",
+                      )
+                    }
+                  />
+                  <Image
+                    src={SAR_ICON_PATH}
+                    alt=""
+                    width={16}
+                    height={16}
+                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
+                      isArabic ? "left-3" : "right-3"
+                    }`}
+                  />
+                </div>
+              </FieldBlock>
+
+              <FieldBlock label={t.fields.billingType} error={errors.billing_type}>
+                <select
+                  value={formData.billing_type}
+                  disabled={isSubmitting}
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  onChange={(event) =>
+                    updateField("billing_type", event.target.value as BillingType)
+                  }
+                >
+                  {Object.entries(t.billingTypes).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </FieldBlock>
+
+              <FieldBlock
+                label={t.fields.fulfillmentType}
+                error={errors.fulfillment_type}
+              >
+                <select
+                  value={formData.fulfillment_type}
+                  disabled={isSubmitting}
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  onChange={(event) =>
+                    updateField(
+                      "fulfillment_type",
+                      event.target.value as FulfillmentType,
+                    )
+                  }
+                >
+                  {Object.entries(t.fulfillmentTypes).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </FieldBlock>
+
+              <FieldBlock
+                label={t.fields.durationValue}
+                error={errors.duration_value}
+              >
                 <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  value={form.max_discount_rate}
+                  value={formData.duration_value}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.durationValue}
+                  className="h-10 rounded-xl"
+                  onChange={(event) =>
+                    updateField("duration_value", event.target.value)
+                  }
+                />
+              </FieldBlock>
+
+              <FieldBlock label={t.fields.durationUnit} error={errors.duration_unit}>
+                <select
+                  value={formData.duration_unit}
+                  disabled={isSubmitting}
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  onChange={(event) =>
+                    updateField("duration_unit", event.target.value as DurationUnit)
+                  }
+                >
+                  {Object.entries(t.durationUnits).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </FieldBlock>
+
+              <FieldBlock label={t.fields.taxRate} error={errors.tax_rate}>
+                <Input
+                  value={formData.tax_rate}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.taxRate}
+                  className="h-10 rounded-xl"
+                  onChange={(event) => updateField("tax_rate", event.target.value)}
+                />
+              </FieldBlock>
+
+              <div className="flex items-end">
+                <ToggleBox
+                  checked={formData.is_taxable}
+                  disabled={isSubmitting}
+                  title={t.fields.taxable}
+                  description={`${t.fields.taxRate}: ${formData.tax_rate || "0"}%`}
+                  onChange={(value) => updateField("is_taxable", value)}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Readiness */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <ShieldCheck className="h-4 w-4" />
+                {t.availabilityInfo}
+              </CardTitle>
+              <CardDescription>{t.availabilityDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <ToggleBox
+                checked={formData.is_public}
+                disabled={isSubmitting}
+                title={t.fields.public}
+                description={t.fields.public}
+                onChange={(value) => updateField("is_public", value)}
+              />
+
+              <ToggleBox
+                checked={formData.is_featured}
+                disabled={isSubmitting}
+                title={t.fields.featured}
+                description={t.fields.featured}
+                onChange={(value) => updateField("is_featured", value)}
+              />
+
+              <ToggleBox
+                checked={formData.requires_approval}
+                disabled={isSubmitting}
+                title={t.fields.requiresApproval}
+                description={t.fields.requiresApproval}
+                onChange={(value) => updateField("requires_approval", value)}
+              />
+
+              <ToggleBox
+                checked={formData.can_be_ordered}
+                disabled={isSubmitting}
+                title={t.fields.canBeOrdered}
+                description={t.fields.canBeOrdered}
+                onChange={(value) => updateField("can_be_ordered", value)}
+              />
+
+              <ToggleBox
+                checked={formData.can_be_used_in_contracts}
+                disabled={isSubmitting}
+                title={t.fields.contractsReady}
+                description={t.fields.contractsReady}
+                onChange={(value) =>
+                  updateField("can_be_used_in_contracts", value)
+                }
+              />
+
+              <ToggleBox
+                checked={formData.requires_provider}
+                disabled={isSubmitting}
+                title={t.fields.requiresProvider}
+                description={t.fields.requiresProvider}
+                onChange={(value) => updateField("requires_provider", value)}
+              />
+
+              <ToggleBox
+                checked={formData.allow_online_purchase}
+                disabled={isSubmitting}
+                title={t.fields.onlinePurchase}
+                description={t.fields.onlinePurchase}
+                onChange={(value) => updateField("allow_online_purchase", value)}
+              />
+
+              <ToggleBox
+                checked={formData.allow_agent_sale}
+                disabled={isSubmitting}
+                title={t.fields.agentSale}
+                description={t.fields.agentSale}
+                onChange={(value) => updateField("allow_agent_sale", value)}
+              />
+
+              <ToggleBox
+                checked={formData.allow_provider_sale}
+                disabled={isSubmitting}
+                title={t.fields.providerSale}
+                description={t.fields.providerSale}
+                onChange={(value) => updateField("allow_provider_sale", value)}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Limits */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <Percent className="h-4 w-4" />
+                {t.limitsInfo}
+              </CardTitle>
+              <CardDescription>{t.limitsDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <FieldBlock
+                label={t.fields.maxDiscount}
+                error={errors.max_discount_rate}
+              >
+                <Input
+                  value={formData.max_discount_rate}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.maxDiscount}
+                  className="h-10 rounded-xl"
                   onChange={(event) =>
                     updateField("max_discount_rate", event.target.value)
                   }
-                  className="rounded-2xl bg-background/70"
                 />
-              </div>
+              </FieldBlock>
 
-              <div className="space-y-2">
-                <Label>{t.defaultAgentCommissionRate}</Label>
+              <FieldBlock
+                label={t.fields.agentCommission}
+                error={errors.default_agent_commission_rate}
+              >
                 <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  value={form.default_agent_commission_rate}
+                  value={formData.default_agent_commission_rate}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.agentCommission}
+                  className="h-10 rounded-xl"
                   onChange={(event) =>
-                    updateField("default_agent_commission_rate", event.target.value)
+                    updateField(
+                      "default_agent_commission_rate",
+                      event.target.value,
+                    )
                   }
-                  className="rounded-2xl bg-background/70"
                 />
-              </div>
+              </FieldBlock>
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-primary" />
-                  {t.benefitsInfo}
-                </CardTitle>
-                <CardDescription>{t.benefitsInfoDesc}</CardDescription>
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl"
-                onClick={addBenefit}
-              >
-                <Plus className="h-4 w-4" />
-                {t.addBenefit}
-              </Button>
+          {/* Advanced */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <Layers3 className="h-4 w-4" />
+                {t.advancedInfo}
+              </CardTitle>
+              <CardDescription>{t.advancedDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-3">
-              {form.benefits.map((benefit, index) => (
-                <div key={index} className="rounded-3xl border bg-background/50 p-4">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <Badge variant="secondary" className="rounded-full">
-                      {t.addBenefit} #{index + 1}
-                    </Badge>
+            <CardContent className="grid gap-4">
+              <FieldBlock
+                label={t.fields.pricingTiers}
+                error={errors.pricing_tiers_text}
+              >
+                <Textarea
+                  value={formData.pricing_tiers_text}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.pricingTiers}
+                  className="min-h-24 rounded-xl"
+                  onChange={(event) =>
+                    updateField("pricing_tiers_text", event.target.value)
+                  }
+                />
+              </FieldBlock>
 
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="rounded-xl text-destructive"
-                      onClick={() => removeBenefit(index)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      {t.remove}
-                    </Button>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-[1fr_120px]">
-                    <div className="space-y-2">
-                      <Label>{t.benefitTitle}</Label>
-                      <Input
-                        value={benefit.title}
-                        onChange={(event) =>
-                          updateBenefit(index, { title: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.sortOrder}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={benefit.sort_order}
-                        onChange={(event) =>
-                          updateBenefit(index, { sort_order: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>{t.benefitDescription}</Label>
-                      <TextAreaField
-                        value={benefit.description}
-                        onChange={(value) =>
-                          updateBenefit(index, { description: value })
-                        }
-                        rows={3}
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-3 rounded-2xl border bg-background/50 p-3 md:col-span-2">
-                      <Checkbox
-                        checked={benefit.is_active}
-                        onCheckedChange={(checked) =>
-                          updateBenefit(index, { is_active: Boolean(checked) })
-                        }
-                      />
-                      <Label>{t.activeItem}</Label>
-                    </div>
-                  </div>
-                </div>
-              ))}
+              <FieldBlock
+                label={t.fields.serviceItems}
+                error={errors.service_items_text}
+              >
+                <Textarea
+                  value={formData.service_items_text}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.serviceItems}
+                  className="min-h-24 rounded-xl"
+                  onChange={(event) =>
+                    updateField("service_items_text", event.target.value)
+                  }
+                />
+              </FieldBlock>
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Star className="h-5 w-5 text-primary" />
-                  {t.tiersInfo}
-                </CardTitle>
-                <CardDescription>{t.tiersInfoDesc}</CardDescription>
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl"
-                onClick={addTier}
-              >
-                <Plus className="h-4 w-4" />
-                {t.addTier}
-              </Button>
+          {/* Notes */}
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <FileText className="h-4 w-4" />
+                {t.notesInfo}
+              </CardTitle>
+              <CardDescription>{t.notesDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-3">
-              {form.pricing_tiers.map((tier, index) => (
-                <div key={index} className="rounded-3xl border bg-background/50 p-4">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <Badge variant="secondary" className="rounded-full">
-                      {t.addTier} #{index + 1}
-                    </Badge>
-
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="rounded-xl text-destructive"
-                      onClick={() => removeTier(index)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      {t.remove}
-                    </Button>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-4">
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>{t.tierName}</Label>
-                      <Input
-                        value={tier.name}
-                        onChange={(event) =>
-                          updateTier(index, { name: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>{t.tierType}</Label>
-                      <SelectField
-                        value={tier.pricing_type}
-                        onChange={(value) =>
-                          updateTier(index, { pricing_type: value as PricingType })
-                        }
-                      >
-                        {pricingTypeOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </SelectField>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.tierPrice}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={tier.price}
-                        onChange={(event) =>
-                          updateTier(index, { price: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.tierSalePrice}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={tier.sale_price}
-                        onChange={(event) =>
-                          updateTier(index, { sale_price: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.minQuantity}</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={tier.min_quantity}
-                        onChange={(event) =>
-                          updateTier(index, { min_quantity: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.maxQuantity}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={tier.max_quantity}
-                        onChange={(event) =>
-                          updateTier(index, { max_quantity: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.discountRate}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={tier.discount_rate}
-                        onChange={(event) =>
-                          updateTier(index, { discount_rate: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.agentCommissionRate}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={tier.agent_commission_rate}
-                        onChange={(event) =>
-                          updateTier(index, {
-                            agent_commission_rate: event.target.value,
-                          })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.providerShareRate}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={tier.provider_share_rate}
-                        onChange={(event) =>
-                          updateTier(index, { provider_share_rate: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.systemShareRate}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={tier.system_share_rate}
-                        onChange={(event) =>
-                          updateTier(index, { system_share_rate: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.startsAt}</Label>
-                      <Input
-                        type="datetime-local"
-                        value={tier.starts_at}
-                        onChange={(event) =>
-                          updateTier(index, { starts_at: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.endsAt}</Label>
-                      <Input
-                        type="datetime-local"
-                        value={tier.ends_at}
-                        onChange={(event) =>
-                          updateTier(index, { ends_at: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.sortOrder}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={tier.sort_order}
-                        onChange={(event) =>
-                          updateTier(index, { sort_order: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-3 rounded-2xl border bg-background/50 p-3 md:col-span-4">
-                      <Checkbox
-                        checked={tier.is_active}
-                        onCheckedChange={(checked) =>
-                          updateTier(index, { is_active: Boolean(checked) })
-                        }
-                      />
-                      <Label>{t.activeItem}</Label>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Stethoscope className="h-5 w-5 text-primary" />
-                  {t.serviceItemsInfo}
-                </CardTitle>
-                <CardDescription>{t.serviceItemsInfoDesc}</CardDescription>
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl"
-                onClick={addServiceItem}
-              >
-                <Plus className="h-4 w-4" />
-                {t.addServiceItem}
-              </Button>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              {form.service_items.map((item, index) => (
-                <div key={index} className="rounded-3xl border bg-background/50 p-4">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <Badge variant="secondary" className="rounded-full">
-                      {t.addServiceItem} #{index + 1}
-                    </Badge>
-
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="rounded-xl text-destructive"
-                      onClick={() => removeServiceItem(index)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      {t.remove}
-                    </Button>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-4">
-                    <div className="space-y-2 md:col-span-3">
-                      <Label>{t.serviceItemName}</Label>
-                      <Input
-                        value={item.name}
-                        onChange={(event) =>
-                          updateServiceItem(index, { name: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.sortOrder}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={item.sort_order}
-                        onChange={(event) =>
-                          updateServiceItem(index, { sort_order: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2 md:col-span-4">
-                      <Label>{t.serviceItemDescription}</Label>
-                      <TextAreaField
-                        value={item.description}
-                        onChange={(value) =>
-                          updateServiceItem(index, { description: value })
-                        }
-                        rows={3}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.includedQuantity}</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={item.included_quantity}
-                        onChange={(event) =>
-                          updateServiceItem(index, {
-                            included_quantity: event.target.value,
-                          })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.unitPrice}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.unit_price}
-                        onChange={(event) =>
-                          updateServiceItem(index, { unit_price: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>{t.discountRate}</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={item.discount_rate}
-                        onChange={(event) =>
-                          updateServiceItem(index, { discount_rate: event.target.value })
-                        }
-                        className="rounded-2xl bg-background/70"
-                      />
-                    </div>
-
-                    <div className="grid gap-3 md:col-span-4 md:grid-cols-3">
-                      {[
-                        ["requires_provider", t.requiresProvider],
-                        ["is_optional", t.isOptional],
-                        ["is_active", t.activeItem],
-                      ].map(([key, label]) => (
-                        <div
-                          key={key}
-                          className="flex items-center gap-3 rounded-2xl border bg-background/50 p-3"
-                        >
-                          <Checkbox
-                            checked={Boolean(item[key as keyof ServiceItemForm])}
-                            onCheckedChange={(checked) =>
-                              updateServiceItem(index, {
-                                [key]: Boolean(checked),
-                              } as Partial<ServiceItemForm>)
-                            }
-                          />
-                          <Label>{label}</Label>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <CardContent>
+              <FieldBlock label={t.fields.notes} error={errors.notes}>
+                <Textarea
+                  value={formData.notes}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.notes}
+                  className="min-h-28 rounded-xl"
+                  onChange={(event) => updateField("notes", event.target.value)}
+                />
+              </FieldBlock>
             </CardContent>
           </Card>
         </div>
 
-        <div className="space-y-6 xl:sticky xl:top-24 xl:self-start">
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5 text-primary" />
-                {t.previewTitle}
+        {/* Sidebar Summary */}
+        <aside className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-bold">
+                {t.summaryTitle}
               </CardTitle>
-              <CardDescription>{t.previewDesc}</CardDescription>
+              <CardDescription>{t.summaryDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-4">
-              <div className="rounded-3xl border bg-gradient-to-br from-primary/10 via-background/70 to-background p-5">
-                <div className="mb-4 flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-lg font-bold">
-                      {form.name || t.unnamed}
-                    </h3>
-                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                      {form.short_description || t.placeholderShort}
+              <div className="rounded-xl border bg-background p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">
+                      {t.completion}
+                    </p>
+                    <p className="mt-1 text-2xl font-bold">
+                      {formatNumber(progressPercent)}%
                     </p>
                   </div>
 
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                    <Package className="h-5 w-5" />
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
+                    <BadgeCheck className="h-5 w-5" />
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <Badge className="rounded-full">{selectedTypeLabel}</Badge>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
 
-                  <Badge variant="secondary" className="rounded-full">
-                    {selectedStatusLabel}
-                  </Badge>
-
-                  <Badge variant="outline" className="rounded-full">
-                    {selectedFulfillmentLabel}
-                  </Badge>
-
-                  {form.is_featured ? (
+                <div className="mt-3">
+                  {isReadyToSave ? (
+                    <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {t.ready}
+                    </Badge>
+                  ) : (
                     <Badge variant="outline" className="rounded-full">
-                      <Star className="h-3 w-3" />
-                      {t.isFeatured}
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      {t.missingData}
                     </Badge>
-                  ) : null}
+                  )}
                 </div>
               </div>
 
-              <div className="grid gap-3">
-                <div className="flex items-center justify-between gap-3 rounded-2xl border bg-background/50 p-4">
-                  <span className="text-sm text-muted-foreground">{t.price}</span>
-                  <div className="flex items-center gap-1 font-bold">
-                    <span>{formatMoneyPreview(form.sale_price || form.price)}</span>
-                    <Image
-                      src={SAR_ICON_PATH}
-                      alt="SAR"
-                      width={15}
-                      height={15}
-                      className="opacity-80"
-                    />
+              <SummaryItem
+                icon={Package}
+                label={t.fields.name}
+                value={formData.name || "-"}
+              />
+
+              <SummaryItem
+                icon={ShieldCheck}
+                label={t.fields.code}
+                value={normalizeCode(formData.code) || "-"}
+              />
+
+              <SummaryItem
+                icon={Tag}
+                label={t.fields.type}
+                value={t.productTypes[formData.product_type]}
+              />
+
+              <SummaryItem
+                icon={CheckCircle2}
+                label={t.fields.status}
+                value={t.statuses[formData.status]}
+              />
+
+              <div className="rounded-xl border bg-background p-4">
+                <p className="text-xs text-muted-foreground">
+                  {t.priceSummary}
+                </p>
+                <p className="mt-1 text-lg font-bold">
+                  <SarAmount value={effectivePrice} />
+                </p>
+              </div>
+
+              <SummaryItem
+                icon={CreditCard}
+                label={t.fields.billingType}
+                value={t.billingTypes[formData.billing_type]}
+              />
+
+              <SummaryItem
+                icon={Boxes}
+                label={t.readinessSummary}
+                value={[
+                  formData.can_be_ordered ? t.fields.canBeOrdered : "",
+                  formData.can_be_used_in_contracts ? t.fields.contractsReady : "",
+                ]
+                  .filter(Boolean)
+                  .join(" / ")}
+              />
+
+              <SummaryItem
+                icon={Stethoscope}
+                label={t.saleChannelsSummary}
+                value={[
+                  formData.allow_online_purchase ? t.fields.onlinePurchase : "",
+                  formData.allow_agent_sale ? t.fields.agentSale : "",
+                  formData.allow_provider_sale ? t.fields.providerSale : "",
+                ]
+                  .filter(Boolean)
+                  .join(" / ")}
+              />
+
+              <div className="grid gap-2">
+                <Button
+                  type="button"
+                  className="h-10 rounded-xl"
+                  disabled={isSubmitting}
+                  onClick={submitForm}
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4" />
+                  )}
+                  {isSubmitting ? t.saving : t.create}
+                </Button>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 rounded-xl"
+                    disabled={isSubmitting}
+                    onClick={restoreDraft}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    {t.restoreDraft}
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 rounded-xl"
+                    disabled={isSubmitting}
+                    onClick={clearForm}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {t.clearForm}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-bold">
+                {t.stepsTitle}
+              </CardTitle>
+              <CardDescription>{t.stepsDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-3">
+              {t.quickNotes.map((item, index) => (
+                <div
+                  key={item}
+                  className="flex items-start gap-3 rounded-xl border bg-background p-3"
+                >
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
+                    {index + 1}
                   </div>
+
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {item}
+                  </p>
                 </div>
-
-                <div className="flex items-center justify-between gap-3 rounded-2xl border bg-background/50 p-4">
-                  <span className="text-sm text-muted-foreground">{t.category}</span>
-                  <span className="text-sm font-semibold">
-                    {selectedCategory?.name || t.noCategory}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between gap-3 rounded-2xl border bg-background/50 p-4">
-                  <span className="text-sm text-muted-foreground">
-                    {t.billingType}
-                  </span>
-                  <span className="text-sm font-semibold">{selectedBillingLabel}</span>
-                </div>
-
-                <div className="flex flex-wrap gap-2 rounded-2xl border bg-background/50 p-4">
-                  {form.is_public ? (
-                    <Badge variant="secondary" className="rounded-full">
-                      {t.isPublic}
-                    </Badge>
-                  ) : null}
-
-                  {form.allow_online_purchase ? (
-                    <Badge variant="secondary" className="rounded-full">
-                      {t.allowOnlinePurchase}
-                    </Badge>
-                  ) : null}
-
-                  {form.can_be_ordered ? (
-                    <Badge variant="secondary" className="rounded-full">
-                      {t.canBeOrdered}
-                    </Badge>
-                  ) : null}
-
-                  {form.can_be_used_in_contracts ? (
-                    <Badge variant="secondary" className="rounded-full">
-                      {t.canBeUsedInContracts}
-                    </Badge>
-                  ) : null}
-
-                  {form.requires_provider ? (
-                    <Badge variant="secondary" className="rounded-full">
-                      {t.requiresProvider}
-                    </Badge>
-                  ) : null}
-
-                  {form.is_taxable ? (
-                    <Badge variant="secondary" className="rounded-full">
-                      {t.isTaxable}
-                    </Badge>
-                  ) : null}
-                </div>
-              </div>
-
-              <Button
-                type="button"
-                className="w-full rounded-2xl"
-                onClick={handleSubmit}
-                disabled={isSaving}
-              >
-                {isSaving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4" />
-                )}
-                {isSaving ? t.saving : t.save}
-              </Button>
+              ))}
             </CardContent>
           </Card>
-
-          <Card className="rounded-3xl border-white/20 bg-white/70 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2">
-                <Tag className="h-4 w-4 text-primary" />
-                <span className="text-sm font-semibold">{t.tags}</span>
-              </div>
-
-              <p className="text-sm leading-7 text-muted-foreground">
-                {form.tags || t.placeholderTags}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+        </aside>
       </div>
     </div>
   );
