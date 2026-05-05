@@ -1,32 +1,64 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/contracts/create/page.tsx
+   🧠 Primey Care | Create Contract
+   ------------------------------------------------------------
+   ✅ المرحلة 17 + المرحلة 2
+   ✅ مبني بنفس نمط إنشاء المراكز/العملاء المعتمد
+   ✅ Full Width Layout
+   ✅ Main Form + Sidebar Summary
+   ✅ حماية زر الإنشاء وطلبات البيانات حسب الصلاحيات
+   ✅ fallback آمن لـ system_admin / superadmin
+   ✅ Error Alert داخلي
+   ✅ Field-level validation
+   ✅ beforeunload protection
+   ✅ حفظ واستعادة مسودة محلية
+   ✅ تعطيل الحقول أثناء الحفظ
+   ✅ تنظيف البيانات قبل الإرسال
+   ✅ دعم contract_products
+   ✅ استخدام /currency/sar.svg
+   ✅ استخدام toast من sonner
+   ✅ دعم عربي / إنجليزي عبر primey-locale
+   ✅ بدون localhost hardcoded
+   ✅ لا توجد روابط تقارير داخل الوحدة
+   ✅ لا توجد نصوص تقنية ظاهرة في الواجهة
+   ✅ الأرقام بالإنجليزية
+============================================================ */
+
 import Image from "next/image";
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { ComponentType, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   BadgeCheck,
   Building2,
-  CalendarRange,
-  FileSignature,
+  CalendarDays,
+  CheckCircle2,
+  ClipboardList,
+  FileText,
+  Handshake,
+  Layers3,
   Loader2,
-  Mail,
   Package,
   Percent,
-  Phone,
-  PlusCircle,
+  Plus,
+  RefreshCcw,
   Save,
   ShieldCheck,
-  Sparkles,
   Trash2,
-  UserRound,
   Wallet,
+  X,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Card,
   CardContent,
@@ -39,98 +71,98 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 /* ============================================================
-   📂 app/system/contracts/create/page.tsx
-   🧾 Primey Care | Create Contract
-   ------------------------------------------------------------
-   ✅ إنشاء عقد جديد
-   ✅ ربط مع /api/contracts/
-   ✅ ربط مقدمي الخدمة من /api/providers/
-   ✅ ربط المنتجات من /api/products/
-   ✅ دعم pricing_model
-   ✅ دعم discount_percentage
-   ✅ دعم system_commission_percentage
-   ✅ دعم contract_products
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ الأرقام دائمًا إنجليزية
-   ✅ استخدام sonner
-   ✅ استخدام رمز SAR الرسمي
-   ✅ بدون hardcoded localhost
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
+type AuthRecord = Record<string, unknown>;
 
-type ContractStatus =
-  | "DRAFT"
-  | "ACTIVE"
-  | "EXPIRED"
-  | "TERMINATED"
-  | "SUSPENDED";
+type ContractStatus = "DRAFT" | "ACTIVE" | "SUSPENDED";
+type PricingModel = "DISCOUNT" | "FIXED_PRICE" | "COMMISSION" | "MIXED";
 
-type PricingModel = "FIXED" | "PERCENTAGE" | "CUSTOM" | "FREE";
-
-type ProviderOption = {
-  id: number | string;
-  name: string;
-  code: string;
-  city: string;
-  status: string;
+type OptionItem = {
+  id: string;
+  label: string;
+  subtitle?: string;
+  raw?: Record<string, unknown>;
 };
 
-type ProductOption = {
-  id: number | string;
-  name: string;
-  code: string;
-  productType: string;
-  status: string;
-  price: string;
-  salePrice: string;
-};
-
-type ContractProductFormRow = {
-  localId: string;
-  productId: string;
-  isActive: boolean;
-  specialPrice: string;
-  discountPercentage: string;
-  coverageNotes: string;
+type ContractProductRow = {
+  rowId: string;
+  product_id: string;
+  special_price: string;
+  discount_percentage: string;
+  is_active: boolean;
 };
 
 type ContractFormData = {
-  contractNumber: string;
+  contract_number: string;
   title: string;
-  providerId: string;
+  provider_id: string;
   status: ContractStatus;
-  pricingModel: PricingModel;
-  startDate: string;
-  endDate: string;
-  signedAt: string;
-  providerContactName: string;
-  providerContactPhone: string;
-  providerContactEmail: string;
-  discountPercentage: string;
-  systemCommissionPercentage: string;
-  termsAndConditions: string;
+  pricing_model: PricingModel;
+
+  start_date: string;
+  end_date: string;
+
+  discount_percentage: string;
+  system_commission_percentage: string;
+  contract_value: string;
+
+  terms_and_conditions: string;
+  coverage_notes: string;
   notes: string;
+
+  auto_activate: boolean;
+  notify_provider: boolean;
+
+  contract_products: ContractProductRow[];
 };
 
 type ContractFormErrors = Partial<
-  Record<keyof ContractFormData | "contractProducts", string>
+  Record<keyof ContractFormData | `product_${string}`, string>
 >;
 
 type ApiListResponse = {
   ok?: boolean;
   message?: string;
   results?: unknown[];
-  data?: unknown[] | { results?: unknown[] };
   items?: unknown[];
   providers?: unknown[];
+  centers?: unknown[];
   products?: unknown[];
+  data?:
+    | unknown[]
+    | {
+        results?: unknown[];
+        items?: unknown[];
+        providers?: unknown[];
+        centers?: unknown[];
+        products?: unknown[];
+      };
 };
 
-const SAR_ICON = "/currency/sar.svg";
+type CreateContractApiResponse = {
+  ok?: boolean;
+  message?: string;
+  errors?: Record<string, string[] | string>;
+  id?: number | string;
+  contract?: {
+    id?: number | string;
+  };
+  data?: {
+    id?: number | string;
+    contract?: {
+      id?: number | string;
+    };
+  };
+};
+
+const SAR_ICON_PATH = "/currency/sar.svg";
+const DRAFT_STORAGE_KEY = "primey-care-contract-create-draft";
 
 /* ============================================================
-   🌐 Locale Helpers
+   Locale Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -138,6 +170,7 @@ function readLocale(): AppLocale {
     if (typeof window === "undefined") return "ar";
 
     const savedLocale = window.localStorage.getItem("primey-locale");
+
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
@@ -160,537 +193,981 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
-function getCookie(name: string) {
+/* ============================================================
+   API Helpers
+============================================================ */
+
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
+
+  if (!base) return path;
+
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
+function readCookie(name: string) {
   if (typeof document === "undefined") return "";
 
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
+  const match = document.cookie
+    .split("; ")
+    .find((cookie) => cookie.startsWith(`${name}=`));
 
-  if (parts.length === 2) {
-    return parts.pop()?.split(";").shift() || "";
-  }
-
-  return "";
+  return match ? decodeURIComponent(match.split("=")[1] || "") : "";
 }
 
 /* ============================================================
-   🔢 Helpers
+   Permission Helpers
 ============================================================ */
 
-function formatEnglishNumber(value: number | string | null | undefined) {
-  const numericValue = Number(value || 0);
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(numericValue) ? numericValue : 0);
+function asRecord(value: unknown): AuthRecord {
+  return value && typeof value === "object" ? (value as AuthRecord) : {};
 }
 
-function formatEnglishMoney(value: number | string | null | undefined) {
-  const numericValue = Number(value || 0);
+function getNestedRecord(source: AuthRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
 
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(numericValue) ? numericValue : 0);
-}
-
-function formatPercent(value: number | string | null | undefined) {
-  const numericValue = Number(value || 0);
-
-  return `${new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(numericValue) ? numericValue : 0)}%`;
-}
-
-function normalizeNumberInput(value: string) {
-  const cleaned = value.replace(/[^\d.]/g, "");
-  const parts = cleaned.split(".");
-
-  if (parts.length <= 1) return cleaned;
-
-  return `${parts[0]}.${parts.slice(1).join("")}`;
-}
-
-function normalizePercentInput(value: string) {
-  const cleaned = normalizeNumberInput(value);
-  const numeric = Number(cleaned || 0);
-
-  if (!Number.isFinite(numeric)) return "";
-  if (numeric > 100) return "100";
-
-  return cleaned;
-}
-
-function normalizeApiList(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-
-  if (payload && typeof payload === "object") {
-    const data = payload as ApiListResponse;
-
-    if (Array.isArray(data.results)) return data.results;
-    if (Array.isArray(data.items)) return data.items;
-    if (Array.isArray(data.providers)) return data.providers;
-    if (Array.isArray(data.products)) return data.products;
-    if (Array.isArray(data.data)) return data.data;
-
-    if (
-      data.data &&
-      typeof data.data === "object" &&
-      Array.isArray((data.data as { results?: unknown[] }).results)
-    ) {
-      return (data.data as { results: unknown[] }).results;
+    if (value && typeof value === "object") {
+      return value as AuthRecord;
     }
   }
 
-  return [];
+  return {};
 }
 
-function readProviderName(value: Record<string, unknown>) {
-  return String(
-    value.name ??
-      value.display_name ??
-      value.provider_name ??
-      value.center_name ??
-      value.company_name ??
-      value.title ??
-      `Provider #${value.id ?? ""}`
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
+
+          if (typeof value === "string") return [value];
+
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
+
+              if (item && typeof item === "object") {
+                const obj = item as AuthRecord;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as AuthRecord;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
   );
 }
 
-function readProductName(value: Record<string, unknown>) {
-  return String(
-    value.name ??
-      value.display_name ??
-      value.product_name ??
-      value.title ??
-      `Product #${value.id ?? ""}`
+function getAuthUser(authValue: unknown): AuthRecord {
+  const auth = asRecord(authValue);
+
+  return getNestedRecord(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
+}
+
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asRecord(authValue);
+  const user = getAuthUser(authValue);
+
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asRecord(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asRecord(auth.permissions);
+  const userPermissions = asRecord(user.permissions);
+  const authProfilePermissions = asRecord(auth.profile_permissions);
+  const userProfilePermissions = asRecord(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asRecord(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
   );
 }
 
-function normalizeProvider(item: unknown): ProviderOption {
-  const obj = (item || {}) as Record<string, unknown>;
+function isSystemAdmin(authValue: unknown) {
+  const auth = asRecord(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
 
-  return {
-    id: (obj.id ?? "") as number | string,
-    name: readProviderName(obj),
-    code: String(obj.provider_code ?? obj.code ?? obj.center_code ?? ""),
-    city: String(obj.city ?? ""),
-    status: String(obj.status ?? ""),
-  };
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
 }
 
-function normalizeProduct(item: unknown): ProductOption {
-  const obj = (item || {}) as Record<string, unknown>;
-
-  return {
-    id: (obj.id ?? "") as number | string,
-    name: readProductName(obj),
-    code: String(obj.product_code ?? obj.code ?? obj.slug ?? ""),
-    productType: String(obj.product_type ?? obj.type ?? ""),
-    status: String(obj.status ?? ""),
-    price: String(obj.price ?? "0"),
-    salePrice: String(obj.sale_price ?? obj.salePrice ?? ""),
-  };
+function hasKnownPermissionSignal(authValue: unknown) {
+  return (
+    getAuthRoles(authValue).length > 0 ||
+    getAuthPermissionCodes(authValue).length > 0
+  );
 }
 
-function buildContractNumber() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  const suffix = String(now.getTime()).slice(-5);
+function hasPermissionCode(authValue: unknown, codes: string[]) {
+  const permissions = getAuthPermissionCodes(authValue);
 
-  return `CONT-${year}${month}${day}-${suffix}`;
+  if (permissions.length === 0) return undefined;
+
+  return codes.some((code) => permissions.includes(code));
 }
 
-function newContractProductRow(): ContractProductFormRow {
-  return {
-    localId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    productId: "",
-    isActive: true,
-    specialPrice: "",
-    discountPercentage: "",
-    coverageNotes: "",
-  };
+function hasSafePermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const explicitPermission = hasPermissionCode(authValue, codes);
+
+  if (typeof explicitPermission === "boolean") {
+    return explicitPermission;
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "support",
+          "accountant",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin"].includes(role),
+    );
+  }
+
+  if (!hasKnownPermissionSignal(authValue)) {
+    return true;
+  }
+
+  return mode === "view";
 }
 
 /* ============================================================
-   📚 Dictionary
+   Dictionary
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    title: isArabic ? "إنشاء عقد" : "Create Contract",
+    title: isArabic ? "إنشاء عقد جديد" : "Create New Contract",
     subtitle: isArabic
-      ? "إضافة عقد جديد وربطه بمقدم الخدمة والمنتجات مع نسبة الخصم ونسبة النظام."
-      : "Create a new contract and link it to a provider and products with discount and system commission.",
+      ? "إنشاء عقد وربطه بمقدم الخدمة والمنتجات ونسب الخصم ونسبة النظام والشروط التشغيلية."
+      : "Create a contract and link it with provider, products, discounts, system commission, and operational terms.",
 
-    back: isArabic ? "لوحة العقود" : "Contracts Overview",
-    list: isArabic ? "قائمة العقود" : "Contracts List",
-    saveDraft: isArabic ? "حفظ مسودة" : "Save Draft",
+    back: isArabic ? "العودة للعقود" : "Back to Contracts",
+    contractsList: isArabic ? "قائمة العقود" : "Contracts List",
     create: isArabic ? "إنشاء العقد" : "Create Contract",
+    saving: isArabic ? "جاري الحفظ..." : "Saving...",
+    saveDraft: isArabic ? "حفظ كمسودة محلية" : "Save Local Draft",
+    restoreDraft: isArabic ? "استعادة المسودة" : "Restore Draft",
+    clearForm: isArabic ? "تفريغ النموذج" : "Clear Form",
+    refreshOptions: isArabic ? "تحديث الخيارات" : "Refresh Options",
 
-    basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
-    basicInfoDesc: isArabic
-      ? "البيانات الرئيسية التي تميز العقد داخل النظام."
-      : "Main data that identifies the contract inside the system.",
+    basicInfo: isArabic ? "بيانات العقد" : "Contract Information",
+    basicDesc: isArabic
+      ? "رقم العقد والعنوان والحالة ونموذج التسعير."
+      : "Contract number, title, status, and pricing model.",
 
-    providerInfo: isArabic ? "مقدم الخدمة" : "Provider",
-    providerInfoDesc: isArabic
-      ? "اختيار مقدم الخدمة المرتبط بهذا العقد."
-      : "Choose the provider linked to this contract.",
+    partyInfo: isArabic ? "مقدم الخدمة" : "Provider",
+    partyDesc: isArabic
+      ? "اختيار مقدم الخدمة أو المركز المرتبط بالعقد."
+      : "Select the provider or center linked to this contract.",
 
-    durationInfo: isArabic ? "مدة العقد" : "Contract Duration",
-    durationInfoDesc: isArabic
-      ? "تاريخ بداية ونهاية العقد وتاريخ التوقيع."
-      : "Contract start, end, and signing dates.",
+    financialInfo: isArabic ? "النسب والقيمة" : "Rates & Value",
+    financialDesc: isArabic
+      ? "نسبة الخصم ونسبة النظام وقيمة العقد إن وجدت."
+      : "Discount percentage, system commission, and contract value when available.",
 
-    financialInfo: isArabic ? "النسب والتسعير" : "Pricing & Percentages",
-    financialInfoDesc: isArabic
-      ? "آلية التسعير، نسبة الخصم، ونسبة النظام."
-      : "Pricing model, discount percentage, and system commission.",
+    datesInfo: isArabic ? "مدة العقد" : "Contract Period",
+    datesDesc: isArabic
+      ? "تاريخ بداية العقد وتاريخ نهايته."
+      : "Contract start and end dates.",
 
-    contactInfo: isArabic ? "مسؤول الجهة" : "Provider Contact",
-    contactInfoDesc: isArabic
-      ? "بيانات مسؤول مقدم الخدمة داخل العقد."
-      : "Provider contact information inside the contract.",
+    productsInfo: isArabic ? "منتجات العقد" : "Contract Products",
+    productsDesc: isArabic
+      ? "ربط المنتجات أو البرامج المشمولة بالعقد مع سعر أو خصم خاص عند الحاجة."
+      : "Link products or programs covered by the contract with special price or discount when needed.",
 
-    productsInfo: isArabic ? "المنتجات المشمولة" : "Covered Products",
-    productsInfoDesc: isArabic
-      ? "ربط المنتجات أو البرامج المشمولة داخل العقد مع أسعار وخصومات خاصة."
-      : "Link covered products or programs with special prices and discounts.",
+    termsInfo: isArabic ? "الشروط والتغطية" : "Terms & Coverage",
+    termsDesc: isArabic
+      ? "الشروط والأحكام وملاحظات التغطية والملاحظات الداخلية."
+      : "Terms, coverage notes, and internal notes.",
 
-    termsInfo: isArabic ? "الشروط والملاحظات" : "Terms & Notes",
-    termsInfoDesc: isArabic
-      ? "الشروط والأحكام والملاحظات الداخلية."
-      : "Terms, conditions, and internal notes.",
-
-    contractNumber: isArabic ? "رقم العقد" : "Contract Number",
-    contractNumberPlaceholder: isArabic
-      ? "مثال: CONT-20260428-00001"
-      : "Example: CONT-20260428-00001",
-
-    contractTitle: isArabic ? "اسم العقد" : "Contract Title",
-    contractTitlePlaceholder: isArabic
-      ? "مثال: عقد خصومات مركز طبي"
-      : "Example: Medical Center Discount Contract",
-
-    pricingModel: isArabic ? "آلية التسعير" : "Pricing Model",
-    status: isArabic ? "الحالة" : "Status",
-
-    provider: isArabic ? "مقدم الخدمة" : "Provider",
-    selectProvider: isArabic ? "اختر مقدم الخدمة" : "Select Provider",
-    loadingProviders: isArabic
-      ? "جاري تحميل مقدمي الخدمة..."
-      : "Loading providers...",
-    noProviders: isArabic
-      ? "لا توجد مراكز/مقدمو خدمة متاحون"
-      : "No providers available",
-
-    startDate: isArabic ? "تاريخ البداية" : "Start Date",
-    endDate: isArabic ? "تاريخ النهاية" : "End Date",
-    signedAt: isArabic ? "تاريخ التوقيع" : "Signed At",
-
-    discountPercentage: isArabic ? "نسبة الخصم العامة" : "General Discount",
-    systemCommissionPercentage: isArabic ? "نسبة النظام" : "System Commission",
-
-    providerContactName: isArabic ? "اسم المسؤول" : "Contact Name",
-    providerContactPhone: isArabic ? "جوال المسؤول" : "Contact Phone",
-    providerContactEmail: isArabic ? "بريد المسؤول" : "Contact Email",
-
-    product: isArabic ? "المنتج / البرنامج" : "Product / Program",
-    selectProduct: isArabic ? "اختر المنتج" : "Select Product",
-    loadingProducts: isArabic ? "جاري تحميل المنتجات..." : "Loading products...",
-    noProducts: isArabic ? "لا توجد منتجات متاحة" : "No products available",
-    addProduct: isArabic ? "إضافة منتج" : "Add Product",
-    removeProduct: isArabic ? "حذف" : "Remove",
-    specialPrice: isArabic ? "سعر خاص" : "Special Price",
-    productDiscount: isArabic ? "خصم المنتج" : "Product Discount",
-    coverageNotes: isArabic ? "ملاحظات التغطية" : "Coverage Notes",
-    activeProduct: isArabic ? "نشط" : "Active",
-
-    termsAndConditions: isArabic ? "الشروط والأحكام" : "Terms & Conditions",
-    termsAndConditionsPlaceholder: isArabic
-      ? "اكتب شروط وأحكام العقد..."
-      : "Write contract terms and conditions...",
-
-    notes: isArabic ? "ملاحظات داخلية" : "Internal Notes",
-    notesPlaceholder: isArabic
-      ? "أي ملاحظات داخلية حول العقد..."
-      : "Any internal notes about the contract...",
-
-    active: isArabic ? "نشط" : "Active",
-    draft: isArabic ? "مسودة" : "Draft",
-    suspended: isArabic ? "موقوف" : "Suspended",
-    expired: isArabic ? "منتهي" : "Expired",
-    terminated: isArabic ? "منهى" : "Terminated",
-
-    fixed: isArabic ? "سعر ثابت" : "Fixed",
-    percentage: isArabic ? "نسبة" : "Percentage",
-    custom: isArabic ? "مخصص" : "Custom",
-    free: isArabic ? "مجاني" : "Free",
-
-    required: isArabic ? "هذا الحقل مطلوب" : "This field is required",
-    invalidNumber: isArabic ? "القيمة الرقمية غير صحيحة" : "Invalid numeric value",
-    invalidPercent: isArabic
-      ? "النسبة يجب أن تكون بين 0 و 100"
-      : "Percentage must be between 0 and 100",
-    invalidDateRange: isArabic
-      ? "تاريخ النهاية يجب أن يكون بعد تاريخ البداية"
-      : "End date must be after start date",
-    selectProviderError: isArabic
-      ? "يجب اختيار مقدم الخدمة"
-      : "Provider is required",
-    duplicateProduct: isArabic
-      ? "لا يمكن تكرار نفس المنتج داخل العقد"
-      : "The same product cannot be duplicated inside the contract",
-
-    createdSuccess: isArabic
-      ? "تم إنشاء العقد بنجاح"
-      : "Contract created successfully",
-    draftSuccess: isArabic
-      ? "تم حفظ العقد كمسودة"
-      : "Contract saved as draft",
-    createError: isArabic
-      ? "تعذر إنشاء العقد"
-      : "Failed to create contract",
-    providersError: isArabic
-      ? "تعذر تحميل مقدمي الخدمة"
-      : "Failed to load providers",
-    productsError: isArabic
-      ? "تعذر تحميل المنتجات"
-      : "Failed to load products",
+    postOptionsInfo: isArabic ? "إعدادات بعد الإنشاء" : "Post-create Options",
+    postOptionsDesc: isArabic
+      ? "خيارات تشغيلية تطبق بعد حفظ العقد حسب دعم الباك إند."
+      : "Operational options applied after saving depending on backend support.",
 
     summaryTitle: isArabic ? "ملخص العقد" : "Contract Summary",
     summaryDesc: isArabic
-      ? "مراجعة سريعة قبل حفظ العقد."
-      : "Quick review before saving the contract.",
-    selectedProvider: isArabic ? "مقدم الخدمة المحدد" : "Selected Provider",
-    contractStatus: isArabic ? "حالة العقد" : "Contract Status",
-    coveredProducts: isArabic ? "المنتجات المشمولة" : "Covered Products",
-    noCoveredProducts: isArabic
-      ? "لم يتم إضافة منتجات بعد"
-      : "No products added yet",
+      ? "مراجعة سريعة للعقد قبل الحفظ."
+      : "Quick review before saving.",
+
+    stepsTitle: isArabic ? "إرشادات قبل الحفظ" : "Before Saving",
+    stepsDesc: isArabic
+      ? "نقاط مهمة تساعدك على إنشاء عقد صحيح."
+      : "Important points to help you create a correct contract.",
+
+    formErrorTitle: isArabic ? "تعذر حفظ البيانات" : "Unable to save data",
+
+    accessDeniedTitle: isArabic ? "غير مصرح بإنشاء عقد" : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية إنشاء العقود. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to create contracts. Contact your system administrator if you need access.",
+
+    labels: {
+      contractNumber: isArabic ? "رقم العقد" : "Contract Number",
+      title: isArabic ? "عنوان العقد" : "Contract Title",
+      provider: isArabic ? "مقدم الخدمة / المركز" : "Provider / Center",
+      status: isArabic ? "الحالة" : "Status",
+      pricingModel: isArabic ? "نموذج التسعير" : "Pricing Model",
+      startDate: isArabic ? "تاريخ البداية" : "Start Date",
+      endDate: isArabic ? "تاريخ النهاية" : "End Date",
+      discountPercentage: isArabic ? "نسبة الخصم" : "Discount Percentage",
+      systemCommissionPercentage: isArabic
+        ? "نسبة النظام"
+        : "System Commission",
+      contractValue: isArabic ? "قيمة العقد" : "Contract Value",
+      product: isArabic ? "المنتج / البرنامج" : "Product / Program",
+      specialPrice: isArabic ? "سعر خاص" : "Special Price",
+      productDiscount: isArabic ? "خصم خاص" : "Special Discount",
+      activeProduct: isArabic ? "منتج نشط داخل العقد" : "Active in Contract",
+      terms: isArabic ? "الشروط والأحكام" : "Terms & Conditions",
+      coverageNotes: isArabic ? "ملاحظات التغطية" : "Coverage Notes",
+      notes: isArabic ? "ملاحظات داخلية" : "Internal Notes",
+      autoActivate: isArabic ? "تفعيل العقد بعد الإنشاء" : "Activate contract after creation",
+      notifyProvider: isArabic ? "إشعار مقدم الخدمة" : "Notify provider",
+    },
+
+    placeholders: {
+      contractNumber: isArabic
+        ? "يتم توليده تلقائيًا عند تركه فارغًا"
+        : "Auto-generated if left empty",
+      title: isArabic
+        ? "مثال: عقد مركز برايمي كير 2026"
+        : "Example: Primey Care Center Contract 2026",
+      discountPercentage: isArabic ? "مثال: 20" : "Example: 20",
+      systemCommissionPercentage: isArabic ? "مثال: 10" : "Example: 10",
+      contractValue: isArabic ? "مثال: 50000" : "Example: 50000",
+      specialPrice: isArabic ? "مثال: 199" : "Example: 199",
+      productDiscount: isArabic ? "مثال: 15" : "Example: 15",
+      terms: isArabic
+        ? "اكتب الشروط والأحكام الخاصة بالعقد..."
+        : "Write contract terms and conditions...",
+      coverageNotes: isArabic
+        ? "اكتب ملاحظات التغطية والخدمات المشمولة..."
+        : "Write coverage notes and included services...",
+      notes: isArabic
+        ? "ملاحظات داخلية لفريق التشغيل..."
+        : "Internal notes for operations team...",
+    },
+
+    statuses: {
+      DRAFT: isArabic ? "مسودة" : "Draft",
+      ACTIVE: isArabic ? "نشط" : "Active",
+      SUSPENDED: isArabic ? "موقوف" : "Suspended",
+    } satisfies Record<ContractStatus, string>,
+
+    pricingModels: {
+      DISCOUNT: isArabic ? "خصم" : "Discount",
+      FIXED_PRICE: isArabic ? "سعر ثابت" : "Fixed Price",
+      COMMISSION: isArabic ? "عمولة" : "Commission",
+      MIXED: isArabic ? "مختلط" : "Mixed",
+    } satisfies Record<PricingModel, string>,
+
+    validation: {
+      title: isArabic ? "عنوان العقد مطلوب." : "Contract title is required.",
+      provider: isArabic ? "اختيار مقدم الخدمة مطلوب." : "Provider is required.",
+      dates: isArabic
+        ? "تاريخ النهاية يجب أن يكون بعد تاريخ البداية."
+        : "End date must be after start date.",
+      number: isArabic ? "القيمة يجب أن تكون رقمًا صحيحًا." : "Value must be a valid number.",
+      percentage: isArabic
+        ? "النسبة يجب أن تكون بين 0 و 100."
+        : "Percentage must be between 0 and 100.",
+      product: isArabic
+        ? "اختر منتجًا أو احذف الصف الفارغ."
+        : "Select a product or remove the empty row.",
+    },
+
+    success: isArabic ? "تم إنشاء العقد بنجاح." : "Contract created successfully.",
+    draftSaved: isArabic ? "تم حفظ المسودة محليًا." : "Draft saved locally.",
+    draftRestored: isArabic ? "تمت استعادة المسودة." : "Draft restored.",
+    noDraft: isArabic ? "لا توجد مسودة محفوظة." : "No saved draft found.",
+    formCleared: isArabic ? "تم تفريغ النموذج." : "Form cleared.",
+    apiError: isArabic
+      ? "تعذر إنشاء العقد. تحقق من البيانات وحاول مرة أخرى."
+      : "Unable to create contract. Please check the data and try again.",
+    optionLoadError: isArabic
+      ? "تعذر تحميل بعض خيارات النموذج."
+      : "Unable to load some form options.",
+    validationToast: isArabic
+      ? "يرجى تصحيح الحقول المطلوبة قبل المتابعة."
+      : "Please fix the required fields before continuing.",
+    confirmLeave: isArabic
+      ? "لديك بيانات غير محفوظة. هل تريد المغادرة؟"
+      : "You have unsaved changes. Do you want to leave?",
+    confirmClear: isArabic
+      ? "سيتم تفريغ النموذج الحالي. هل تريد المتابعة؟"
+      : "The current form will be cleared. Do you want to continue?",
+
+    addProduct: isArabic ? "إضافة منتج" : "Add Product",
+    removeProduct: isArabic ? "حذف المنتج" : "Remove Product",
+    selectPlaceholder: isArabic ? "اختر..." : "Select...",
+    noOptions: isArabic ? "لا توجد خيارات متاحة" : "No options available",
+
+    completion: isArabic ? "نسبة الاكتمال" : "Completion",
+    ready: isArabic ? "جاهز للحفظ" : "Ready to save",
+    missingData: isArabic ? "ينقصه بيانات أساسية" : "Missing required data",
+    productsCount: isArabic ? "عدد المنتجات" : "Products Count",
+
+    quickNotes: [
+      isArabic
+        ? "اختر مقدم الخدمة قبل حفظ العقد."
+        : "Select the provider before saving the contract.",
+      isArabic
+        ? "يمكن ترك رقم العقد فارغًا إذا كان الباك إند يولده تلقائيًا."
+        : "You can leave contract number empty if the backend generates it automatically.",
+      isArabic
+        ? "نسبة الخصم ونسبة النظام يجب أن تكون بين 0 و 100."
+        : "Discount and system commission percentages must be between 0 and 100.",
+      isArabic
+        ? "منتجات العقد اختيارية، ويمكن ربطها لاحقًا عند الحاجة."
+        : "Contract products are optional and can be linked later when needed.",
+    ],
   };
-}
-
-function statusLabel(status: ContractStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<ContractStatus, string> = {
-    DRAFT: t.draft,
-    ACTIVE: t.active,
-    SUSPENDED: t.suspended,
-    EXPIRED: t.expired,
-    TERMINATED: t.terminated,
-  };
-
-  return labels[status];
-}
-
-function pricingModelLabel(pricingModel: PricingModel, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<PricingModel, string> = {
-    FIXED: t.fixed,
-    PERCENTAGE: t.percentage,
-    CUSTOM: t.custom,
-    FREE: t.free,
-  };
-
-  return labels[pricingModel];
 }
 
 /* ============================================================
-   🧾 Small Components
+   Defaults
 ============================================================ */
 
-function FieldError({ message }: { message?: string }) {
-  if (!message) return null;
-
-  return <p className="mt-1 text-xs font-medium text-destructive">{message}</p>;
+function createProductRow(): ContractProductRow {
+  return {
+    rowId: crypto.randomUUID(),
+    product_id: "",
+    special_price: "",
+    discount_percentage: "0.00",
+    is_active: true,
+  };
 }
 
-function SarAmount({ amount }: { amount: number | string }) {
-  return (
-    <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
-      <Image
-        src={SAR_ICON}
-        alt="SAR"
-        width={14}
-        height={14}
-        className="opacity-80"
-      />
-      {formatEnglishMoney(amount)}
-    </span>
-  );
-}
+const initialFormData: ContractFormData = {
+  contract_number: "",
+  title: "",
+  provider_id: "",
+  status: "ACTIVE",
+  pricing_model: "DISCOUNT",
 
-function PercentValue({ value }: { value: number | string }) {
-  return (
-    <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
-      <Percent className="h-3.5 w-3.5 text-muted-foreground" />
-      {formatPercent(value)}
-    </span>
-  );
-}
+  start_date: "",
+  end_date: "",
+
+  discount_percentage: "0.00",
+  system_commission_percentage: "0.00",
+  contract_value: "",
+
+  terms_and_conditions: "",
+  coverage_notes: "",
+  notes: "",
+
+  auto_activate: false,
+  notify_provider: false,
+
+  contract_products: [],
+};
 
 /* ============================================================
-   🧾 Page
+   Data Helpers
 ============================================================ */
 
-export default function SystemContractsCreatePage() {
-  const router = useRouter();
+function getValue(obj: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = obj[key];
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isLoadingProviders, setIsLoadingProviders] = useState(true);
-  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
-  const [providers, setProviders] = useState<ProviderOption[]>([]);
-  const [products, setProducts] = useState<ProductOption[]>([]);
-  const [errors, setErrors] = useState<ContractFormErrors>({});
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
 
-  const [formData, setFormData] = useState<ContractFormData>({
-    contractNumber: buildContractNumber(),
-    title: "",
-    providerId: "",
-    status: "ACTIVE",
-    pricingModel: "CUSTOM",
-    startDate: "",
-    endDate: "",
-    signedAt: "",
-    providerContactName: "",
-    providerContactPhone: "",
-    providerContactEmail: "",
-    discountPercentage: "",
-    systemCommissionPercentage: "",
-    termsAndConditions: "",
-    notes: "",
+  return "";
+}
+
+function extractList(payload: unknown, keys: string[]): unknown[] {
+  if (Array.isArray(payload)) return payload;
+
+  if (!payload || typeof payload !== "object") return [];
+
+  const response = payload as ApiListResponse;
+
+  if (Array.isArray(response.results)) return response.results;
+  if (Array.isArray(response.items)) return response.items;
+
+  for (const key of keys) {
+    const value = (response as Record<string, unknown>)[key];
+
+    if (Array.isArray(value)) return value;
+  }
+
+  if (Array.isArray(response.data)) return response.data;
+
+  if (response.data && typeof response.data === "object") {
+    const dataObj = response.data as Record<string, unknown>;
+
+    if (Array.isArray(dataObj.results)) return dataObj.results;
+    if (Array.isArray(dataObj.items)) return dataObj.items;
+
+    for (const key of keys) {
+      const value = dataObj[key];
+
+      if (Array.isArray(value)) return value;
+    }
+  }
+
+  return [];
+}
+
+function normalizeOption(item: unknown, fallbackPrefix: string): OptionItem {
+  const obj = (item || {}) as Record<string, unknown>;
+  const id = String(getValue(obj, ["id", "uuid", "pk"]));
+
+  const label = String(
+    getValue(obj, [
+      "name",
+      "title",
+      "full_name",
+      "label",
+      "code",
+      "provider_name",
+      "center_name",
+      "product_name",
+    ]) || (id ? `${fallbackPrefix}-${id}` : "-"),
+  );
+
+  const subtitle = String(
+    getValue(obj, [
+      "code",
+      "city",
+      "category_name",
+      "product_type",
+      "provider_type",
+      "status",
+      "price",
+      "base_price",
+    ]) || "",
+  );
+
+  return {
+    id,
+    label,
+    subtitle,
+    raw: obj,
+  };
+}
+
+function toNumber(value: string | number) {
+  const parsed = Number(String(value || "").replace(/,/g, ""));
+
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isValidNumber(value: string) {
+  if (!value.trim()) return true;
+
+  const parsed = Number(value.replace(/,/g, ""));
+
+  return Number.isFinite(parsed);
+}
+
+function isValidPercentage(value: string) {
+  if (!isValidNumber(value)) return false;
+
+  const parsed = toNumber(value);
+
+  return parsed >= 0 && parsed <= 100;
+}
+
+function normalizeNumberString(value: string, fallback = "0.00") {
+  const clean = value.replace(/,/g, "").replace(/[^\d.]/g, "");
+  const parsed = Number(clean);
+
+  if (!Number.isFinite(parsed)) return fallback;
+
+  return parsed.toFixed(2);
+}
+
+function normalizeContractNumber(value: string) {
+  return value.trim().replace(/\s+/g, "-").toUpperCase();
+}
+
+function hasFormChanges(formData: ContractFormData) {
+  return JSON.stringify(formData) !== JSON.stringify(initialFormData);
+}
+
+function normalizePayload(formData: ContractFormData) {
+  const contractProducts = formData.contract_products
+    .filter((row) => row.product_id.trim().length > 0)
+    .map((row) => ({
+      product_id: row.product_id,
+      special_price: row.special_price
+        ? toNumber(row.special_price).toFixed(2)
+        : null,
+      discount_percentage: toNumber(row.discount_percentage).toFixed(2),
+      is_active: row.is_active,
+    }));
+
+  return {
+    contract_number:
+      normalizeContractNumber(formData.contract_number) || undefined,
+    title: formData.title.trim(),
+    name: formData.title.trim(),
+
+    provider_id: formData.provider_id || null,
+    center_id: formData.provider_id || null,
+
+    status: formData.status,
+    pricing_model: formData.pricing_model,
+
+    start_date: formData.start_date || null,
+    end_date: formData.end_date || null,
+
+    discount_percentage: toNumber(formData.discount_percentage).toFixed(2),
+    system_commission_percentage: toNumber(
+      formData.system_commission_percentage,
+    ).toFixed(2),
+    contract_value: formData.contract_value
+      ? toNumber(formData.contract_value).toFixed(2)
+      : "0.00",
+
+    terms_and_conditions: formData.terms_and_conditions.trim(),
+    coverage_notes: formData.coverage_notes.trim(),
+    notes: formData.notes.trim(),
+
+    auto_activate: formData.auto_activate,
+    notify_provider: formData.notify_provider,
+
+    contract_products: contractProducts,
+    products: contractProducts,
+  };
+}
+
+function resolveCreatedId(result: CreateContractApiResponse) {
+  return (
+    result.contract?.id ||
+    result.data?.contract?.id ||
+    result.data?.id ||
+    result.id ||
+    null
+  );
+}
+
+function mapApiFieldErrors(
+  errors: CreateContractApiResponse["errors"],
+): ContractFormErrors {
+  const nextErrors: ContractFormErrors = {};
+
+  if (!errors) return nextErrors;
+
+  Object.entries(errors).forEach(([key, value]) => {
+    const message = Array.isArray(value) ? value[0] : value;
+
+    if (!message) return;
+
+    if (key in initialFormData) {
+      nextErrors[key as keyof ContractFormData] = String(message);
+    }
   });
 
-  const [contractProducts, setContractProducts] = useState<
-    ContractProductFormRow[]
-  >([newContractProductRow()]);
+  return nextErrors;
+}
 
+/* ============================================================
+   UI Helpers
+============================================================ */
+
+function formatNumber(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0";
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(numericValue);
+}
+
+function formatMoney(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0.00";
+
+  return numericValue.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatPercent(value: string | number) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0%";
+
+  return `${numericValue.toLocaleString("en-US", {
+    maximumFractionDigits: 2,
+  })}%`;
+}
+
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
+}
+
+function FieldBlock({
+  label,
+  error,
+  required,
+  children,
+}: {
+  label: string;
+  error?: string;
+  required?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label className="text-sm font-medium">
+        {label}
+        {required ? <span className="ms-1 text-destructive">*</span> : null}
+      </Label>
+
+      {children}
+
+      {error ? (
+        <p className="text-xs font-medium text-destructive">{error}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function SummaryItem({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border bg-background p-3">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+        <Icon className="h-4 w-4" />
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <div className="mt-1 truncate text-sm font-semibold">{value || "-"}</div>
+      </div>
+    </div>
+  );
+}
+
+function ToggleBox({
+  checked,
+  disabled,
+  title,
+  description,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  title: string;
+  description: string;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-xl border bg-background p-4">
+      <Checkbox
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(value) => onChange(Boolean(value))}
+      />
+
+      <div>
+        <p className="text-sm font-semibold">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </label>
+  );
+}
+
+function SelectField({
+  value,
+  disabled,
+  options,
+  placeholder,
+  noOptions,
+  onChange,
+}: {
+  value: string;
+  disabled?: boolean;
+  options: OptionItem[];
+  placeholder: string;
+  noOptions: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      value={value}
+      disabled={disabled}
+      className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <option value="">{options.length ? placeholder : noOptions}</option>
+
+      {options.map((item) => (
+        <option key={item.id} value={item.id}>
+          {item.subtitle ? `${item.label} - ${item.subtitle}` : item.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function MoneyInput({
+  value,
+  disabled,
+  placeholder,
+  isArabic,
+  onChange,
+  onBlur,
+}: {
+  value: string;
+  disabled?: boolean;
+  placeholder: string;
+  isArabic: boolean;
+  onChange: (value: string) => void;
+  onBlur?: () => void;
+}) {
+  return (
+    <div className="relative">
+      <Input
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        className={`h-10 rounded-xl ${isArabic ? "pl-10" : "pr-10"}`}
+        dir="ltr"
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
+      />
+
+      <SarIcon
+        className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
+          isArabic ? "left-3" : "right-3"
+        }`}
+      />
+    </div>
+  );
+}
+
+/* ============================================================
+   Page
+============================================================ */
+
+export default function SystemCreateContractPage() {
+  const router = useRouter();
+  const auth = useAuth() as unknown;
+
+  const [locale, setLocale] = useState<AppLocale>("ar");
+  const [formData, setFormData] = useState<ContractFormData>(initialFormData);
+  const [errors, setErrors] = useState<ContractFormErrors>({});
+  const [submitError, setSubmitError] = useState("");
+  const [optionsError, setOptionsError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingOptions, setIsLoadingOptions] = useState(false);
+
+  const [providers, setProviders] = useState<OptionItem[]>([]);
+  const [products, setProducts] = useState<OptionItem[]>([]);
+
+  const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
-  const t = dictionary(locale);
+  const authResolving = isAuthResolving(auth);
 
-  useEffect(() => {
-    const currentLocale = readLocale();
-    setLocale(currentLocale);
-    applyDocumentLocale(currentLocale);
+  const canCreateContracts = hasSafePermission(
+    auth,
+    ["contracts.create"],
+    "action",
+  );
 
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-      setLocale(nextLocale);
-      applyDocumentLocale(nextLocale);
-    };
+  const canViewContracts = hasSafePermission(
+    auth,
+    ["contracts.view", "contracts.list"],
+    "view",
+  );
 
-    window.addEventListener("primey-locale-changed", syncLocale);
-    window.addEventListener("storage", syncLocale);
+  const canViewProviders = hasSafePermission(
+    auth,
+    ["providers.view", "providers.list", "centers.view", "centers.list"],
+    "view",
+  );
 
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncLocale);
-      window.removeEventListener("storage", syncLocale);
-    };
-  }, []);
+  const canViewProducts = hasSafePermission(
+    auth,
+    ["products.view", "products.list"],
+    "view",
+  );
 
-  async function loadProviders() {
-    try {
-      setIsLoadingProviders(true);
+  const isDirty = useMemo(() => hasFormChanges(formData), [formData]);
 
-      const response = await fetch("/api/providers/?page_size=500", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
+  const selectedProvider = useMemo(
+    () => providers.find((item) => item.id === formData.provider_id),
+    [formData.provider_id, providers],
+  );
 
-      const payload = await response.json().catch(() => null);
+  const selectedProductsCount = useMemo(
+    () =>
+      formData.contract_products.filter((row) => row.product_id.trim().length > 0)
+        .length,
+    [formData.contract_products],
+  );
 
-      if (!response.ok) {
-        throw new Error(payload?.message || "Failed to load providers.");
-      }
+  const completedFields = useMemo(() => {
+    const keys: Array<keyof ContractFormData> = [
+      "title",
+      "provider_id",
+      "status",
+      "pricing_model",
+      "discount_percentage",
+      "system_commission_percentage",
+      "start_date",
+      "end_date",
+    ];
 
-      const items = normalizeApiList(payload)
-        .map(normalizeProvider)
-        .filter((provider) => provider.id);
+    return keys.filter((key) => String(formData[key] || "").trim().length > 0)
+      .length;
+  }, [formData]);
 
-      setProviders(items);
-    } catch (error) {
-      console.error("Load providers error:", error);
-      toast.error(t.providersError);
-      setProviders([]);
-    } finally {
-      setIsLoadingProviders(false);
-    }
-  }
+  const progressPercent = Math.round((completedFields / 8) * 100);
 
-  async function loadProducts() {
-    try {
-      setIsLoadingProducts(true);
-
-      const response = await fetch("/api/products/?page_size=500", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-
-      const payload = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(payload?.message || "Failed to load products.");
-      }
-
-      const items = normalizeApiList(payload)
-        .map(normalizeProduct)
-        .filter((product) => product.id);
-
-      setProducts(items);
-    } catch (error) {
-      console.error("Load products error:", error);
-      toast.error(t.productsError);
-      setProducts([]);
-    } finally {
-      setIsLoadingProducts(false);
-    }
-  }
-
-  useEffect(() => {
-    loadProviders();
-    loadProducts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const selectedProvider = useMemo(() => {
-    return providers.find(
-      (provider) => String(provider.id) === formData.providerId
-    );
-  }, [providers, formData.providerId]);
-
-  const selectedProductRows = useMemo(() => {
-    return contractProducts
-      .filter((row) => row.productId)
-      .map((row) => {
-        const product = products.find(
-          (item) => String(item.id) === row.productId
-        );
-
-        return {
-          ...row,
-          product,
-        };
-      });
-  }, [contractProducts, products]);
+  const isReadyToSave =
+    formData.title.trim().length > 0 &&
+    formData.provider_id.trim().length > 0 &&
+    isValidPercentage(formData.discount_percentage) &&
+    isValidPercentage(formData.system_commission_percentage);
 
   function updateField<K extends keyof ContractFormData>(
     key: K,
-    value: ContractFormData[K]
+    value: ContractFormData[K],
   ) {
     setFormData((current) => ({
       ...current,
@@ -701,975 +1178,1136 @@ export default function SystemContractsCreatePage() {
       ...current,
       [key]: undefined,
     }));
+
+    if (submitError) {
+      setSubmitError("");
+    }
   }
 
-  function updateContractProductRow(
-    localId: string,
-    patch: Partial<ContractProductFormRow>
+  function updateProductRow(
+    rowId: string,
+    patch: Partial<ContractProductRow>,
   ) {
-    setContractProducts((current) =>
-      current.map((row) => (row.localId === localId ? { ...row, ...patch } : row))
-    );
+    setFormData((current) => ({
+      ...current,
+      contract_products: current.contract_products.map((row) =>
+        row.rowId === rowId ? { ...row, ...patch } : row,
+      ),
+    }));
 
     setErrors((current) => ({
       ...current,
-      contractProducts: undefined,
+      [`product_${rowId}`]: undefined,
     }));
   }
 
-  function addContractProductRow() {
-    setContractProducts((current) => [...current, newContractProductRow()]);
+  function addProductRow() {
+    setFormData((current) => ({
+      ...current,
+      contract_products: [...current.contract_products, createProductRow()],
+    }));
   }
 
-  function removeContractProductRow(localId: string) {
-    setContractProducts((current) => {
-      if (current.length <= 1) {
-        return [newContractProductRow()];
-      }
-
-      return current.filter((row) => row.localId !== localId);
-    });
+  function removeProductRow(rowId: string) {
+    setFormData((current) => ({
+      ...current,
+      contract_products: current.contract_products.filter(
+        (row) => row.rowId !== rowId,
+      ),
+    }));
   }
 
-  function isInvalidPercentage(value: string) {
-    if (!value) return false;
-
-    const numeric = Number(value);
-    return !Number.isFinite(numeric) || numeric < 0 || numeric > 100;
-  }
-
-  function validate(nextStatus?: ContractStatus) {
+  function validateForm() {
     const nextErrors: ContractFormErrors = {};
-    const statusToValidate = nextStatus || formData.status;
-
-    if (!formData.contractNumber.trim()) {
-      nextErrors.contractNumber = t.required;
-    }
 
     if (!formData.title.trim()) {
-      nextErrors.title = t.required;
+      nextErrors.title = t.validation.title;
     }
 
-    if (!formData.providerId) {
-      nextErrors.providerId = t.selectProviderError;
+    if (!formData.provider_id) {
+      nextErrors.provider_id = t.validation.provider;
     }
 
-    if (statusToValidate !== "DRAFT") {
-      if (!formData.startDate) {
-        nextErrors.startDate = t.required;
+    const numericFields: Array<keyof ContractFormData> = [
+      "discount_percentage",
+      "system_commission_percentage",
+      "contract_value",
+    ];
+
+    numericFields.forEach((key) => {
+      if (!isValidNumber(String(formData[key] || ""))) {
+        nextErrors[key] = t.validation.number;
       }
-
-      if (!formData.endDate) {
-        nextErrors.endDate = t.required;
-      }
-    }
-
-    if (formData.startDate && formData.endDate) {
-      const startDate = new Date(formData.startDate);
-      const endDate = new Date(formData.endDate);
-
-      if (
-        !Number.isNaN(startDate.getTime()) &&
-        !Number.isNaN(endDate.getTime()) &&
-        endDate < startDate
-      ) {
-        nextErrors.endDate = t.invalidDateRange;
-      }
-    }
-
-    if (isInvalidPercentage(formData.discountPercentage)) {
-      nextErrors.discountPercentage = t.invalidPercent;
-    }
-
-    if (isInvalidPercentage(formData.systemCommissionPercentage)) {
-      nextErrors.systemCommissionPercentage = t.invalidPercent;
-    }
-
-    const selectedProducts = contractProducts
-      .map((row) => row.productId)
-      .filter(Boolean);
-
-    const uniqueProducts = new Set(selectedProducts);
-
-    if (selectedProducts.length !== uniqueProducts.size) {
-      nextErrors.contractProducts = t.duplicateProduct;
-    }
-
-    const hasInvalidProductPercentage = contractProducts.some((row) =>
-      isInvalidPercentage(row.discountPercentage)
-    );
-
-    if (hasInvalidProductPercentage) {
-      nextErrors.contractProducts = t.invalidPercent;
-    }
-
-    const hasInvalidSpecialPrice = contractProducts.some((row) => {
-      if (!row.specialPrice) return false;
-
-      const numeric = Number(row.specialPrice);
-      return !Number.isFinite(numeric) || numeric < 0;
     });
 
-    if (hasInvalidSpecialPrice) {
-      nextErrors.contractProducts = t.invalidNumber;
+    if (!isValidPercentage(formData.discount_percentage)) {
+      nextErrors.discount_percentage = t.validation.percentage;
     }
+
+    if (!isValidPercentage(formData.system_commission_percentage)) {
+      nextErrors.system_commission_percentage = t.validation.percentage;
+    }
+
+    if (formData.start_date && formData.end_date) {
+      const startDate = new Date(formData.start_date).getTime();
+      const endDate = new Date(formData.end_date).getTime();
+
+      if (Number.isFinite(startDate) && Number.isFinite(endDate)) {
+        if (endDate < startDate) {
+          nextErrors.end_date = t.validation.dates;
+        }
+      }
+    }
+
+    formData.contract_products.forEach((row) => {
+      const hasAnyValue =
+        row.product_id ||
+        row.special_price ||
+        row.discount_percentage !== "0.00" ||
+        !row.is_active;
+
+      if (hasAnyValue && !row.product_id) {
+        nextErrors[`product_${row.rowId}`] = t.validation.product;
+      }
+
+      if (!isValidNumber(row.special_price)) {
+        nextErrors[`product_${row.rowId}`] = t.validation.number;
+      }
+
+      if (!isValidPercentage(row.discount_percentage)) {
+        nextErrors[`product_${row.rowId}`] = t.validation.percentage;
+      }
+    });
 
     setErrors(nextErrors);
 
     return Object.keys(nextErrors).length === 0;
   }
 
-  function buildPayload(statusOverride?: ContractStatus) {
-    const status = statusOverride || formData.status;
+  const loadOptions = useCallback(
+    async (showToast = false) => {
+      if (!canCreateContracts) return;
 
-    const filteredProducts = contractProducts
-      .filter((row) => row.productId)
-      .map((row) => ({
-        product_id: Number(row.productId),
-        is_active: row.isActive,
-        special_price: row.specialPrice ? Number(row.specialPrice) : null,
-        discount_percentage: row.discountPercentage
-          ? Number(row.discountPercentage)
-          : 0,
-        coverage_notes: row.coverageNotes.trim(),
-      }));
+      try {
+        setIsLoadingOptions(true);
+        setOptionsError("");
 
-    return {
-      contract_number: formData.contractNumber.trim(),
-      title: formData.title.trim(),
-      provider_id: formData.providerId ? Number(formData.providerId) : null,
-      status,
-      pricing_model: formData.pricingModel,
-      start_date: formData.startDate || null,
-      end_date: formData.endDate || null,
-      signed_at: formData.signedAt || null,
-      provider_contact_name: formData.providerContactName.trim(),
-      provider_contact_phone: formData.providerContactPhone.trim(),
-      provider_contact_email: formData.providerContactEmail.trim(),
-      discount_percentage: formData.discountPercentage
-        ? Number(formData.discountPercentage)
-        : 0,
-      system_commission_percentage: formData.systemCommissionPercentage
-        ? Number(formData.systemCommissionPercentage)
-        : 0,
-      terms_and_conditions: formData.termsAndConditions.trim(),
-      notes: formData.notes.trim(),
-      contract_products: filteredProducts,
-    };
-  }
+        const requests: Array<Promise<void>> = [];
 
-  async function submitContract(statusOverride?: ContractStatus) {
-    const nextStatus = statusOverride || formData.status;
+        if (canViewProviders) {
+          requests.push(
+            fetch(apiUrl("/api/providers/?page_size=200"), {
+              credentials: "include",
+              headers: { Accept: "application/json" },
+            })
+              .then((response) => response.json())
+              .then((payload) => {
+                setProviders(
+                  extractList(payload, ["providers", "centers"]).map((item) =>
+                    normalizeOption(item, "PRV"),
+                  ),
+                );
+              }),
+          );
+        }
 
-    if (!validate(nextStatus)) return;
+        if (canViewProducts) {
+          requests.push(
+            fetch(apiUrl("/api/products/?page_size=200"), {
+              credentials: "include",
+              headers: { Accept: "application/json" },
+            })
+              .then((response) => response.json())
+              .then((payload) => {
+                setProducts(
+                  extractList(payload, ["products"]).map((item) =>
+                    normalizeOption(item, "PRD"),
+                  ),
+                );
+              }),
+          );
+        }
 
-    try {
-      setIsSubmitting(true);
+        await Promise.all(requests);
 
-      const response = await fetch("/api/contracts/", {
+        if (showToast) {
+          toast.success(t.refreshOptions);
+        }
+      } catch (error) {
+        console.error("Load contract form options error:", error);
+        setOptionsError(t.optionLoadError);
+        toast.error(t.optionLoadError);
+      } finally {
+        setIsLoadingOptions(false);
+      }
+    },
+    [
+      canCreateContracts,
+      canViewProducts,
+      canViewProviders,
+      t.optionLoadError,
+      t.refreshOptions,
+    ],
+  );
+
+  async function postContract(payload: Record<string, unknown>) {
+    const csrfToken = readCookie("csrftoken");
+
+    const endpoints = ["/api/contracts/create/", "/api/contracts/"];
+
+    let lastResult: CreateContractApiResponse | null = null;
+
+    for (const endpoint of endpoints) {
+      const response = await fetch(apiUrl(endpoint), {
         method: "POST",
         credentials: "include",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          "X-CSRFToken": getCookie("csrftoken"),
+          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
         },
-        body: JSON.stringify(buildPayload(nextStatus)),
+        body: JSON.stringify(payload),
       });
 
-      const payload = await response.json().catch(() => null);
+      const result = (await response.json().catch(() => null)) as
+        | CreateContractApiResponse
+        | null;
 
-      if (!response.ok || payload?.ok === false) {
-        const serverMessage =
-          payload?.message ||
-          payload?.errors?.join?.(", ") ||
-          payload?.errors ||
-          t.createError;
+      lastResult = result;
 
-        throw new Error(String(serverMessage));
+      if (response.status === 404 || response.status === 405) {
+        continue;
       }
 
-      toast.success(nextStatus === "DRAFT" ? t.draftSuccess : t.createdSuccess);
+      if (!response.ok || result?.ok === false) {
+        throw result || { message: `HTTP ${response.status}` };
+      }
 
-      const createdId = payload?.data?.id || payload?.id;
+      return result || {};
+    }
+
+    throw lastResult || { message: t.apiError };
+  }
+
+  async function submitForm() {
+    setSubmitError("");
+
+    if (!validateForm()) {
+      toast.error(t.validationToast);
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+
+      const result = await postContract(normalizePayload(formData));
+
+      const createdId = resolveCreatedId(result);
+
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+      toast.success(t.success);
 
       if (createdId) {
         router.push(`/system/contracts/${createdId}`);
-      } else {
-        router.push("/system/contracts/list");
+        return;
       }
 
-      router.refresh();
+      router.push("/system/contracts/list");
     } catch (error) {
+      const result = error as CreateContractApiResponse;
+      const apiErrors = mapApiFieldErrors(result?.errors);
+      const message = result?.message || t.apiError;
+
       console.error("Create contract error:", error);
-      toast.error(error instanceof Error ? error.message : t.createError);
+
+      setErrors((current) => ({
+        ...current,
+        ...apiErrors,
+      }));
+
+      setSubmitError(message);
+      toast.error(message);
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  function saveDraft() {
+    try {
+      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(formData));
+      toast.success(t.draftSaved);
+    } catch (error) {
+      console.error("Save contract draft error:", error);
+      toast.error(t.apiError);
+    }
+  }
+
+  function restoreDraft() {
+    try {
+      const rawDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+
+      if (!rawDraft) {
+        toast.error(t.noDraft);
+        return;
+      }
+
+      const parsed = JSON.parse(rawDraft) as ContractFormData;
+
+      setFormData({
+        ...initialFormData,
+        ...parsed,
+        contract_products: Array.isArray(parsed.contract_products)
+          ? parsed.contract_products.map((row) => ({
+              ...createProductRow(),
+              ...row,
+              rowId: row.rowId || crypto.randomUUID(),
+            }))
+          : [],
+      });
+
+      setErrors({});
+      setSubmitError("");
+      toast.success(t.draftRestored);
+    } catch (error) {
+      console.error("Restore contract draft error:", error);
+      toast.error(t.apiError);
+    }
+  }
+
+  function clearForm() {
+    if (isDirty && !window.confirm(t.confirmClear)) return;
+
+    setFormData(initialFormData);
+    setErrors({});
+    setSubmitError("");
+    toast.success(t.formCleared);
+  }
+
+  function confirmNavigate(path: string) {
+    if (isSubmitting) return;
+
+    if (isDirty && !window.confirm(t.confirmLeave)) {
+      return;
+    }
+
+    router.push(path);
+  }
+
+  useEffect(() => {
+    const syncLocale = () => {
+      const nextLocale = readLocale();
+
+      applyDocumentLocale(nextLocale);
+      setLocale(nextLocale);
+    };
+
+    const syncAfterPaint = () => {
+      syncLocale();
+
+      window.setTimeout(() => {
+        syncLocale();
+      }, 0);
+    };
+
+    syncAfterPaint();
+
+    window.addEventListener("primey-locale-changed", syncAfterPaint);
+    window.addEventListener("storage", syncAfterPaint);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", syncAfterPaint);
+      window.removeEventListener("storage", syncAfterPaint);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authResolving) return;
+    loadOptions(false);
+  }, [authResolving, loadOptions]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirty || isSubmitting) return;
+
+      event.preventDefault();
+      event.returnValue = t.confirmLeave;
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [isDirty, isSubmitting, t.confirmLeave]);
+
+  if (!authResolving && !canCreateContracts) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-muted/30">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-white/80 p-6 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-white/5">
-          <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-sky-500/10" />
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      {/* Header */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+            {t.title}
+          </h1>
 
-          <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Link href="/system/contracts">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="rounded-full bg-white/70 dark:bg-white/5"
-                  >
-                    <ArrowLeft className="me-2 h-4 w-4" />
-                    {t.back}
-                  </Button>
-                </Link>
-
-                <Badge className="rounded-full border-primary/20 bg-primary/10 px-3 py-1 text-primary hover:bg-primary/10">
-                  <FileSignature className="me-1 h-3.5 w-3.5" />
-                  {isArabic ? "وحدة العقود" : "Contracts Module"}
-                </Badge>
-
-                <Badge
-                  variant="outline"
-                  className="rounded-full bg-white/60 dark:bg-white/5"
-                >
-                  <ShieldCheck className="me-1 h-3.5 w-3.5" />
-                  {isArabic ? "بيانات حقيقية" : "Live Data"}
-                </Badge>
-              </div>
-
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                  {t.title}
-                </h1>
-                <p className="mt-2 max-w-3xl text-sm leading-7 text-muted-foreground">
-                  {t.subtitle}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Link href="/system/contracts/list">
-                <Button
-                  variant="outline"
-                  className="rounded-2xl bg-white/70 dark:bg-white/5"
-                >
-                  <BadgeCheck className="me-2 h-4 w-4" />
-                  {t.list}
-                </Button>
-              </Link>
-
-              <Button
-                variant="outline"
-                className="rounded-2xl bg-white/70 dark:bg-white/5"
-                disabled={isSubmitting}
-                onClick={() => submitContract("DRAFT")}
-              >
-                {isSubmitting ? (
-                  <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="me-2 h-4 w-4" />
-                )}
-                {t.saveDraft}
-              </Button>
-
-              <Button
-                className="rounded-2xl shadow-lg"
-                disabled={isSubmitting}
-                onClick={() => submitContract()}
-              >
-                {isSubmitting ? (
-                  <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <PlusCircle className="me-2 h-4 w-4" />
-                )}
-                {t.create}
-              </Button>
-            </div>
-          </div>
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
+          </p>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
-          <div className="space-y-6">
-            {/* Basic Info */}
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileSignature className="h-5 w-5 text-primary" />
-                  {t.basicInfo}
-                </CardTitle>
-                <CardDescription>{t.basicInfoDesc}</CardDescription>
-              </CardHeader>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-xl sm:w-auto"
+            disabled={isSubmitting}
+            onClick={() => confirmNavigate("/system/contracts")}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span>{t.back}</span>
+          </Button>
 
-              <CardContent className="grid gap-5 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="contractNumber">{t.contractNumber}</Label>
-                  <Input
-                    id="contractNumber"
-                    value={formData.contractNumber}
-                    onChange={(event) =>
-                      updateField("contractNumber", event.target.value)
-                    }
-                    placeholder={t.contractNumberPlaceholder}
-                    className="rounded-2xl bg-white/80 dark:bg-white/5"
-                  />
-                  <FieldError message={errors.contractNumber} />
-                </div>
+          {canViewContracts ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+              disabled={isSubmitting}
+              onClick={() => confirmNavigate("/system/contracts/list")}
+            >
+              <ClipboardList className="h-4 w-4" />
+              <span>{t.contractsList}</span>
+            </Button>
+          ) : null}
 
-                <div className="space-y-2">
-                  <Label htmlFor="title">{t.contractTitle}</Label>
-                  <Input
-                    id="title"
-                    value={formData.title}
-                    onChange={(event) => updateField("title", event.target.value)}
-                    placeholder={t.contractTitlePlaceholder}
-                    className="rounded-2xl bg-white/80 dark:bg-white/5"
-                  />
-                  <FieldError message={errors.title} />
-                </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-xl sm:w-auto"
+            disabled={isSubmitting || isLoadingOptions}
+            onClick={() => loadOptions(true)}
+          >
+            {isLoadingOptions ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+            <span>{t.refreshOptions}</span>
+          </Button>
 
-                <div className="space-y-2">
-                  <Label htmlFor="pricingModel">{t.pricingModel}</Label>
-                  <select
-                    id="pricingModel"
-                    value={formData.pricingModel}
-                    onChange={(event) =>
-                      updateField(
-                        "pricingModel",
-                        event.target.value as PricingModel
-                      )
-                    }
-                    className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
-                  >
-                    <option value="CUSTOM">{t.custom}</option>
-                    <option value="PERCENTAGE">{t.percentage}</option>
-                    <option value="FIXED">{t.fixed}</option>
-                    <option value="FREE">{t.free}</option>
-                  </select>
-                </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-xl sm:w-auto"
+            disabled={isSubmitting}
+            onClick={saveDraft}
+          >
+            <Save className="h-4 w-4" />
+            <span>{t.saveDraft}</span>
+          </Button>
 
-                <div className="space-y-2">
-                  <Label htmlFor="status">{t.status}</Label>
-                  <select
-                    id="status"
-                    value={formData.status}
-                    onChange={(event) =>
-                      updateField("status", event.target.value as ContractStatus)
-                    }
-                    className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
-                  >
-                    <option value="ACTIVE">{t.active}</option>
-                    <option value="DRAFT">{t.draft}</option>
-                    <option value="SUSPENDED">{t.suspended}</option>
-                    <option value="EXPIRED">{t.expired}</option>
-                    <option value="TERMINATED">{t.terminated}</option>
-                  </select>
-                </div>
-              </CardContent>
-            </Card>
+          <Button
+            type="button"
+            className="h-10 w-full rounded-xl sm:w-auto"
+            disabled={isSubmitting}
+            onClick={submitForm}
+          >
+            {isSubmitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            <span>{isSubmitting ? t.saving : t.create}</span>
+          </Button>
+        </div>
+      </div>
 
-            {/* Provider */}
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Building2 className="h-5 w-5 text-primary" />
-                  {t.providerInfo}
-                </CardTitle>
-                <CardDescription>{t.providerInfoDesc}</CardDescription>
-              </CardHeader>
+      {/* Errors */}
+      {submitError ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5 text-destructive">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <p className="font-semibold">{t.formErrorTitle}</p>
+              <p className="mt-1 text-sm">{submitError}</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
-              <CardContent>
-                <div className="space-y-2">
-                  <Label htmlFor="provider">{t.provider}</Label>
-                  <select
-                    id="provider"
-                    value={formData.providerId}
-                    onChange={(event) =>
-                      updateField("providerId", event.target.value)
-                    }
-                    disabled={isLoadingProviders}
-                    className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/5"
-                  >
-                    <option value="">
-                      {isLoadingProviders ? t.loadingProviders : t.selectProvider}
+      {optionsError ? (
+        <Card className="rounded-2xl border border-orange-200 bg-orange-50 shadow-sm dark:border-orange-900/40 dark:bg-orange-950/20">
+          <CardContent className="flex items-start gap-3 p-5 text-orange-700 dark:text-orange-300">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <p className="text-sm font-medium">{optionsError}</p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        {/* Main Form */}
+        <div className="space-y-4">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <FileText className="h-4 w-4" />
+                {t.basicInfo}
+              </CardTitle>
+              <CardDescription>{t.basicDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <FieldBlock label={t.labels.contractNumber}>
+                <Input
+                  value={formData.contract_number}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.contractNumber}
+                  className="h-10 rounded-xl"
+                  dir="ltr"
+                  onChange={(event) =>
+                    updateField("contract_number", event.target.value)
+                  }
+                  onBlur={() =>
+                    updateField(
+                      "contract_number",
+                      normalizeContractNumber(formData.contract_number),
+                    )
+                  }
+                />
+              </FieldBlock>
+
+              <FieldBlock label={t.labels.title} error={errors.title} required>
+                <Input
+                  value={formData.title}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.title}
+                  className="h-10 rounded-xl"
+                  onChange={(event) => updateField("title", event.target.value)}
+                />
+              </FieldBlock>
+
+              <FieldBlock label={t.labels.status}>
+                <select
+                  value={formData.status}
+                  disabled={isSubmitting}
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  onChange={(event) =>
+                    updateField("status", event.target.value as ContractStatus)
+                  }
+                >
+                  {Object.entries(t.statuses).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
                     </option>
+                  ))}
+                </select>
+              </FieldBlock>
 
-                    {providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.name}
-                        {provider.code ? ` - ${provider.code}` : ""}
-                        {provider.city ? ` - ${provider.city}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <FieldError message={errors.providerId} />
+              <FieldBlock label={t.labels.pricingModel}>
+                <select
+                  value={formData.pricing_model}
+                  disabled={isSubmitting}
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  onChange={(event) =>
+                    updateField(
+                      "pricing_model",
+                      event.target.value as PricingModel,
+                    )
+                  }
+                >
+                  {Object.entries(t.pricingModels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </FieldBlock>
+            </CardContent>
+          </Card>
 
-                  {!isLoadingProviders && providers.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      {t.noProviders}
-                    </p>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <Building2 className="h-4 w-4" />
+                {t.partyInfo}
+              </CardTitle>
+              <CardDescription>{t.partyDesc}</CardDescription>
+            </CardHeader>
 
-            {/* Duration */}
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CalendarRange className="h-5 w-5 text-primary" />
-                  {t.durationInfo}
-                </CardTitle>
-                <CardDescription>{t.durationInfoDesc}</CardDescription>
-              </CardHeader>
+            <CardContent>
+              <FieldBlock
+                label={t.labels.provider}
+                error={errors.provider_id}
+                required
+              >
+                <SelectField
+                  value={formData.provider_id}
+                  disabled={isSubmitting || isLoadingOptions}
+                  options={providers}
+                  placeholder={t.selectPlaceholder}
+                  noOptions={t.noOptions}
+                  onChange={(value) => updateField("provider_id", value)}
+                />
+              </FieldBlock>
+            </CardContent>
+          </Card>
 
-              <CardContent className="grid gap-5 md:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor="startDate">{t.startDate}</Label>
-                  <Input
-                    id="startDate"
-                    type="date"
-                    value={formData.startDate}
-                    onChange={(event) =>
-                      updateField("startDate", event.target.value)
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <Wallet className="h-4 w-4" />
+                {t.financialInfo}
+              </CardTitle>
+              <CardDescription>{t.financialDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-3">
+              <FieldBlock
+                label={t.labels.discountPercentage}
+                error={errors.discount_percentage}
+              >
+                <Input
+                  value={formData.discount_percentage}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.discountPercentage}
+                  className="h-10 rounded-xl"
+                  dir="ltr"
+                  onChange={(event) =>
+                    updateField("discount_percentage", event.target.value)
+                  }
+                  onBlur={() =>
+                    updateField(
+                      "discount_percentage",
+                      normalizeNumberString(formData.discount_percentage),
+                    )
+                  }
+                />
+              </FieldBlock>
+
+              <FieldBlock
+                label={t.labels.systemCommissionPercentage}
+                error={errors.system_commission_percentage}
+              >
+                <Input
+                  value={formData.system_commission_percentage}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.systemCommissionPercentage}
+                  className="h-10 rounded-xl"
+                  dir="ltr"
+                  onChange={(event) =>
+                    updateField(
+                      "system_commission_percentage",
+                      event.target.value,
+                    )
+                  }
+                  onBlur={() =>
+                    updateField(
+                      "system_commission_percentage",
+                      normalizeNumberString(
+                        formData.system_commission_percentage,
+                      ),
+                    )
+                  }
+                />
+              </FieldBlock>
+
+              <FieldBlock
+                label={t.labels.contractValue}
+                error={errors.contract_value}
+              >
+                <MoneyInput
+                  value={formData.contract_value}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.contractValue}
+                  isArabic={isArabic}
+                  onChange={(value) => updateField("contract_value", value)}
+                  onBlur={() => {
+                    if (formData.contract_value.trim()) {
+                      updateField(
+                        "contract_value",
+                        normalizeNumberString(formData.contract_value),
+                      );
                     }
-                    className="rounded-2xl bg-white/80 dark:bg-white/5"
-                  />
-                  <FieldError message={errors.startDate} />
-                </div>
+                  }}
+                />
+              </FieldBlock>
+            </CardContent>
+          </Card>
 
-                <div className="space-y-2">
-                  <Label htmlFor="endDate">{t.endDate}</Label>
-                  <Input
-                    id="endDate"
-                    type="date"
-                    value={formData.endDate}
-                    onChange={(event) => updateField("endDate", event.target.value)}
-                    className="rounded-2xl bg-white/80 dark:bg-white/5"
-                  />
-                  <FieldError message={errors.endDate} />
-                </div>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <CalendarDays className="h-4 w-4" />
+                {t.datesInfo}
+              </CardTitle>
+              <CardDescription>{t.datesDesc}</CardDescription>
+            </CardHeader>
 
-                <div className="space-y-2">
-                  <Label htmlFor="signedAt">{t.signedAt}</Label>
-                  <Input
-                    id="signedAt"
-                    type="date"
-                    value={formData.signedAt}
-                    onChange={(event) => updateField("signedAt", event.target.value)}
-                    className="rounded-2xl bg-white/80 dark:bg-white/5"
-                  />
-                  <FieldError message={errors.signedAt} />
-                </div>
-              </CardContent>
-            </Card>
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <FieldBlock label={t.labels.startDate} error={errors.start_date}>
+                <Input
+                  type="date"
+                  value={formData.start_date}
+                  disabled={isSubmitting}
+                  className="h-10 rounded-xl"
+                  onChange={(event) =>
+                    updateField("start_date", event.target.value)
+                  }
+                />
+              </FieldBlock>
 
-            {/* Financial */}
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Wallet className="h-5 w-5 text-primary" />
-                  {t.financialInfo}
+              <FieldBlock label={t.labels.endDate} error={errors.end_date}>
+                <Input
+                  type="date"
+                  value={formData.end_date}
+                  disabled={isSubmitting}
+                  className="h-10 rounded-xl"
+                  onChange={(event) =>
+                    updateField("end_date", event.target.value)
+                  }
+                />
+              </FieldBlock>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base font-bold">
+                  <Package className="h-4 w-4" />
+                  {t.productsInfo}
                 </CardTitle>
-                <CardDescription>{t.financialInfoDesc}</CardDescription>
-              </CardHeader>
+                <CardDescription>{t.productsDesc}</CardDescription>
+              </div>
 
-              <CardContent className="grid gap-5 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="discountPercentage">
-                    {t.discountPercentage}
-                  </Label>
-                  <div className="relative">
-                    <Percent className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="discountPercentage"
-                      inputMode="decimal"
-                      value={formData.discountPercentage}
-                      onChange={(event) =>
-                        updateField(
-                          "discountPercentage",
-                          normalizePercentInput(event.target.value)
-                        )
-                      }
-                      placeholder="0"
-                      className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
-                    />
-                    <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                      %
-                    </span>
-                  </div>
-                  <FieldError message={errors.discountPercentage} />
-                </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-xl"
+                disabled={isSubmitting}
+                onClick={addProductRow}
+              >
+                <Plus className="h-4 w-4" />
+                {t.addProduct}
+              </Button>
+            </CardHeader>
 
-                <div className="space-y-2">
-                  <Label htmlFor="systemCommissionPercentage">
-                    {t.systemCommissionPercentage}
-                  </Label>
-                  <div className="relative">
-                    <Image
-                      src={SAR_ICON}
-                      alt="SAR"
-                      width={16}
-                      height={16}
-                      className="absolute start-3 top-1/2 -translate-y-1/2 opacity-70"
-                    />
-                    <Input
-                      id="systemCommissionPercentage"
-                      inputMode="decimal"
-                      value={formData.systemCommissionPercentage}
-                      onChange={(event) =>
-                        updateField(
-                          "systemCommissionPercentage",
-                          normalizePercentInput(event.target.value)
-                        )
-                      }
-                      placeholder="0"
-                      className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
-                    />
-                    <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                      %
-                    </span>
-                  </div>
-                  <FieldError message={errors.systemCommissionPercentage} />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Contact */}
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <UserRound className="h-5 w-5 text-primary" />
-                  {t.contactInfo}
-                </CardTitle>
-                <CardDescription>{t.contactInfoDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-5 md:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor="providerContactName">
-                    {t.providerContactName}
-                  </Label>
-                  <div className="relative">
-                    <UserRound className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="providerContactName"
-                      value={formData.providerContactName}
-                      onChange={(event) =>
-                        updateField("providerContactName", event.target.value)
-                      }
-                      className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
-                    />
-                  </div>
-                  <FieldError message={errors.providerContactName} />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="providerContactPhone">
-                    {t.providerContactPhone}
-                  </Label>
-                  <div className="relative">
-                    <Phone className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="providerContactPhone"
-                      value={formData.providerContactPhone}
-                      onChange={(event) =>
-                        updateField("providerContactPhone", event.target.value)
-                      }
-                      className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
-                    />
-                  </div>
-                  <FieldError message={errors.providerContactPhone} />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="providerContactEmail">
-                    {t.providerContactEmail}
-                  </Label>
-                  <div className="relative">
-                    <Mail className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="providerContactEmail"
-                      type="email"
-                      value={formData.providerContactEmail}
-                      onChange={(event) =>
-                        updateField("providerContactEmail", event.target.value)
-                      }
-                      className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
-                    />
-                  </div>
-                  <FieldError message={errors.providerContactEmail} />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Contract Products */}
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <Package className="h-5 w-5 text-primary" />
-                      {t.productsInfo}
-                    </CardTitle>
-                    <CardDescription>{t.productsInfoDesc}</CardDescription>
-                  </div>
-
+            <CardContent className="space-y-3">
+              {formData.contract_products.length === 0 ? (
+                <div className="rounded-2xl border bg-background p-6 text-center">
+                  <Package className="mx-auto h-8 w-8 text-muted-foreground" />
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    {t.productsDesc}
+                  </p>
                   <Button
                     type="button"
                     variant="outline"
-                    className="rounded-2xl"
-                    onClick={addContractProductRow}
+                    className="mt-4 rounded-xl"
+                    disabled={isSubmitting}
+                    onClick={addProductRow}
                   >
-                    <PlusCircle className="me-2 h-4 w-4" />
+                    <Plus className="h-4 w-4" />
                     {t.addProduct}
                   </Button>
                 </div>
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                <FieldError message={errors.contractProducts} />
-
-                {contractProducts.map((row, index) => (
+              ) : (
+                formData.contract_products.map((row, index) => (
                   <div
-                    key={row.localId}
-                    className="rounded-3xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5"
+                    key={row.rowId}
+                    className="rounded-2xl border bg-background p-4"
                   >
-                    <div className="mb-4 flex items-center justify-between gap-3">
-                      <Badge
-                        variant="outline"
-                        className="rounded-full bg-white/70 dark:bg-white/5"
-                      >
-                        {t.product} #{formatEnglishNumber(index + 1)}
-                      </Badge>
-
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="rounded-xl text-destructive"
-                        onClick={() => removeContractProductRow(row.localId)}
-                      >
-                        <Trash2 className="me-2 h-4 w-4" />
-                        {t.removeProduct}
-                      </Button>
-                    </div>
-
-                    <div className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr_0.7fr_0.5fr]">
-                      <div className="space-y-2">
-                        <Label>{t.product}</Label>
-                        <select
-                          value={row.productId}
-                          onChange={(event) =>
-                            updateContractProductRow(row.localId, {
-                              productId: event.target.value,
-                            })
-                          }
-                          disabled={isLoadingProducts}
-                          className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white/5"
-                        >
-                          <option value="">
-                            {isLoadingProducts
-                              ? t.loadingProducts
-                              : t.selectProduct}
-                          </option>
-
-                          {products.map((product) => (
-                            <option key={product.id} value={product.id}>
-                              {product.name}
-                              {product.code ? ` - ${product.code}` : ""}
-                            </option>
-                          ))}
-                        </select>
-
-                        {!isLoadingProducts && products.length === 0 ? (
-                          <p className="text-xs text-muted-foreground">
-                            {t.noProducts}
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">
+                          {t.labels.product} #{index + 1}
+                        </p>
+                        {errors[`product_${row.rowId}`] ? (
+                          <p className="mt-1 text-xs font-medium text-destructive">
+                            {errors[`product_${row.rowId}`]}
                           </p>
                         ) : null}
                       </div>
 
-                      <div className="space-y-2">
-                        <Label>{t.specialPrice}</Label>
-                        <div className="relative">
-                          <Image
-                            src={SAR_ICON}
-                            alt="SAR"
-                            width={16}
-                            height={16}
-                            className="absolute start-3 top-1/2 -translate-y-1/2 opacity-70"
-                          />
-                          <Input
-                            inputMode="decimal"
-                            value={row.specialPrice}
-                            onChange={(event) =>
-                              updateContractProductRow(row.localId, {
-                                specialPrice: normalizeNumberInput(
-                                  event.target.value
-                                ),
-                              })
-                            }
-                            placeholder="0.00"
-                            className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
-                          />
-                        </div>
-                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9 rounded-xl"
+                        disabled={isSubmitting}
+                        onClick={() => removeProductRow(row.rowId)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
 
-                      <div className="space-y-2">
-                        <Label>{t.productDiscount}</Label>
-                        <div className="relative">
-                          <Percent className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                          <Input
-                            inputMode="decimal"
-                            value={row.discountPercentage}
-                            onChange={(event) =>
-                              updateContractProductRow(row.localId, {
-                                discountPercentage: normalizePercentInput(
-                                  event.target.value
-                                ),
-                              })
-                            }
-                            placeholder="0"
-                            className="rounded-2xl bg-white/80 ps-9 dark:bg-white/5"
-                          />
-                          <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                            %
-                          </span>
-                        </div>
-                      </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <FieldBlock label={t.labels.product}>
+                        <SelectField
+                          value={row.product_id}
+                          disabled={isSubmitting || isLoadingOptions}
+                          options={products}
+                          placeholder={t.selectPlaceholder}
+                          noOptions={t.noOptions}
+                          onChange={(value) => {
+                            const selected = products.find(
+                              (item) => item.id === value,
+                            );
 
-                      <div className="space-y-2">
-                        <Label>{t.activeProduct}</Label>
-                        <select
-                          value={row.isActive ? "true" : "false"}
-                          onChange={(event) =>
-                            updateContractProductRow(row.localId, {
-                              isActive: event.target.value === "true",
+                            const price = selected?.raw
+                              ? getValue(selected.raw, [
+                                  "effective_price",
+                                  "sale_price",
+                                  "price",
+                                  "base_price",
+                                ])
+                              : "";
+
+                            updateProductRow(row.rowId, {
+                              product_id: value,
+                              special_price:
+                                price && !row.special_price
+                                  ? normalizeNumberString(String(price))
+                                  : row.special_price,
+                            });
+                          }}
+                        />
+                      </FieldBlock>
+
+                      <FieldBlock label={t.labels.specialPrice}>
+                        <MoneyInput
+                          value={row.special_price}
+                          disabled={isSubmitting}
+                          placeholder={t.placeholders.specialPrice}
+                          isArabic={isArabic}
+                          onChange={(value) =>
+                            updateProductRow(row.rowId, {
+                              special_price: value,
                             })
                           }
-                          className="h-10 w-full rounded-2xl border border-input bg-white/80 px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring dark:bg-white/5"
-                        >
-                          <option value="true">{t.active}</option>
-                          <option value="false">{t.suspended}</option>
-                        </select>
+                          onBlur={() => {
+                            if (row.special_price.trim()) {
+                              updateProductRow(row.rowId, {
+                                special_price: normalizeNumberString(
+                                  row.special_price,
+                                ),
+                              });
+                            }
+                          }}
+                        />
+                      </FieldBlock>
+
+                      <FieldBlock label={t.labels.productDiscount}>
+                        <Input
+                          value={row.discount_percentage}
+                          disabled={isSubmitting}
+                          placeholder={t.placeholders.productDiscount}
+                          className="h-10 rounded-xl"
+                          dir="ltr"
+                          onChange={(event) =>
+                            updateProductRow(row.rowId, {
+                              discount_percentage: event.target.value,
+                            })
+                          }
+                          onBlur={() =>
+                            updateProductRow(row.rowId, {
+                              discount_percentage: normalizeNumberString(
+                                row.discount_percentage,
+                              ),
+                            })
+                          }
+                        />
+                      </FieldBlock>
+
+                      <div className="flex items-end">
+                        <label className="flex min-h-10 w-full cursor-pointer items-center gap-3 rounded-xl border bg-card px-3 py-2">
+                          <Checkbox
+                            checked={row.is_active}
+                            disabled={isSubmitting}
+                            onCheckedChange={(value) =>
+                              updateProductRow(row.rowId, {
+                                is_active: Boolean(value),
+                              })
+                            }
+                          />
+                          <span className="text-sm font-medium">
+                            {t.labels.activeProduct}
+                          </span>
+                        </label>
                       </div>
                     </div>
-
-                    <div className="mt-4 space-y-2">
-                      <Label>{t.coverageNotes}</Label>
-                      <Textarea
-                        value={row.coverageNotes}
-                        onChange={(event) =>
-                          updateContractProductRow(row.localId, {
-                            coverageNotes: event.target.value,
-                          })
-                        }
-                        className="min-h-20 rounded-2xl bg-white/80 dark:bg-white/5"
-                      />
-                    </div>
                   </div>
-                ))}
-              </CardContent>
-            </Card>
+                ))
+              )}
+            </CardContent>
+          </Card>
 
-            {/* Terms */}
-            <Card className="rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
-                  {t.termsInfo}
-                </CardTitle>
-                <CardDescription>{t.termsInfoDesc}</CardDescription>
-              </CardHeader>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <ShieldCheck className="h-4 w-4" />
+                {t.termsInfo}
+              </CardTitle>
+              <CardDescription>{t.termsDesc}</CardDescription>
+            </CardHeader>
 
-              <CardContent className="grid gap-5">
-                <div className="space-y-2">
-                  <Label htmlFor="termsAndConditions">
-                    {t.termsAndConditions}
-                  </Label>
-                  <Textarea
-                    id="termsAndConditions"
-                    value={formData.termsAndConditions}
-                    onChange={(event) =>
-                      updateField("termsAndConditions", event.target.value)
-                    }
-                    placeholder={t.termsAndConditionsPlaceholder}
-                    className="min-h-32 rounded-2xl bg-white/80 dark:bg-white/5"
+            <CardContent className="grid gap-4">
+              <FieldBlock label={t.labels.terms}>
+                <Textarea
+                  value={formData.terms_and_conditions}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.terms}
+                  className="min-h-28 rounded-xl"
+                  onChange={(event) =>
+                    updateField("terms_and_conditions", event.target.value)
+                  }
+                />
+              </FieldBlock>
+
+              <FieldBlock label={t.labels.coverageNotes}>
+                <Textarea
+                  value={formData.coverage_notes}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.coverageNotes}
+                  className="min-h-28 rounded-xl"
+                  onChange={(event) =>
+                    updateField("coverage_notes", event.target.value)
+                  }
+                />
+              </FieldBlock>
+
+              <FieldBlock label={t.labels.notes}>
+                <Textarea
+                  value={formData.notes}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.notes}
+                  className="min-h-28 rounded-xl"
+                  onChange={(event) => updateField("notes", event.target.value)}
+                />
+              </FieldBlock>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <BadgeCheck className="h-4 w-4" />
+                {t.postOptionsInfo}
+              </CardTitle>
+              <CardDescription>{t.postOptionsDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <ToggleBox
+                checked={formData.auto_activate}
+                disabled={isSubmitting}
+                title={t.labels.autoActivate}
+                description={t.labels.autoActivate}
+                onChange={(value) => updateField("auto_activate", value)}
+              />
+
+              <ToggleBox
+                checked={formData.notify_provider}
+                disabled={isSubmitting}
+                title={t.labels.notifyProvider}
+                description={t.labels.notifyProvider}
+                onChange={(value) => updateField("notify_provider", value)}
+              />
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Sidebar Summary */}
+        <aside className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-bold">
+                {t.summaryTitle}
+              </CardTitle>
+              <CardDescription>{t.summaryDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="rounded-xl border bg-background p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">
+                      {t.completion}
+                    </p>
+                    <p className="mt-1 text-2xl font-bold">
+                      {formatNumber(progressPercent)}%
+                    </p>
+                  </div>
+
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
+                    <BadgeCheck className="h-5 w-5" />
+                  </div>
+                </div>
+
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all"
+                    style={{ width: `${progressPercent}%` }}
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="notes">{t.notes}</Label>
-                  <Textarea
-                    id="notes"
-                    value={formData.notes}
-                    onChange={(event) => updateField("notes", event.target.value)}
-                    placeholder={t.notesPlaceholder}
-                    className="min-h-28 rounded-2xl bg-white/80 dark:bg-white/5"
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Summary */}
-          <div className="space-y-6">
-            <Card className="sticky top-6 rounded-3xl border-white/20 bg-white/80 shadow-sm dark:border-white/10 dark:bg-white/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-primary" />
-                  {t.summaryTitle}
-                </CardTitle>
-                <CardDescription>{t.summaryDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                  <p className="text-xs text-muted-foreground">
-                    {t.contractTitle}
-                  </p>
-                  <p className="mt-1 font-semibold">
-                    {formData.title || (isArabic ? "غير محدد" : "Not set")}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                  <p className="text-xs text-muted-foreground">
-                    {t.selectedProvider}
-                  </p>
-                  <p className="mt-1 font-semibold">
-                    {selectedProvider?.name ||
-                      (isArabic ? "غير محدد" : "Not set")}
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                    <p className="text-xs text-muted-foreground">
-                      {t.discountPercentage}
-                    </p>
-                    <p className="mt-1 text-sm">
-                      <PercentValue value={formData.discountPercentage || 0} />
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                    <p className="text-xs text-muted-foreground">
-                      {t.systemCommissionPercentage}
-                    </p>
-                    <p className="mt-1 text-sm">
-                      <PercentValue
-                        value={formData.systemCommissionPercentage || 0}
-                      />
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                  <p className="text-xs text-muted-foreground">
-                    {t.contractStatus}
-                  </p>
-                  <div className="mt-2">
-                    <Badge className="rounded-full border-primary/20 bg-primary/10 text-primary hover:bg-primary/10">
-                      {statusLabel(formData.status, locale)}
+                <div className="mt-3">
+                  {isReadyToSave ? (
+                    <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {t.ready}
                     </Badge>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                  <p className="text-xs text-muted-foreground">
-                    {t.pricingModel}
-                  </p>
-                  <div className="mt-2">
-                    <Badge
-                      variant="outline"
-                      className="rounded-full bg-white/70 dark:bg-white/5"
-                    >
-                      {pricingModelLabel(formData.pricingModel, locale)}
-                    </Badge>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/20 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
-                  <p className="text-xs text-muted-foreground">
-                    {t.coveredProducts}
-                  </p>
-
-                  {selectedProductRows.length === 0 ? (
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {t.noCoveredProducts}
-                    </p>
                   ) : (
-                    <div className="mt-3 space-y-2">
-                      {selectedProductRows.slice(0, 5).map((row) => (
-                        <div
-                          key={row.localId}
-                          className="rounded-xl bg-muted/50 px-3 py-2 text-sm"
-                        >
-                          <p className="font-medium">
-                            {row.product?.name || row.productId}
-                          </p>
-                          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                            <span>
-                              {t.productDiscount}:{" "}
-                              {formatPercent(row.discountPercentage || 0)}
-                            </span>
-                            {row.specialPrice ? (
-                              <span>
-                                {t.specialPrice}:{" "}
-                                <SarAmount amount={row.specialPrice} />
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
-
-                      {selectedProductRows.length > 5 ? (
-                        <p className="text-xs text-muted-foreground">
-                          +{formatEnglishNumber(selectedProductRows.length - 5)}
-                        </p>
-                      ) : null}
-                    </div>
+                    <Badge variant="outline" className="rounded-full">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      {t.missingData}
+                    </Badge>
                   )}
                 </div>
+              </div>
 
-                <div className="flex flex-col gap-2 pt-2">
+              <SummaryItem
+                icon={FileText}
+                label={t.labels.contractNumber}
+                value={formData.contract_number || "-"}
+              />
+
+              <SummaryItem
+                icon={Handshake}
+                label={t.labels.title}
+                value={formData.title || "-"}
+              />
+
+              <SummaryItem
+                icon={Building2}
+                label={t.labels.provider}
+                value={selectedProvider?.label || "-"}
+              />
+
+              <SummaryItem
+                icon={Layers3}
+                label={t.labels.pricingModel}
+                value={t.pricingModels[formData.pricing_model]}
+              />
+
+              <SummaryItem
+                icon={Percent}
+                label={t.labels.discountPercentage}
+                value={formatPercent(formData.discount_percentage)}
+              />
+
+              <SummaryItem
+                icon={Percent}
+                label={t.labels.systemCommissionPercentage}
+                value={formatPercent(formData.system_commission_percentage)}
+              />
+
+              <SummaryItem
+                icon={Wallet}
+                label={t.labels.contractValue}
+                value={
+                  <span className="inline-flex items-center gap-1.5">
+                    <span>{formatMoney(formData.contract_value || 0)}</span>
+                    <SarIcon className="h-3.5 w-3.5" />
+                  </span>
+                }
+              />
+
+              <SummaryItem
+                icon={Package}
+                label={t.productsCount}
+                value={formatNumber(selectedProductsCount)}
+              />
+
+              <div className="grid gap-2">
+                <Button
+                  type="button"
+                  className="h-10 rounded-xl"
+                  disabled={isSubmitting}
+                  onClick={submitForm}
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4" />
+                  )}
+                  {isSubmitting ? t.saving : t.create}
+                </Button>
+
+                <div className="grid grid-cols-2 gap-2">
                   <Button
-                    className="rounded-2xl"
+                    type="button"
+                    variant="outline"
+                    className="h-10 rounded-xl"
                     disabled={isSubmitting}
-                    onClick={() => submitContract()}
+                    onClick={restoreDraft}
                   >
-                    {isSubmitting ? (
-                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <PlusCircle className="me-2 h-4 w-4" />
-                    )}
-                    {t.create}
+                    <RefreshCcw className="h-4 w-4" />
+                    {t.restoreDraft}
                   </Button>
 
                   <Button
+                    type="button"
                     variant="outline"
-                    className="rounded-2xl"
+                    className="h-10 rounded-xl"
                     disabled={isSubmitting}
-                    onClick={() => submitContract("DRAFT")}
+                    onClick={clearForm}
                   >
-                    {isSubmitting ? (
-                      <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Save className="me-2 h-4 w-4" />
-                    )}
-                    {t.saveDraft}
+                    <Trash2 className="h-4 w-4" />
+                    {t.clearForm}
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-bold">
+                {t.stepsTitle}
+              </CardTitle>
+              <CardDescription>{t.stepsDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-3">
+              {t.quickNotes.map((item, index) => (
+                <div
+                  key={item}
+                  className="flex items-start gap-3 rounded-xl border bg-background p-3"
+                >
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
+                    {index + 1}
+                  </div>
+
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {item}
+                  </p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </aside>
       </div>
     </div>
   );
