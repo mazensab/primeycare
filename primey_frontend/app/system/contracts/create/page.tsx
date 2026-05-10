@@ -2,33 +2,19 @@
 
 /* ============================================================
    📂 app/system/contracts/create/page.tsx
-   🧠 Primey Care | Create Contract
+   🧠 Primey Care | Create Provider Marketing Contract
    ------------------------------------------------------------
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ مبني بنفس نمط إنشاء المراكز/العملاء المعتمد
-   ✅ Full Width Layout
-   ✅ Main Form + Sidebar Summary
-   ✅ حماية زر الإنشاء وطلبات البيانات حسب الصلاحيات
-   ✅ fallback آمن لـ system_admin / superadmin
-   ✅ Error Alert داخلي
-   ✅ Field-level validation
-   ✅ beforeunload protection
-   ✅ حفظ واستعادة مسودة محلية
-   ✅ تعطيل الحقول أثناء الحفظ
-   ✅ تنظيف البيانات قبل الإرسال
-   ✅ دعم contract_products
-   ✅ استخدام /currency/sar.svg
-   ✅ استخدام toast من sonner
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ بدون localhost hardcoded
-   ✅ لا توجد روابط تقارير داخل الوحدة
-   ✅ لا توجد نصوص تقنية ظاهرة في الواجهة
-   ✅ الأرقام بالإنجليزية
+   ✅ عقد تسويق لمنتجات مقدم الخدمة
+   ✅ لا توجد قيمة مالية مباشرة للعقد
+   ✅ كل بند منتج له سعر قبل الخصم / نسبة الخصم / سعر بعد الخصم
+   ✅ كل بند منتج له تاريخ بداية ونهاية اختياري داخل العقد
+   ✅ المنتجات مرتبطة بمقدم الخدمة المحدد
+   ✅ Phase 17 UX + Phase 2 Permissions
 ============================================================ */
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import type { ComponentType, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -78,7 +64,6 @@ type AppLocale = "ar" | "en";
 type AuthRecord = Record<string, unknown>;
 
 type ContractStatus = "DRAFT" | "ACTIVE" | "SUSPENDED";
-type PricingModel = "DISCOUNT" | "FIXED_PRICE" | "COMMISSION" | "MIXED";
 
 type OptionItem = {
   id: string;
@@ -90,8 +75,11 @@ type OptionItem = {
 type ContractProductRow = {
   rowId: string;
   product_id: string;
-  special_price: string;
+  price_before_discount: string;
   discount_percentage: string;
+  price_after_discount: string;
+  start_date: string;
+  end_date: string;
   is_active: boolean;
 };
 
@@ -100,22 +88,14 @@ type ContractFormData = {
   title: string;
   provider_id: string;
   status: ContractStatus;
-  pricing_model: PricingModel;
-
   start_date: string;
   end_date: string;
-
-  discount_percentage: string;
   system_commission_percentage: string;
-  contract_value: string;
-
   terms_and_conditions: string;
   coverage_notes: string;
   notes: string;
-
   auto_activate: boolean;
   notify_provider: boolean;
-
   contract_products: ContractProductRow[];
 };
 
@@ -129,7 +109,6 @@ type ApiListResponse = {
   results?: unknown[];
   items?: unknown[];
   providers?: unknown[];
-  centers?: unknown[];
   products?: unknown[];
   data?:
     | unknown[]
@@ -137,7 +116,6 @@ type ApiListResponse = {
         results?: unknown[];
         items?: unknown[];
         providers?: unknown[];
-        centers?: unknown[];
         products?: unknown[];
       };
 };
@@ -159,10 +137,10 @@ type CreateContractApiResponse = {
 };
 
 const SAR_ICON_PATH = "/currency/sar.svg";
-const DRAFT_STORAGE_KEY = "primey-care-contract-create-draft";
+const DRAFT_STORAGE_KEY = "primey-care-contract-create-draft-v2";
 
 /* ============================================================
-   Locale Helpers
+   Locale / API
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -175,8 +153,7 @@ function readLocale(): AppLocale {
     if (savedLocale === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
@@ -192,10 +169,6 @@ function applyDocumentLocale(locale: AppLocale) {
     console.error("Apply locale error:", error);
   }
 }
-
-/* ============================================================
-   API Helpers
-============================================================ */
 
 function apiUrl(path: string) {
   const base =
@@ -219,7 +192,7 @@ function readCookie(name: string) {
 }
 
 /* ============================================================
-   Permission Helpers
+   Auth / Permissions
 ============================================================ */
 
 function asRecord(value: unknown): AuthRecord {
@@ -452,10 +425,10 @@ function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    title: isArabic ? "إنشاء عقد جديد" : "Create New Contract",
+    title: isArabic ? "إنشاء عقد تسويق" : "Create Marketing Contract",
     subtitle: isArabic
-      ? "إنشاء عقد وربطه بمقدم الخدمة والمنتجات ونسب الخصم ونسبة النظام والشروط التشغيلية."
-      : "Create a contract and link it with provider, products, discounts, system commission, and operational terms.",
+      ? "إنشاء عقد تسويق لمنتجات مقدم الخدمة مع أسعار المنتجات وتواريخ سريانها داخل العقد."
+      : "Create a marketing contract for provider products with pricing and item validity dates.",
 
     back: isArabic ? "العودة للعقود" : "Back to Contracts",
     contractsList: isArabic ? "قائمة العقود" : "Contracts List",
@@ -466,30 +439,25 @@ function dictionary(locale: AppLocale) {
     clearForm: isArabic ? "تفريغ النموذج" : "Clear Form",
     refreshOptions: isArabic ? "تحديث الخيارات" : "Refresh Options",
 
-    basicInfo: isArabic ? "بيانات العقد" : "Contract Information",
+    basicInfo: isArabic ? "بيانات عقد التسويق" : "Marketing Contract Information",
     basicDesc: isArabic
-      ? "رقم العقد والعنوان والحالة ونموذج التسعير."
-      : "Contract number, title, status, and pricing model.",
+      ? "رقم العقد، عنوان العقد، الحالة، ونسبة النظام."
+      : "Contract number, title, status, and system commission.",
 
     partyInfo: isArabic ? "مقدم الخدمة" : "Provider",
     partyDesc: isArabic
-      ? "اختيار مقدم الخدمة أو المركز المرتبط بالعقد."
-      : "Select the provider or center linked to this contract.",
-
-    financialInfo: isArabic ? "النسب والقيمة" : "Rates & Value",
-    financialDesc: isArabic
-      ? "نسبة الخصم ونسبة النظام وقيمة العقد إن وجدت."
-      : "Discount percentage, system commission, and contract value when available.",
+      ? "اختيار مقدم الخدمة الذي سيتم تسويق منتجاته ضمن هذا العقد."
+      : "Select the provider whose products will be marketed under this contract.",
 
     datesInfo: isArabic ? "مدة العقد" : "Contract Period",
     datesDesc: isArabic
-      ? "تاريخ بداية العقد وتاريخ نهايته."
-      : "Contract start and end dates.",
+      ? "تاريخ بداية ونهاية العقد الأساسي."
+      : "Main contract start and end dates.",
 
     productsInfo: isArabic ? "منتجات العقد" : "Contract Products",
     productsDesc: isArabic
-      ? "ربط المنتجات أو البرامج المشمولة بالعقد مع سعر أو خصم خاص عند الحاجة."
-      : "Link products or programs covered by the contract with special price or discount when needed.",
+      ? "أضف منتجات مقدم الخدمة مع السعر قبل الخصم ونسبة الخصم والسعر بعد الخصم وتواريخ سريان البند."
+      : "Add provider products with price before discount, discount percentage, final price, and item validity dates.",
 
     termsInfo: isArabic ? "الشروط والتغطية" : "Terms & Coverage",
     termsDesc: isArabic
@@ -501,7 +469,7 @@ function dictionary(locale: AppLocale) {
       ? "خيارات تشغيلية تطبق بعد حفظ العقد حسب دعم الباك إند."
       : "Operational options applied after saving depending on backend support.",
 
-    summaryTitle: isArabic ? "ملخص العقد" : "Contract Summary",
+    summaryTitle: isArabic ? "ملخص عقد التسويق" : "Marketing Contract Summary",
     summaryDesc: isArabic
       ? "مراجعة سريعة للعقد قبل الحفظ."
       : "Quick review before saving.",
@@ -520,25 +488,31 @@ function dictionary(locale: AppLocale) {
 
     labels: {
       contractNumber: isArabic ? "رقم العقد" : "Contract Number",
-      title: isArabic ? "عنوان العقد" : "Contract Title",
-      provider: isArabic ? "مقدم الخدمة / المركز" : "Provider / Center",
+      title: isArabic ? "عنوان عقد التسويق" : "Marketing Contract Title",
+      provider: isArabic ? "مقدم الخدمة" : "Provider",
       status: isArabic ? "الحالة" : "Status",
-      pricingModel: isArabic ? "نموذج التسعير" : "Pricing Model",
-      startDate: isArabic ? "تاريخ البداية" : "Start Date",
-      endDate: isArabic ? "تاريخ النهاية" : "End Date",
-      discountPercentage: isArabic ? "نسبة الخصم" : "Discount Percentage",
+      startDate: isArabic ? "تاريخ بداية العقد" : "Contract Start Date",
+      endDate: isArabic ? "تاريخ نهاية العقد" : "Contract End Date",
       systemCommissionPercentage: isArabic
         ? "نسبة النظام"
         : "System Commission",
-      contractValue: isArabic ? "قيمة العقد" : "Contract Value",
-      product: isArabic ? "المنتج / البرنامج" : "Product / Program",
-      specialPrice: isArabic ? "سعر خاص" : "Special Price",
-      productDiscount: isArabic ? "خصم خاص" : "Special Discount",
+      product: isArabic ? "المنتج / الخدمة" : "Product / Service",
+      priceBeforeDiscount: isArabic
+        ? "السعر قبل الخصم"
+        : "Price Before Discount",
+      productDiscount: isArabic ? "نسبة الخصم" : "Discount Percentage",
+      priceAfterDiscount: isArabic ? "السعر بعد الخصم" : "Price After Discount",
+      productStartDate: isArabic
+        ? "بداية المنتج داخل العقد"
+        : "Product Start Date",
+      productEndDate: isArabic ? "نهاية المنتج داخل العقد" : "Product End Date",
       activeProduct: isArabic ? "منتج نشط داخل العقد" : "Active in Contract",
       terms: isArabic ? "الشروط والأحكام" : "Terms & Conditions",
       coverageNotes: isArabic ? "ملاحظات التغطية" : "Coverage Notes",
       notes: isArabic ? "ملاحظات داخلية" : "Internal Notes",
-      autoActivate: isArabic ? "تفعيل العقد بعد الإنشاء" : "Activate contract after creation",
+      autoActivate: isArabic
+        ? "تفعيل العقد بعد الإنشاء"
+        : "Activate contract after creation",
       notifyProvider: isArabic ? "إشعار مقدم الخدمة" : "Notify provider",
     },
 
@@ -547,16 +521,15 @@ function dictionary(locale: AppLocale) {
         ? "يتم توليده تلقائيًا عند تركه فارغًا"
         : "Auto-generated if left empty",
       title: isArabic
-        ? "مثال: عقد مركز برايمي كير 2026"
-        : "Example: Primey Care Center Contract 2026",
-      discountPercentage: isArabic ? "مثال: 20" : "Example: 20",
+        ? "مثال: عقد تسويق منتجات مقدم الخدمة"
+        : "Example: Provider Products Marketing Contract",
       systemCommissionPercentage: isArabic ? "مثال: 10" : "Example: 10",
-      contractValue: isArabic ? "مثال: 50000" : "Example: 50000",
-      specialPrice: isArabic ? "مثال: 199" : "Example: 199",
-      productDiscount: isArabic ? "مثال: 15" : "Example: 15",
+      priceBeforeDiscount: isArabic ? "مثال: 500" : "Example: 500",
+      productDiscount: isArabic ? "مثال: 20" : "Example: 20",
+      priceAfterDiscount: isArabic ? "يحسب تلقائيًا" : "Calculated automatically",
       terms: isArabic
-        ? "اكتب الشروط والأحكام الخاصة بالعقد..."
-        : "Write contract terms and conditions...",
+        ? "اكتب الشروط والأحكام الخاصة بعقد التسويق..."
+        : "Write marketing contract terms and conditions...",
       coverageNotes: isArabic
         ? "اكتب ملاحظات التغطية والخدمات المشمولة..."
         : "Write coverage notes and included services...",
@@ -571,26 +544,27 @@ function dictionary(locale: AppLocale) {
       SUSPENDED: isArabic ? "موقوف" : "Suspended",
     } satisfies Record<ContractStatus, string>,
 
-    pricingModels: {
-      DISCOUNT: isArabic ? "خصم" : "Discount",
-      FIXED_PRICE: isArabic ? "سعر ثابت" : "Fixed Price",
-      COMMISSION: isArabic ? "عمولة" : "Commission",
-      MIXED: isArabic ? "مختلط" : "Mixed",
-    } satisfies Record<PricingModel, string>,
-
     validation: {
       title: isArabic ? "عنوان العقد مطلوب." : "Contract title is required.",
       provider: isArabic ? "اختيار مقدم الخدمة مطلوب." : "Provider is required.",
       dates: isArabic
-        ? "تاريخ النهاية يجب أن يكون بعد تاريخ البداية."
-        : "End date must be after start date.",
-      number: isArabic ? "القيمة يجب أن تكون رقمًا صحيحًا." : "Value must be a valid number.",
+        ? "تاريخ نهاية العقد يجب أن يكون بعد تاريخ البداية."
+        : "Contract end date must be after start date.",
+      number: isArabic
+        ? "القيمة يجب أن تكون رقمًا صحيحًا."
+        : "Value must be a valid number.",
       percentage: isArabic
         ? "النسبة يجب أن تكون بين 0 و 100."
         : "Percentage must be between 0 and 100.",
       product: isArabic
         ? "اختر منتجًا أو احذف الصف الفارغ."
         : "Select a product or remove the empty row.",
+      price: isArabic
+        ? "السعر قبل الخصم مطلوب عند اختيار منتج."
+        : "Price before discount is required when selecting a product.",
+      productDates: isArabic
+        ? "تاريخ نهاية المنتج يجب أن يكون بعد تاريخ بدايته."
+        : "Product end date must be after product start date.",
     },
 
     success: isArabic ? "تم إنشاء العقد بنجاح." : "Contract created successfully.",
@@ -618,39 +592,51 @@ function dictionary(locale: AppLocale) {
     removeProduct: isArabic ? "حذف المنتج" : "Remove Product",
     selectPlaceholder: isArabic ? "اختر..." : "Select...",
     noOptions: isArabic ? "لا توجد خيارات متاحة" : "No options available",
+    selectProviderFirst: isArabic
+      ? "اختر مقدم الخدمة أولًا لعرض منتجاته."
+      : "Select a provider first to show its products.",
 
     completion: isArabic ? "نسبة الاكتمال" : "Completion",
     ready: isArabic ? "جاهز للحفظ" : "Ready to save",
     missingData: isArabic ? "ينقصه بيانات أساسية" : "Missing required data",
     productsCount: isArabic ? "عدد المنتجات" : "Products Count",
+    productsTotalAfterDiscount: isArabic
+      ? "إجمالي الأسعار بعد الخصم"
+      : "Total After Discount",
 
     quickNotes: [
       isArabic
-        ? "اختر مقدم الخدمة قبل حفظ العقد."
-        : "Select the provider before saving the contract.",
+        ? "هذا العقد عقد تسويق لمنتجات مقدم الخدمة، وليس عقدًا بقيمة مالية مباشرة."
+        : "This is a marketing contract for provider products, not a direct-value contract.",
       isArabic
-        ? "يمكن ترك رقم العقد فارغًا إذا كان الباك إند يولده تلقائيًا."
-        : "You can leave contract number empty if the backend generates it automatically.",
+        ? "اختر مقدم الخدمة أولًا، ثم أضف منتجاته داخل العقد."
+        : "Select the provider first, then add its products to the contract.",
       isArabic
-        ? "نسبة الخصم ونسبة النظام يجب أن تكون بين 0 و 100."
-        : "Discount and system commission percentages must be between 0 and 100.",
+        ? "لكل منتج داخل العقد سعر قبل الخصم ونسبة خصم وسعر بعد الخصم وتاريخ سريان اختياري."
+        : "Each contract product has price before discount, discount percentage, final price, and optional validity dates.",
       isArabic
-        ? "منتجات العقد اختيارية، ويمكن ربطها لاحقًا عند الحاجة."
-        : "Contract products are optional and can be linked later when needed.",
+        ? "نسبة النظام تمثل نسبة Primey Care من عمليات التسويق والبيع."
+        : "System commission represents Primey Care share from marketing and sales.",
     ],
   };
 }
 
 /* ============================================================
-   Defaults
+   Defaults / Data Helpers
 ============================================================ */
 
 function createProductRow(): ContractProductRow {
   return {
-    rowId: crypto.randomUUID(),
+    rowId:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     product_id: "",
-    special_price: "",
+    price_before_discount: "",
     discount_percentage: "0.00",
+    price_after_discount: "0.00",
+    start_date: "",
+    end_date: "",
     is_active: true,
   };
 }
@@ -660,28 +646,16 @@ const initialFormData: ContractFormData = {
   title: "",
   provider_id: "",
   status: "ACTIVE",
-  pricing_model: "DISCOUNT",
-
   start_date: "",
   end_date: "",
-
-  discount_percentage: "0.00",
   system_commission_percentage: "0.00",
-  contract_value: "",
-
   terms_and_conditions: "",
   coverage_notes: "",
   notes: "",
-
   auto_activate: false,
   notify_provider: false,
-
   contract_products: [],
 };
-
-/* ============================================================
-   Data Helpers
-============================================================ */
 
 function getValue(obj: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
@@ -697,7 +671,6 @@ function getValue(obj: Record<string, unknown>, keys: string[]) {
 
 function extractList(payload: unknown, keys: string[]): unknown[] {
   if (Array.isArray(payload)) return payload;
-
   if (!payload || typeof payload !== "object") return [];
 
   const response = payload as ApiListResponse;
@@ -707,7 +680,6 @@ function extractList(payload: unknown, keys: string[]): unknown[] {
 
   for (const key of keys) {
     const value = (response as Record<string, unknown>)[key];
-
     if (Array.isArray(value)) return value;
   }
 
@@ -721,7 +693,6 @@ function extractList(payload: unknown, keys: string[]): unknown[] {
 
     for (const key of keys) {
       const value = dataObj[key];
-
       if (Array.isArray(value)) return value;
     }
   }
@@ -736,38 +707,47 @@ function normalizeOption(item: unknown, fallbackPrefix: string): OptionItem {
   const label = String(
     getValue(obj, [
       "name",
+      "name_ar",
+      "name_en",
       "title",
       "full_name",
       "label",
-      "code",
       "provider_name",
-      "center_name",
       "product_name",
+      "code",
     ]) || (id ? `${fallbackPrefix}-${id}` : "-"),
   );
 
-  const subtitle = String(
-    getValue(obj, [
-      "code",
-      "city",
-      "category_name",
-      "product_type",
-      "provider_type",
-      "status",
-      "price",
-      "base_price",
-    ]) || "",
-  );
+  const subtitleParts = [
+    getValue(obj, ["code"]),
+    getValue(obj, ["category_name"]),
+    getValue(obj, ["product_type"]),
+    getValue(obj, ["status"]),
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
 
   return {
     id,
     label,
-    subtitle,
+    subtitle: subtitleParts.join(" - "),
     raw: obj,
   };
 }
 
-function toNumber(value: string | number) {
+function getProductProviderId(product: OptionItem) {
+  const raw = product.raw || {};
+
+  const direct =
+    getValue(raw, ["provider_id", "providerId"]) ||
+    (raw.provider && typeof raw.provider === "object"
+      ? getValue(raw.provider as Record<string, unknown>, ["id", "uuid", "pk"])
+      : "");
+
+  return String(direct || "");
+}
+
+function toNumber(value: string | number | unknown) {
   const parsed = Number(String(value || "").replace(/,/g, ""));
 
   return Number.isFinite(parsed) ? parsed : 0;
@@ -798,6 +778,48 @@ function normalizeNumberString(value: string, fallback = "0.00") {
   return parsed.toFixed(2);
 }
 
+function calculatePriceAfterDiscount(
+  priceBeforeDiscount: string | number,
+  discountPercentage: string | number,
+) {
+  const price = toNumber(priceBeforeDiscount);
+  const discount = Math.min(Math.max(toNumber(discountPercentage), 0), 100);
+  const result = price - price * (discount / 100);
+
+  return Math.max(result, 0).toFixed(2);
+}
+
+function getProductDefaultPricing(product: OptionItem | undefined) {
+  const raw = product?.raw || {};
+  const priceBefore = toNumber(
+    getValue(raw, ["price", "base_price", "original_price", "price_before_discount"]),
+  );
+
+  const salePrice = toNumber(
+    getValue(raw, [
+      "sale_price",
+      "effective_price",
+      "final_price",
+      "price_after_discount",
+    ]),
+  );
+
+  const priceAfter = salePrice > 0 ? salePrice : priceBefore;
+  const discountFromPrices =
+    priceBefore > 0 && priceAfter > 0 && priceAfter < priceBefore
+      ? ((priceBefore - priceAfter) / priceBefore) * 100
+      : 0;
+
+  const discount =
+    discountFromPrices ||
+    toNumber(getValue(raw, ["discount_percentage", "discount_rate"]));
+
+  return {
+    priceBeforeDiscount: priceBefore > 0 ? priceBefore.toFixed(2) : "",
+    discountPercentage: Math.min(Math.max(discount, 0), 100).toFixed(2),
+  };
+}
+
 function normalizeContractNumber(value: string) {
   return value.trim().replace(/\s+/g, "-").toUpperCase();
 }
@@ -809,14 +831,35 @@ function hasFormChanges(formData: ContractFormData) {
 function normalizePayload(formData: ContractFormData) {
   const contractProducts = formData.contract_products
     .filter((row) => row.product_id.trim().length > 0)
-    .map((row) => ({
-      product_id: row.product_id,
-      special_price: row.special_price
-        ? toNumber(row.special_price).toFixed(2)
-        : null,
-      discount_percentage: toNumber(row.discount_percentage).toFixed(2),
-      is_active: row.is_active,
-    }));
+    .map((row) => {
+      const priceBeforeDiscount = toNumber(row.price_before_discount).toFixed(2);
+      const discountPercentage = toNumber(row.discount_percentage).toFixed(2);
+      const priceAfterDiscount = calculatePriceAfterDiscount(
+        priceBeforeDiscount,
+        discountPercentage,
+      );
+
+      return {
+        product_id: row.product_id,
+
+        price_before_discount: priceBeforeDiscount,
+        original_price: priceBeforeDiscount,
+        base_price: priceBeforeDiscount,
+
+        discount_percentage: discountPercentage,
+
+        price_after_discount: priceAfterDiscount,
+        final_price: priceAfterDiscount,
+        special_price: priceAfterDiscount,
+
+        start_date: row.start_date || null,
+        end_date: row.end_date || null,
+        item_start_date: row.start_date || null,
+        item_end_date: row.end_date || null,
+
+        is_active: row.is_active,
+      };
+    });
 
   return {
     contract_number:
@@ -825,21 +868,17 @@ function normalizePayload(formData: ContractFormData) {
     name: formData.title.trim(),
 
     provider_id: formData.provider_id || null,
-    center_id: formData.provider_id || null,
-
     status: formData.status,
-    pricing_model: formData.pricing_model,
 
-    start_date: formData.start_date || null,
-    end_date: formData.end_date || null,
-
-    discount_percentage: toNumber(formData.discount_percentage).toFixed(2),
+    pricing_model: "DISCOUNT",
+    discount_percentage: "0.00",
     system_commission_percentage: toNumber(
       formData.system_commission_percentage,
     ).toFixed(2),
-    contract_value: formData.contract_value
-      ? toNumber(formData.contract_value).toFixed(2)
-      : "0.00",
+    contract_value: "0.00",
+
+    start_date: formData.start_date || null,
+    end_date: formData.end_date || null,
 
     terms_and_conditions: formData.terms_and_conditions.trim(),
     coverage_notes: formData.coverage_notes.trim(),
@@ -930,6 +969,15 @@ function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
+function MoneyValue({ value }: { value: string | number }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span>{formatMoney(value)}</span>
+      <SarIcon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
 function FieldBlock({
   label,
   error,
@@ -962,7 +1010,7 @@ function SummaryItem({
   label,
   value,
 }: {
-  icon: ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: ReactNode;
 }) {
@@ -1117,7 +1165,7 @@ export default function SystemCreateContractPage() {
 
   const canViewProviders = hasSafePermission(
     auth,
-    ["providers.view", "providers.list", "centers.view", "centers.list"],
+    ["providers.view", "providers.list"],
     "view",
   );
 
@@ -1134,10 +1182,29 @@ export default function SystemCreateContractPage() {
     [formData.provider_id, providers],
   );
 
+  const filteredProducts = useMemo(() => {
+    if (!formData.provider_id) return products;
+
+    return products.filter((product) => {
+      const productProviderId = getProductProviderId(product);
+
+      return !productProviderId || productProviderId === formData.provider_id;
+    });
+  }, [formData.provider_id, products]);
+
   const selectedProductsCount = useMemo(
     () =>
       formData.contract_products.filter((row) => row.product_id.trim().length > 0)
         .length,
+    [formData.contract_products],
+  );
+
+  const productsTotalAfterDiscount = useMemo(
+    () =>
+      formData.contract_products.reduce(
+        (sum, row) => sum + toNumber(row.price_after_discount),
+        0,
+      ),
     [formData.contract_products],
   );
 
@@ -1146,8 +1213,6 @@ export default function SystemCreateContractPage() {
       "title",
       "provider_id",
       "status",
-      "pricing_model",
-      "discount_percentage",
       "system_commission_percentage",
       "start_date",
       "end_date",
@@ -1157,22 +1222,29 @@ export default function SystemCreateContractPage() {
       .length;
   }, [formData]);
 
-  const progressPercent = Math.round((completedFields / 8) * 100);
+  const progressPercent = Math.round((completedFields / 6) * 100);
 
   const isReadyToSave =
     formData.title.trim().length > 0 &&
     formData.provider_id.trim().length > 0 &&
-    isValidPercentage(formData.discount_percentage) &&
     isValidPercentage(formData.system_commission_percentage);
 
   function updateField<K extends keyof ContractFormData>(
     key: K,
     value: ContractFormData[K],
   ) {
-    setFormData((current) => ({
-      ...current,
-      [key]: value,
-    }));
+    setFormData((current) => {
+      const next = {
+        ...current,
+        [key]: value,
+      };
+
+      if (key === "provider_id" && current.provider_id !== value) {
+        next.contract_products = [];
+      }
+
+      return next;
+    });
 
     setErrors((current) => ({
       ...current,
@@ -1190,9 +1262,42 @@ export default function SystemCreateContractPage() {
   ) {
     setFormData((current) => ({
       ...current,
-      contract_products: current.contract_products.map((row) =>
-        row.rowId === rowId ? { ...row, ...patch } : row,
-      ),
+      contract_products: current.contract_products.map((row) => {
+        if (row.rowId !== rowId) return row;
+
+        const nextRow = {
+          ...row,
+          ...patch,
+        };
+
+        if ("product_id" in patch && patch.product_id) {
+          const productDefaults = getProductDefaultPricing(
+            products.find((item) => item.id === patch.product_id),
+          );
+
+          if (!nextRow.price_before_discount) {
+            nextRow.price_before_discount = productDefaults.priceBeforeDiscount;
+          }
+
+          if (row.discount_percentage === "0.00") {
+            nextRow.discount_percentage = productDefaults.discountPercentage;
+          }
+        }
+
+        const shouldRecalculate =
+          "product_id" in patch ||
+          "price_before_discount" in patch ||
+          "discount_percentage" in patch;
+
+        if (shouldRecalculate) {
+          nextRow.price_after_discount = calculatePriceAfterDiscount(
+            nextRow.price_before_discount,
+            nextRow.discount_percentage,
+          );
+        }
+
+        return nextRow;
+      }),
     }));
 
     setErrors((current) => ({
@@ -1202,6 +1307,11 @@ export default function SystemCreateContractPage() {
   }
 
   function addProductRow() {
+    if (!formData.provider_id) {
+      toast.error(t.validation.provider);
+      return;
+    }
+
     setFormData((current) => ({
       ...current,
       contract_products: [...current.contract_products, createProductRow()],
@@ -1224,24 +1334,8 @@ export default function SystemCreateContractPage() {
       nextErrors.title = t.validation.title;
     }
 
-    if (!formData.provider_id) {
+    if (!formData.provider_id.trim()) {
       nextErrors.provider_id = t.validation.provider;
-    }
-
-    const numericFields: Array<keyof ContractFormData> = [
-      "discount_percentage",
-      "system_commission_percentage",
-      "contract_value",
-    ];
-
-    numericFields.forEach((key) => {
-      if (!isValidNumber(String(formData[key] || ""))) {
-        nextErrors[key] = t.validation.number;
-      }
-    });
-
-    if (!isValidPercentage(formData.discount_percentage)) {
-      nextErrors.discount_percentage = t.validation.percentage;
     }
 
     if (!isValidPercentage(formData.system_commission_percentage)) {
@@ -1249,33 +1343,44 @@ export default function SystemCreateContractPage() {
     }
 
     if (formData.start_date && formData.end_date) {
-      const startDate = new Date(formData.start_date).getTime();
-      const endDate = new Date(formData.end_date).getTime();
-
-      if (Number.isFinite(startDate) && Number.isFinite(endDate)) {
-        if (endDate < startDate) {
-          nextErrors.end_date = t.validation.dates;
-        }
+      if (new Date(formData.end_date) < new Date(formData.start_date)) {
+        nextErrors.end_date = t.validation.dates;
       }
     }
 
     formData.contract_products.forEach((row) => {
       const hasAnyValue =
         row.product_id ||
-        row.special_price ||
+        row.price_before_discount ||
         row.discount_percentage !== "0.00" ||
+        row.start_date ||
+        row.end_date ||
         !row.is_active;
 
       if (hasAnyValue && !row.product_id) {
         nextErrors[`product_${row.rowId}`] = t.validation.product;
+        return;
       }
 
-      if (!isValidNumber(row.special_price)) {
+      if (row.product_id && !row.price_before_discount.trim()) {
+        nextErrors[`product_${row.rowId}`] = t.validation.price;
+        return;
+      }
+
+      if (!isValidNumber(row.price_before_discount)) {
         nextErrors[`product_${row.rowId}`] = t.validation.number;
+        return;
       }
 
       if (!isValidPercentage(row.discount_percentage)) {
         nextErrors[`product_${row.rowId}`] = t.validation.percentage;
+        return;
+      }
+
+      if (row.start_date && row.end_date) {
+        if (new Date(row.end_date) < new Date(row.start_date)) {
+          nextErrors[`product_${row.rowId}`] = t.validation.productDates;
+        }
       }
     });
 
@@ -1303,7 +1408,7 @@ export default function SystemCreateContractPage() {
               .then((response) => response.json())
               .then((payload) => {
                 setProviders(
-                  extractList(payload, ["providers", "centers"]).map((item) =>
+                  extractList(payload, ["providers"]).map((item) =>
                     normalizeOption(item, "PRV"),
                   ),
                 );
@@ -1312,11 +1417,20 @@ export default function SystemCreateContractPage() {
         }
 
         if (canViewProducts) {
+          const providerQuery = formData.provider_id
+            ? `&provider_id=${encodeURIComponent(formData.provider_id)}`
+            : "";
+
           requests.push(
-            fetch(apiUrl("/api/products/?page_size=200"), {
-              credentials: "include",
-              headers: { Accept: "application/json" },
-            })
+            fetch(
+              apiUrl(
+                `/api/products/?page_size=200&can_be_used_in_contracts=true${providerQuery}`,
+              ),
+              {
+                credentials: "include",
+                headers: { Accept: "application/json" },
+              },
+            )
               .then((response) => response.json())
               .then((payload) => {
                 setProducts(
@@ -1345,6 +1459,7 @@ export default function SystemCreateContractPage() {
       canCreateContracts,
       canViewProducts,
       canViewProviders,
+      formData.provider_id,
       t.optionLoadError,
       t.refreshOptions,
     ],
@@ -1352,7 +1467,6 @@ export default function SystemCreateContractPage() {
 
   async function postContract(payload: Record<string, unknown>) {
     const csrfToken = readCookie("csrftoken");
-
     const endpoints = ["/api/contracts/create/", "/api/contracts/"];
 
     let lastResult: CreateContractApiResponse | null = null;
@@ -1401,7 +1515,6 @@ export default function SystemCreateContractPage() {
       setIsSubmitting(true);
 
       const result = await postContract(normalizePayload(formData));
-
       const createdId = resolveCreatedId(result);
 
       window.localStorage.removeItem(DRAFT_STORAGE_KEY);
@@ -1451,18 +1564,31 @@ export default function SystemCreateContractPage() {
         return;
       }
 
-      const parsed = JSON.parse(rawDraft) as ContractFormData;
+      const parsed = JSON.parse(rawDraft) as Partial<ContractFormData>;
 
       setFormData({
         ...initialFormData,
         ...parsed,
-        contract_products: Array.isArray(parsed.contract_products)
-          ? parsed.contract_products.map((row) => ({
+        contract_products:
+          parsed.contract_products?.map((row) => {
+            const rowId = row.rowId || createProductRow().rowId;
+            const priceBeforeDiscount = row.price_before_discount || "";
+            const discountPercentage = row.discount_percentage || "0.00";
+
+            return {
               ...createProductRow(),
               ...row,
-              rowId: row.rowId || crypto.randomUUID(),
-            }))
-          : [],
+              rowId,
+              price_before_discount: priceBeforeDiscount,
+              discount_percentage: discountPercentage,
+              price_after_discount: calculatePriceAfterDiscount(
+                priceBeforeDiscount,
+                discountPercentage,
+              ),
+              start_date: row.start_date || "",
+              end_date: row.end_date || "",
+            };
+          }) || [],
       });
 
       setErrors({});
@@ -1503,10 +1629,7 @@ export default function SystemCreateContractPage() {
 
     const syncAfterPaint = () => {
       syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
+      window.setTimeout(syncLocale, 0);
     };
 
     syncAfterPaint();
@@ -1565,7 +1688,6 @@ export default function SystemCreateContractPage() {
 
   return (
     <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
@@ -1631,7 +1753,7 @@ export default function SystemCreateContractPage() {
           <Button
             type="button"
             className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isLoadingOptions}
             onClick={submitForm}
           >
             {isSubmitting ? (
@@ -1644,7 +1766,6 @@ export default function SystemCreateContractPage() {
         </div>
       </div>
 
-      {/* Errors */}
       {submitError ? (
         <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
           <CardContent className="flex items-start gap-3 p-5 text-destructive">
@@ -1667,7 +1788,6 @@ export default function SystemCreateContractPage() {
       ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        {/* Main Form */}
         <div className="space-y-4">
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
@@ -1725,87 +1845,6 @@ export default function SystemCreateContractPage() {
                 </select>
               </FieldBlock>
 
-              <FieldBlock label={t.labels.pricingModel}>
-                <select
-                  value={formData.pricing_model}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  onChange={(event) =>
-                    updateField(
-                      "pricing_model",
-                      event.target.value as PricingModel,
-                    )
-                  }
-                >
-                  {Object.entries(t.pricingModels).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Building2 className="h-4 w-4" />
-                {t.partyInfo}
-              </CardTitle>
-              <CardDescription>{t.partyDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <FieldBlock
-                label={t.labels.provider}
-                error={errors.provider_id}
-                required
-              >
-                <SelectField
-                  value={formData.provider_id}
-                  disabled={isSubmitting || isLoadingOptions}
-                  options={providers}
-                  placeholder={t.selectPlaceholder}
-                  noOptions={t.noOptions}
-                  onChange={(value) => updateField("provider_id", value)}
-                />
-              </FieldBlock>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Wallet className="h-4 w-4" />
-                {t.financialInfo}
-              </CardTitle>
-              <CardDescription>{t.financialDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-3">
-              <FieldBlock
-                label={t.labels.discountPercentage}
-                error={errors.discount_percentage}
-              >
-                <Input
-                  value={formData.discount_percentage}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.discountPercentage}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
-                  onChange={(event) =>
-                    updateField("discount_percentage", event.target.value)
-                  }
-                  onBlur={() =>
-                    updateField(
-                      "discount_percentage",
-                      normalizeNumberString(formData.discount_percentage),
-                    )
-                  }
-                />
-              </FieldBlock>
-
               <FieldBlock
                 label={t.labels.systemCommissionPercentage}
                 error={errors.system_commission_percentage}
@@ -1832,25 +1871,31 @@ export default function SystemCreateContractPage() {
                   }
                 />
               </FieldBlock>
+            </CardContent>
+          </Card>
 
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <Handshake className="h-4 w-4" />
+                {t.partyInfo}
+              </CardTitle>
+              <CardDescription>{t.partyDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent>
               <FieldBlock
-                label={t.labels.contractValue}
-                error={errors.contract_value}
+                label={t.labels.provider}
+                error={errors.provider_id}
+                required
               >
-                <MoneyInput
-                  value={formData.contract_value}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.contractValue}
-                  isArabic={isArabic}
-                  onChange={(value) => updateField("contract_value", value)}
-                  onBlur={() => {
-                    if (formData.contract_value.trim()) {
-                      updateField(
-                        "contract_value",
-                        normalizeNumberString(formData.contract_value),
-                      );
-                    }
-                  }}
+                <SelectField
+                  value={formData.provider_id}
+                  disabled={isSubmitting || isLoadingOptions || !canViewProviders}
+                  options={providers}
+                  placeholder={t.selectPlaceholder}
+                  noOptions={t.noOptions}
+                  onChange={(value) => updateField("provider_id", value)}
                 />
               </FieldBlock>
             </CardContent>
@@ -1893,7 +1938,7 @@ export default function SystemCreateContractPage() {
           </Card>
 
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-start lg:justify-between">
+            <CardHeader className="flex flex-col gap-3 pb-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <CardTitle className="flex items-center gap-2 text-base font-bold">
                   <Package className="h-4 w-4" />
@@ -1905,8 +1950,13 @@ export default function SystemCreateContractPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 rounded-xl"
-                disabled={isSubmitting}
+                className="h-9 rounded-xl"
+                disabled={
+                  isSubmitting ||
+                  isLoadingOptions ||
+                  !canViewProducts ||
+                  !formData.provider_id
+                }
                 onClick={addProductRow}
               >
                 <Plus className="h-4 w-4" />
@@ -1915,106 +1965,61 @@ export default function SystemCreateContractPage() {
             </CardHeader>
 
             <CardContent className="space-y-3">
-              {formData.contract_products.length === 0 ? (
-                <div className="rounded-2xl border bg-background p-6 text-center">
-                  <Package className="mx-auto h-8 w-8 text-muted-foreground" />
-                  <p className="mt-3 text-sm text-muted-foreground">
-                    {t.productsDesc}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="mt-4 rounded-xl"
-                    disabled={isSubmitting}
-                    onClick={addProductRow}
-                  >
-                    <Plus className="h-4 w-4" />
-                    {t.addProduct}
-                  </Button>
+              {!formData.provider_id ? (
+                <div className="rounded-2xl border bg-background px-5 py-8 text-center text-sm text-muted-foreground">
+                  {t.selectProviderFirst}
+                </div>
+              ) : formData.contract_products.length === 0 ? (
+                <div className="rounded-2xl border bg-background px-5 py-8 text-center text-sm text-muted-foreground">
+                  {t.productsDesc}
                 </div>
               ) : (
-                formData.contract_products.map((row, index) => (
+                formData.contract_products.map((row) => (
                   <div
                     key={row.rowId}
-                    className="rounded-2xl border bg-background p-4"
+                    className="space-y-3 rounded-2xl border bg-background p-4"
                   >
-                    <div className="mb-4 flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold">
-                          {t.labels.product} #{index + 1}
-                        </p>
-                        {errors[`product_${row.rowId}`] ? (
-                          <p className="mt-1 text-xs font-medium text-destructive">
-                            {errors[`product_${row.rowId}`]}
-                          </p>
-                        ) : null}
-                      </div>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-9 w-9 rounded-xl"
-                        disabled={isSubmitting}
-                        onClick={() => removeProductRow(row.rowId)}
+                    <div className="grid gap-3 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,0.6fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_auto]">
+                      <FieldBlock
+                        label={t.labels.product}
+                        error={errors[`product_${row.rowId}`]}
                       >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <FieldBlock label={t.labels.product}>
                         <SelectField
                           value={row.product_id}
-                          disabled={isSubmitting || isLoadingOptions}
-                          options={products}
+                          disabled={
+                            isSubmitting || isLoadingOptions || !canViewProducts
+                          }
+                          options={filteredProducts}
                           placeholder={t.selectPlaceholder}
                           noOptions={t.noOptions}
-                          onChange={(value) => {
-                            const selected = products.find(
-                              (item) => item.id === value,
-                            );
-
-                            const price = selected?.raw
-                              ? getValue(selected.raw, [
-                                  "effective_price",
-                                  "sale_price",
-                                  "price",
-                                  "base_price",
-                                ])
-                              : "";
-
+                          onChange={(value) =>
                             updateProductRow(row.rowId, {
                               product_id: value,
-                              special_price:
-                                price && !row.special_price
-                                  ? normalizeNumberString(String(price))
-                                  : row.special_price,
-                            });
-                          }}
+                            })
+                          }
                         />
                       </FieldBlock>
 
-                      <FieldBlock label={t.labels.specialPrice}>
+                      <FieldBlock label={t.labels.priceBeforeDiscount}>
                         <MoneyInput
-                          value={row.special_price}
+                          value={row.price_before_discount}
                           disabled={isSubmitting}
-                          placeholder={t.placeholders.specialPrice}
+                          placeholder={t.placeholders.priceBeforeDiscount}
                           isArabic={isArabic}
                           onChange={(value) =>
                             updateProductRow(row.rowId, {
-                              special_price: value,
+                              price_before_discount: value,
                             })
                           }
-                          onBlur={() => {
-                            if (row.special_price.trim()) {
-                              updateProductRow(row.rowId, {
-                                special_price: normalizeNumberString(
-                                  row.special_price,
-                                ),
-                              });
-                            }
-                          }}
+                          onBlur={() =>
+                            updateProductRow(row.rowId, {
+                              price_before_discount: row.price_before_discount
+                                ? normalizeNumberString(
+                                    row.price_before_discount,
+                                  )
+                                : "",
+                            })
+                          }
                         />
                       </FieldBlock>
 
@@ -2040,23 +2045,65 @@ export default function SystemCreateContractPage() {
                         />
                       </FieldBlock>
 
+                      <FieldBlock label={t.labels.priceAfterDiscount}>
+                        <div className="flex h-10 items-center rounded-xl border bg-muted/40 px-3 text-sm font-semibold">
+                          <MoneyValue value={row.price_after_discount} />
+                        </div>
+                      </FieldBlock>
+
+                      <FieldBlock label={t.labels.productStartDate}>
+                        <Input
+                          type="date"
+                          value={row.start_date}
+                          disabled={isSubmitting}
+                          className="h-10 rounded-xl"
+                          onChange={(event) =>
+                            updateProductRow(row.rowId, {
+                              start_date: event.target.value,
+                            })
+                          }
+                        />
+                      </FieldBlock>
+
+                      <FieldBlock label={t.labels.productEndDate}>
+                        <Input
+                          type="date"
+                          value={row.end_date}
+                          disabled={isSubmitting}
+                          className="h-10 rounded-xl"
+                          onChange={(event) =>
+                            updateProductRow(row.rowId, {
+                              end_date: event.target.value,
+                            })
+                          }
+                        />
+                      </FieldBlock>
+
                       <div className="flex items-end">
-                        <label className="flex min-h-10 w-full cursor-pointer items-center gap-3 rounded-xl border bg-card px-3 py-2">
-                          <Checkbox
-                            checked={row.is_active}
-                            disabled={isSubmitting}
-                            onCheckedChange={(value) =>
-                              updateProductRow(row.rowId, {
-                                is_active: Boolean(value),
-                              })
-                            }
-                          />
-                          <span className="text-sm font-medium">
-                            {t.labels.activeProduct}
-                          </span>
-                        </label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-10 w-full rounded-xl xl:w-auto"
+                          disabled={isSubmitting}
+                          onClick={() => removeProductRow(row.rowId)}
+                        >
+                          <X className="h-4 w-4" />
+                          <span className="xl:hidden">{t.removeProduct}</span>
+                        </Button>
                       </div>
                     </div>
+
+                    <ToggleBox
+                      checked={row.is_active}
+                      disabled={isSubmitting}
+                      title={t.labels.activeProduct}
+                      description={t.productsDesc}
+                      onChange={(value) =>
+                        updateProductRow(row.rowId, {
+                          is_active: value,
+                        })
+                      }
+                    />
                   </div>
                 ))
               )}
@@ -2112,7 +2159,7 @@ export default function SystemCreateContractPage() {
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <BadgeCheck className="h-4 w-4" />
+                <Layers3 className="h-4 w-4" />
                 {t.postOptionsInfo}
               </CardTitle>
               <CardDescription>{t.postOptionsDesc}</CardDescription>
@@ -2123,7 +2170,7 @@ export default function SystemCreateContractPage() {
                 checked={formData.auto_activate}
                 disabled={isSubmitting}
                 title={t.labels.autoActivate}
-                description={t.labels.autoActivate}
+                description={t.postOptionsDesc}
                 onChange={(value) => updateField("auto_activate", value)}
               />
 
@@ -2131,14 +2178,13 @@ export default function SystemCreateContractPage() {
                 checked={formData.notify_provider}
                 disabled={isSubmitting}
                 title={t.labels.notifyProvider}
-                description={t.labels.notifyProvider}
+                description={t.postOptionsDesc}
                 onChange={(value) => updateField("notify_provider", value)}
               />
             </CardContent>
           </Card>
         </div>
 
-        {/* Sidebar Summary */}
         <aside className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardHeader className="pb-3">
@@ -2206,15 +2252,9 @@ export default function SystemCreateContractPage() {
               />
 
               <SummaryItem
-                icon={Layers3}
-                label={t.labels.pricingModel}
-                value={t.pricingModels[formData.pricing_model]}
-              />
-
-              <SummaryItem
-                icon={Percent}
-                label={t.labels.discountPercentage}
-                value={formatPercent(formData.discount_percentage)}
+                icon={ShieldCheck}
+                label={t.labels.status}
+                value={t.statuses[formData.status]}
               />
 
               <SummaryItem
@@ -2224,27 +2264,22 @@ export default function SystemCreateContractPage() {
               />
 
               <SummaryItem
-                icon={Wallet}
-                label={t.labels.contractValue}
-                value={
-                  <span className="inline-flex items-center gap-1.5">
-                    <span>{formatMoney(formData.contract_value || 0)}</span>
-                    <SarIcon className="h-3.5 w-3.5" />
-                  </span>
-                }
-              />
-
-              <SummaryItem
                 icon={Package}
                 label={t.productsCount}
                 value={formatNumber(selectedProductsCount)}
+              />
+
+              <SummaryItem
+                icon={Wallet}
+                label={t.productsTotalAfterDiscount}
+                value={<MoneyValue value={productsTotalAfterDiscount} />}
               />
 
               <div className="grid gap-2">
                 <Button
                   type="button"
                   className="h-10 rounded-xl"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isLoadingOptions}
                   onClick={submitForm}
                 >
                   {isSubmitting ? (

@@ -1,14 +1,20 @@
 # ============================================================
 # 📂 agents/services.py
-# 🧠 Agent Commission & Statement Services — Primey Care V1.3
+# 🧠 Agent Commission & Statement Services — Primey Care V2
 # ------------------------------------------------------------
 # ✅ إنشاء ربط الطلب بالمندوب
 # ✅ إنشاء العمولة من ربط الطلب
 # ✅ اعتماد العمولة مع earned_at + approved_at
 # ✅ إطلاق قيد استحقاق العمولة بعد commit
-# ✅ كشف حساب المندوب V1
+# ✅ ربط العمولة مع Accounting Backend الجديد
+# ✅ منع الترحيل المتكرر قدر الإمكان
+# ✅ كشف حساب المندوب
 # ✅ Logging منظم + أخطاء واضحة
 # ✅ بدون المساس بأي منجز سابق
+# ------------------------------------------------------------
+# المسار المالي المعتمد:
+# AgentCommission Approved
+# → Accounting JournalEntry via accounting.services.post_agent_commission_accrual
 # ============================================================
 
 from __future__ import annotations
@@ -52,13 +58,23 @@ FINAL_COMMISSION_STATUSES = {
     COMMISSION_STATUS_PAID,
 }
 
+POSTABLE_COMMISSION_STATUSES = {
+    COMMISSION_STATUS_APPROVED,
+    COMMISSION_STATUS_PAID,
+}
+
 CANDIDATE_COMMISSION_POSTING_TARGETS = [
+    # ✅ الدالة الرسمية الحالية بعد إعادة بناء Backend المالي
+    ("accounting.services", "post_agent_commission_accrual"),
+
+    # توافق خلفي لأي أسماء قديمة
+    ("accounting.services", "post_commission_accrual"),
+    ("accounting.services", "post_agent_commission"),
+
     ("accounting.services.posting", "post_agent_commission_accrual"),
     ("accounting.services.posting", "post_commission_accrual"),
     ("accounting.services.posting", "post_agent_commission"),
-    ("accounting.services", "post_agent_commission_accrual"),
-    ("accounting.services", "post_commission_accrual"),
-    ("accounting.services", "post_agent_commission"),
+
     ("accounting.services.commissions", "post_agent_commission_accrual"),
     ("accounting.services.commissions", "post_commission_accrual"),
     ("accounting.services.commissions", "post_agent_commission"),
@@ -230,25 +246,33 @@ def _resolve_commission_amount(commission: Any) -> Decimal:
         _safe_getattr(commission, "value"),
         _safe_getattr(commission, "total_amount"),
     ]
+
     for value in candidates:
         if value is not None:
             try:
-                return Decimal(str(value))
+                return _money(value)
             except Exception:
                 continue
+
     return Decimal("0.00")
 
 
 def _resolve_import_callable(
-    candidates: list[tuple[str, str]]
+    candidates: list[tuple[str, str]],
 ) -> Optional[Callable[..., Any]]:
     for module_path, function_name in candidates:
         try:
             module = import_module(module_path)
             fn = getattr(module, function_name, None)
+
             if callable(fn):
-                logger.info("✅ تم العثور على الدالة: %s.%s", module_path, function_name)
+                logger.info(
+                    "✅ تم العثور على الدالة: %s.%s",
+                    module_path,
+                    function_name,
+                )
                 return fn
+
         except Exception as exc:
             logger.debug(
                 "تعذر تحميل %s.%s أثناء البحث عن الدالة المطلوبة: %s",
@@ -257,11 +281,35 @@ def _resolve_import_callable(
                 exc,
             )
             continue
+
     return None
 
 
+def _call_commission_posting_with_fallbacks(
+    posting_callable: Callable[..., Any],
+    commission: Any,
+    actor: Any = None,
+) -> Any:
+    """
+    الدالة الرسمية الحالية:
+      accounting.services.post_agent_commission_accrual(commission, actor=None)
+    """
+    try:
+        return posting_callable(commission=commission, actor=actor)
+    except TypeError:
+        try:
+            return posting_callable(commission=commission)
+        except TypeError:
+            return posting_callable(commission)
+
+
 def _save_commission(commission: Any, update_fields: list[str]) -> None:
-    valid_update_fields = [field for field in update_fields if hasattr(commission, field)]
+    valid_update_fields = [
+        field
+        for field in list(dict.fromkeys(update_fields))
+        if hasattr(commission, field)
+    ]
+
     if valid_update_fields:
         commission.save(update_fields=valid_update_fields)
     else:
@@ -303,6 +351,76 @@ def _resolve_agent_currency(
 
 def _sort_datetime_fallback() -> datetime:
     return timezone.now()
+
+
+def _is_commission_accounting_posted(commission: Any) -> bool:
+    """
+    منع الترحيل المكرر قدر الإمكان بدون افتراض وجود حقول جديدة.
+    """
+    if hasattr(commission, "is_accounting_posted"):
+        return bool(_safe_getattr(commission, "is_accounting_posted", False))
+
+    reference = _first_non_empty(
+        _safe_getattr(commission, "accounting_entry_reference"),
+        _safe_getattr(commission, "journal_entry_reference"),
+        _safe_getattr(commission, "posting_reference"),
+    )
+
+    return bool(reference)
+
+
+def _mark_commission_accounting_posted(
+    commission: Any,
+    result: Any,
+) -> None:
+    update_fields: list[str] = []
+
+    reference = _first_non_empty(
+        _safe_getattr(result, "entry_number"),
+        _safe_getattr(result, "journal_number"),
+        _safe_getattr(result, "reference"),
+        _safe_getattr(result, "number"),
+        _safe_getattr(result, "id"),
+    )
+
+    if hasattr(commission, "is_accounting_posted"):
+        commission.is_accounting_posted = True
+        update_fields.append("is_accounting_posted")
+
+    if reference and hasattr(commission, "accounting_entry_reference"):
+        commission.accounting_entry_reference = str(reference)
+        update_fields.append("accounting_entry_reference")
+
+    if reference and hasattr(commission, "journal_entry_reference"):
+        commission.journal_entry_reference = str(reference)
+        update_fields.append("journal_entry_reference")
+
+    if reference and hasattr(commission, "posting_reference"):
+        commission.posting_reference = str(reference)
+        update_fields.append("posting_reference")
+
+    if hasattr(commission, "posted_at") and not _safe_getattr(commission, "posted_at"):
+        commission.posted_at = timezone.now()
+        update_fields.append("posted_at")
+
+    if hasattr(commission, "updated_at"):
+        commission.updated_at = timezone.now()
+        update_fields.append("updated_at")
+
+    if update_fields:
+        _save_commission(commission, update_fields)
+
+
+def _load_commission_for_posting(commission_pk: int) -> AgentCommission:
+    return (
+        AgentCommission.objects.select_related(
+            "agent",
+            "order",
+            "payment",
+            "agent_order",
+        )
+        .get(pk=commission_pk)
+    )
 
 
 # ============================================================
@@ -476,10 +594,9 @@ def _prepare_commission_approval_fields(commission: Any, status_before: str) -> 
 
     if hasattr(commission, "updated_at"):
         commission.updated_at = now
-        if "updated_at" not in changed_fields:
-            changed_fields.append("updated_at")
+        changed_fields.append("updated_at")
 
-    return changed_fields
+    return list(dict.fromkeys(changed_fields))
 
 
 def _enforce_post_save_status(commission: Any, status_before: str) -> None:
@@ -502,7 +619,7 @@ def _enforce_post_save_status(commission: Any, status_before: str) -> None:
             expected_status,
         )
         commission.commission_status = expected_status
-        _save_commission(commission, ["commission_status"])
+        _save_commission(commission, ["commission_status", "updated_at"])
         _refresh_commission(commission)
 
 
@@ -514,25 +631,45 @@ def dispatch_commission_accounting_post(
     commission: Any,
     actor: Any = None,
 ) -> tuple[bool, str]:
+    if commission is None:
+        raise CommissionPostingError("commission is required for accounting posting.")
+
+    _refresh_commission(commission)
+
     commission_id = _resolve_commission_identifier(commission)
+    status = _resolve_commission_status(commission)
+
+    if _is_commission_accounting_posted(commission):
+        message = f"تم تجاوز الترحيل المحاسبي لأن العمولة {commission_id} مرحلة محاسبيًا مسبقًا."
+        logger.info(message)
+        return True, message
+
+    if status not in POSTABLE_COMMISSION_STATUSES:
+        message = f"لا يمكن ترحيل العمولة {commission_id} محاسبيًا لأنها غير معتمدة."
+        logger.warning(message)
+        return False, message
+
     posting_callable = _resolve_import_callable(CANDIDATE_COMMISSION_POSTING_TARGETS)
 
     if posting_callable is None:
         message = (
             "لم يتم العثور على دالة ترحيل محاسبي لاستحقاق العمولة. "
-            "تحقق من ربط accounting.services.posting."
+            "تحقق من ربط accounting.services.post_agent_commission_accrual."
         )
         logger.warning("Commission %s: %s", commission_id, message)
         return False, message
 
     try:
-        try:
-            posting_callable(commission=commission, actor=actor)
-        except TypeError:
-            try:
-                posting_callable(commission=commission)
-            except TypeError:
-                posting_callable(commission)
+        result = _call_commission_posting_with_fallbacks(
+            posting_callable,
+            commission=commission,
+            actor=actor,
+        )
+
+        _refresh_commission(commission)
+
+        if not _is_commission_accounting_posted(commission):
+            _mark_commission_accounting_posted(commission, result)
 
         message = f"تم إطلاق قيد استحقاق العمولة بنجاح للعمولة {commission_id}."
         logger.info(message)
@@ -566,6 +703,8 @@ def approve_commission(
     if commission is None:
         raise CommissionValidationError("commission is required.")
 
+    commission = AgentCommission.objects.select_for_update().get(pk=commission.pk)
+
     commission_id = _resolve_commission_identifier(commission)
     status_before = _resolve_commission_status(commission)
 
@@ -576,11 +715,6 @@ def approve_commission(
     )
 
     validate_commission_for_approval(commission)
-
-    changed_fields = _prepare_commission_approval_fields(
-        commission,
-        status_before=status_before,
-    )
 
     for method_name in ("recalculate", "recalculate_totals", "refresh_from_source"):
         try:
@@ -593,6 +727,11 @@ def approve_commission(
                 exc,
             )
 
+    changed_fields = _prepare_commission_approval_fields(
+        commission,
+        status_before=status_before,
+    )
+
     _save_commission(commission, changed_fields)
     _refresh_commission(commission)
     _enforce_post_save_status(commission, status_before=status_before)
@@ -602,9 +741,12 @@ def approve_commission(
     accounting_post_message = "لم يُطلب الترحيل المحاسبي."
 
     if auto_post_accounting:
-        def _post_accounting_after_commit() -> None:
+        commission_pk = commission.pk
+
+        def _post_accounting_after_commit(commission_id_for_callback: int = commission_pk) -> None:
+            fresh_commission = _load_commission_for_posting(commission_id_for_callback)
             dispatch_commission_accounting_post(
-                commission=commission,
+                commission=fresh_commission,
                 actor=actor,
             )
 
@@ -649,6 +791,8 @@ def mark_commission_paid(
     if commission is None:
         raise CommissionValidationError("commission is required.")
 
+    commission = AgentCommission.objects.select_for_update().get(pk=commission.pk)
+
     if commission.commission_status not in {
         COMMISSION_STATUS_APPROVED,
         COMMISSION_STATUS_EARNED,
@@ -673,7 +817,15 @@ def mark_commission_paid(
     if payment is not None:
         commission.payment = payment
 
-    commission.save()
+    update_fields = [
+        "paid_amount",
+        "commission_status",
+        "paid_at",
+        "payment",
+        "updated_at",
+    ]
+    _save_commission(commission, update_fields)
+    _refresh_commission(commission)
 
     logger.info(
         "✅ تم تعليم العمولة %s كمدفوعة بواسطة %s",
@@ -699,7 +851,10 @@ def repost_commission_accounting(
     commission_id = _resolve_commission_identifier(commission)
     logger.info("🔁 إعادة ترحيل محاسبي لاستحقاق العمولة %s", commission_id)
 
-    return dispatch_commission_accounting_post(commission=commission, actor=actor)
+    return dispatch_commission_accounting_post(
+        commission=commission,
+        actor=actor,
+    )
 
 
 # ============================================================
@@ -723,6 +878,7 @@ def _build_agent_statement_summary(
         commissions_qs.aggregate(total=Sum("paid_amount")).get("total") or "0.00"
     )
     total_due_amount = _money(total_commission_amount - total_paid_amount)
+
     if total_due_amount < Decimal("0.00"):
         total_due_amount = Decimal("0.00")
 
@@ -756,8 +912,10 @@ def _collect_agent_order_lines(
     lines: list[dict[str, Any]] = []
 
     queryset = agent_orders_qs
+
     if date_from:
         queryset = queryset.filter(created_at__gte=date_from)
+
     if date_to:
         queryset = queryset.filter(created_at__lte=date_to)
 
@@ -802,8 +960,10 @@ def _collect_commission_lines(
     lines: list[dict[str, Any]] = []
 
     queryset = commissions_qs
+
     if date_from:
         queryset = queryset.filter(created_at__gte=date_from)
+
     if date_to:
         queryset = queryset.filter(created_at__lte=date_to)
 
@@ -847,6 +1007,7 @@ def _collect_commission_lines(
                 _ensure_aware(commission.updated_at),
                 _ensure_aware(commission.created_at),
             )
+
             lines.append(
                 {
                     "line_type": "COMMISSION_PAYOUT",
@@ -984,6 +1145,7 @@ def build_agent_statement(
 
 def _serialize_agent_statement_summary(summary: AgentStatementSummary) -> dict[str, Any]:
     data = asdict(summary)
+
     for key in [
         "total_sales_amount",
         "total_commission_amount",
@@ -991,6 +1153,7 @@ def _serialize_agent_statement_summary(summary: AgentStatementSummary) -> dict[s
         "total_due_amount",
     ]:
         data[key] = str(data[key])
+
     return data
 
 

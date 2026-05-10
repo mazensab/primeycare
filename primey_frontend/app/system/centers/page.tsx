@@ -2,81 +2,47 @@
 
 /* ============================================================
    📂 app/system/centers/page.tsx
-   🧠 Primey Care | Centers Dashboard Page
-   ------------------------------------------------------------
-   ✅ المسار:
-      /system/centers
+   🧠 Primey Care | Centers Overview
 
-   ✅ العمل:
-      صفحة لوحة إدارة المراكز / مقدمي الخدمة داخل مساحة النظام.
-
-   ✅ الإصدار:
-      v1.1.1 - UX Refinement + Excel Export
-
-   ✅ يعتمد على:
-      GET /api/providers/?page_size=100
-
-   ✅ متوافق مع صفحات:
-      - /system/centers
-      - /system/centers/list
-      - /system/centers/create
-      - /system/centers/reports
-      - /system/centers/[id]
-
-   ✅ الوظائف:
-      - عرض إحصائيات المراكز من API فعلي
-      - عرض المراكز المميزة
-      - عرض آخر المراكز في جدول مختصر
-      - البحث السريع داخل بيانات المراكز المحملة
-      - فلترة حسب حالة المركز
-      - تصدير Excel للبيانات الظاهرة بصيغة .xls متوافقة مع Microsoft Excel
-      - Error State حقيقي عند فشل API
-      - Empty State ذكي حسب البحث أو عدم وجود بيانات
-      - Loading Skeleton احترافي بدل نص تحميل فقط
-      - دعم عربي / إنجليزي عبر primey-locale
-      - استخدام toast من sonner للتنبيهات
-      - عدم استخدام localhost hardcoded
-      - استخدام UI الداخلي فقط
-      - الأرقام تبقى بالإنجليزية
-      - روابط داخلية آمنة بدون Dynamic href غير مدعوم
-
-   ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - فصل حالة الخطأ عن الحالة الفارغة
-      - إضافة زر إعادة المحاولة عند فشل التحميل
-      - إضافة Skeleton للبطاقات والجدول والمراكز المميزة
-      - تفعيل زر تصدير Excel بدل تركه وهميًا
-      - استبدال زر الأعمدة الوهمي بفلتر حالة فعلي
-      - تحسين Empty State عند البحث وعدم وجود نتائج
-      - حماية روابط التفاصيل عند غياب id صالح
-      - تحسين Footer بدل Pagination غير حقيقي
-      - تحسين مؤشرات الإحصائيات بدل قيم ثابتة غير دقيقة
+   ✅ المرحلة 17 + المرحلة 2
+   ✅ نفس النمط المعتمد
+   ✅ w-full space-y-4
+   ✅ بدون main / min-h-screen / max-w
+   ✅ أزرار انتقال للصفحات التي أزلناها من السايدر
+   ✅ Skeleton Loading
+   ✅ Error State مستقل
+   ✅ Empty State ذكي
+   ✅ Excel .xls HTML Workbook
+   ✅ Web PDF Print
+   ✅ sonner
+   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
 ============================================================ */
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Activity,
+  ArrowUpRight,
   BadgeCheck,
-  BarChart3,
   Building2,
   Download,
   Eye,
   FileText,
-  ListChecks,
+  Hospital,
   Loader2,
   MapPin,
   Phone,
-  Plus,
+  PlusCircle,
+  Printer,
   RefreshCcw,
   Search,
   ShieldCheck,
-  Star,
-  Users,
+  Sparkles,
+  Stethoscope,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -101,84 +67,107 @@ import {
 ============================================================ */
 
 type AppLocale = "ar" | "en";
+type Dict = Record<string, unknown>;
 
-type ProviderStatus =
-  | "ACTIVE"
-  | "INACTIVE"
-  | "SUSPENDED"
-  | "DRAFT"
-  | "UNKNOWN";
+type CenterStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED" | "DRAFT" | "UNKNOWN";
 
-type ProviderType =
+type CenterType =
   | "HOSPITAL"
   | "MEDICAL_CENTER"
   | "PHARMACY"
-  | "PARTNER"
   | "LAB"
   | "CLINIC"
+  | "PARTNER"
   | "OTHER"
   | "UNKNOWN";
 
-type StatusFilter = "ALL" | ProviderStatus;
-
-type Center = {
-  id: number | string;
-  name: string;
+type CenterRow = {
+  id: string;
   code: string;
-  providerType: ProviderType;
-  status: ProviderStatus;
-  contactPerson: string;
+  name: string;
+  center_type: CenterType;
+  status: CenterStatus;
+  contact_person: string;
   phone: string;
   mobile: string;
   email: string;
-  website: string;
   city: string;
   area: string;
   address: string;
-  googleMapsLink: string;
-  notes: string;
-  isFeatured: boolean;
-  createdAt: string;
-  updatedAt: string;
-  raw: Record<string, unknown>;
+  contracts_count: number;
+  active_contracts_count: number;
+  orders_count: number;
+  providers_count: number;
+  is_featured: boolean;
+  created_at: string;
 };
 
-type ProvidersApiResponse = {
+type CentersSummary = {
+  total_centers: number;
+  active_centers: number;
+  inactive_centers: number;
+  suspended_centers: number;
+  hospitals_count: number;
+  medical_centers_count: number;
+  pharmacies_count: number;
+  labs_count: number;
+  clinics_count: number;
+  featured_centers: number;
+  total_contracts: number;
+  active_contracts: number;
+  total_orders: number;
+};
+
+type ApiEnvelope<T> = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
+  detail?: string;
+  error?: string;
+  data?: T;
   results?: unknown[];
-  data?: unknown[];
   items?: unknown[];
-  providers?: unknown[];
+  rows?: unknown[];
   centers?: unknown[];
+  providers?: unknown[];
+  summary?: Partial<CentersSummary>;
+  stats?: Partial<CentersSummary>;
 };
 
-type ExcelSheetOptions = {
-  filename: string;
-  worksheetName: string;
-  title: string;
-  locale: AppLocale;
-  summaryRows: Array<[string, string | number]>;
-  headers: string[];
-  rows: Array<Array<string | number>>;
+const DEFAULT_SUMMARY: CentersSummary = {
+  total_centers: 0,
+  active_centers: 0,
+  inactive_centers: 0,
+  suspended_centers: 0,
+  hospitals_count: 0,
+  medical_centers_count: 0,
+  pharmacies_count: 0,
+  labs_count: 0,
+  clinics_count: 0,
+  featured_centers: 0,
+  total_contracts: 0,
+  active_contracts: 0,
+  total_orders: 0,
 };
 
 /* ============================================================
-   Locale Helpers
+   Locale / API
 ============================================================ */
 
 function readLocale(): AppLocale {
   try {
     if (typeof window === "undefined") return "ar";
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
@@ -195,78 +184,220 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
+
+  if (!base) return path;
+
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
 /* ============================================================
-   API Normalizers
+   Auth / Permissions
 ============================================================ */
 
-function normalizeApiList(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
+}
 
-  if (payload && typeof payload === "object") {
-    const data = payload as ProvidersApiResponse;
+function getNested(source: Dict, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
 
-    if (Array.isArray(data.results)) return data.results;
-    if (Array.isArray(data.data)) return data.data;
-    if (Array.isArray(data.items)) return data.items;
-    if (Array.isArray(data.providers)) return data.providers;
-    if (Array.isArray(data.centers)) return data.centers;
+    if (value && typeof value === "object") return value as Dict;
   }
 
-  return [];
+  return {};
 }
 
-function normalizeStatus(value: unknown): ProviderStatus {
-  const status = String(value || "").toUpperCase();
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
 
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "INACTIVE") return "INACTIVE";
-  if (status === "SUSPENDED") return "SUSPENDED";
-  if (status === "DRAFT") return "DRAFT";
+          if (typeof value === "string") return [value];
 
-  if (value === true) return "ACTIVE";
-  if (value === false) return "INACTIVE";
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
 
-  return "UNKNOWN";
+              if (item && typeof item === "object") {
+                const obj = item as Dict;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as Dict;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
-function normalizeProviderType(value: unknown): ProviderType {
-  const providerType = String(value || "").toUpperCase();
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
 
-  if (providerType === "HOSPITAL") return "HOSPITAL";
-  if (providerType === "MEDICAL_CENTER") return "MEDICAL_CENTER";
-  if (providerType === "PHARMACY") return "PHARMACY";
-  if (providerType === "PARTNER") return "PARTNER";
-  if (providerType === "LAB") return "LAB";
-  if (providerType === "CLINIC") return "CLINIC";
-  if (providerType === "OTHER") return "OTHER";
-
-  return "UNKNOWN";
+  return getNested(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
 }
 
-function normalizeCenter(item: unknown): Center {
-  const obj = (item || {}) as Record<string, unknown>;
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
 
-  return {
-    id: (obj.id ?? "") as number | string,
-    name: String(obj.name ?? "-"),
-    code: String(obj.code ?? "-"),
-    providerType: normalizeProviderType(obj.provider_type),
-    status: normalizeStatus(obj.status),
-    contactPerson: String(obj.contact_person ?? ""),
-    phone: String(obj.phone ?? ""),
-    mobile: String(obj.mobile ?? ""),
-    email: String(obj.email ?? ""),
-    website: String(obj.website ?? ""),
-    city: String(obj.city ?? ""),
-    area: String(obj.area ?? ""),
-    address: String(obj.address ?? ""),
-    googleMapsLink: String(obj.google_maps_link ?? ""),
-    notes: String(obj.notes ?? ""),
-    isFeatured: Boolean(obj.is_featured),
-    createdAt: String(obj.created_at ?? ""),
-    updatedAt: String(obj.updated_at ?? ""),
-    raw: obj,
-  };
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
+  );
+}
+
+function isSystemAdmin(authValue: unknown) {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
+
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
+}
+
+function hasAnyPermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const permissions = getAuthPermissionCodes(authValue);
+
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "accountant",
+          "support",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin", "support"].includes(role),
+    );
+  }
+
+  return true;
 }
 
 /* ============================================================
@@ -277,135 +408,319 @@ function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    pageTitle: isArabic ? "إدارة المراكز" : "Centers Management",
-    pageSubtitle: isArabic
-      ? "متابعة المراكز ومقدمي الخدمة، حالة التفعيل، المدن، والروابط التشغيلية من بيانات حقيقية."
-      : "Monitor centers and providers, activation status, cities, and operational links from live data.",
+    title: isArabic ? "المراكز" : "Centers",
+    subtitle: isArabic
+      ? "لوحة متابعة المراكز الطبية ومقدمي الخدمة والعقود والطلبات المرتبطة بها."
+      : "Overview for medical centers, providers, contracts, and related orders.",
 
-    addCenter: isArabic ? "إنشاء مركز" : "Create Center",
-    centersList: isArabic ? "قائمة المراكز" : "Centers List",
-    reports: isArabic ? "التقارير" : "Reports",
-    export: isArabic ? "تصدير" : "Export",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
     refresh: isArabic ? "تحديث" : "Refresh",
     retry: isArabic ? "إعادة المحاولة" : "Retry",
+    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
+    centersList: isArabic ? "قائمة المراكز" : "Centers List",
+    createCenter: isArabic ? "إنشاء مركز" : "Create Center",
 
-    featuredCenters: isArabic ? "المراكز المميزة" : "Featured Centers",
-    featuredSubtitle: isArabic
-      ? "عرض مختصر لأهم المراكز حسب حالة التمييز أو أحدث السجلات."
-      : "A compact view of important centers based on featured status or latest records.",
+    totalCenters: isArabic ? "إجمالي المراكز" : "Total Centers",
+    activeCenters: isArabic ? "مراكز نشطة" : "Active Centers",
+    totalContracts: isArabic ? "العقود" : "Contracts",
+    activeContracts: isArabic ? "عقود نشطة" : "Active Contracts",
+    totalOrders: isArabic ? "الطلبات" : "Orders",
+    featuredCenters: isArabic ? "مراكز مميزة" : "Featured Centers",
+    suspendedCenters: isArabic ? "مراكز موقوفة" : "Suspended Centers",
+    hospitals: isArabic ? "مستشفيات" : "Hospitals",
+    medicalCenters: isArabic ? "مراكز طبية" : "Medical Centers",
+    pharmacies: isArabic ? "صيدليات" : "Pharmacies",
+    labs: isArabic ? "مختبرات" : "Labs",
 
-    trackStatus: isArabic ? "حالة المراكز" : "Track Center Status",
-    trackSubtitle: isArabic
-      ? "تحليل سريع لحالة المراكز ومقدمي الخدمة."
-      : "Quick analysis of center and provider status.",
+    shortcutsTitle: isArabic ? "اختصارات المراكز" : "Center Shortcuts",
+    shortcutsDesc: isArabic
+      ? "الوصول السريع لقائمة المراكز أو إنشاء مركز بعد تنظيف السايدر."
+      : "Quick access to center list and create page after sidebar cleanup.",
 
-    filterPlaceholder: isArabic
-      ? "ابحث في المراكز..."
-      : "Filter centers...",
+    latestTitle: isArabic ? "أحدث المراكز" : "Latest Centers",
+    latestDesc: isArabic
+      ? "أحدث المراكز مع الحالة والمدينة والعقود."
+      : "Latest centers with status, city, and contracts.",
 
-    all: isArabic ? "الكل" : "All",
-    total: isArabic ? "الإجمالي" : "Total",
-    active: isArabic ? "نشط" : "Active",
-    draft: isArabic ? "مسودة" : "Draft",
-    suspended: isArabic ? "موقوف" : "Suspended",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    loaded: isArabic ? "محمّلة" : "Loaded",
-    operational: isArabic ? "تشغيلي" : "Operational",
-    needsReview: isArabic ? "يحتاج مراجعة" : "Needs Review",
-    stopped: isArabic ? "متوقف" : "Stopped",
-
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    latestRecords: isArabic ? "آخر السجلات" : "Latest records",
-    viewFullList: isArabic ? "عرض القائمة الكاملة" : "View Full List",
+    searchPlaceholder: isArabic
+      ? "ابحث باسم المركز أو الكود أو المدينة أو الجوال..."
+      : "Search by center name, code, city, or phone...",
 
     table: {
-      id: isArabic ? "الرقم" : "ID",
-      name: isArabic ? "اسم المركز" : "Center Name",
+      center: isArabic ? "المركز" : "Center",
+      code: isArabic ? "الكود" : "Code",
       type: isArabic ? "النوع" : "Type",
       city: isArabic ? "المدينة" : "City",
       contact: isArabic ? "التواصل" : "Contact",
       status: isArabic ? "الحالة" : "Status",
+      contracts: isArabic ? "العقود" : "Contracts",
+      orders: isArabic ? "الطلبات" : "Orders",
+      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
       action: isArabic ? "الإجراء" : "Action",
     },
 
-    emptyTitle: isArabic ? "لا توجد مراكز بعد" : "No centers yet",
-    emptyText: isArabic
-      ? "عند إضافة مراكز من صفحة الإنشاء أو من لوحة Django ستظهر هنا مباشرة."
-      : "Centers created from the create page or Django admin will appear here.",
+    active: isArabic ? "نشط" : "Active",
+    inactive: isArabic ? "غير نشط" : "Inactive",
+    suspended: isArabic ? "موقوف" : "Suspended",
+    draft: isArabic ? "مسودة" : "Draft",
+    unknown: isArabic ? "غير محدد" : "Unknown",
 
-    noResultsTitle: isArabic
-      ? "لا توجد نتائج مطابقة"
-      : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو فلتر الحالة لعرض نتائج أكثر."
-      : "Try changing the search keywords or status filter to show more results.",
+    hospital: isArabic ? "مستشفى" : "Hospital",
+    medicalCenter: isArabic ? "مركز طبي" : "Medical Center",
+    pharmacy: isArabic ? "صيدلية" : "Pharmacy",
+    lab: isArabic ? "مختبر" : "Lab",
+    clinic: isArabic ? "عيادة" : "Clinic",
+    partner: isArabic ? "شريك" : "Partner",
+    other: isArabic ? "أخرى" : "Other",
 
-    loading: isArabic ? "جاري تحميل بيانات المراكز..." : "Loading centers data...",
-    apiError: isArabic
-      ? "تعذر تحميل بيانات المراكز."
-      : "Unable to load centers data.",
-    apiErrorHint: isArabic
-      ? "تحقق من اتصال API أو الصلاحيات ثم أعد المحاولة."
-      : "Check the API connection or permissions, then try again.",
-    refreshSuccess: isArabic
-      ? "تم تحديث بيانات المراكز بنجاح"
-      : "Centers data refreshed successfully",
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح"
-      : "Excel file prepared successfully",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير"
-      : "No data available to export",
-
-    quickAccessTitle: isArabic ? "إجراءات وحدة المراكز" : "Centers Module Actions",
-    quickAccessSubtitle: isArabic
-      ? "اختصارات منظمة للوصول إلى أهم صفحات وحدة المراكز بدون عرض روابط خام."
-      : "Organized shortcuts to the key center module pages without raw route text.",
-
-    open: isArabic ? "فتح" : "Open",
-    manage: isArabic ? "إدارة" : "Manage",
+    featured: isArabic ? "مميز" : "Featured",
     view: isArabic ? "عرض" : "View",
 
-    actionListTitle: isArabic ? "قائمة المراكز" : "Centers List",
-    actionListDesc: isArabic
-      ? "استعراض جميع المراكز، البحث، التصفية، وإدارة السجلات."
-      : "Browse all centers, search, filter, and manage records.",
+    emptyTitle: isArabic ? "لا توجد بيانات مراكز" : "No center data",
+    emptyText: isArabic
+      ? "ستظهر بيانات المراكز هنا بعد إنشاء أول مركز."
+      : "Center data will appear here after creating the first center.",
+    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
+    noResultsText: isArabic
+      ? "جرّب تغيير كلمات البحث."
+      : "Try changing your search terms.",
 
-    actionCreateTitle: isArabic ? "إنشاء مركز" : "Create Center",
-    actionCreateDesc: isArabic
-      ? "إضافة مركز أو مقدم خدمة جديد وربطه لاحقًا بالعقود والخدمات."
-      : "Add a new center/provider and later connect it with contracts and services.",
+    accessDeniedTitle: isArabic ? "غير مصرح بعرض المراكز" : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية عرض المراكز. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to view centers. Contact your system administrator if you need access.",
 
-    actionReportsTitle: isArabic ? "تقارير المراكز" : "Centers Reports",
-    actionReportsDesc: isArabic
-      ? "عرض تقارير تشغيلية، فلاتر، جداول، تصدير وطباعة."
-      : "View operational reports, filters, tables, export and print.",
+    loadError: isArabic ? "تعذر تحميل بيانات المراكز." : "Unable to load centers.",
+    loadErrorHint: isArabic
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
+    loadSuccess: isArabic ? "تم تحديث بيانات المراكز." : "Centers refreshed.",
 
-    typeLabels: {
-      HOSPITAL: isArabic ? "مستشفى" : "Hospital",
-      MEDICAL_CENTER: isArabic ? "مركز طبي" : "Medical Center",
-      PHARMACY: isArabic ? "صيدلية" : "Pharmacy",
-      PARTNER: isArabic ? "شريك" : "Partner",
-      LAB: isArabic ? "مختبر" : "Lab",
-      CLINIC: isArabic ? "عيادة" : "Clinic",
-      OTHER: isArabic ? "أخرى" : "Other",
-      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
-    } satisfies Record<ProviderType, string>,
+    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
+    exportEmpty: isArabic
+      ? "لا توجد بيانات قابلة للتصدير."
+      : "No data available to export.",
+    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
+    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
+
+    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
+    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
   };
 }
 
 /* ============================================================
-   UI Helpers
+   Helpers
 ============================================================ */
 
-function statusLabel(status: ProviderStatus, locale: AppLocale) {
+function toNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatNumber(value: unknown): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(toNumber(value));
+}
+
+function formatDate(value: string, locale: AppLocale): string {
+  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  }).format(date);
+}
+
+function escapeHtml(value: string | number) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function getNestedValue(obj: Dict, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = obj[key];
+
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+
+  for (const container of ["center", "provider", "company", "profile", "data"]) {
+    const nested = obj[container];
+
+    if (nested && typeof nested === "object") {
+      const value = getNestedValue(nested as Dict, keys);
+
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+  }
+
+  return undefined;
+}
+
+function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
+  if (!payload) return [];
+
+  const data = asDict(payload.data);
+  const directValue = (payload as Dict)[key];
+
+  if (Array.isArray(directValue)) return directValue;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.rows)) return payload.rows;
+
+  if (Array.isArray(data[key])) return data[key] as unknown[];
+  if (Array.isArray(data.results)) return data.results as unknown[];
+  if (Array.isArray(data.items)) return data.items as unknown[];
+  if (Array.isArray(data.rows)) return data.rows as unknown[];
+
+  if (Array.isArray(payload.data)) return payload.data;
+
+  return [];
+}
+
+function extractSummary(payload: ApiEnvelope<unknown> | null) {
+  if (!payload) return {};
+
+  const data = asDict(payload.data);
+
+  return {
+    ...asDict(payload.summary),
+    ...asDict(payload.stats),
+    ...asDict(data.summary),
+    ...asDict(data.stats),
+    ...asDict(data.totals),
+    ...asDict(data),
+  } as Partial<CentersSummary>;
+}
+
+function normalizeStatus(value: unknown): CenterStatus {
+  const clean = String(value || "").toUpperCase();
+
+  if (["ACTIVE", "ENABLED", "APPROVED"].includes(clean)) return "ACTIVE";
+  if (["INACTIVE", "DISABLED"].includes(clean)) return "INACTIVE";
+  if (["SUSPENDED", "BLOCKED", "BANNED"].includes(clean)) return "SUSPENDED";
+  if (["DRAFT", "PENDING", "NEW"].includes(clean)) return "DRAFT";
+
+  return "UNKNOWN";
+}
+
+function normalizeType(value: unknown): CenterType {
+  const clean = String(value || "").toUpperCase();
+
+  if (["HOSPITAL"].includes(clean)) return "HOSPITAL";
+  if (["MEDICAL_CENTER", "CENTER", "MEDICALCENTRE"].includes(clean)) {
+    return "MEDICAL_CENTER";
+  }
+  if (["PHARMACY"].includes(clean)) return "PHARMACY";
+  if (["LAB", "LABORATORY"].includes(clean)) return "LAB";
+  if (["CLINIC"].includes(clean)) return "CLINIC";
+  if (["PARTNER"].includes(clean)) return "PARTNER";
+  if (["OTHER"].includes(clean)) return "OTHER";
+
+  return "UNKNOWN";
+}
+
+function normalizeCenter(item: unknown, index: number): CenterRow {
+  const obj = asDict(item);
+
+  return {
+    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
+    code: String(getNestedValue(obj, ["code", "center_code", "provider_code", "number"]) || "-"),
+    name: String(getNestedValue(obj, ["name", "title", "center_name", "provider_name"]) || "-"),
+    center_type: normalizeType(getNestedValue(obj, ["center_type", "provider_type", "type", "kind"])),
+    status: normalizeStatus(getNestedValue(obj, ["status", "state"])),
+    contact_person: String(
+      getNestedValue(obj, ["contact_person", "contact_name", "manager_name"]) || "",
+    ),
+    phone: String(getNestedValue(obj, ["phone", "phone_number"]) || ""),
+    mobile: String(getNestedValue(obj, ["mobile", "mobile_number"]) || ""),
+    email: String(getNestedValue(obj, ["email", "center_email", "provider_email"]) || ""),
+    city: String(getNestedValue(obj, ["city", "city_name"]) || ""),
+    area: String(getNestedValue(obj, ["area", "district", "region"]) || ""),
+    address: String(getNestedValue(obj, ["address", "full_address"]) || ""),
+    contracts_count: toNumber(getNestedValue(obj, ["contracts_count", "total_contracts"])),
+    active_contracts_count: toNumber(
+      getNestedValue(obj, ["active_contracts_count", "active_contracts"]),
+    ),
+    orders_count: toNumber(getNestedValue(obj, ["orders_count", "total_orders"])),
+    providers_count: toNumber(getNestedValue(obj, ["providers_count", "provider_count"])),
+    is_featured: Boolean(getNestedValue(obj, ["is_featured", "featured"])),
+    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
+  };
+}
+
+function buildSummary(rows: CenterRow[], apiSummary?: Partial<CentersSummary>): CentersSummary {
+  const fallback: CentersSummary = {
+    total_centers: rows.length,
+    active_centers: rows.filter((item) => item.status === "ACTIVE").length,
+    inactive_centers: rows.filter((item) => item.status === "INACTIVE").length,
+    suspended_centers: rows.filter((item) => item.status === "SUSPENDED").length,
+    hospitals_count: rows.filter((item) => item.center_type === "HOSPITAL").length,
+    medical_centers_count: rows.filter((item) => item.center_type === "MEDICAL_CENTER").length,
+    pharmacies_count: rows.filter((item) => item.center_type === "PHARMACY").length,
+    labs_count: rows.filter((item) => item.center_type === "LAB").length,
+    clinics_count: rows.filter((item) => item.center_type === "CLINIC").length,
+    featured_centers: rows.filter((item) => item.is_featured).length,
+    total_contracts: rows.reduce((sum, item) => sum + item.contracts_count, 0),
+    active_contracts: rows.reduce((sum, item) => sum + item.active_contracts_count, 0),
+    total_orders: rows.reduce((sum, item) => sum + item.orders_count, 0),
+  };
+
+  const api = asDict(apiSummary);
+
+  return {
+    total_centers:
+      toNumber(api.total_centers) ||
+      toNumber(api.centers_count) ||
+      toNumber(api.total_providers) ||
+      fallback.total_centers,
+    active_centers:
+      toNumber(api.active_centers) ||
+      toNumber(api.active_providers) ||
+      fallback.active_centers,
+    inactive_centers:
+      toNumber(api.inactive_centers) ||
+      toNumber(api.inactive_providers) ||
+      fallback.inactive_centers,
+    suspended_centers:
+      toNumber(api.suspended_centers) ||
+      toNumber(api.suspended_providers) ||
+      fallback.suspended_centers,
+    hospitals_count: toNumber(api.hospitals_count) || fallback.hospitals_count,
+    medical_centers_count:
+      toNumber(api.medical_centers_count) || fallback.medical_centers_count,
+    pharmacies_count: toNumber(api.pharmacies_count) || fallback.pharmacies_count,
+    labs_count: toNumber(api.labs_count) || fallback.labs_count,
+    clinics_count: toNumber(api.clinics_count) || fallback.clinics_count,
+    featured_centers:
+      toNumber(api.featured_centers) ||
+      toNumber(api.featured_providers) ||
+      fallback.featured_centers,
+    total_contracts:
+      toNumber(api.total_contracts) ||
+      toNumber(api.contracts_count) ||
+      fallback.total_contracts,
+    active_contracts:
+      toNumber(api.active_contracts) || fallback.active_contracts,
+    total_orders:
+      toNumber(api.total_orders) ||
+      toNumber(api.orders_count) ||
+      fallback.total_orders,
+  };
+}
+
+function statusLabel(status: CenterStatus, locale: AppLocale) {
   const t = dictionary(locale);
 
-  const labels: Record<ProviderStatus, string> = {
+  const labels: Record<CenterStatus, string> = {
     ACTIVE: t.active,
     INACTIVE: t.inactive,
     SUSPENDED: t.suspended,
@@ -416,7 +731,24 @@ function statusLabel(status: ProviderStatus, locale: AppLocale) {
   return labels[status];
 }
 
-function statusBadge(status: ProviderStatus, locale: AppLocale) {
+function typeLabel(type: CenterType, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<CenterType, string> = {
+    HOSPITAL: t.hospital,
+    MEDICAL_CENTER: t.medicalCenter,
+    PHARMACY: t.pharmacy,
+    LAB: t.lab,
+    CLINIC: t.clinic,
+    PARTNER: t.partner,
+    OTHER: t.other,
+    UNKNOWN: t.unknown,
+  };
+
+  return labels[type];
+}
+
+function statusBadge(status: CenterStatus, locale: AppLocale) {
   const label = statusLabel(status, locale);
 
   if (status === "ACTIVE") {
@@ -429,78 +761,106 @@ function statusBadge(status: ProviderStatus, locale: AppLocale) {
 
   if (status === "DRAFT") {
     return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
         {label}
       </Badge>
     );
   }
 
-  if (status === "SUSPENDED") {
+  if (status === "INACTIVE" || status === "SUSPENDED") {
     return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "INACTIVE") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
+      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
         {label}
       </Badge>
     );
   }
 
   return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
+    <Badge variant="outline" className="rounded-full px-3 py-1">
       {label}
     </Badge>
   );
 }
 
-function percent(value: number, total: number) {
-  if (!total) return 0;
-  return Math.round((value / total) * 100);
+function isValidId(value: unknown) {
+  const id = String(value || "").trim();
+
+  return id && id !== "-" && id !== "undefined" && id !== "null";
 }
 
-function isValidCenterId(id: Center["id"]) {
-  const value = String(id || "").trim();
-
-  return value.length > 0 && value !== "-" && value !== "undefined";
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
 }
 
-function excelEscape(value: string | number) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+function PageSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-5">
+              <SkeletonLine className="h-8 w-28" />
+              <SkeletonLine className="mt-3 h-4 w-24" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="grid gap-3 p-5 md:grid-cols-2">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-24 w-full rounded-2xl" />
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="space-y-3 p-5">
+          <SkeletonLine className="h-7 w-48" />
+          {Array.from({ length: 7 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
-function downloadExcel(options: ExcelSheetOptions) {
-  const dir = options.locale === "ar" ? "rtl" : "ltr";
-  const align = options.locale === "ar" ? "right" : "left";
-  const colspan = Math.max(options.headers.length, 2);
+/* ============================================================
+   Export / Print
+============================================================ */
 
-  const summaryHtml = options.summaryRows
+function downloadExcel({
+  filename,
+  title,
+  locale,
+  summary,
+  rows,
+}: {
+  filename: string;
+  title: string;
+  locale: AppLocale;
+  summary: CentersSummary;
+  rows: CenterRow[];
+}) {
+  const isArabic = locale === "ar";
+  const dir = isArabic ? "rtl" : "ltr";
+  const align = isArabic ? "right" : "left";
+  const t = dictionary(locale);
+
+  const rowsHtml = rows
     .map(
-      ([label, value]) => `
+      (item) => `
         <tr>
-          <td class="summary-label">${excelEscape(label)}</td>
-          <td class="summary-value">${excelEscape(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const headerHtml = options.headers
-    .map((header) => `<th>${excelEscape(header)}</th>`)
-    .join("");
-
-  const rowsHtml = options.rows
-    .map(
-      (row) => `
-        <tr>
-          ${row.map((cell) => `<td>${excelEscape(cell)}</td>`).join("")}
+          <td>${escapeHtml(item.code)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(typeLabel(item.center_type, locale))}</td>
+          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
+          <td>${escapeHtml(item.city || "-")}</td>
+          <td>${escapeHtml(item.phone || item.mobile || "-")}</td>
+          <td>${escapeHtml(formatNumber(item.contracts_count))}</td>
+          <td>${escapeHtml(formatNumber(item.orders_count))}</td>
+          <td>${escapeHtml(formatDate(item.created_at, locale))}</td>
         </tr>`,
     )
     .join("");
@@ -511,72 +871,43 @@ function downloadExcel(options: ExcelSheetOptions) {
           xmlns="http://www.w3.org/TR/REC-html40">
       <head>
         <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${excelEscape(options.worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${options.locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
         <style>
-          body {
-            direction: ${dir};
-            font-family: Arial, sans-serif;
-          }
-          table {
-            border-collapse: collapse;
-            width: 100%;
-          }
-          th,
-          td {
+          body { direction: ${dir}; font-family: Arial, sans-serif; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td {
             border: 1px solid #d9e2ef;
             padding: 8px;
             text-align: ${align};
+            vertical-align: top;
             mso-number-format: "\\@";
           }
-          th {
-            background: #d8ecfb;
-            color: #000000;
-            font-weight: 700;
-          }
-          .title {
-            font-size: 20px;
-            font-weight: 700;
-            text-align: center;
-            background: #ffffff;
-          }
-          .summary-label {
-            font-weight: 700;
-            background: #f8fafc;
-          }
-          .summary-value {
-            font-weight: 700;
-          }
+          th { background: #d8ecfb; font-weight: 700; }
+          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
+          .section { font-weight: 700; background: #eef6ff; }
+          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
         </style>
       </head>
       <body dir="${dir}">
         <table>
+          <tr><td class="title" colspan="9">${escapeHtml(title)}</td></tr>
+          <tr><td colspan="9"></td></tr>
+          <tr><td class="section" colspan="9">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalCenters)}</td><td colspan="8">${escapeHtml(formatNumber(summary.total_centers))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.activeCenters)}</td><td colspan="8">${escapeHtml(formatNumber(summary.active_centers))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalContracts)}</td><td colspan="8">${escapeHtml(formatNumber(summary.total_contracts))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalOrders)}</td><td colspan="8">${escapeHtml(formatNumber(summary.total_orders))}</td></tr>
+
+          <tr><td colspan="9"></td></tr>
           <tr>
-            <td class="title" colspan="${colspan}">
-              ${excelEscape(options.title)}
-            </td>
-          </tr>
-          <tr>
-            <td colspan="${colspan}"></td>
-          </tr>
-          ${summaryHtml}
-          <tr>
-            <td colspan="${colspan}"></td>
-          </tr>
-          <tr>
-            ${headerHtml}
+            <th>${escapeHtml(t.table.code)}</th>
+            <th>${escapeHtml(t.table.center)}</th>
+            <th>${escapeHtml(t.table.type)}</th>
+            <th>${escapeHtml(t.table.status)}</th>
+            <th>${escapeHtml(t.table.city)}</th>
+            <th>${escapeHtml(t.table.contact)}</th>
+            <th>${escapeHtml(t.table.contracts)}</th>
+            <th>${escapeHtml(t.table.orders)}</th>
+            <th>${escapeHtml(t.table.createdAt)}</th>
           </tr>
           ${rowsHtml}
         </table>
@@ -591,97 +922,138 @@ function downloadExcel(options: ExcelSheetOptions) {
   const anchor = document.createElement("a");
 
   anchor.href = url;
-  anchor.download = options.filename;
+  anchor.download = filename;
   anchor.click();
 
   URL.revokeObjectURL(url);
 }
 
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
+function buildPrintHtml({
+  locale,
+  title,
+  summary,
+  rows,
+}: {
+  locale: AppLocale;
+  title: string;
+  summary: CentersSummary;
+  rows: CenterRow[];
+}) {
+  const isArabic = locale === "ar";
+  const t = dictionary(locale);
 
-function FeaturedCentersSkeleton() {
-  return (
-    <div className="space-y-3">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <div
-          key={index}
-          className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3"
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            <SkeletonLine className="h-11 w-11 shrink-0 rounded-xl" />
-            <div className="space-y-2">
-              <SkeletonLine className="h-3 w-28" />
-              <SkeletonLine className="h-3 w-20" />
-            </div>
-          </div>
+  const tableRows = rows
+    .slice(0, 40)
+    .map(
+      (item) => `
+        <tr>
+          <td>${escapeHtml(item.code)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(typeLabel(item.center_type, locale))}</td>
+          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
+          <td>${escapeHtml(item.city || "-")}</td>
+          <td>${escapeHtml(formatNumber(item.contracts_count))}</td>
+        </tr>`,
+    )
+    .join("");
 
-          <div className="space-y-2">
-            <SkeletonLine className="h-3 w-16" />
-            <SkeletonLine className="h-3 w-12" />
+  return `
+    <!doctype html>
+    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            padding: 24px;
+            font-family: Arial, Tahoma, sans-serif;
+            color: #111827;
+            background: #fff;
+            direction: ${isArabic ? "rtl" : "ltr"};
+            text-align: ${isArabic ? "right" : "left"};
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 14px;
+            margin-bottom: 18px;
+          }
+          h1 { margin: 0; font-size: 22px; font-weight: 800; }
+          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
+          .badge {
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            padding: 5px 12px;
+            font-size: 12px;
+            height: fit-content;
+          }
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 18px;
+          }
+          .box {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 10px;
+          }
+          .box span { color: #6b7280; display: block; font-size: 11px; }
+          .box strong { display: block; margin-top: 6px; font-size: 16px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+          th { background: #f3f4f6; font-weight: 700; }
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 8px;
+            text-align: ${isArabic ? "right" : "left"};
+          }
+          @page { size: A4 landscape; margin: 12mm; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1>${escapeHtml(title)}</h1>
+            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
           </div>
+          <div class="badge">Primey Care</div>
         </div>
-      ))}
-    </div>
-  );
-}
 
-function StatusCardsSkeleton() {
-  return (
-    <div className="grid gap-3 md:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <div key={index} className="space-y-3">
-          <div className="flex items-center gap-2">
-            <SkeletonLine className="h-4 w-4" />
-            <SkeletonLine className="h-7 w-14" />
-          </div>
-          <div className="space-y-2">
-            <SkeletonLine className="h-3 w-20" />
-            <SkeletonLine className="h-2 w-full" />
-          </div>
+        <div class="grid">
+          <div class="box"><span>${escapeHtml(t.totalCenters)}</span><strong>${escapeHtml(formatNumber(summary.total_centers))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.activeCenters)}</span><strong>${escapeHtml(formatNumber(summary.active_centers))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.totalContracts)}</span><strong>${escapeHtml(formatNumber(summary.total_contracts))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.totalOrders)}</span><strong>${escapeHtml(formatNumber(summary.total_orders))}</strong></div>
         </div>
-      ))}
-    </div>
-  );
-}
 
-function TableRowsSkeleton() {
-  return (
-    <>
-      {Array.from({ length: 6 }).map((_, index) => (
-        <TableRow key={index}>
-          <TableCell>
-            <SkeletonLine className="h-4 w-16" />
-          </TableCell>
-          <TableCell>
-            <div className="flex items-center gap-2">
-              <SkeletonLine className="h-8 w-8 rounded-lg" />
-              <div className="space-y-2">
-                <SkeletonLine className="h-3 w-32" />
-                <SkeletonLine className="h-3 w-24" />
-              </div>
-            </div>
-          </TableCell>
-          <TableCell>
-            <SkeletonLine className="h-6 w-20" />
-          </TableCell>
-          <TableCell>
-            <SkeletonLine className="h-4 w-20" />
-          </TableCell>
-          <TableCell>
-            <SkeletonLine className="h-4 w-24" />
-          </TableCell>
-          <TableCell>
-            <SkeletonLine className="h-6 w-16" />
-          </TableCell>
-          <TableCell>
-            <SkeletonLine className="h-8 w-10 rounded-lg" />
-          </TableCell>
-        </TableRow>
-      ))}
-    </>
-  );
+        <table>
+          <thead>
+            <tr>
+              <th>${escapeHtml(t.table.code)}</th>
+              <th>${escapeHtml(t.table.center)}</th>
+              <th>${escapeHtml(t.table.type)}</th>
+              <th>${escapeHtml(t.table.status)}</th>
+              <th>${escapeHtml(t.table.city)}</th>
+              <th>${escapeHtml(t.table.contracts)}</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows || `<tr><td colspan="6">${escapeHtml(t.emptyTitle)}</td></tr>`}</tbody>
+        </table>
+
+        <script>
+          window.addEventListener("load", () => {
+            window.focus();
+            window.print();
+          });
+        </script>
+      </body>
+    </html>
+  `;
 }
 
 /* ============================================================
@@ -689,301 +1061,184 @@ function TableRowsSkeleton() {
 ============================================================ */
 
 export default function SystemCentersPage() {
+  const auth = useAuth() as unknown;
+
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [centers, setCenters] = useState<Center[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [rows, setRows] = useState<CenterRow[]>([]);
+  const [summary, setSummary] = useState<CentersSummary>(DEFAULT_SUMMARY);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
+  const authResolving = isAuthResolving(auth);
 
-  const filteredCenters = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
-
-    return centers.filter((center) => {
-      const matchesStatus =
-        statusFilter === "ALL" ? true : center.status === statusFilter;
-
-      const matchesQuery = !cleanQuery
-        ? true
-        : center.name.toLowerCase().includes(cleanQuery) ||
-          center.code.toLowerCase().includes(cleanQuery) ||
-          center.city.toLowerCase().includes(cleanQuery) ||
-          center.area.toLowerCase().includes(cleanQuery) ||
-          center.phone.toLowerCase().includes(cleanQuery) ||
-          center.mobile.toLowerCase().includes(cleanQuery) ||
-          center.email.toLowerCase().includes(cleanQuery) ||
-          center.providerType.toLowerCase().includes(cleanQuery) ||
-          center.status.toLowerCase().includes(cleanQuery);
-
-      return matchesStatus && matchesQuery;
-    });
-  }, [centers, query, statusFilter]);
-
-  const stats = useMemo(() => {
-    const total = centers.length;
-    const active = centers.filter((item) => item.status === "ACTIVE").length;
-    const draft = centers.filter((item) => item.status === "DRAFT").length;
-    const suspended = centers.filter(
-      (item) => item.status === "SUSPENDED",
-    ).length;
-    const inactive = centers.filter((item) => item.status === "INACTIVE").length;
-
-    return {
-      total,
-      active,
-      draft,
-      suspended,
-      inactive,
-      stopped: suspended + inactive,
-    };
-  }, [centers]);
-
-  const featuredCenters = useMemo(() => {
-    const featured = centers.filter((item) => item.isFeatured);
-
-    if (featured.length > 0) {
-      return featured.slice(0, 6);
-    }
-
-    return centers.slice(0, 6);
-  }, [centers]);
-
-  const tableRows = useMemo(() => filteredCenters.slice(0, 8), [filteredCenters]);
-
-  const statusCards = useMemo(
-    () => [
-      {
-        title: t.total,
-        value: stats.total,
-        helper: t.loaded,
-        helperValue: stats.total > 0 ? "100%" : "0%",
-        icon: Building2,
-        percent: stats.total > 0 ? 100 : 0,
-      },
-      {
-        title: t.active,
-        value: stats.active,
-        helper: t.operational,
-        helperValue: `${percent(stats.active, stats.total)}%`,
-        icon: BadgeCheck,
-        percent: percent(stats.active, stats.total),
-      },
-      {
-        title: t.draft,
-        value: stats.draft,
-        helper: t.needsReview,
-        helperValue: `${percent(stats.draft, stats.total)}%`,
-        icon: FileText,
-        percent: percent(stats.draft, stats.total),
-      },
-      {
-        title: t.suspended,
-        value: stats.stopped,
-        helper: t.stopped,
-        helperValue: `${percent(stats.stopped, stats.total)}%`,
-        icon: ShieldCheck,
-        percent: percent(stats.stopped, stats.total),
-      },
-    ],
-    [stats, t],
+  const canView = hasAnyPermission(
+    auth,
+    ["centers.view", "providers.view", "providers.list"],
+    "view",
   );
 
-  const statusFilters = useMemo(
-    () =>
-      [
-        {
-          value: "ALL" as const,
-          label: t.all,
-          count: centers.length,
-        },
-        {
-          value: "ACTIVE" as const,
-          label: t.active,
-          count: stats.active,
-        },
-        {
-          value: "DRAFT" as const,
-          label: t.draft,
-          count: stats.draft,
-        },
-        {
-          value: "SUSPENDED" as const,
-          label: t.suspended,
-          count: stats.suspended,
-        },
-        {
-          value: "INACTIVE" as const,
-          label: t.inactive,
-          count: stats.inactive,
-        },
-      ] satisfies Array<{
-        value: StatusFilter;
-        label: string;
-        count: number;
-      }>,
-    [centers.length, stats, t],
+  const canCreate = hasAnyPermission(
+    auth,
+    ["centers.create", "providers.create"],
+    "action",
   );
 
-  const moduleActions = useMemo(
-    () => [
-      {
-        title: t.actionListTitle,
-        description: t.actionListDesc,
-        href: "/system/centers/list",
-        icon: Users,
-        badge: `${centers.length}`,
-        cta: t.manage,
-      },
-      {
-        title: t.actionCreateTitle,
-        description: t.actionCreateDesc,
-        href: "/system/centers/create",
-        icon: Plus,
-        badge: isArabic ? "جديد" : "New",
-        cta: t.open,
-      },
-      {
-        title: t.actionReportsTitle,
-        description: t.actionReportsDesc,
-        href: "/system/centers/reports",
-        icon: Activity,
-        badge: isArabic ? "تحليل" : "Reports",
-        cta: t.view,
-      },
-    ],
-    [centers.length, isArabic, t],
+  const canExport = hasAnyPermission(
+    auth,
+    ["centers.export", "providers.export", "reports.export"],
+    "action",
   );
 
-  const hasSearchOrFilter =
-    query.trim().length > 0 || statusFilter !== "ALL";
+  const canPrint = hasAnyPermission(
+    auth,
+    ["centers.print", "providers.print", "reports.print"],
+    "action",
+  );
 
-  async function loadCenters(showToast = false) {
-    try {
-      setIsLoading(true);
-      setErrorMessage("");
+  const canViewDetails = hasAnyPermission(
+    auth,
+    ["centers.view", "providers.view"],
+    "view",
+  );
 
-      const response = await fetch("/api/providers/?page_size=100", {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      });
+  const filteredRows = useMemo(() => {
+    const clean = query.trim().toLowerCase();
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+    const sorted = [...rows].sort((a, b) =>
+      String(b.created_at).localeCompare(String(a.created_at)),
+    );
+
+    if (!clean) return sorted.slice(0, 12);
+
+    return sorted
+      .filter((item) =>
+        [
+          item.code,
+          item.name,
+          item.contact_person,
+          item.phone,
+          item.mobile,
+          item.email,
+          item.city,
+          item.area,
+          item.address,
+          typeLabel(item.center_type, locale),
+          statusLabel(item.status, locale),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(clean),
+      )
+      .slice(0, 12);
+  }, [locale, query, rows]);
+
+  const activeSummary = useMemo(() => buildSummary(filteredRows), [filteredRows]);
+
+  const displaySummary = query.trim() ? activeSummary : summary;
+  const hasData = rows.length > 0;
+  const hasSearch = query.trim().length > 0;
+
+  const loadCenters = useCallback(
+    async (showToast = false) => {
+      if (!canView) {
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
+        setIsLoading(false);
+        return;
       }
 
-      const payload = (await response.json()) as ProvidersApiResponse;
-      const normalized = normalizeApiList(payload).map(normalizeCenter);
+      try {
+        setIsLoading(true);
+        setErrorMessage("");
 
-      setCenters(normalized);
+        const payload = await loadFirstAvailable([
+          "/api/centers/list/?page_size=500",
+          "/api/centers/?page_size=500",
+          "/api/providers/list/?page_size=500",
+          "/api/providers/?page_size=500",
+        ]);
 
-      if (showToast) {
-        toast.success(t.refreshSuccess);
+        if (!payload) {
+          throw new Error(t.loadError);
+        }
+
+        const normalizedRows = [
+          ...extractRows(payload, "centers"),
+          ...extractRows(payload, "providers"),
+        ]
+          .map(normalizeCenter)
+          .filter((item) => item.id || item.name);
+
+        const dedupedRows = Array.from(
+          new Map(normalizedRows.map((item) => [String(item.id), item])).values(),
+        );
+
+        setRows(dedupedRows);
+        setSummary(buildSummary(dedupedRows, extractSummary(payload)));
+
+        if (showToast) toast.success(t.loadSuccess);
+      } catch (error) {
+        console.error("Centers overview load error:", error);
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
+        setErrorMessage(t.loadError);
+        toast.error(t.loadError);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error("Failed to load centers:", error);
-      setCenters([]);
-      setErrorMessage(t.apiError);
-      toast.error(t.apiError);
-    } finally {
-      setIsLoading(false);
-    }
-  }
+    },
+    [canView, t.loadError, t.loadSuccess],
+  );
 
-  function handleExport() {
-    if (filteredCenters.length === 0) {
+  function exportExcel() {
+    if (!canExport) return;
+
+    if (!hasData) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    const date = new Date().toISOString().slice(0, 10);
-
     downloadExcel({
-      filename: `primey-centers-${date}.xls`,
-      worksheetName: locale === "ar" ? "المراكز" : "Centers",
-      title: t.pageTitle,
+      filename: `primey-care-centers-${new Date().toISOString().slice(0, 10)}.xls`,
+      title: t.title,
       locale,
-      summaryRows: [
-        [t.total, stats.total],
-        [t.active, stats.active],
-        [t.draft, stats.draft],
-        [t.suspended, stats.suspended],
-        [t.inactive, stats.inactive],
-        [t.showing, filteredCenters.length],
-      ],
-      headers: [
-        t.table.id,
-        t.table.name,
-        t.table.type,
-        t.table.city,
-        t.table.contact,
-        t.table.status,
-      ],
-      rows: filteredCenters.map((center) => [
-        center.code || String(center.id || "-"),
-        center.name,
-        t.typeLabels[center.providerType],
-        center.city || center.area || "-",
-        center.mobile || center.phone || center.email || "-",
-        statusLabel(center.status, locale),
-      ]),
+      summary: displaySummary,
+      rows: hasSearch ? filteredRows : rows,
     });
 
     toast.success(t.exportSuccess);
   }
 
-  function renderFeaturedCenter(center: Center) {
-    const content = (
-      <div className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3 transition hover:bg-muted/50">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-            <Building2 className="h-5 w-5" />
-          </div>
+  function printPage() {
+    if (!canPrint) return;
 
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="truncate text-sm font-semibold">{center.name}</p>
-
-              {center.isFeatured ? (
-                <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-500" />
-              ) : null}
-            </div>
-
-            <p className="text-muted-foreground mt-1 truncate text-xs">
-              {center.code}
-            </p>
-          </div>
-        </div>
-
-        <div className="shrink-0 text-end">
-          <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            {t.typeLabels[center.providerType]}
-          </p>
-          <p className="text-muted-foreground mt-1 text-xs">
-            {center.city || center.area || "-"}
-          </p>
-        </div>
-      </div>
-    );
-
-    if (!isValidCenterId(center.id)) {
-      return (
-        <div key={`${center.code}-${center.name}`} className="block">
-          {content}
-        </div>
-      );
+    if (!hasData) {
+      toast.error(t.exportEmpty);
+      return;
     }
 
-    return (
-      <Link key={center.id} href={`/system/centers/${center.id}`} className="block">
-        {content}
-      </Link>
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(t.printError);
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(
+      buildPrintHtml({
+        locale,
+        title: t.title,
+        summary: displaySummary,
+        rows: hasSearch ? filteredRows : rows,
+      }),
     );
+    printWindow.document.close();
+
+    toast.success(t.printSuccess);
   }
 
   useEffect(() => {
@@ -996,10 +1251,7 @@ export default function SystemCentersPage() {
 
     const syncAfterPaint = () => {
       syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
+      window.setTimeout(syncLocale, 0);
     };
 
     syncAfterPaint();
@@ -1014,22 +1266,43 @@ export default function SystemCentersPage() {
   }, []);
 
   useEffect(() => {
+    if (authResolving) return;
     loadCenters(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
+  }, [authResolving, loadCenters]);
+
+  if (!authResolving && !canView) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4">
-      {/* =====================================================
-          Header
-      ====================================================== */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.pageTitle}
+            {t.title}
           </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
-            {t.pageSubtitle}
+
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
           </p>
         </div>
 
@@ -1048,25 +1321,31 @@ export default function SystemCentersPage() {
             <span>{t.refresh}</span>
           </Button>
 
-          <Link href="/system/centers/reports">
-            <Button variant="outline" className="h-10 w-full rounded-xl sm:w-auto">
-              <BarChart3 className="h-4 w-4" />
-              <span>{t.reports}</span>
+          {canExport ? (
+            <Button
+              className="h-10 rounded-xl"
+              onClick={exportExcel}
+              disabled={isLoading || !hasData || Boolean(errorMessage)}
+            >
+              <Download className="h-4 w-4" />
+              <span>{t.exportExcel}</span>
             </Button>
-          </Link>
+          ) : null}
 
-          <Link href="/system/centers/create">
-            <Button className="h-10 w-full rounded-xl sm:w-auto">
-              <Plus className="h-4 w-4" />
-              <span>{t.addCenter}</span>
+          {canPrint ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl"
+              onClick={printPage}
+              disabled={isLoading || !hasData || Boolean(errorMessage)}
+            >
+              <Printer className="h-4 w-4" />
+              <span>{t.print}</span>
             </Button>
-          </Link>
+          ) : null}
         </div>
       </div>
 
-      {/* =====================================================
-          Error State
-      ====================================================== */}
       {!isLoading && errorMessage ? (
         <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -1077,8 +1356,8 @@ export default function SystemCentersPage() {
 
               <div>
                 <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="text-muted-foreground mt-1 text-sm">
-                  {t.apiErrorHint}
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t.loadErrorHint}
                 </p>
               </div>
             </div>
@@ -1095,340 +1374,394 @@ export default function SystemCentersPage() {
         </Card>
       ) : null}
 
-      {/* =====================================================
-          Main Layout
-      ====================================================== */}
-      <div className="grid gap-4 xl:grid-cols-3">
-        {/* Featured Centers */}
-        <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
-          <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-            <div>
+      {isLoading ? (
+        <PageSkeleton />
+      ) : (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              title={t.totalCenters}
+              value={formatNumber(displaySummary.total_centers)}
+              icon={<Building2 className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.activeCenters}
+              value={formatNumber(displaySummary.active_centers)}
+              icon={<BadgeCheck className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.totalContracts}
+              value={formatNumber(displaySummary.total_contracts)}
+              icon={<ShieldCheck className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.totalOrders}
+              value={formatNumber(displaySummary.total_orders)}
+              icon={<Stethoscope className="h-5 w-5" />}
+            />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MiniStat title={t.hospitals} value={displaySummary.hospitals_count} />
+            <MiniStat
+              title={t.medicalCenters}
+              value={displaySummary.medical_centers_count}
+            />
+            <MiniStat
+              title={t.featuredCenters}
+              value={displaySummary.featured_centers}
+            />
+            <MiniStat
+              title={t.suspendedCenters}
+              value={displaySummary.suspended_centers}
+            />
+          </div>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader>
               <CardTitle className="text-base font-bold">
-                {t.featuredCenters}
+                {t.shortcutsTitle}
               </CardTitle>
-              <CardDescription className="mt-1 text-sm">
-                {t.featuredSubtitle}
-              </CardDescription>
-            </div>
+              <CardDescription>{t.shortcutsDesc}</CardDescription>
+            </CardHeader>
 
-            <Link href="/system/centers/list">
-              <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl">
-                <ListChecks className="h-4 w-4" />
-              </Button>
-            </Link>
-          </CardHeader>
-
-          <CardContent className="space-y-3">
-            {isLoading ? (
-              <FeaturedCentersSkeleton />
-            ) : featuredCenters.length === 0 ? (
-              <div className="rounded-xl border border-dashed p-5 text-center">
-                <p className="font-semibold">{t.emptyTitle}</p>
-                <p className="text-muted-foreground mt-2 text-sm leading-6">
-                  {t.emptyText}
-                </p>
-              </div>
-            ) : (
-              featuredCenters.map((center) => renderFeaturedCenter(center))
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Status + Table */}
-        <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-2">
-          <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <CardTitle className="text-base font-bold">
-                {t.trackStatus}
-              </CardTitle>
-              <CardDescription className="mt-1 text-sm">
-                {t.trackSubtitle}
-              </CardDescription>
-            </div>
-
-            <Button
-              variant="outline"
-              className="h-9 rounded-xl"
-              onClick={handleExport}
-              disabled={isLoading || filteredCenters.length === 0}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          </CardHeader>
-
-          <CardContent className="space-y-4">
-            {/* Status Cards */}
-            {isLoading ? (
-              <StatusCardsSkeleton />
-            ) : (
-              <div className="grid gap-3 md:grid-cols-4">
-                {statusCards.map((card) => {
-                  const Icon = card.icon;
-
-                  return (
-                    <button
-                      key={card.title}
-                      type="button"
-                      className="space-y-2 rounded-xl border bg-background/70 p-3 text-start transition hover:bg-muted/40"
-                      onClick={() => {
-                        if (card.title === t.active) setStatusFilter("ACTIVE");
-                        if (card.title === t.draft) setStatusFilter("DRAFT");
-                        if (card.title === t.suspended) {
-                          setStatusFilter("SUSPENDED");
-                        }
-                        if (card.title === t.total) setStatusFilter("ALL");
-                      }}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Icon className="text-muted-foreground h-4 w-4" />
-                        <p className="text-2xl font-bold">{card.value}</p>
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Link href="/system/centers/list">
+                  <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
+                    <CardContent className="flex h-full items-start gap-3 p-4">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                        <FileText className="h-5 w-5" />
                       </div>
 
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-muted-foreground text-sm">
-                            {card.title}
+                      <div className="min-w-0">
+                        <p className="font-semibold">{t.centersList}</p>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {isArabic
+                            ? "عرض المراكز مع البحث والفلاتر والإجراءات."
+                            : "Open centers with search, filters, and actions."}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+
+                {canCreate ? (
+                  <Link href="/system/centers/create">
+                    <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
+                      <CardContent className="flex h-full items-start gap-3 p-4">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                          <PlusCircle className="h-5 w-5" />
+                        </div>
+
+                        <div className="min-w-0">
+                          <p className="font-semibold">{t.createCenter}</p>
+                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                            {isArabic
+                              ? "إضافة مركز جديد وربطه بشبكة الخدمة."
+                              : "Add a new center and link it to the service network."}
                           </p>
-                          <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                            {card.helperValue}
-                          </span>
                         </div>
-
-                        <div className="h-2 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-primary transition-all"
-                            style={{ width: `${card.percent}%` }}
-                          />
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
+                      </CardContent>
+                    </Card>
+                  </Link>
+                ) : null}
               </div>
-            )}
+            </CardContent>
+          </Card>
 
-            {/* Filter */}
-            <div className="grid gap-3">
-              <div className="relative">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="relative w-full">
                 <Search
-                  className={`text-muted-foreground absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
+                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
                     isArabic ? "right-3" : "left-3"
                   }`}
                 />
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.filterPlaceholder}
-                  className={`h-10 rounded-xl ${
-                    isArabic ? "pr-10" : "pl-10"
-                  }`}
+                  placeholder={t.searchPlaceholder}
+                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
                 />
               </div>
+            </CardContent>
+          </Card>
 
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {statusFilters.map((item) => {
-                  const isSelected = statusFilter === item.value;
+          {!hasData ? (
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+                <Building2 className="h-12 w-12 text-muted-foreground/40" />
+                <p className="text-lg font-semibold">{t.emptyTitle}</p>
+                <p className="max-w-md text-sm text-muted-foreground">
+                  {t.emptyText}
+                </p>
 
-                  return (
-                    <Button
-                      key={item.value}
-                      type="button"
-                      variant={isSelected ? "default" : "outline"}
-                      size="sm"
-                      className="shrink-0 rounded-xl"
-                      onClick={() => setStatusFilter(item.value)}
-                    >
-                      <span>{item.label}</span>
-                      <Badge
-                        variant={isSelected ? "secondary" : "outline"}
-                        className="ms-1 rounded-full"
-                      >
-                        {item.count}
-                      </Badge>
+                {canCreate ? (
+                  <Link href="/system/centers/create">
+                    <Button className="mt-2 rounded-xl">
+                      <PlusCircle className="h-4 w-4" />
+                      {t.createCenter}
                     </Button>
-                  );
-                })}
+                  </Link>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {hasData && hasSearch && filteredRows.length === 0 ? (
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+                <Search className="h-12 w-12 text-muted-foreground/40" />
+                <p className="text-lg font-semibold">{t.noResultsTitle}</p>
+                <p className="max-w-md text-sm text-muted-foreground">
+                  {t.noResultsText}
+                </p>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.latestTitle}
+                  </CardTitle>
+                  <CardDescription>{t.latestDesc}</CardDescription>
+                </div>
+
+                <Link href="/system/centers/list">
+                  <Button variant="outline" className="h-10 rounded-xl">
+                    <ArrowUpRight className="h-4 w-4" />
+                    {t.centersList}
+                  </Button>
+                </Link>
               </div>
-            </div>
+            </CardHeader>
 
-            {/* Table */}
-            <div className="overflow-hidden rounded-xl border">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t.table.id}</TableHead>
-                      <TableHead>{t.table.name}</TableHead>
-                      <TableHead>{t.table.type}</TableHead>
-                      <TableHead>{t.table.city}</TableHead>
-                      <TableHead>{t.table.contact}</TableHead>
-                      <TableHead>{t.table.status}</TableHead>
-                      <TableHead>{t.table.action}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-
-                  <TableBody>
-                    {isLoading ? (
-                      <TableRowsSkeleton />
-                    ) : tableRows.length === 0 ? (
+            <CardContent>
+              <div className="overflow-hidden rounded-xl border">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={7}>
-                          <div className="py-12 text-center">
-                            <p className="font-semibold">
-                              {hasSearchOrFilter
-                                ? t.noResultsTitle
-                                : t.emptyTitle}
-                            </p>
-                            <p className="text-muted-foreground mt-2 text-sm">
-                              {hasSearchOrFilter ? t.noResultsText : t.emptyText}
-                            </p>
-                          </div>
-                        </TableCell>
+                        <TableHead className="min-w-[230px]">
+                          {t.table.center}
+                        </TableHead>
+                        <TableHead className="min-w-[110px]">
+                          {t.table.code}
+                        </TableHead>
+                        <TableHead className="min-w-[140px]">
+                          {t.table.type}
+                        </TableHead>
+                        <TableHead className="min-w-[120px]">
+                          {t.table.status}
+                        </TableHead>
+                        <TableHead className="min-w-[130px]">
+                          {t.table.city}
+                        </TableHead>
+                        <TableHead className="min-w-[170px]">
+                          {t.table.contact}
+                        </TableHead>
+                        <TableHead className="min-w-[100px]">
+                          {t.table.contracts}
+                        </TableHead>
+                        {canViewDetails ? (
+                          <TableHead className="min-w-[90px]">
+                            {t.table.action}
+                          </TableHead>
+                        ) : null}
                       </TableRow>
-                    ) : (
-                      tableRows.map((center) => (
-                        <TableRow key={`${center.id}-${center.code}`}>
-                          <TableCell className="font-medium">
-                            {center.code || `#${center.id}`}
-                          </TableCell>
+                    </TableHeader>
 
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                                <Building2 className="h-4 w-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="truncate font-medium">
-                                  {center.name}
+                    <TableBody>
+                      {filteredRows.length > 0 ? (
+                        filteredRows.map((item) => (
+                          <TableRow key={`${item.id}-${item.code}`}>
+                            <TableCell>
+                              <div className="min-w-[210px]">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-semibold">{item.name}</p>
+                                  {item.is_featured ? (
+                                    <Badge variant="outline" className="rounded-full">
+                                      <Sparkles className="h-3 w-3" />
+                                      {t.featured}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {item.area || item.address || "-"}
                                 </p>
-                                <p className="text-muted-foreground truncate text-xs">
-                                  {center.contactPerson || center.email || "-"}
-                                </p>
                               </div>
-                            </div>
-                          </TableCell>
+                            </TableCell>
 
-                          <TableCell>
-                            <Badge variant="secondary" className="rounded-full">
-                              {t.typeLabels[center.providerType]}
-                            </Badge>
-                          </TableCell>
+                            <TableCell className="font-medium" dir="ltr">
+                              {item.code}
+                            </TableCell>
 
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <MapPin className="text-muted-foreground h-3.5 w-3.5" />
-                              <span>{center.city || center.area || "-"}</span>
-                            </div>
-                          </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="rounded-full">
+                                {item.center_type === "HOSPITAL" ? (
+                                  <Hospital className="h-3 w-3" />
+                                ) : null}
+                                {typeLabel(item.center_type, locale)}
+                              </Badge>
+                            </TableCell>
 
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Phone className="text-muted-foreground h-3.5 w-3.5" />
-                              <span>{center.mobile || center.phone || "-"}</span>
-                            </div>
-                          </TableCell>
+                            <TableCell>{statusBadge(item.status, locale)}</TableCell>
 
-                          <TableCell>{statusBadge(center.status, locale)}</TableCell>
+                            <TableCell>
+                              <span className="inline-flex items-center gap-1.5">
+                                <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                                {item.city || "-"}
+                              </span>
+                            </TableCell>
 
-                          <TableCell>
-                            {isValidCenterId(center.id) ? (
-                              <Link href={`/system/centers/${center.id}`}>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 rounded-lg"
+                            <TableCell>
+                              <div className="min-w-[150px]">
+                                <p className="text-sm">
+                                  {item.contact_person || "-"}
+                                </p>
+                                <p
+                                  className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+                                  dir="ltr"
                                 >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                              </Link>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 rounded-lg"
-                                disabled
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            )}
+                                  <Phone className="h-3.5 w-3.5" />
+                                  {item.phone || item.mobile || "-"}
+                                </p>
+                              </div>
+                            </TableCell>
+
+                            <TableCell>
+                              <div className="flex flex-col gap-1">
+                                <span>{formatNumber(item.contracts_count)}</span>
+                                {item.active_contracts_count > 0 ? (
+                                  <span className="text-xs text-muted-foreground">
+                                    {formatNumber(item.active_contracts_count)}{" "}
+                                    {isArabic ? "نشط" : "active"}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </TableCell>
+
+                            {canViewDetails ? (
+                              <TableCell>
+                                {isValidId(item.id) ? (
+                                  <Link href={`/system/centers/${item.id}`}>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 rounded-lg"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                      <span className="sr-only">{t.view}</span>
+                                    </Button>
+                                  </Link>
+                                ) : (
+                                  <span className="text-sm text-muted-foreground">
+                                    -
+                                  </span>
+                                )}
+                              </TableCell>
+                            ) : null}
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={canViewDetails ? 8 : 7}
+                            className="h-32 text-center"
+                          >
+                            <p className="text-sm text-muted-foreground">
+                              {hasSearch ? t.noResultsText : t.emptyText}
+                            </p>
                           </TableCell>
                         </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
-            </div>
-
-            {/* Footer */}
-            <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-              <p>
-                {t.showing} {tableRows.length} {t.from} {filteredCenters.length} ·{" "}
-                {t.latestRecords}
-              </p>
-
-              <Link href="/system/centers/list">
-                <Button variant="outline" size="sm" className="rounded-xl">
-                  <ListChecks className="h-4 w-4" />
-                  {t.viewFullList}
-                </Button>
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* =====================================================
-          Professional Action Cards
-      ====================================================== */}
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-bold">
-            {t.quickAccessTitle}
-          </CardTitle>
-          <CardDescription>{t.quickAccessSubtitle}</CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
-            {moduleActions.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <Link key={item.href} href={item.href} className="block">
-                  <Card className="h-full rounded-2xl border bg-background shadow-none transition hover:bg-muted/40 hover:shadow-sm">
-                    <CardContent className="flex h-full items-start justify-between gap-4 p-4">
-                      <div className="min-w-0 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-                            <Icon className="h-5 w-5" />
-                          </div>
-
-                          <Badge variant="secondary" className="rounded-full">
-                            {item.badge}
-                          </Badge>
-                        </div>
-
-                        <div>
-                          <p className="font-semibold">{item.title}</p>
-                          <p className="text-muted-foreground mt-1 line-clamp-2 text-sm leading-6">
-                            {item.description}
-                          </p>
-                        </div>
-
-                        <Button variant="outline" size="sm" className="rounded-xl">
-                          {item.cta}
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
+  );
+}
+
+/* ============================================================
+   Small Components
+============================================================ */
+
+async function loadFirstAvailable(endpoints: string[]) {
+  let lastError = "";
+
+  for (const endpoint of endpoints) {
+    const response = await fetch(apiUrl(endpoint), {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | ApiEnvelope<unknown>
+      | null;
+
+    if (response.ok && payload?.ok !== false && payload?.success !== false) {
+      return payload;
+    }
+
+    lastError =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `HTTP ${response.status}`;
+  }
+
+  console.warn("Centers endpoint fallback failed:", lastError);
+  return null;
+}
+
+function KpiCard({
+  title,
+  value,
+  icon,
+}: {
+  title: string;
+  value: ReactNode;
+  icon: ReactNode;
+}) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-2xl font-bold">{value}</div>
+            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
+          </div>
+
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            {icon}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MiniStat({ title, value }: { title: string; value: number }) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="text-muted-foreground">{title}</span>
+          <span className="text-lg font-bold">{formatNumber(value)}</span>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

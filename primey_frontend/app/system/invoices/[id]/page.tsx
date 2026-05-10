@@ -1,35 +1,44 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/invoices/[id]/page.tsx
+   🧠 Primey Care | Invoice Details
+   ------------------------------------------------------------
+   ✅ تفاصيل الفاتورة
+   ✅ إصدار / إلغاء حسب الصلاحيات والحالة
+   ✅ تسجيل دفعة للفواتير غير المسددة
+   ✅ Web PDF Print
+   ✅ Skeleton / Error / Not Found
+   ✅ Phase 17 UX + Phase 2 Permissions
+============================================================ */
+
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
-  BadgeCheck,
-  BarChart3,
-  Building2,
+  Ban,
   CalendarDays,
   CheckCircle2,
   Copy,
   CreditCard,
-  Eye,
   FileText,
   Loader2,
-  Mail,
-  Phone,
   Printer,
   ReceiptText,
   RefreshCcw,
   ShieldCheck,
   ShoppingCart,
-  User,
-  Wallet,
+  UserRound,
+  WalletCards,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/components/providers/AuthProvider";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,322 +48,540 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-/* =====================================================
-   TYPES
-===================================================== */
+/* ============================================================
+   Types
+============================================================ */
 
 type AppLocale = "ar" | "en";
+type Dict = Record<string, unknown>;
 
-type ApiCustomer = {
-  id?: number | null;
-  name?: string | null;
-  phone?: string | null;
-  email?: string | null;
+type InvoiceStatus =
+  | "DRAFT"
+  | "ISSUED"
+  | "PAID"
+  | "PARTIALLY_PAID"
+  | "CANCELLED"
+  | "OVERDUE"
+  | "UNKNOWN";
+
+type PaymentStatus =
+  | "UNPAID"
+  | "PARTIAL"
+  | "PAID"
+  | "REFUNDED"
+  | "CANCELLED"
+  | "UNKNOWN";
+
+type InvoiceItemRow = {
+  id: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  discount_amount: number;
+  tax_rate: number;
+  tax_amount: number;
+  subtotal: number;
+  total_amount: number;
 };
 
-type ApiOrder = {
-  id?: number | null;
-  order_number?: string | null;
-  status?: string | null;
-  payment_status?: string | null;
-  fulfillment_status?: string | null;
-  total_amount?: string | number | null;
+type PaymentRow = {
+  id: string;
+  payment_number: string;
+  payment_method: string;
+  status: string;
+  amount: number;
+  paid_at: string;
+  reference: string;
 };
 
-type ApiInvoiceItem = {
-  id: number;
-  order_item_id?: number | null;
-  title?: string | null;
-  quantity?: number | null;
-  unit_price?: string | number | null;
-  discount_amount?: string | number | null;
-  line_total?: string | number | null;
-  sort_order?: number | null;
+type InvoiceDetails = {
+  id: string;
+  invoice_number: string;
+  status: InvoiceStatus;
+  payment_status: PaymentStatus;
+
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+
+  order_id: string;
+  order_number: string;
+
+  issue_date: string;
+  due_date: string;
+  created_at: string;
+  source_reference: string;
+  notes: string;
+
+  subtotal: number;
+  discount_amount: number;
+  taxable_amount: number;
+  tax_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+
+  items: InvoiceItemRow[];
+  payments: PaymentRow[];
 };
 
-type ApiInvoicePayment = {
-  id: number;
-  payment_id?: number | null;
-  payment_number?: string | null;
-  amount_applied?: string | number | null;
-  applied_at?: string | null;
-  notes?: string | null;
-};
-
-type ApiInvoice = {
-  id: number;
-  invoice_number?: string | null;
-  number?: string | null;
-  invoice_type?: string | null;
-  status?: string | null;
-  issue_date?: string | null;
-  due_date?: string | null;
-  customer_id?: number | null;
-  order_id?: number | null;
-  customer?: ApiCustomer | null;
-  order?: ApiOrder | null;
-  items?: ApiInvoiceItem[];
-  payments?: ApiInvoicePayment[];
-  subtotal?: string | number | null;
-  discount_amount?: string | number | null;
-  taxable_amount?: string | number | null;
-  tax_rate?: string | number | null;
-  tax_amount?: string | number | null;
-  total_amount?: string | number | null;
-  paid_amount?: string | number | null;
-  due_amount?: string | number | null;
-  currency?: string | null;
-  notes?: string | null;
-  internal_notes?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
-type DetailApiResponse = {
+type ApiEnvelope<T> = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
-  invoice?: ApiInvoice;
+  detail?: string;
+  error?: string;
+  data?: T;
+  invoice?: unknown;
+  item?: unknown;
+  results?: unknown[];
+  items?: unknown[];
+  rows?: unknown[];
+  payments?: unknown[];
 };
-
-type ActionApiResponse = {
-  ok?: boolean;
-  message?: string;
-  invoice?: ApiInvoice;
-  transition?: {
-    status_before?: string | null;
-    status_after?: string | null;
-  };
-  accounting?: {
-    requested?: boolean;
-    dispatched?: boolean;
-    message?: string;
-  };
-};
-
-type StatusMeta = {
-  labelAr: string;
-  labelEn: string;
-  className: string;
-};
-
-type InvoiceTypeMeta = {
-  labelAr: string;
-  labelEn: string;
-};
-
-/* =====================================================
-   CONSTANTS
-===================================================== */
 
 const SAR_ICON_PATH = "/currency/sar.svg";
 
-const STATUS_META: Record<string, StatusMeta> = {
-  DRAFT: {
-    labelAr: "مسودة",
-    labelEn: "Draft",
-    className:
-      "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300",
-  },
-  ISSUED: {
-    labelAr: "مصدرة",
-    labelEn: "Issued",
-    className:
-      "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300",
-  },
-  PARTIALLY_PAID: {
-    labelAr: "مدفوعة جزئيًا",
-    labelEn: "Partially Paid",
-    className:
-      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300",
-  },
-  PAID: {
-    labelAr: "مدفوعة",
-    labelEn: "Paid",
-    className:
-      "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300",
-  },
-  OVERDUE: {
-    labelAr: "متأخرة",
-    labelEn: "Overdue",
-    className:
-      "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300",
-  },
-  CANCELLED: {
-    labelAr: "ملغاة",
-    labelEn: "Cancelled",
-    className:
-      "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300",
-  },
-  REFUNDED: {
-    labelAr: "مستردة",
-    labelEn: "Refunded",
-    className:
-      "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900/60 dark:bg-purple-950/40 dark:text-purple-300",
-  },
-};
+/* ============================================================
+   Locale / API
+============================================================ */
 
-const INVOICE_TYPE_META: Record<string, InvoiceTypeMeta> = {
-  SALES: {
-    labelAr: "فاتورة مبيعات",
-    labelEn: "Sales Invoice",
-  },
-  TAX: {
-    labelAr: "فاتورة ضريبية",
-    labelEn: "Tax Invoice",
-  },
-  SIMPLIFIED: {
-    labelAr: "فاتورة مبسطة",
-    labelEn: "Simplified Invoice",
-  },
-  CREDIT_NOTE: {
-    labelAr: "إشعار دائن",
-    labelEn: "Credit Note",
-  },
-  DEBIT_NOTE: {
-    labelAr: "إشعار مدين",
-    labelEn: "Debit Note",
-  },
-};
+function readLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
 
-/* =====================================================
-   LOCALE HELPERS
-===================================================== */
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
 
-function getInitialLocale(): AppLocale {
-  if (typeof window === "undefined") return "ar";
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
-  const stored = window.localStorage.getItem("primey-locale");
-  if (stored === "ar" || stored === "en") return stored;
-
-  const htmlLang = document.documentElement.lang;
-  if (htmlLang === "en") return "en";
-
-  return "ar";
+    return document.documentElement.lang === "en" ? "en" : "ar";
+  } catch {
+    return "ar";
+  }
 }
 
-function applyLocaleToDocument(locale: AppLocale) {
-  if (typeof document === "undefined") return;
+function applyDocumentLocale(locale: AppLocale) {
+  try {
+    if (typeof document === "undefined") return;
 
-  document.documentElement.lang = locale;
-  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-  document.body.dir = locale === "ar" ? "rtl" : "ltr";
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch (error) {
+    console.error("Apply locale error:", error);
+  }
 }
 
-/* =====================================================
-   FORMAT HELPERS
-===================================================== */
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
 
-function toNumber(value: string | number | null | undefined): number {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  if (!value) return 0;
+  if (!base) return path;
 
-  const parsed = Number(String(value).replace(/,/g, ""));
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
+function getCookie(name: string) {
+  try {
+    if (typeof document === "undefined") return "";
+
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+
+    if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
+
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/* ============================================================
+   Auth / Permissions
+============================================================ */
+
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
+}
+
+function getNested(source: Dict, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+
+    if (value && typeof value === "object") return value as Dict;
+  }
+
+  return {};
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
+
+          if (typeof value === "string") return [value];
+
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
+
+              if (item && typeof item === "object") {
+                const obj = item as Dict;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as Dict;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return getNested(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
+}
+
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
+  );
+}
+
+function isSystemAdmin(authValue: unknown) {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
+
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
+}
+
+function hasSafePermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const permissions = getAuthPermissionCodes(authValue);
+
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "accountant",
+          "support",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
+    );
+  }
+
+  return true;
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
+
+function dictionary(locale: AppLocale) {
+  const isArabic = locale === "ar";
+
+  return {
+    title: isArabic ? "تفاصيل الفاتورة" : "Invoice Details",
+    subtitle: isArabic
+      ? "عرض بيانات الفاتورة والبنود والمدفوعات المرتبطة بها."
+      : "View invoice information, line items, and related payments.",
+
+    back: isArabic ? "قائمة الفواتير" : "Invoices List",
+    dashboard: isArabic ? "الفواتير" : "Invoices",
+    refresh: isArabic ? "تحديث" : "Refresh",
+    retry: isArabic ? "إعادة المحاولة" : "Retry",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
+    issue: isArabic ? "إصدار الفاتورة" : "Issue Invoice",
+    cancel: isArabic ? "إلغاء الفاتورة" : "Cancel Invoice",
+    createPayment: isArabic ? "تسجيل دفعة" : "Create Payment",
+
+    profileTitle: isArabic ? "بطاقة الفاتورة" : "Invoice Card",
+    invoiceInfo: isArabic ? "بيانات الفاتورة" : "Invoice Information",
+    customerInfo: isArabic ? "بيانات العميل" : "Customer Information",
+    orderInfo: isArabic ? "بيانات الطلب" : "Order Information",
+    totalsTitle: isArabic ? "الإجماليات" : "Totals",
+    itemsTitle: isArabic ? "بنود الفاتورة" : "Invoice Items",
+    paymentsTitle: isArabic ? "المدفوعات" : "Payments",
+    paymentsDesc: isArabic
+      ? "المدفوعات المرتبطة بهذه الفاتورة."
+      : "Payments related to this invoice.",
+
+    invoiceNumber: isArabic ? "رقم الفاتورة" : "Invoice No.",
+    customer: isArabic ? "العميل" : "Customer",
+    phone: isArabic ? "الجوال" : "Phone",
+    email: isArabic ? "البريد الإلكتروني" : "Email",
+    order: isArabic ? "الطلب" : "Order",
+    issueDate: isArabic ? "تاريخ الإصدار" : "Issue Date",
+    dueDate: isArabic ? "تاريخ الاستحقاق" : "Due Date",
+    createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
+    status: isArabic ? "حالة الفاتورة" : "Invoice Status",
+    paymentStatus: isArabic ? "حالة الدفع" : "Payment Status",
+    sourceReference: isArabic ? "المرجع" : "Reference",
+    notes: isArabic ? "ملاحظات" : "Notes",
+
+    subtotal: isArabic ? "الإجمالي قبل الخصم" : "Subtotal",
+    discountAmount: isArabic ? "الخصم" : "Discount",
+    taxableAmount: isArabic ? "الخاضع للضريبة" : "Taxable",
+    taxAmount: isArabic ? "الضريبة" : "Tax",
+    totalAmount: isArabic ? "إجمالي الفاتورة" : "Invoice Total",
+    paidAmount: isArabic ? "المدفوع" : "Paid",
+    remainingAmount: isArabic ? "المتبقي" : "Remaining",
+
+    draft: isArabic ? "مسودة" : "Draft",
+    issued: isArabic ? "مصدرة" : "Issued",
+    paid: isArabic ? "مدفوعة" : "Paid",
+    partiallyPaid: isArabic ? "مدفوعة جزئيًا" : "Partially Paid",
+    cancelled: isArabic ? "ملغاة" : "Cancelled",
+    overdue: isArabic ? "متأخرة" : "Overdue",
+    unpaid: isArabic ? "غير مدفوعة" : "Unpaid",
+    refunded: isArabic ? "مستردة" : "Refunded",
+    unknown: isArabic ? "غير محدد" : "Unknown",
+
+    table: {
+      description: isArabic ? "الوصف" : "Description",
+      quantity: isArabic ? "الكمية" : "Qty",
+      unitPrice: isArabic ? "سعر الوحدة" : "Unit Price",
+      discount: isArabic ? "الخصم" : "Discount",
+      tax: isArabic ? "الضريبة" : "Tax",
+      total: isArabic ? "الإجمالي" : "Total",
+      paymentNo: isArabic ? "رقم الدفعة" : "Payment No.",
+      method: isArabic ? "طريقة الدفع" : "Method",
+      date: isArabic ? "التاريخ" : "Date",
+      amount: isArabic ? "المبلغ" : "Amount",
+      reference: isArabic ? "المرجع" : "Reference",
+      action: isArabic ? "الإجراء" : "Action",
+    },
+
+    view: isArabic ? "عرض" : "View",
+    copy: isArabic ? "نسخ" : "Copy",
+    copied: isArabic ? "تم النسخ." : "Copied.",
+    notAvailable: isArabic ? "غير متوفر" : "Not available",
+
+    emptyItems: isArabic ? "لا توجد بنود مسجلة." : "No items recorded.",
+    emptyPayments: isArabic ? "لا توجد مدفوعات مسجلة." : "No payments recorded.",
+
+    accessDeniedTitle: isArabic
+      ? "غير مصرح بعرض الفاتورة"
+      : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية عرض تفاصيل الفواتير. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to view invoice details. Contact your system administrator if you need access.",
+
+    notFoundTitle: isArabic ? "الفاتورة غير موجودة" : "Invoice not found",
+    notFoundText: isArabic
+      ? "لم يتم العثور على الفاتورة المطلوبة."
+      : "The requested invoice could not be found.",
+
+    loadError: isArabic ? "تعذر تحميل الفاتورة." : "Unable to load invoice.",
+    loadErrorHint: isArabic
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
+
+    issueConfirm: isArabic
+      ? "هل تريد إصدار هذه الفاتورة؟"
+      : "Issue this invoice?",
+    cancelConfirm: isArabic
+      ? "هل تريد إلغاء هذه الفاتورة؟"
+      : "Cancel this invoice?",
+    issueSuccess: isArabic
+      ? "تم إصدار الفاتورة بنجاح."
+      : "Invoice issued successfully.",
+    cancelSuccess: isArabic
+      ? "تم إلغاء الفاتورة بنجاح."
+      : "Invoice cancelled successfully.",
+    actionError: isArabic
+      ? "تعذر تنفيذ العملية."
+      : "Unable to complete the action.",
+    printSuccess: isArabic
+      ? "تم تجهيز نافذة الطباعة."
+      : "Print window prepared.",
+    printError: isArabic
+      ? "تعذر فتح نافذة الطباعة."
+      : "Unable to open print window.",
+    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
+  };
+}
+
+/* ============================================================
+   Helpers
+============================================================ */
+
+function toNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatNumber(value: number): string {
+function formatNumber(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(value || 0);
+  }).format(toNumber(value));
 }
 
-function formatMoney(value: number): string {
+function formatMoney(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value || 0);
+  }).format(toNumber(value));
 }
 
-function formatDate(value: string | null | undefined, locale: AppLocale): string {
+function formatDate(value: string, locale: AppLocale): string {
   if (!value) return locale === "ar" ? "غير محدد" : "Not set";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return locale === "ar" ? "غير محدد" : "Not set";
+  if (Number.isNaN(date.getTime())) return value;
 
-  return new Intl.DateTimeFormat("en-GB", {
+  return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
-    month: "2-digit",
+    month: "short",
     day: "2-digit",
   }).format(date);
 }
 
-function formatDateTime(value: string | null | undefined, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return locale === "ar" ? "غير محدد" : "Not set";
-
-  return new Intl.DateTimeFormat("en-GB", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function getCookie(name: string): string {
-  if (typeof document === "undefined") return "";
-
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length !== 2) return "";
-
-  return parts.pop()?.split(";").shift() || "";
-}
-
-function getInvoiceNumber(invoice: ApiInvoice): string {
-  return invoice.invoice_number || invoice.number || `INV-${invoice.id}`;
-}
-
-function getOrderNumber(invoice: ApiInvoice, fallback: string): string {
-  return invoice.order?.order_number || (invoice.order_id ? `#${invoice.order_id}` : fallback);
-}
-
-function getCustomerName(invoice: ApiInvoice, fallback: string): string {
-  return invoice.customer?.name || (invoice.customer_id ? `#${invoice.customer_id}` : fallback);
-}
-
-function getStatusKey(status: string | null | undefined): string {
-  return String(status || "DRAFT").toUpperCase();
-}
-
-function getStatusLabel(status: string | null | undefined, locale: AppLocale): string {
-  const key = getStatusKey(status);
-  const meta = STATUS_META[key];
-
-  if (!meta) return status || (locale === "ar" ? "غير محدد" : "Unknown");
-
-  return locale === "ar" ? meta.labelAr : meta.labelEn;
-}
-
-function getStatusClassName(status: string | null | undefined): string {
-  const key = getStatusKey(status);
-  return STATUS_META[key]?.className || STATUS_META.DRAFT.className;
-}
-
-function getInvoiceTypeLabel(type: string | null | undefined, locale: AppLocale): string {
-  const key = String(type || "SALES").toUpperCase();
-  const meta = INVOICE_TYPE_META[key];
-
-  if (!meta) return type || (locale === "ar" ? "غير محدد" : "Unknown");
-
-  return locale === "ar" ? meta.labelAr : meta.labelEn;
-}
-
-function canIssueInvoice(invoice: ApiInvoice): boolean {
-  return getStatusKey(invoice.status) === "DRAFT";
-}
-
-function canCancelInvoice(invoice: ApiInvoice): boolean {
-  const status = getStatusKey(invoice.status);
-  const paidAmount = toNumber(invoice.paid_amount);
-
-  return paidAmount <= 0 && !["PAID", "CANCELLED", "REFUNDED"].includes(status);
-}
-
-function escapeHtml(value: unknown): string {
+function escapeHtml(value: string | number) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -363,965 +590,1413 @@ function escapeHtml(value: unknown): string {
     .replaceAll("'", "&#039;");
 }
 
-/* =====================================================
-   API HELPERS
-===================================================== */
+function getNestedValue(obj: Dict, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = obj[key];
 
-async function fetchInvoiceDetail(invoiceId: string): Promise<ApiInvoice> {
-  const response = await fetch(`/api/invoices/${invoiceId}/`, {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-
-  const data = (await response.json().catch(() => null)) as DetailApiResponse | null;
-
-  if (!response.ok || !data?.ok || !data.invoice) {
-    throw new Error(data?.message || "Failed to load invoice.");
+    if (value !== undefined && value !== null && value !== "") return value;
   }
 
-  return data.invoice;
-}
+  for (const container of [
+    "customer",
+    "client",
+    "order",
+    "invoice",
+    "payment",
+    "item",
+    "data",
+  ]) {
+    const nested = obj[container];
 
-async function issueInvoice(invoiceId: number): Promise<ActionApiResponse> {
-  const csrfToken = getCookie("csrftoken");
+    if (nested && typeof nested === "object") {
+      const value = getNestedValue(nested as Dict, keys);
 
-  const response = await fetch(`/api/invoices/${invoiceId}/issue/`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-    },
-    body: JSON.stringify({
-      auto_post_accounting: true,
-    }),
-  });
-
-  const data = (await response.json().catch(() => null)) as ActionApiResponse | null;
-
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.message || "Failed to issue invoice.");
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
   }
 
-  return data;
+  return undefined;
 }
 
-async function cancelInvoice(invoiceId: number, reason: string): Promise<ActionApiResponse> {
-  const csrfToken = getCookie("csrftoken");
+function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
+  if (!payload) return [];
 
-  const response = await fetch(`/api/invoices/${invoiceId}/cancel/`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-    },
-    body: JSON.stringify({
-      reason,
-    }),
-  });
+  const data = asDict(payload.data);
+  const directValue = (payload as Dict)[key];
 
-  const data = (await response.json().catch(() => null)) as ActionApiResponse | null;
+  if (Array.isArray(directValue)) return directValue;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.rows)) return payload.rows;
 
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.message || "Failed to cancel invoice.");
+  if (Array.isArray(data[key])) return data[key] as unknown[];
+  if (Array.isArray(data.results)) return data.results as unknown[];
+  if (Array.isArray(data.items)) return data.items as unknown[];
+  if (Array.isArray(data.rows)) return data.rows as unknown[];
+
+  if (Array.isArray(payload.data)) return payload.data;
+
+  return [];
+}
+
+function normalizeInvoiceStatus(value: unknown): InvoiceStatus {
+  const clean = String(value || "").toUpperCase();
+
+  if (["DRAFT", "PENDING"].includes(clean)) return "DRAFT";
+  if (["ISSUED", "APPROVED", "POSTED"].includes(clean)) return "ISSUED";
+  if (["PAID", "FULLY_PAID"].includes(clean)) return "PAID";
+  if (["PARTIALLY_PAID", "PARTIAL", "PARTIAL_PAID"].includes(clean)) {
+    return "PARTIALLY_PAID";
   }
+  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
+  if (["OVERDUE", "LATE"].includes(clean)) return "OVERDUE";
 
-  return data;
+  return "UNKNOWN";
 }
 
-/* =====================================================
-   PAGE
-===================================================== */
+function normalizePaymentStatus(value: unknown): PaymentStatus {
+  const clean = String(value || "").toUpperCase();
 
-export default function InvoiceDetailsPage() {
-  const params = useParams<{ id: string }>();
-  const invoiceId = String(params?.id || "");
+  if (["UNPAID", "NOT_PAID", "PENDING"].includes(clean)) return "UNPAID";
+  if (["PARTIAL", "PARTIALLY_PAID", "PARTIAL_PAID"].includes(clean)) {
+    return "PARTIAL";
+  }
+  if (["PAID", "FULLY_PAID"].includes(clean)) return "PAID";
+  if (["REFUNDED"].includes(clean)) return "REFUNDED";
+  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [invoice, setInvoice] = useState<ApiInvoice | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [issuing, setIssuing] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
+  return "UNKNOWN";
+}
 
-  const isAr = locale === "ar";
+function normalizeItem(item: unknown, index: number): InvoiceItemRow {
+  const obj = asDict(item);
 
-  const t = useMemo(
-    () => ({
-      badge: isAr ? "تفاصيل الفاتورة" : "Invoice Details",
-      title: isAr ? "تفاصيل الفاتورة" : "Invoice Details",
-      subtitle: isAr
-        ? "عرض كامل للفاتورة، البنود، العميل، الطلب، المدفوعات، والملخص المالي."
-        : "Full invoice view including items, customer, order, payments, and financial summary.",
-      back: isAr ? "قائمة الفواتير" : "Invoices List",
-      dashboard: isAr ? "لوحة الفواتير" : "Invoices Dashboard",
-      reports: isAr ? "التقارير" : "Reports",
-      refresh: isAr ? "تحديث" : "Refresh",
-      print: isAr ? "طباعة Web PDF" : "Print Web PDF",
-      issue: isAr ? "إصدار الفاتورة" : "Issue Invoice",
-      issuing: isAr ? "جاري الإصدار..." : "Issuing...",
-      cancel: isAr ? "إلغاء آمن" : "Safe Cancel",
-      cancelling: isAr ? "جاري الإلغاء..." : "Cancelling...",
-      registerPayment: isAr ? "تسجيل دفعة" : "Register Payment",
-      loading: isAr ? "جاري تحميل تفاصيل الفاتورة..." : "Loading invoice details...",
-      notFound: isAr ? "لم يتم العثور على الفاتورة." : "Invoice was not found.",
-      loadError: isAr ? "تعذر تحميل تفاصيل الفاتورة" : "Failed to load invoice details",
-      refreshSuccess: isAr ? "تم تحديث بيانات الفاتورة بنجاح" : "Invoice refreshed successfully",
-      issueSuccess: isAr ? "تم إصدار الفاتورة بنجاح" : "Invoice issued successfully",
-      issueError: isAr ? "تعذر إصدار الفاتورة" : "Failed to issue invoice",
-      cancelSuccess: isAr ? "تم إلغاء الفاتورة بنجاح" : "Invoice cancelled successfully",
-      cancelError: isAr ? "تعذر إلغاء الفاتورة" : "Failed to cancel invoice",
-      copySuccess: isAr ? "تم النسخ بنجاح" : "Copied successfully",
-      copyError: isAr ? "تعذر النسخ" : "Failed to copy",
-      invoiceNumber: isAr ? "رقم الفاتورة" : "Invoice Number",
-      invoiceType: isAr ? "نوع الفاتورة" : "Invoice Type",
-      status: isAr ? "الحالة" : "Status",
-      issueDate: isAr ? "تاريخ الإصدار" : "Issue Date",
-      dueDate: isAr ? "تاريخ الاستحقاق" : "Due Date",
-      createdAt: isAr ? "تاريخ الإنشاء" : "Created At",
-      updatedAt: isAr ? "آخر تحديث" : "Updated At",
-      customer: isAr ? "العميل" : "Customer",
-      customerData: isAr ? "بيانات العميل" : "Customer Data",
-      orderData: isAr ? "بيانات الطلب" : "Order Data",
-      order: isAr ? "الطلب" : "Order",
-      phone: isAr ? "الجوال" : "Phone",
-      email: isAr ? "البريد" : "Email",
-      orderStatus: isAr ? "حالة الطلب" : "Order Status",
-      paymentStatus: isAr ? "حالة الدفع" : "Payment Status",
-      fulfillmentStatus: isAr ? "حالة التنفيذ" : "Fulfillment Status",
-      items: isAr ? "بنود الفاتورة" : "Invoice Items",
-      item: isAr ? "البند" : "Item",
-      quantity: isAr ? "الكمية" : "Quantity",
-      unitPrice: isAr ? "سعر الوحدة" : "Unit Price",
-      discount: isAr ? "الخصم" : "Discount",
-      lineTotal: isAr ? "الإجمالي" : "Line Total",
-      payments: isAr ? "المدفوعات المرتبطة" : "Linked Payments",
-      paymentNumber: isAr ? "رقم الدفعة" : "Payment Number",
-      amountApplied: isAr ? "المبلغ المربوط" : "Amount Applied",
-      appliedAt: isAr ? "تاريخ الربط" : "Applied At",
-      summary: isAr ? "ملخص مالي" : "Financial Summary",
-      subtotal: isAr ? "الإجمالي قبل الخصم والضريبة" : "Subtotal",
-      taxableAmount: isAr ? "الخاضع للضريبة" : "Taxable Amount",
-      taxRate: isAr ? "نسبة الضريبة" : "Tax Rate",
-      taxAmount: isAr ? "قيمة الضريبة" : "Tax Amount",
-      totalAmount: isAr ? "الإجمالي النهائي" : "Total Amount",
-      paidAmount: isAr ? "المبلغ المدفوع" : "Paid Amount",
-      dueAmount: isAr ? "المبلغ المتبقي" : "Due Amount",
-      notes: isAr ? "ملاحظات" : "Notes",
-      internalNotes: isAr ? "ملاحظات داخلية" : "Internal Notes",
-      noNotes: isAr ? "لا توجد ملاحظات." : "No notes.",
-      noItems: isAr ? "لا توجد بنود مرتبطة بالفاتورة." : "No invoice items found.",
-      noPayments: isAr ? "لا توجد مدفوعات مرتبطة بهذه الفاتورة." : "No linked payments found.",
-      notAvailable: isAr ? "غير متاح" : "N/A",
-      sar: isAr ? "ريال" : "SAR",
-      cancelConfirm: isAr
-        ? "هل تريد إلغاء هذه الفاتورة؟ لا يمكن إلغاء فاتورة عليها مبلغ مدفوع."
-        : "Cancel this invoice? Paid invoices cannot be cancelled.",
-    }),
-    [isAr]
+  const quantity = toNumber(getNestedValue(obj, ["quantity", "qty"]));
+  const unitPrice = toNumber(
+    getNestedValue(obj, ["unit_price", "price", "unitPrice"]),
+  );
+  const discount = toNumber(
+    getNestedValue(obj, ["discount_amount", "discount"]),
+  );
+  const taxRate = toNumber(getNestedValue(obj, ["tax_rate", "vat_rate"]));
+  const taxAmount = toNumber(getNestedValue(obj, ["tax_amount", "vat_amount"]));
+
+  const subtotalValue = getNestedValue(obj, ["subtotal", "sub_total"]);
+  const totalValue = getNestedValue(obj, ["total_amount", "total", "line_total"]);
+
+  const subtotal =
+    subtotalValue !== undefined && subtotalValue !== null
+      ? toNumber(subtotalValue)
+      : quantity * unitPrice;
+
+  const total =
+    totalValue !== undefined && totalValue !== null
+      ? toNumber(totalValue)
+      : Math.max(subtotal - discount, 0) + taxAmount;
+
+  return {
+    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
+    description: String(
+      getNestedValue(obj, ["description", "name", "title", "label"]) || "-",
+    ),
+    quantity,
+    unit_price: unitPrice,
+    discount_amount: discount,
+    tax_rate: taxRate,
+    tax_amount: taxAmount,
+    subtotal,
+    total_amount: total,
+  };
+}
+
+function normalizePayment(item: unknown, index: number): PaymentRow {
+  const obj = asDict(item);
+
+  return {
+    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
+    payment_number: String(
+      getNestedValue(obj, ["payment_number", "number", "code", "reference"]) ||
+        "-",
+    ),
+    payment_method: String(
+      getNestedValue(obj, ["payment_method", "method", "type"]) || "-",
+    ),
+    status: String(getNestedValue(obj, ["status", "state"]) || "-"),
+    amount: toNumber(getNestedValue(obj, ["amount", "paid_amount", "total"])),
+    paid_at: String(
+      getNestedValue(obj, ["paid_at", "payment_date", "created_at", "date"]) ||
+        "",
+    ),
+    reference: String(
+      getNestedValue(obj, [
+        "source_reference",
+        "external_reference",
+        "transaction_reference",
+        "ref",
+      ]) || "",
+    ),
+  };
+}
+
+function normalizeInvoice(payload: unknown): InvoiceDetails {
+  const root = asDict(payload);
+  const data = asDict(root.data);
+  const invoiceObj = asDict(
+    root.invoice || data.invoice || data.item || root.item || root.data || root,
+  );
+  const customerObj = asDict(invoiceObj.customer || invoiceObj.client);
+  const orderObj = asDict(invoiceObj.order);
+
+  const totalAmount = toNumber(
+    getNestedValue(invoiceObj, [
+      "total_amount",
+      "grand_total",
+      "net_amount",
+      "amount",
+      "total",
+    ]),
   );
 
-  const loadInvoice = async (mode: "initial" | "refresh" = "initial") => {
-    if (!invoiceId) return;
+  const paidAmount = toNumber(
+    getNestedValue(invoiceObj, ["paid_amount", "amount_paid", "collected_amount"]),
+  );
 
-    try {
-      if (mode === "initial") setLoading(true);
-      if (mode === "refresh") setRefreshing(true);
+  const remainingValue = getNestedValue(invoiceObj, [
+    "remaining_amount",
+    "balance_due",
+    "due_amount",
+  ]);
 
-      const data = await fetchInvoiceDetail(invoiceId);
-      setInvoice(data);
+  const rawItems =
+    extractRows({ data: invoiceObj }, "items").length > 0
+      ? extractRows({ data: invoiceObj }, "items")
+      : extractRows({ data: invoiceObj }, "lines");
 
-      if (mode === "refresh") toast.success(t.refreshSuccess);
-    } catch (error) {
-      console.error(error);
-      toast.error(error instanceof Error ? error.message : t.loadError);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+  const rawPayments =
+    extractRows({ data: invoiceObj }, "payments").length > 0
+      ? extractRows({ data: invoiceObj }, "payments")
+      : extractRows(root as ApiEnvelope<unknown>, "payments");
+
+  return {
+    id: String(getNestedValue(invoiceObj, ["id", "uuid", "pk"]) || ""),
+    invoice_number: String(
+      getNestedValue(invoiceObj, [
+        "invoice_number",
+        "number",
+        "code",
+        "reference",
+      ]) || "-",
+    ),
+    status: normalizeInvoiceStatus(
+      getNestedValue(invoiceObj, ["status", "invoice_status", "state"]),
+    ),
+    payment_status: normalizePaymentStatus(
+      getNestedValue(invoiceObj, [
+        "payment_status",
+        "paid_status",
+        "collection_status",
+      ]),
+    ),
+
+    customer_id: String(
+      customerObj.id ||
+        getNestedValue(invoiceObj, ["customer_id", "client_id"]) ||
+        "",
+    ),
+    customer_name: String(
+      customerObj.name ||
+        customerObj.full_name ||
+        getNestedValue(invoiceObj, [
+          "customer_name",
+          "client_name",
+          "beneficiary_name",
+          "name",
+        ]) ||
+        "-",
+    ),
+    customer_phone: String(
+      customerObj.phone ||
+        customerObj.mobile ||
+        getNestedValue(invoiceObj, ["customer_phone", "phone", "mobile"]) ||
+        "",
+    ),
+    customer_email: String(
+      customerObj.email || getNestedValue(invoiceObj, ["customer_email", "email"]) || "",
+    ),
+
+    order_id: String(orderObj.id || getNestedValue(invoiceObj, ["order_id"]) || ""),
+    order_number: String(
+      orderObj.order_number ||
+        orderObj.number ||
+        getNestedValue(invoiceObj, ["order_number", "order_reference"]) ||
+        "-",
+    ),
+
+    issue_date: String(
+      getNestedValue(invoiceObj, ["issue_date", "issued_at", "date", "created_at"]) ||
+        "",
+    ),
+    due_date: String(
+      getNestedValue(invoiceObj, ["due_date", "payment_due_date"]) || "",
+    ),
+    created_at: String(getNestedValue(invoiceObj, ["created_at", "created"]) || ""),
+    source_reference: String(
+      getNestedValue(invoiceObj, [
+        "source_reference",
+        "external_reference",
+        "payment_reference",
+        "ref",
+      ]) || "",
+    ),
+    notes: String(getNestedValue(invoiceObj, ["notes", "description", "memo"]) || ""),
+
+    subtotal: toNumber(getNestedValue(invoiceObj, ["subtotal", "sub_total"])),
+    discount_amount: toNumber(
+      getNestedValue(invoiceObj, ["discount_amount", "discount", "total_discount"]),
+    ),
+    taxable_amount: toNumber(
+      getNestedValue(invoiceObj, ["taxable_amount", "net_before_tax"]),
+    ),
+    tax_amount: toNumber(
+      getNestedValue(invoiceObj, ["tax_amount", "vat_amount", "total_tax"]),
+    ),
+    total_amount: totalAmount,
+    paid_amount: paidAmount,
+    remaining_amount:
+      remainingValue !== undefined && remainingValue !== null
+        ? toNumber(remainingValue)
+        : Math.max(totalAmount - paidAmount, 0),
+
+    items: rawItems.map(normalizeItem),
+    payments: rawPayments.map(normalizePayment),
+  };
+}
+
+function invoiceStatusLabel(status: InvoiceStatus, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<InvoiceStatus, string> = {
+    DRAFT: t.draft,
+    ISSUED: t.issued,
+    PAID: t.paid,
+    PARTIALLY_PAID: t.partiallyPaid,
+    CANCELLED: t.cancelled,
+    OVERDUE: t.overdue,
+    UNKNOWN: t.unknown,
   };
 
-  const handleCopy = async (value: string | number | null | undefined) => {
-    const resolvedValue = String(value || "");
-    if (!resolvedValue) return;
+  return labels[status];
+}
 
-    try {
-      await navigator.clipboard.writeText(resolvedValue);
-      toast.success(t.copySuccess);
-    } catch {
-      toast.error(t.copyError);
-    }
+function paymentStatusLabel(status: PaymentStatus, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<PaymentStatus, string> = {
+    UNPAID: t.unpaid,
+    PARTIAL: t.partiallyPaid,
+    PAID: t.paid,
+    REFUNDED: t.refunded,
+    CANCELLED: t.cancelled,
+    UNKNOWN: t.unknown,
   };
 
-  const handleIssue = async () => {
-    if (!invoice) return;
+  return labels[status];
+}
 
-    try {
-      setIssuing(true);
-      const result = await issueInvoice(invoice.id);
-      toast.success(result.message || t.issueSuccess);
-      await loadInvoice("refresh");
-    } catch (error) {
-      console.error(error);
-      toast.error(error instanceof Error ? error.message : t.issueError);
-    } finally {
-      setIssuing(false);
-    }
-  };
+function invoiceStatusBadge(status: InvoiceStatus, locale: AppLocale) {
+  const label = invoiceStatusLabel(status, locale);
 
-  const handleCancel = async () => {
-    if (!invoice) return;
-
-    const confirmed = window.confirm(t.cancelConfirm);
-    if (!confirmed) return;
-
-    try {
-      setCancelling(true);
-      const result = await cancelInvoice(invoice.id, "Cancelled from invoice detail page.");
-      toast.success(result.message || t.cancelSuccess);
-      await loadInvoice("refresh");
-    } catch (error) {
-      console.error(error);
-      toast.error(error instanceof Error ? error.message : t.cancelError);
-    } finally {
-      setCancelling(false);
-    }
-  };
-
-  const handlePrint = () => {
-    window.print();
-  };
-
-  useEffect(() => {
-    const currentLocale = getInitialLocale();
-    setLocale(currentLocale);
-    applyLocaleToDocument(currentLocale);
-
-    const syncLocale = () => {
-      const nextLocale = getInitialLocale();
-      setLocale(nextLocale);
-      applyLocaleToDocument(nextLocale);
-    };
-
-    window.addEventListener("primey-locale-changed", syncLocale);
-    window.addEventListener("storage", syncLocale);
-
-    const timeout = window.setTimeout(syncLocale, 50);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncLocale);
-      window.removeEventListener("storage", syncLocale);
-      window.clearTimeout(timeout);
-    };
-  }, []);
-
-  useEffect(() => {
-    loadInvoice("initial");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoiceId]);
-
-  if (loading) {
+  if (status === "PAID" || status === "ISSUED") {
     return (
-      <main className="min-h-screen bg-background">
-        <div className="mx-auto flex min-h-screen w-full max-w-7xl items-center justify-center px-4 py-6">
-          <div className="flex flex-col items-center gap-3 text-muted-foreground">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm">{t.loading}</p>
-          </div>
-        </div>
-      </main>
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
     );
   }
 
-  if (!invoice) {
+  if (status === "PARTIALLY_PAID" || status === "DRAFT") {
     return (
-      <main className="min-h-screen bg-background">
-        <div className="mx-auto flex min-h-screen w-full max-w-7xl items-center justify-center px-4 py-6">
-          <Card className="w-full max-w-lg rounded-[1.5rem]">
-            <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
-              <AlertTriangle className="h-12 w-12 text-amber-500" />
-              <div>
-                <h1 className="text-xl font-bold">{t.notFound}</h1>
-                <p className="mt-2 text-sm text-muted-foreground">{t.loadError}</p>
-              </div>
-              <Button asChild className="rounded-2xl">
-                <Link href="/system/invoices/list">{t.back}</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </main>
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+        {label}
+      </Badge>
     );
   }
 
-  const invoiceNumber = getInvoiceNumber(invoice);
-  const status = getStatusKey(invoice.status);
-  const items = Array.isArray(invoice.items) ? invoice.items : [];
-  const payments = Array.isArray(invoice.payments) ? invoice.payments : [];
+  if (status === "OVERDUE" || status === "CANCELLED") {
+    return (
+      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
+        {label}
+      </Badge>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-background">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        {/* =====================================================
-            HERO
-        ===================================================== */}
-        <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm print:border-0 print:shadow-none">
-          <div className="pointer-events-none absolute -top-24 end-12 h-56 w-56 rounded-full bg-primary/10 blur-3xl print:hidden" />
-          <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl print:hidden" />
-
-          <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-4">
-              <Badge
-                variant="outline"
-                className="w-fit rounded-full border-primary/20 bg-primary/5 px-3 py-1 text-primary"
-              >
-                <ReceiptText className="me-2 h-3.5 w-3.5" />
-                {t.badge}
-              </Badge>
-
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
-                    {invoiceNumber}
-                  </h1>
-
-                  <Badge
-                    variant="outline"
-                    className={`rounded-full ${getStatusClassName(status)}`}
-                  >
-                    {getStatusLabel(status, locale)}
-                  </Badge>
-                </div>
-
-                <p className="max-w-3xl text-sm leading-7 text-muted-foreground md:text-base">
-                  {t.subtitle}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                <span className="inline-flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  {getCustomerName(invoice, t.notAvailable)}
-                </span>
-
-                <span className="inline-flex items-center gap-2">
-                  <ShoppingCart className="h-4 w-4" />
-                  {getOrderNumber(invoice, t.notAvailable)}
-                </span>
-
-                <span className="inline-flex items-center gap-2">
-                  <CalendarDays className="h-4 w-4" />
-                  {formatDate(invoice.issue_date, locale)}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 print:hidden">
-              <Button asChild variant="outline" className="rounded-2xl">
-                <Link href="/system/invoices/list">
-                  {isAr ? (
-                    <ArrowLeft className="me-2 h-4 w-4" />
-                  ) : (
-                    <ArrowLeft className="me-2 h-4 w-4 rotate-180" />
-                  )}
-                  {t.back}
-                </Link>
-              </Button>
-
-              <Button asChild variant="secondary" className="rounded-2xl">
-                <Link href="/system/invoices">
-                  <ReceiptText className="me-2 h-4 w-4" />
-                  {t.dashboard}
-                </Link>
-              </Button>
-
-              <Button asChild variant="ghost" className="rounded-2xl">
-                <Link href="/system/invoices/reports">
-                  <BarChart3 className="me-2 h-4 w-4" />
-                  {t.reports}
-                </Link>
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl"
-                onClick={() => loadInvoice("refresh")}
-                disabled={refreshing}
-              >
-                {refreshing ? (
-                  <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="me-2 h-4 w-4" />
-                )}
-                {t.refresh}
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl"
-                onClick={handlePrint}
-              >
-                <Printer className="me-2 h-4 w-4" />
-                {t.print}
-              </Button>
-            </div>
-          </div>
-        </section>
-
-        {/* =====================================================
-            ACTIONS
-        ===================================================== */}
-        <section className="grid gap-3 md:grid-cols-3 print:hidden">
-          {canIssueInvoice(invoice) ? (
-            <Button
-              type="button"
-              className="h-12 rounded-2xl"
-              onClick={handleIssue}
-              disabled={issuing}
-            >
-              {issuing ? (
-                <Loader2 className="me-2 h-4 w-4 animate-spin" />
-              ) : (
-                <BadgeCheck className="me-2 h-4 w-4" />
-              )}
-              {issuing ? t.issuing : t.issue}
-            </Button>
-          ) : (
-            <Button type="button" className="h-12 rounded-2xl" disabled>
-              <CheckCircle2 className="me-2 h-4 w-4" />
-              {getStatusLabel(status, locale)}
-            </Button>
-          )}
-
-          {canCancelInvoice(invoice) ? (
-            <Button
-              type="button"
-              variant="destructive"
-              className="h-12 rounded-2xl"
-              onClick={handleCancel}
-              disabled={cancelling}
-            >
-              {cancelling ? (
-                <Loader2 className="me-2 h-4 w-4 animate-spin" />
-              ) : (
-                <XCircle className="me-2 h-4 w-4" />
-              )}
-              {cancelling ? t.cancelling : t.cancel}
-            </Button>
-          ) : (
-            <Button type="button" variant="outline" className="h-12 rounded-2xl" disabled>
-              <ShieldCheck className="me-2 h-4 w-4" />
-              {t.cancel}
-            </Button>
-          )}
-
-          <Button asChild variant="secondary" className="h-12 rounded-2xl">
-            <Link
-              href={`/system/payments/create?invoice_id=${invoice.id}&order_id=${invoice.order_id || ""}`}
-            >
-              <CreditCard className="me-2 h-4 w-4" />
-              {t.registerPayment}
-            </Link>
-          </Button>
-        </section>
-
-        {/* =====================================================
-            STATS
-        ===================================================== */}
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <StatCard
-            title={t.totalAmount}
-            value={<MoneyValue value={toNumber(invoice.total_amount)} />}
-            description={t.sar}
-            icon={ReceiptText}
-          />
-
-          <StatCard
-            title={t.paidAmount}
-            value={<MoneyValue value={toNumber(invoice.paid_amount)} />}
-            description={isAr ? "إجمالي المدفوعات المرتبطة" : "Total linked payments"}
-            icon={CheckCircle2}
-          />
-
-          <StatCard
-            title={t.dueAmount}
-            value={<MoneyValue value={toNumber(invoice.due_amount)} />}
-            description={isAr ? "المبلغ المطلوب سداده" : "Amount still due"}
-            icon={Wallet}
-          />
-
-          <StatCard
-            title={t.taxAmount}
-            value={<MoneyValue value={toNumber(invoice.tax_amount)} />}
-            description={`${formatMoney(toNumber(invoice.tax_rate))}%`}
-            icon={ShieldCheck}
-          />
-        </section>
-
-        {/* =====================================================
-            MAIN GRID
-        ===================================================== */}
-        <section className="grid gap-6 lg:grid-cols-[1.45fr_0.9fr]">
-          <div className="space-y-6">
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-primary" />
-                  {t.items}
-                </CardTitle>
-                <CardDescription>
-                  {formatNumber(items.length)} {t.items}
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                {items.length === 0 ? (
-                  <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
-                    <FileText className="h-10 w-10 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">{t.noItems}</p>
-                  </div>
-                ) : (
-                  <div className="overflow-hidden rounded-3xl border">
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[760px] text-sm">
-                        <thead className="bg-muted/50 text-xs text-muted-foreground">
-                          <tr>
-                            <th className="px-4 py-3 text-start font-medium">{t.item}</th>
-                            <th className="px-4 py-3 text-start font-medium">{t.quantity}</th>
-                            <th className="px-4 py-3 text-start font-medium">{t.unitPrice}</th>
-                            <th className="px-4 py-3 text-start font-medium">{t.discount}</th>
-                            <th className="px-4 py-3 text-start font-medium">{t.lineTotal}</th>
-                          </tr>
-                        </thead>
-
-                        <tbody className="divide-y">
-                          {items.map((item) => (
-                            <tr key={item.id} className="bg-card">
-                              <td className="px-4 py-3">
-                                <div>
-                                  <p className="font-semibold">
-                                    {item.title || `${t.item} #${item.id}`}
-                                  </p>
-                                  {item.order_item_id ? (
-                                    <p className="mt-1 text-xs text-muted-foreground">
-                                      Order item: {item.order_item_id}
-                                    </p>
-                                  ) : null}
-                                </div>
-                              </td>
-
-                              <td className="px-4 py-3">
-                                {formatNumber(Number(item.quantity || 1))}
-                              </td>
-
-                              <td className="px-4 py-3">
-                                <MoneyValue value={toNumber(item.unit_price)} />
-                              </td>
-
-                              <td className="px-4 py-3">
-                                <MoneyValue value={toNumber(item.discount_amount)} />
-                              </td>
-
-                              <td className="px-4 py-3">
-                                <MoneyValue value={toNumber(item.line_total)} strong />
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BadgeCheck className="h-5 w-5 text-primary" />
-                  {t.invoiceNumber}
-                </CardTitle>
-              </CardHeader>
-
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <InfoRow
-                  label={t.invoiceNumber}
-                  value={
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-2 hover:text-primary"
-                      onClick={() => handleCopy(invoiceNumber)}
-                    >
-                      {invoiceNumber}
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
-                  }
-                  icon={ReceiptText}
-                />
-
-                <InfoRow
-                  label={t.invoiceType}
-                  value={getInvoiceTypeLabel(invoice.invoice_type, locale)}
-                  icon={FileText}
-                />
-
-                <InfoRow
-                  label={t.status}
-                  value={
-                    <Badge
-                      variant="outline"
-                      className={`rounded-full ${getStatusClassName(status)}`}
-                    >
-                      {getStatusLabel(status, locale)}
-                    </Badge>
-                  }
-                  icon={ShieldCheck}
-                />
-
-                <InfoRow
-                  label={t.issueDate}
-                  value={formatDate(invoice.issue_date, locale)}
-                  icon={CalendarDays}
-                />
-
-                <InfoRow
-                  label={t.dueDate}
-                  value={formatDate(invoice.due_date, locale)}
-                  icon={CalendarDays}
-                />
-
-                <InfoRow
-                  label={t.createdAt}
-                  value={formatDateTime(invoice.created_at, locale)}
-                  icon={CalendarDays}
-                />
-
-                <InfoRow
-                  label={t.updatedAt}
-                  value={formatDateTime(invoice.updated_at, locale)}
-                  icon={RefreshCcw}
-                />
-
-                <InfoRow
-                  label={t.order}
-                  value={
-                    invoice.order_id ? (
-                      <Link
-                        href={`/system/orders/${invoice.order_id}`}
-                        className="inline-flex items-center gap-2 hover:text-primary"
-                      >
-                        {getOrderNumber(invoice, t.notAvailable)}
-                        <Eye className="h-3.5 w-3.5" />
-                      </Link>
-                    ) : (
-                      t.notAvailable
-                    )
-                  }
-                  icon={ShoppingCart}
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CreditCard className="h-5 w-5 text-primary" />
-                  {t.payments}
-                </CardTitle>
-                <CardDescription>
-                  {formatNumber(payments.length)} {t.payments}
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                {payments.length === 0 ? (
-                  <div className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
-                    <CreditCard className="h-10 w-10 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">{t.noPayments}</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {payments.map((payment) => (
-                      <div
-                        key={payment.id}
-                        className="flex flex-col gap-3 rounded-3xl border bg-card p-4 md:flex-row md:items-center md:justify-between"
-                      >
-                        <div>
-                          <p className="font-semibold">
-                            {payment.payment_number || `PAY-${payment.payment_id || payment.id}`}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {t.appliedAt}: {formatDateTime(payment.applied_at, locale)}
-                          </p>
-                          {payment.notes ? (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {payment.notes}
-                            </p>
-                          ) : null}
-                        </div>
-
-                        <MoneyValue value={toNumber(payment.amount_applied)} strong />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <aside className="space-y-6">
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Wallet className="h-5 w-5 text-primary" />
-                  {t.summary}
-                </CardTitle>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <SummaryLine label={t.subtotal} value={toNumber(invoice.subtotal)} />
-                <SummaryLine label={t.discount} value={toNumber(invoice.discount_amount)} />
-                <SummaryLine label={t.taxableAmount} value={toNumber(invoice.taxable_amount)} />
-                <SummaryLine label={t.taxAmount} value={toNumber(invoice.tax_amount)} />
-                <SummaryLine label={t.paidAmount} value={toNumber(invoice.paid_amount)} />
-                <SummaryLine label={t.dueAmount} value={toNumber(invoice.due_amount)} strong />
-
-                <div className="rounded-3xl border border-primary/20 bg-primary/5 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold">{t.totalAmount}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{t.sar}</p>
-                    </div>
-                    <MoneyValue value={toNumber(invoice.total_amount)} strong size="lg" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <User className="h-5 w-5 text-primary" />
-                  {t.customerData}
-                </CardTitle>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <InfoRow
-                  label={t.customer}
-                  value={getCustomerName(invoice, t.notAvailable)}
-                  icon={User}
-                />
-
-                <InfoRow
-                  label={t.phone}
-                  value={
-                    invoice.customer?.phone ? (
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-2 hover:text-primary"
-                        onClick={() => handleCopy(invoice.customer?.phone)}
-                      >
-                        {invoice.customer.phone}
-                        <Copy className="h-3.5 w-3.5" />
-                      </button>
-                    ) : (
-                      t.notAvailable
-                    )
-                  }
-                  icon={Phone}
-                />
-
-                <InfoRow
-                  label={t.email}
-                  value={
-                    invoice.customer?.email ? (
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-2 hover:text-primary"
-                        onClick={() => handleCopy(invoice.customer?.email)}
-                      >
-                        {invoice.customer.email}
-                        <Copy className="h-3.5 w-3.5" />
-                      </button>
-                    ) : (
-                      t.notAvailable
-                    )
-                  }
-                  icon={Mail}
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShoppingCart className="h-5 w-5 text-primary" />
-                  {t.orderData}
-                </CardTitle>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <InfoRow
-                  label={t.order}
-                  value={getOrderNumber(invoice, t.notAvailable)}
-                  icon={ShoppingCart}
-                />
-
-                <InfoRow
-                  label={t.orderStatus}
-                  value={invoice.order?.status || t.notAvailable}
-                  icon={BadgeCheck}
-                />
-
-                <InfoRow
-                  label={t.paymentStatus}
-                  value={invoice.order?.payment_status || t.notAvailable}
-                  icon={CreditCard}
-                />
-
-                <InfoRow
-                  label={t.fulfillmentStatus}
-                  value={invoice.order?.fulfillment_status || t.notAvailable}
-                  icon={Building2}
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-primary" />
-                  {t.notes}
-                </CardTitle>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <div className="rounded-3xl border bg-muted/20 p-4 text-sm leading-7 text-muted-foreground">
-                  {invoice.notes || t.noNotes}
-                </div>
-
-                {invoice.internal_notes ? (
-                  <div className="rounded-3xl border bg-amber-50/60 p-4 text-sm leading-7 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-                    <p className="mb-1 font-semibold">{t.internalNotes}</p>
-                    {invoice.internal_notes}
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-          </aside>
-        </section>
-      </div>
-    </main>
+    <Badge variant="outline" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
   );
 }
 
-/* =====================================================
-   SMALL COMPONENTS
-===================================================== */
+function paymentStatusBadge(status: PaymentStatus, locale: AppLocale) {
+  const label = paymentStatusLabel(status, locale);
 
-function MoneyValue({
-  value,
-  strong = false,
-  size = "sm",
-}: {
-  value: number;
-  strong?: boolean;
-  size?: "sm" | "lg";
-}) {
+  if (status === "PAID") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "PARTIAL") {
+    return (
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "UNPAID" || status === "CANCELLED") {
+    return (
+      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
+        {label}
+      </Badge>
+    );
+  }
+
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 ${
-        strong ? "font-bold" : "font-semibold"
-      } ${size === "lg" ? "text-2xl" : ""}`}
-    >
-      <Image src={SAR_ICON_PATH} alt="SAR" width={size === "lg" ? 20 : 15} height={size === "lg" ? 20 : 15} />
-      {formatMoney(value)}
+    <Badge variant="outline" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
+  );
+}
+
+function isValidId(value: unknown) {
+  const id = String(value || "").trim();
+
+  return id && id !== "-" && id !== "undefined" && id !== "null";
+}
+
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
+}
+
+function MoneyText({ value }: { value: unknown }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span>{formatMoney(value)}</span>
+      <SarIcon className="h-3.5 w-3.5" />
     </span>
   );
 }
 
-function StatCard({
-  title,
-  value,
-  description,
-  icon: Icon,
-}: {
-  title: string;
-  value: ReactNode;
-  description: string;
-  icon: ComponentType<{ className?: string }>;
-}) {
-  return (
-    <Card className="rounded-[1.5rem]">
-      <CardContent className="flex items-start justify-between gap-4 p-5">
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <div className="text-2xl font-bold tracking-tight">{value}</div>
-          <p className="text-xs text-muted-foreground">{description}</p>
-        </div>
-
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-          <Icon className="h-5 w-5" />
-        </div>
-      </CardContent>
-    </Card>
-  );
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
 }
 
-function InfoRow({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string;
-  value: ReactNode;
-  icon: ComponentType<{ className?: string }>;
-}) {
+function PageSkeleton() {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border bg-card p-4">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <Icon className="h-4 w-4" />
-        </div>
-        <span className="text-sm text-muted-foreground">{label}</span>
-      </div>
+    <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="space-y-4 p-5">
+          <SkeletonLine className="h-12 w-12 rounded-2xl" />
+          <SkeletonLine className="h-7 w-44 rounded-xl" />
+          <SkeletonLine className="h-4 w-32 rounded-xl" />
+          <div className="space-y-3 pt-4">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <SkeletonLine key={index} className="h-10 w-full rounded-xl" />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
-      <div className="min-w-0 max-w-[55%] truncate text-end text-sm font-semibold">
-        {value}
+      <div className="space-y-4">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="space-y-3 p-5">
+              <SkeletonLine className="h-6 w-48 rounded-xl" />
+              <SkeletonLine className="h-20 w-full rounded-xl" />
+            </CardContent>
+          </Card>
+        ))}
       </div>
     </div>
   );
 }
 
-function SummaryLine({
+/* ============================================================
+   Print
+============================================================ */
+
+function buildPrintHtml({
+  locale,
+  invoice,
+}: {
+  locale: AppLocale;
+  invoice: InvoiceDetails;
+}) {
+  const isArabic = locale === "ar";
+  const t = dictionary(locale);
+  const now = new Date().toLocaleString("en-US");
+
+  const itemRows = invoice.items
+    .map(
+      (item, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(item.description)}</td>
+          <td>${escapeHtml(formatNumber(item.quantity))}</td>
+          <td>${escapeHtml(formatMoney(item.unit_price))}</td>
+          <td>${escapeHtml(formatMoney(item.discount_amount))}</td>
+          <td>${escapeHtml(formatMoney(item.tax_amount))}</td>
+          <td>${escapeHtml(formatMoney(item.total_amount))}</td>
+        </tr>`,
+    )
+    .join("");
+
+  return `
+    <!doctype html>
+    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(invoice.invoice_number)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            padding: 24px;
+            font-family: Arial, Tahoma, sans-serif;
+            color: #111827;
+            background: #fff;
+            direction: ${isArabic ? "rtl" : "ltr"};
+            text-align: ${isArabic ? "right" : "left"};
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 14px;
+            margin-bottom: 18px;
+          }
+          h1 { margin: 0; font-size: 24px; font-weight: 800; }
+          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
+          .badge {
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            padding: 5px 12px;
+            font-size: 12px;
+            height: fit-content;
+          }
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 18px;
+          }
+          .box {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 12px;
+          }
+          .box h2 { margin: 0 0 10px; font-size: 14px; }
+          .row { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; font-size: 12px; }
+          .label { color: #6b7280; }
+          .value { font-weight: 700; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 14px; }
+          th { background: #f3f4f6; color: #111827; font-weight: 700; }
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 9px 8px;
+            text-align: ${isArabic ? "right" : "left"};
+            vertical-align: top;
+          }
+          .totals {
+            margin-top: 16px;
+            margin-inline-start: auto;
+            width: 360px;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 12px;
+          }
+          @page { size: A4; margin: 12mm; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1>${escapeHtml(t.title)}</h1>
+            <div class="meta">
+              <div>${escapeHtml(t.invoiceNumber)}: ${escapeHtml(invoice.invoice_number)}</div>
+              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
+            </div>
+          </div>
+          <div class="badge">Primey Care</div>
+        </div>
+
+        <div class="grid">
+          <div class="box">
+            <h2>${escapeHtml(t.invoiceInfo)}</h2>
+            <div class="row"><span class="label">${escapeHtml(t.status)}</span><span class="value">${escapeHtml(invoiceStatusLabel(invoice.status, locale))}</span></div>
+            <div class="row"><span class="label">${escapeHtml(t.paymentStatus)}</span><span class="value">${escapeHtml(paymentStatusLabel(invoice.payment_status, locale))}</span></div>
+            <div class="row"><span class="label">${escapeHtml(t.issueDate)}</span><span class="value">${escapeHtml(formatDate(invoice.issue_date, locale))}</span></div>
+            <div class="row"><span class="label">${escapeHtml(t.dueDate)}</span><span class="value">${escapeHtml(formatDate(invoice.due_date, locale))}</span></div>
+          </div>
+
+          <div class="box">
+            <h2>${escapeHtml(t.customerInfo)}</h2>
+            <div class="row"><span class="label">${escapeHtml(t.customer)}</span><span class="value">${escapeHtml(invoice.customer_name)}</span></div>
+            <div class="row"><span class="label">${escapeHtml(t.phone)}</span><span class="value">${escapeHtml(invoice.customer_phone || "-")}</span></div>
+            <div class="row"><span class="label">${escapeHtml(t.order)}</span><span class="value">${escapeHtml(invoice.order_number || "-")}</span></div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>${escapeHtml(t.table.description)}</th>
+              <th>${escapeHtml(t.table.quantity)}</th>
+              <th>${escapeHtml(t.table.unitPrice)}</th>
+              <th>${escapeHtml(t.table.discount)}</th>
+              <th>${escapeHtml(t.table.tax)}</th>
+              <th>${escapeHtml(t.table.total)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              itemRows ||
+              `<tr><td colspan="7" style="text-align:center">${escapeHtml(t.emptyItems)}</td></tr>`
+            }
+          </tbody>
+        </table>
+
+        <div class="totals">
+          <div class="row"><span class="label">${escapeHtml(t.subtotal)}</span><span class="value">${escapeHtml(formatMoney(invoice.subtotal))}</span></div>
+          <div class="row"><span class="label">${escapeHtml(t.discountAmount)}</span><span class="value">${escapeHtml(formatMoney(invoice.discount_amount))}</span></div>
+          <div class="row"><span class="label">${escapeHtml(t.taxAmount)}</span><span class="value">${escapeHtml(formatMoney(invoice.tax_amount))}</span></div>
+          <div class="row"><span class="label">${escapeHtml(t.paidAmount)}</span><span class="value">${escapeHtml(formatMoney(invoice.paid_amount))}</span></div>
+          <div class="row"><span class="label">${escapeHtml(t.remainingAmount)}</span><span class="value">${escapeHtml(formatMoney(invoice.remaining_amount))}</span></div>
+          <div class="row"><span class="label">${escapeHtml(t.totalAmount)}</span><span class="value">${escapeHtml(formatMoney(invoice.total_amount))}</span></div>
+        </div>
+
+        <script>
+          window.addEventListener("load", () => {
+            window.focus();
+            window.print();
+          });
+        </script>
+      </body>
+    </html>
+  `;
+}
+
+/* ============================================================
+   Page
+============================================================ */
+
+export default function SystemInvoiceDetailsPage() {
+  const params = useParams<{ id?: string | string[] }>();
+  const auth = useAuth() as unknown;
+
+  const invoiceId = Array.isArray(params?.id) ? params.id[0] : params?.id || "";
+
+  const [locale, setLocale] = useState<AppLocale>("ar");
+  const [invoice, setInvoice] = useState<InvoiceDetails | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isActionLoading, setIsActionLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [notFound, setNotFound] = useState(false);
+
+  const t = useMemo(() => dictionary(locale), [locale]);
+  const isArabic = locale === "ar";
+  const authResolving = isAuthResolving(auth);
+
+  const canView = hasSafePermission(
+    auth,
+    ["invoices.view", "billing.invoices.view"],
+    "view",
+  );
+
+  const canIssue = hasSafePermission(
+    auth,
+    ["invoices.issue", "invoices.update", "billing.invoices.issue"],
+    "action",
+  );
+
+  const canCancel = hasSafePermission(
+    auth,
+    ["invoices.cancel", "invoices.update", "billing.invoices.cancel"],
+    "action",
+  );
+
+  const canPrint = hasSafePermission(
+    auth,
+    ["invoices.print", "reports.print"],
+    "action",
+  );
+
+  const canCreatePayment = hasSafePermission(
+    auth,
+    ["payments.create", "billing.payments.create"],
+    "action",
+  );
+
+  const canViewOrder = hasSafePermission(auth, ["orders.view"], "view");
+  const canViewCustomer = hasSafePermission(auth, ["customers.view"], "view");
+  const canViewPayment = hasSafePermission(auth, ["payments.view"], "view");
+
+  const currentInvoiceStatus: InvoiceStatus = invoice?.status ?? "UNKNOWN";
+  const currentPaymentStatus: PaymentStatus = invoice?.payment_status ?? "UNKNOWN";
+  const currentRemainingAmount = invoice?.remaining_amount ?? 0;
+  const currentInvoiceId = invoice?.id ?? "";
+
+  const canIssueCurrent =
+    invoice !== null &&
+    canIssue &&
+    ["DRAFT", "UNKNOWN"].includes(currentInvoiceStatus) &&
+    currentInvoiceStatus !== "CANCELLED";
+
+  const canCancelCurrent =
+    invoice !== null &&
+    canCancel &&
+    !["PAID", "CANCELLED"].includes(currentInvoiceStatus) &&
+    currentPaymentStatus !== "PAID";
+
+  const canCreatePaymentCurrent =
+    invoice !== null &&
+    canCreatePayment &&
+    currentInvoiceStatus !== "CANCELLED" &&
+    currentRemainingAmount > 0 &&
+    Boolean(currentInvoiceId);
+
+  const loadInvoice = useCallback(
+    async (showToast = false) => {
+      if (!canView || !invoiceId) {
+        setInvoice(null);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setErrorMessage("");
+        setNotFound(false);
+
+        const endpoints = [
+          `/api/invoices/${invoiceId}/`,
+          `/api/invoices/detail/${invoiceId}/`,
+          `/api/invoices/detail/?id=${invoiceId}`,
+        ];
+
+        let payload: ApiEnvelope<unknown> | null = null;
+        let lastStatus = 0;
+        let lastError = "";
+
+        for (const endpoint of endpoints) {
+          const response = await fetch(apiUrl(endpoint), {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+          });
+
+          lastStatus = response.status;
+
+          const responsePayload = (await response.json().catch(() => null)) as
+            | ApiEnvelope<unknown>
+            | null;
+
+          if (
+            response.ok &&
+            responsePayload?.ok !== false &&
+            responsePayload?.success !== false
+          ) {
+            payload = responsePayload;
+            break;
+          }
+
+          lastError =
+            responsePayload?.message ||
+            responsePayload?.detail ||
+            responsePayload?.error ||
+            `HTTP ${response.status}`;
+        }
+
+        if (!payload) {
+          if (lastStatus === 404) {
+            setNotFound(true);
+            setInvoice(null);
+            return;
+          }
+
+          throw new Error(lastError || t.loadError);
+        }
+
+        setInvoice(normalizeInvoice(payload));
+
+        if (showToast) {
+          toast.success(t.refresh);
+        }
+      } catch (error) {
+        console.error("Load invoice details error:", error);
+        setInvoice(null);
+        setErrorMessage(t.loadError);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [canView, invoiceId, t.loadError, t.refresh],
+  );
+
+  async function runInvoiceAction(action: "issue" | "cancel") {
+    if (!invoice || !invoice.id) return;
+
+    const confirmed = window.confirm(
+      action === "issue" ? t.issueConfirm : t.cancelConfirm,
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setIsActionLoading(true);
+
+      const csrfToken = getCookie("csrftoken");
+
+      const endpoints =
+        action === "issue"
+          ? ["/api/invoices/issue/", `/api/invoices/${invoice.id}/issue/`]
+          : ["/api/invoices/cancel/", `/api/invoices/${invoice.id}/cancel/`];
+
+      let success = false;
+      let lastError = "";
+
+      for (const endpoint of endpoints) {
+        const response = await fetch(apiUrl(endpoint), {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+          },
+          body: JSON.stringify({
+            invoice_id: invoice.id,
+            id: invoice.id,
+          }),
+        });
+
+        const payload = (await response.json().catch(() => null)) as
+          | ApiEnvelope<unknown>
+          | null;
+
+        if (
+          response.ok &&
+          payload?.ok !== false &&
+          payload?.success !== false
+        ) {
+          success = true;
+          break;
+        }
+
+        lastError =
+          payload?.message ||
+          payload?.detail ||
+          payload?.error ||
+          `HTTP ${response.status}`;
+      }
+
+      if (!success) {
+        throw new Error(lastError || t.actionError);
+      }
+
+      toast.success(action === "issue" ? t.issueSuccess : t.cancelSuccess);
+      await loadInvoice(false);
+    } catch (error) {
+      console.error("Invoice action error:", error);
+      toast.error(t.actionError);
+    } finally {
+      setIsActionLoading(false);
+    }
+  }
+
+  function printPage() {
+    if (!invoice) return;
+
+    const printWindow = window.open("", "_blank", "width=980,height=720");
+
+    if (!printWindow) {
+      toast.error(t.printError);
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(
+      buildPrintHtml({
+        locale,
+        invoice,
+      }),
+    );
+    printWindow.document.close();
+
+    toast.success(t.printSuccess);
+  }
+
+  function copyValue(value: string) {
+    if (!value) return;
+
+    navigator.clipboard.writeText(value);
+    toast.success(t.copied);
+  }
+
+  useEffect(() => {
+    const nextLocale = readLocale();
+
+    setLocale(nextLocale);
+    applyDocumentLocale(nextLocale);
+  }, []);
+
+  useEffect(() => {
+    loadInvoice();
+  }, [loadInvoice]);
+
+  if (authResolving) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <PageSkeleton />
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="rounded-full">
+              <ReceiptText className="h-3.5 w-3.5" />
+              {t.dashboard}
+            </Badge>
+
+            {invoice ? invoiceStatusBadge(invoice.status, locale) : null}
+            {invoice ? paymentStatusBadge(invoice.payment_status, locale) : null}
+          </div>
+
+          <h1 className="mt-3 text-xl font-bold tracking-tight lg:text-2xl">
+            {invoice?.invoice_number || t.title}
+          </h1>
+
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center xl:justify-end">
+          <Link href="/system/invoices/list">
+            <Button variant="outline" className="h-10 w-full rounded-xl sm:w-auto">
+              <ArrowLeft className="h-4 w-4" />
+              <span>{t.back}</span>
+            </Button>
+          </Link>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={() => loadInvoice(true)}
+            disabled={isLoading || isActionLoading}
+          >
+            <RefreshCcw className="h-4 w-4" />
+            <span>{t.refresh}</span>
+          </Button>
+
+          {canPrint ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl"
+              onClick={printPage}
+              disabled={isLoading || isActionLoading || !invoice}
+            >
+              <Printer className="h-4 w-4" />
+              <span>{t.print}</span>
+            </Button>
+          ) : null}
+
+          {canIssueCurrent ? (
+            <Button
+              className="h-10 rounded-xl"
+              onClick={() => runInvoiceAction("issue")}
+              disabled={isActionLoading}
+            >
+              {isActionLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              <span>{t.issue}</span>
+            </Button>
+          ) : null}
+
+          {canCancelCurrent ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl text-destructive hover:text-destructive"
+              onClick={() => runInvoiceAction("cancel")}
+              disabled={isActionLoading}
+            >
+              {isActionLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Ban className="h-4 w-4" />
+              )}
+              <span>{t.cancel}</span>
+            </Button>
+          ) : null}
+
+          {canCreatePaymentCurrent ? (
+            <Link href={`/system/payments/create?invoice=${currentInvoiceId}`}>
+              <Button className="h-10 w-full rounded-xl sm:w-auto">
+                <CreditCard className="h-4 w-4" />
+                <span>{t.createPayment}</span>
+              </Button>
+            </Link>
+          ) : null}
+        </div>
+      </div>
+
+      {!isLoading && errorMessage ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="font-semibold text-destructive">{errorMessage}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t.loadErrorHint}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => loadInvoice(true)}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              {t.retry}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!isLoading && notFound ? (
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+            <FileText className="h-12 w-12 text-muted-foreground/40" />
+            <p className="text-lg font-semibold">{t.notFoundTitle}</p>
+            <p className="max-w-md text-sm text-muted-foreground">
+              {t.notFoundText}
+            </p>
+            <Link href="/system/invoices/list">
+              <Button className="mt-2 rounded-xl">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {isLoading ? <PageSkeleton /> : null}
+
+      {!isLoading && invoice ? (
+        <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+          <div className="space-y-4">
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ReceiptText className="h-5 w-5" />
+                  {t.profileTitle}
+                </CardTitle>
+                <CardDescription>{invoice.invoice_number}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="space-y-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted">
+                  <ReceiptText className="h-7 w-7 text-muted-foreground" />
+                </div>
+
+                <div>
+                  <p className="text-lg font-bold">{invoice.invoice_number}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {invoiceStatusBadge(invoice.status, locale)}
+                    {paymentStatusBadge(invoice.payment_status, locale)}
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  <InfoItem
+                    label={t.customer}
+                    value={invoice.customer_name}
+                    icon={<UserRound className="h-4 w-4" />}
+                  />
+                  <InfoItem
+                    label={t.order}
+                    value={invoice.order_number}
+                    icon={<ShoppingCart className="h-4 w-4" />}
+                  />
+                  <InfoItem
+                    label={t.issueDate}
+                    value={formatDate(invoice.issue_date, locale)}
+                    icon={<CalendarDays className="h-4 w-4" />}
+                  />
+                  <InfoItem
+                    label={t.totalAmount}
+                    value={formatMoney(invoice.total_amount)}
+                    icon={<WalletCards className="h-4 w-4" />}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle>{t.totalsTitle}</CardTitle>
+              </CardHeader>
+
+              <CardContent className="space-y-3">
+                <TotalRow label={t.subtotal} value={invoice.subtotal} />
+                <TotalRow label={t.discountAmount} value={invoice.discount_amount} />
+                <TotalRow label={t.taxAmount} value={invoice.tax_amount} />
+                <TotalRow label={t.paidAmount} value={invoice.paid_amount} />
+                <TotalRow label={t.remainingAmount} value={invoice.remaining_amount} />
+                <div className="border-t pt-3">
+                  <TotalRow
+                    label={t.totalAmount}
+                    value={invoice.total_amount}
+                    strong
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-4">
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  {t.invoiceInfo}
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <DetailBox label={t.invoiceNumber} value={invoice.invoice_number} onCopy={() => copyValue(invoice.invoice_number)} />
+                  <DetailBox label={t.status} value={invoiceStatusLabel(invoice.status, locale)} />
+                  <DetailBox label={t.paymentStatus} value={paymentStatusLabel(invoice.payment_status, locale)} />
+                  <DetailBox label={t.issueDate} value={formatDate(invoice.issue_date, locale)} />
+                  <DetailBox label={t.dueDate} value={formatDate(invoice.due_date, locale)} />
+                  <DetailBox label={t.createdAt} value={formatDate(invoice.created_at, locale)} />
+                  <DetailBox label={t.sourceReference} value={invoice.source_reference || t.notAvailable} onCopy={invoice.source_reference ? () => copyValue(invoice.source_reference) : undefined} />
+                </div>
+
+                {invoice.notes ? (
+                  <Alert className="mt-4 rounded-2xl">
+                    <FileText className="h-4 w-4" />
+                    <AlertTitle>{t.notes}</AlertTitle>
+                    <AlertDescription className="whitespace-pre-wrap">
+                      {invoice.notes}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <UserRound className="h-5 w-5" />
+                    {t.customerInfo}
+                  </CardTitle>
+                </CardHeader>
+
+                <CardContent className="space-y-3">
+                  <DetailBox label={t.customer} value={invoice.customer_name} />
+                  <DetailBox label={t.phone} value={invoice.customer_phone || t.notAvailable} />
+                  <DetailBox label={t.email} value={invoice.customer_email || t.notAvailable} />
+
+                  {canViewCustomer && isValidId(invoice.customer_id) ? (
+                    <Link href={`/system/customers/${invoice.customer_id}`}>
+                      <Button variant="outline" className="w-full rounded-xl">
+                        <UserRound className="h-4 w-4" />
+                        {t.view}
+                      </Button>
+                    </Link>
+                  ) : null}
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ShoppingCart className="h-5 w-5" />
+                    {t.orderInfo}
+                  </CardTitle>
+                </CardHeader>
+
+                <CardContent className="space-y-3">
+                  <DetailBox label={t.order} value={invoice.order_number} />
+                  <DetailBox label={t.sourceReference} value={invoice.source_reference || t.notAvailable} />
+
+                  {canViewOrder && isValidId(invoice.order_id) ? (
+                    <Link href={`/system/orders/${invoice.order_id}`}>
+                      <Button variant="outline" className="w-full rounded-xl">
+                        <ShoppingCart className="h-4 w-4" />
+                        {t.view}
+                      </Button>
+                    </Link>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle>{t.itemsTitle}</CardTitle>
+              </CardHeader>
+
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>#</TableHead>
+                        <TableHead>{t.table.description}</TableHead>
+                        <TableHead>{t.table.quantity}</TableHead>
+                        <TableHead>{t.table.unitPrice}</TableHead>
+                        <TableHead>{t.table.discount}</TableHead>
+                        <TableHead>{t.table.tax}</TableHead>
+                        <TableHead>{t.table.total}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+
+                    <TableBody>
+                      {invoice.items.length > 0 ? (
+                        invoice.items.map((item, index) => (
+                          <TableRow key={item.id}>
+                            <TableCell>{formatNumber(index + 1)}</TableCell>
+                            <TableCell className="min-w-[220px]">
+                              {item.description}
+                            </TableCell>
+                            <TableCell>{formatNumber(item.quantity)}</TableCell>
+                            <TableCell>
+                              <MoneyText value={item.unit_price} />
+                            </TableCell>
+                            <TableCell>
+                              <MoneyText value={item.discount_amount} />
+                            </TableCell>
+                            <TableCell>
+                              <MoneyText value={item.tax_amount} />
+                            </TableCell>
+                            <TableCell>
+                              <MoneyText value={item.total_amount} />
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                            {t.emptyItems}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CreditCard className="h-5 w-5" />
+                  {t.paymentsTitle}
+                </CardTitle>
+                <CardDescription>{t.paymentsDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t.table.paymentNo}</TableHead>
+                        <TableHead>{t.table.method}</TableHead>
+                        <TableHead>{t.status}</TableHead>
+                        <TableHead>{t.table.amount}</TableHead>
+                        <TableHead>{t.table.date}</TableHead>
+                        <TableHead>{t.table.reference}</TableHead>
+                        {canViewPayment ? <TableHead>{t.table.action}</TableHead> : null}
+                      </TableRow>
+                    </TableHeader>
+
+                    <TableBody>
+                      {invoice.payments.length > 0 ? (
+                        invoice.payments.map((payment) => (
+                          <TableRow key={payment.id}>
+                            <TableCell>{payment.payment_number}</TableCell>
+                            <TableCell>{payment.payment_method}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="rounded-full">
+                                {payment.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <MoneyText value={payment.amount} />
+                            </TableCell>
+                            <TableCell>{formatDate(payment.paid_at, locale)}</TableCell>
+                            <TableCell>{payment.reference || "-"}</TableCell>
+                            {canViewPayment ? (
+                              <TableCell>
+                                {isValidId(payment.id) ? (
+                                  <Link href={`/system/payments/${payment.id}`}>
+                                    <Button variant="outline" size="sm" className="rounded-xl">
+                                      {t.view}
+                                    </Button>
+                                  </Link>
+                                ) : null}
+                              </TableCell>
+                            ) : null}
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={canViewPayment ? 7 : 6}
+                            className="py-8 text-center text-muted-foreground"
+                          >
+                            {t.emptyPayments}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* ============================================================
+   Small Components
+============================================================ */
+
+function InfoItem({
   label,
   value,
-  strong = false,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border bg-background p-3">
+      <div className="mt-0.5 text-muted-foreground">{icon}</div>
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="mt-1 truncate text-sm font-semibold">{value || "-"}</p>
+      </div>
+    </div>
+  );
+}
+
+function DetailBox({
+  label,
+  value,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  onCopy?: () => void;
+}) {
+  return (
+    <div className="rounded-xl border bg-background p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <p className="min-w-0 break-words text-sm font-semibold">{value || "-"}</p>
+        {onCopy ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0 rounded-lg"
+            onClick={onCopy}
+          >
+            <Copy className="h-4 w-4" />
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function TotalRow({
+  label,
+  value,
+  strong,
 }: {
   label: string;
   value: number;
   strong?: boolean;
 }) {
   return (
-    <div
-      className={`flex items-center justify-between gap-3 rounded-2xl border p-3 ${
-        strong ? "bg-muted/40" : "bg-card"
-      }`}
-    >
-      <p className={`text-sm ${strong ? "font-semibold" : "text-muted-foreground"}`}>
+    <div className="flex items-center justify-between gap-3">
+      <span className={strong ? "font-bold" : "text-sm text-muted-foreground"}>
         {label}
-      </p>
-      <MoneyValue value={value} strong={strong} />
+      </span>
+      <span className={strong ? "text-lg font-bold" : "text-sm font-semibold"}>
+        <MoneyText value={value} />
+      </span>
     </div>
   );
 }

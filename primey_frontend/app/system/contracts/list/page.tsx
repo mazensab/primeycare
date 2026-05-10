@@ -5,9 +5,10 @@
    🧠 Primey Care | Contracts List
    ------------------------------------------------------------
    ✅ المرحلة 17 + المرحلة 2
-   ✅ مبني بنفس نمط قائمة المراكز/العملاء المعتمد
+   ✅ مبني بنفس النمط المعتمد لقوائم النظام
    ✅ البحث في صف مستقل
    ✅ الفلاتر والأعمدة في صف مستقل تحت البحث
+   ✅ فلتر التاريخ من / إلى على createdAt
    ✅ Excel export بصيغة .xls HTML Workbook
    ✅ Web PDF Print
    ✅ Error State مستقل
@@ -30,7 +31,7 @@ import {
   ArrowLeft,
   BadgeCheck,
   Building2,
-  CalendarClock,
+  CalendarDays,
   ColumnsIcon,
   Copy,
   Download,
@@ -500,15 +501,7 @@ function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
     return direct;
   }
 
-  const containers = [
-    "contract",
-    "provider",
-    "center",
-    "item",
-    "data",
-    "summary",
-    "totals",
-  ];
+  const containers = ["contract", "provider", "item", "data", "summary", "totals"];
 
   for (const container of containers) {
     const nested = obj[container];
@@ -549,11 +542,7 @@ function extractContracts(payload: unknown): unknown[] {
 
 function normalizeContract(item: unknown): Contract {
   const obj = (item || {}) as Record<string, unknown>;
-
-  const provider = (obj.provider || obj.center) as
-    | Record<string, unknown>
-    | undefined;
-
+  const provider = obj.provider as Record<string, unknown> | undefined;
   const id = getObjectValue(obj, "id") ?? "";
 
   const contractNumber =
@@ -572,17 +561,9 @@ function normalizeContract(item: unknown): Contract {
     id: id as number | string,
     contractNumber: String(contractNumber || "-"),
     title: String(title || "-"),
-    providerId: String(
-      getObjectValue(obj, "provider_id") ??
-        getObjectValue(obj, "center_id") ??
-        provider?.id ??
-        "",
-    ),
+    providerId: String(getObjectValue(obj, "provider_id") ?? provider?.id ?? ""),
     providerName: String(
-      getObjectValue(obj, "provider_name") ??
-        getObjectValue(obj, "center_name") ??
-        provider?.name ??
-        "-",
+      getObjectValue(obj, "provider_name") ?? provider?.name ?? "-",
     ),
     status: normalizeStatus(getObjectValue(obj, "status")),
     pricingModel: normalizePricingModel(
@@ -609,9 +590,7 @@ function normalizeContract(item: unknown): Contract {
         "",
     ),
     endDate: String(
-      getObjectValue(obj, "end_date") ??
-        getObjectValue(obj, "valid_to") ??
-        "",
+      getObjectValue(obj, "end_date") ?? getObjectValue(obj, "valid_to") ?? "",
     ),
     notes: String(getObjectValue(obj, "notes") ?? ""),
     createdAt: String(getObjectValue(obj, "created_at") ?? ""),
@@ -654,6 +633,9 @@ function dictionary(locale: AppLocale) {
     all: isArabic ? "الكل" : "All",
     allStatuses: isArabic ? "كل الحالات" : "All Statuses",
     allPricing: isArabic ? "كل نماذج التسعير" : "All Pricing Models",
+    fromDate: isArabic ? "من تاريخ" : "From Date",
+    toDate: isArabic ? "إلى تاريخ" : "To Date",
+    notSelected: isArabic ? "غير محدد" : "Not selected",
 
     draft: isArabic ? "مسودة" : "Draft",
     active: isArabic ? "نشط" : "Active",
@@ -684,8 +666,8 @@ function dictionary(locale: AppLocale) {
       : "New contracts will appear here once they are created.",
     noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
     noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو فلاتر الحالة والتسعير."
-      : "Try changing search keywords, status filters, or pricing filters.",
+      ? "جرّب تغيير كلمات البحث أو فلاتر الحالة أو التسعير أو التاريخ."
+      : "Try changing search keywords, status, pricing, or date filters.",
 
     actions: isArabic ? "الإجراءات" : "Actions",
     viewDetails: isArabic ? "عرض التفاصيل" : "View Details",
@@ -730,6 +712,8 @@ function dictionary(locale: AppLocale) {
     filterSearch: isArabic ? "البحث" : "Search",
     filterStatus: isArabic ? "فلتر الحالة" : "Status Filter",
     filterPricing: isArabic ? "فلتر التسعير" : "Pricing Filter",
+    filterDateFrom: isArabic ? "تاريخ الإنشاء من" : "Created From",
+    filterDateTo: isArabic ? "تاريخ الإنشاء إلى" : "Created To",
 
     table: {
       id: isArabic ? "المعرف" : "ID",
@@ -802,6 +786,29 @@ function formatDate(value: string): string {
     month: "short",
     day: "2-digit",
   }).format(date);
+}
+
+function toDateOnly(value: string): string {
+  if (!value) return "";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  return date.toISOString().slice(0, 10);
+}
+
+function isDateInsideRange(value: string, dateFrom: string, dateTo: string) {
+  if (!dateFrom && !dateTo) return true;
+
+  const dateOnly = toDateOnly(value);
+
+  if (!dateOnly) return false;
+
+  if (dateFrom && dateOnly < dateFrom) return false;
+  if (dateTo && dateOnly > dateTo) return false;
+
+  return true;
 }
 
 function escapeHtml(value: string | number) {
@@ -1299,6 +1306,8 @@ export default function SystemContractsListPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [pricingFilter, setPricingFilter] = useState<PricingFilter>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -1452,6 +1461,12 @@ export default function SystemContractsListPage() {
           ? true
           : contract.pricingModel === pricingFilter;
 
+      const matchesDate = isDateInsideRange(
+        contract.createdAt,
+        dateFrom,
+        dateTo,
+      );
+
       const matchesQuery = !cleanQuery
         ? true
         : [
@@ -1462,14 +1477,16 @@ export default function SystemContractsListPage() {
             contract.pricingModel,
             statusLabel(contract.status, locale),
             pricingLabel(contract.pricingModel, locale),
+            formatDate(contract.createdAt),
+            toDateOnly(contract.createdAt),
           ]
             .join(" ")
             .toLowerCase()
             .includes(cleanQuery);
 
-      return matchesStatus && matchesPricing && matchesQuery;
+      return matchesStatus && matchesPricing && matchesDate && matchesQuery;
     });
-  }, [contracts, locale, pricingFilter, query, statusFilter]);
+  }, [contracts, dateFrom, dateTo, locale, pricingFilter, query, statusFilter]);
 
   const sortedContracts = useMemo(() => {
     const rows = [...filteredContracts];
@@ -1573,7 +1590,9 @@ export default function SystemContractsListPage() {
   const hasSearchOrFilter =
     query.trim().length > 0 ||
     statusFilter !== "all" ||
-    pricingFilter !== "all";
+    pricingFilter !== "all" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
 
   const visibleTableColumnsCount =
     1 + Object.values(safeVisibleColumns).filter(Boolean).length;
@@ -1613,6 +1632,8 @@ export default function SystemContractsListPage() {
     setQuery("");
     setStatusFilter("all");
     setPricingFilter("all");
+    setDateFrom("");
+    setDateTo("");
   }
 
   const loadContracts = useCallback(
@@ -1705,6 +1726,8 @@ export default function SystemContractsListPage() {
         [t.filterSearch, query || t.all],
         [t.filterStatus, statusLabelText],
         [t.filterPricing, pricingLabelText],
+        [t.filterDateFrom, dateFrom || t.notSelected],
+        [t.filterDateTo, dateTo || t.notSelected],
       ],
       headers: [
         t.table.id,
@@ -1805,7 +1828,7 @@ export default function SystemContractsListPage() {
   useEffect(() => {
     setPageIndex(0);
     setSelectedIds([]);
-  }, [query, statusFilter, pricingFilter]);
+  }, [query, statusFilter, pricingFilter, dateFrom, dateTo]);
 
   if (!authResolving && !canViewContracts) {
     return (
@@ -2104,6 +2127,34 @@ export default function SystemContractsListPage() {
                           </Badge>
                         </Button>
                       ))}
+                    </div>
+
+                    <div className="grid max-w-xl gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="flex items-center gap-2 text-sm font-medium">
+                          <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                          <span>{t.fromDate}</span>
+                        </label>
+                        <Input
+                          type="date"
+                          value={dateFrom}
+                          onChange={(event) => setDateFrom(event.target.value)}
+                          className="h-10 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="flex items-center gap-2 text-sm font-medium">
+                          <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                          <span>{t.toDate}</span>
+                        </label>
+                        <Input
+                          type="date"
+                          value={dateTo}
+                          onChange={(event) => setDateTo(event.target.value)}
+                          className="h-10 rounded-xl"
+                        />
+                      </div>
                     </div>
                   </div>
 

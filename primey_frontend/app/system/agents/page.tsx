@@ -2,53 +2,46 @@
 
 /* ============================================================
    📂 app/system/agents/page.tsx
-   🧠 Primey Care | System Agents Dashboard
-   ------------------------------------------------------------
-   ✅ المسار: /system/agents
-   ✅ الإصدار: v2.0.1 - Centers Pattern + Safe Permissions
+   🧠 Primey Care | Agents Overview
 
-   ✅ العمل:
-      لوحة مختصرة لإدارة المندوبين داخل مساحة النظام.
-
-   ✅ المعيار:
-      - مبني بصريًا على نمط المراكز والعملاء المعتمد.
-      - دمج UX Refinement مع حماية المرحلة 2.
-      - لا يتم إظهار مسارات تقنية أو API داخل الواجهة.
-      - لا يتم عرض روابط تقارير داخل الوحدة.
-      - لا توجد أزرار وهمية.
-      - إخفاء الأزرار غير المصرح بها بدل تعطيلها.
-      - عدم كسر تحميل البيانات للمستخدم system_admin / superadmin.
-      - منع طلب البيانات فقط عند وجود منع صريح لصلاحية العرض.
-      - Error State مستقل عن Empty State.
-      - Skeleton Loading.
-      - Excel بصيغة .xls HTML Workbook.
-      - Web PDF Print.
-      - استخدام /currency/sar.svg.
-      - الأرقام بالإنجليزية.
+   ✅ المرحلة 17 + المرحلة 2
+   ✅ نفس النمط المعتمد
+   ✅ w-full space-y-4
+   ✅ بدون main / min-h-screen / max-w
+   ✅ أزرار انتقال للصفحات التي أزلناها من السايدر
+   ✅ Skeleton Loading
+   ✅ Error State مستقل
+   ✅ Empty State ذكي
+   ✅ Excel .xls HTML Workbook
+   ✅ Web PDF Print
+   ✅ sonner
+   ✅ SAR icon من /currency/sar.svg
+   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
 ============================================================ */
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowUpRight,
   BadgeCheck,
-  Calculator,
   Download,
   Eye,
+  FileText,
   HandCoins,
-  ListChecks,
   Loader2,
   MapPin,
-  Plus,
+  Phone,
+  PlusCircle,
   Printer,
   RefreshCcw,
   Search,
   ShieldCheck,
   Star,
   TrendingUp,
-  UserRound,
+  UserCheck,
   Users,
-  Wallet,
+  WalletCards,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -78,98 +71,103 @@ import {
 ============================================================ */
 
 type AppLocale = "ar" | "en";
+type Dict = Record<string, unknown>;
 
-type AgentStatus =
-  | "ACTIVE"
-  | "INACTIVE"
-  | "SUSPENDED"
-  | "DRAFT"
-  | "UNKNOWN";
-
+type AgentStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED" | "DRAFT" | "UNKNOWN";
 type CommissionType = "PERCENTAGE" | "FIXED" | "UNKNOWN";
-type StatusFilter = "ALL" | AgentStatus;
-type AuthRecord = Record<string, unknown>;
 
-type Agent = {
-  id: number | string;
-  fullName: string;
-  agentCode: string;
-  referralCode: string;
-  status: AgentStatus;
+type AgentRow = {
+  id: string;
+  agent_code: string;
+  referral_code: string;
+  name: string;
   phone: string;
   email: string;
   city: string;
   address: string;
-  defaultCommissionType: CommissionType;
-  defaultCommissionValue: number;
-  totalCustomers: number;
-  totalOrders: number;
-  totalSales: number;
-  pendingCommission: number;
-  approvedCommission: number;
-  paidCommission: number;
-  accountingPostedCommission: number;
-  bankName: string;
-  bankAccountName: string;
+  status: AgentStatus;
+  commission_type: CommissionType;
+  commission_value: number;
+  total_customers: number;
+  total_orders: number;
+  total_sales: number;
+  pending_commission: number;
+  approved_commission: number;
+  paid_commission: number;
+  accounting_posted_commission: number;
+  bank_name: string;
   iban: string;
-  notes: string;
-  isFeatured: boolean;
-  createdAt: string;
-  updatedAt: string;
-  raw: Record<string, unknown>;
+  is_featured: boolean;
+  created_at: string;
 };
 
-type AgentsApiStats = {
-  total_agents?: number | string;
-  active_agents?: number | string;
-  inactive_agents?: number | string;
-  suspended_agents?: number | string;
-  draft_agents?: number | string;
-  total_sales?: number | string;
-  total_commission?: number | string;
-  total_paid?: number | string;
+type AgentsSummary = {
+  total_agents: number;
+  active_agents: number;
+  inactive_agents: number;
+  suspended_agents: number;
+  draft_agents: number;
+  featured_agents: number;
+  total_customers: number;
+  total_orders: number;
+  total_sales: number;
+  pending_commission: number;
+  approved_commission: number;
+  paid_commission: number;
+  accounting_posted_commission: number;
 };
 
-type AgentsApiResponse = {
+type ApiEnvelope<T> = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
-  count?: number;
+  detail?: string;
+  error?: string;
+  data?: T;
   results?: unknown[];
-  data?: unknown[] | { results?: unknown[]; items?: unknown[]; agents?: unknown[] };
   items?: unknown[];
+  rows?: unknown[];
   agents?: unknown[];
-  stats?: AgentsApiStats;
-};
-
-type ExcelSheetOptions = {
-  filename: string;
-  worksheetName: string;
-  title: string;
-  locale: AppLocale;
-  summaryRows: Array<[string, string | number]>;
-  filterRows: Array<[string, string | number]>;
-  headers: string[];
-  rows: Array<Array<string | number>>;
+  summary?: Partial<AgentsSummary>;
+  stats?: Partial<AgentsSummary>;
 };
 
 const SAR_ICON_PATH = "/currency/sar.svg";
 
+const DEFAULT_SUMMARY: AgentsSummary = {
+  total_agents: 0,
+  active_agents: 0,
+  inactive_agents: 0,
+  suspended_agents: 0,
+  draft_agents: 0,
+  featured_agents: 0,
+  total_customers: 0,
+  total_orders: 0,
+  total_sales: 0,
+  pending_commission: 0,
+  approved_commission: 0,
+  paid_commission: 0,
+  accounting_posted_commission: 0,
+};
+
 /* ============================================================
-   Locale Helpers
+   Locale / API
 ============================================================ */
 
 function readLocale(): AppLocale {
   try {
     if (typeof window === "undefined") return "ar";
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
@@ -186,10 +184,6 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
-/* ============================================================
-   API Helper
-============================================================ */
-
 function apiUrl(path: string) {
   const base =
     process.env.NEXT_PUBLIC_API_URL ||
@@ -198,25 +192,22 @@ function apiUrl(path: string) {
 
   if (!base) return path;
 
-  const cleanBase = base.replace(/\/$/, "");
-  return `${cleanBase}${path}`;
+  return `${base.replace(/\/$/, "")}${path}`;
 }
 
 /* ============================================================
-   Permission Helpers
+   Auth / Permissions
 ============================================================ */
 
-function asRecord(value: unknown): AuthRecord {
-  return value && typeof value === "object" ? (value as AuthRecord) : {};
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
 }
 
-function getNestedRecord(source: AuthRecord, keys: string[]) {
+function getNested(source: Dict, keys: string[]) {
   for (const key of keys) {
     const value = source[key];
 
-    if (value && typeof value === "object") {
-      return value as AuthRecord;
-    }
+    if (value && typeof value === "object") return value as Dict;
   }
 
   return {};
@@ -236,7 +227,8 @@ function uniqueStrings(values: unknown[]): string[] {
               if (typeof item === "string") return [item];
 
               if (item && typeof item === "object") {
-                const obj = item as AuthRecord;
+                const obj = item as Dict;
+
                 return [
                   obj.code,
                   obj.codename,
@@ -251,7 +243,7 @@ function uniqueStrings(values: unknown[]): string[] {
           }
 
           if (value && typeof value === "object") {
-            const obj = value as AuthRecord;
+            const obj = value as Dict;
 
             return [
               obj.code,
@@ -270,10 +262,10 @@ function uniqueStrings(values: unknown[]): string[] {
   );
 }
 
-function getAuthUser(authValue: unknown): AuthRecord {
-  const auth = asRecord(authValue);
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
 
-  return getNestedRecord(auth, [
+  return getNested(auth, [
     "user",
     "currentUser",
     "profile",
@@ -284,7 +276,7 @@ function getAuthUser(authValue: unknown): AuthRecord {
 }
 
 function getAuthRoles(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
+  const auth = asDict(authValue);
   const user = getAuthUser(authValue);
 
   return uniqueStrings([
@@ -308,12 +300,13 @@ function getAuthRoles(authValue: unknown): string[] {
 }
 
 function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
+  const auth = asDict(authValue);
   const user = getAuthUser(authValue);
-  const authPermissions = asRecord(auth.permissions);
-  const userPermissions = asRecord(user.permissions);
-  const authProfilePermissions = asRecord(auth.profile_permissions);
-  const userProfilePermissions = asRecord(user.profile_permissions);
+
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
 
   return uniqueStrings([
     auth.permission_codes,
@@ -332,7 +325,7 @@ function getAuthPermissionCodes(authValue: unknown): string[] {
 }
 
 function isAuthResolving(authValue: unknown) {
-  const auth = asRecord(authValue);
+  const auth = asDict(authValue);
 
   return Boolean(
     auth.isLoading ||
@@ -344,7 +337,7 @@ function isAuthResolving(authValue: unknown) {
 }
 
 function isSystemAdmin(authValue: unknown) {
-  const auth = asRecord(authValue);
+  const auth = asDict(authValue);
   const user = getAuthUser(authValue);
   const roles = getAuthRoles(authValue);
 
@@ -370,29 +363,17 @@ function isSystemAdmin(authValue: unknown) {
   );
 }
 
-function hasAnyKnownPermissionSignal(authValue: unknown) {
-  return getAuthRoles(authValue).length > 0 || getAuthPermissionCodes(authValue).length > 0;
-}
-
-function hasPermissionCode(authValue: unknown, codes: string[]) {
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length === 0) return undefined;
-
-  return codes.some((code) => permissions.includes(code));
-}
-
-function hasSafePermission(
+function hasAnyPermission(
   authValue: unknown,
   codes: string[],
   mode: "view" | "action",
 ) {
   if (isSystemAdmin(authValue)) return true;
 
-  const explicitPermission = hasPermissionCode(authValue, codes);
+  const permissions = getAuthPermissionCodes(authValue);
 
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
   }
 
   const roles = getAuthRoles(authValue);
@@ -400,205 +381,23 @@ function hasSafePermission(
   if (roles.length > 0) {
     if (mode === "view") {
       return roles.some((role) =>
-        ["system_admin", "superuser", "super_admin", "support", "accountant", "viewer"].includes(role),
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "accountant",
+          "support",
+          "viewer",
+        ].includes(role),
       );
     }
 
     return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin"].includes(role),
+      ["system_admin", "superuser", "super_admin", "support"].includes(role),
     );
   }
 
-  if (!hasAnyKnownPermissionSignal(authValue)) {
-    return true;
-  }
-
-  return mode === "view";
-}
-
-/* ============================================================
-   API Normalizers
-============================================================ */
-
-function normalizeApiList(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-
-  if (!payload || typeof payload !== "object") return [];
-
-  const data = payload as AgentsApiResponse;
-
-  if (Array.isArray(data.results)) return data.results;
-  if (Array.isArray(data.items)) return data.items;
-  if (Array.isArray(data.agents)) return data.agents;
-  if (Array.isArray(data.data)) return data.data;
-
-  if (data.data && typeof data.data === "object") {
-    const nested = data.data;
-
-    if (Array.isArray(nested.results)) return nested.results;
-    if (Array.isArray(nested.items)) return nested.items;
-    if (Array.isArray(nested.agents)) return nested.agents;
-  }
-
-  return [];
-}
-
-function extractNestedValue(obj: Record<string, unknown>, key: string): unknown {
-  const direct = obj[key];
-
-  if (direct !== undefined && direct !== null && direct !== "") {
-    return direct;
-  }
-
-  const containers = ["agent", "stats", "summary", "commissions"];
-
-  for (const container of containers) {
-    const nested = obj[container];
-
-    if (nested && typeof nested === "object") {
-      const nestedObj = nested as Record<string, unknown>;
-      const value = nestedObj[key];
-
-      if (value !== undefined && value !== null && value !== "") {
-        return value;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function normalizeStatus(value: unknown): AgentStatus {
-  const status = String(value || "").toUpperCase();
-
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "INACTIVE") return "INACTIVE";
-  if (status === "SUSPENDED") return "SUSPENDED";
-  if (status === "DRAFT") return "DRAFT";
-
-  if (value === true) return "ACTIVE";
-  if (value === false) return "INACTIVE";
-
-  return "UNKNOWN";
-}
-
-function normalizeCommissionType(value: unknown): CommissionType {
-  const commissionType = String(value || "").toUpperCase();
-
-  if (commissionType === "PERCENTAGE") return "PERCENTAGE";
-  if (commissionType === "FIXED") return "FIXED";
-
-  return "UNKNOWN";
-}
-
-function toNumber(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-
-  const clean = String(value ?? "")
-    .replace(/,/g, "")
-    .replace(/[^\d.-]/g, "");
-
-  const parsed = Number(clean);
-
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function normalizeAgent(item: unknown): Agent {
-  const obj = (item || {}) as Record<string, unknown>;
-
-  const id =
-    extractNestedValue(obj, "id") ??
-    extractNestedValue(obj, "agent_id") ??
-    "";
-
-  const fullName =
-    extractNestedValue(obj, "full_name") ??
-    extractNestedValue(obj, "name") ??
-    extractNestedValue(obj, "agent_name") ??
-    "-";
-
-  const agentCode =
-    extractNestedValue(obj, "agent_code") ??
-    extractNestedValue(obj, "code") ??
-    (id ? `AGT-${id}` : "-");
-
-  const referralCode =
-    extractNestedValue(obj, "referral_code") ??
-    extractNestedValue(obj, "reference") ??
-    extractNestedValue(obj, "ref_code") ??
-    "-";
-
-  return {
-    id: id as number | string,
-    fullName: String(fullName || "-"),
-    agentCode: String(agentCode || "-"),
-    referralCode: String(referralCode || "-"),
-    status: normalizeStatus(extractNestedValue(obj, "status")),
-    phone: String(extractNestedValue(obj, "phone") ?? ""),
-    email: String(extractNestedValue(obj, "email") ?? ""),
-    city: String(extractNestedValue(obj, "city") ?? ""),
-    address: String(extractNestedValue(obj, "address") ?? ""),
-    defaultCommissionType: normalizeCommissionType(
-      extractNestedValue(obj, "default_commission_type") ??
-        extractNestedValue(obj, "commission_type"),
-    ),
-    defaultCommissionValue: toNumber(
-      extractNestedValue(obj, "default_commission_value") ??
-        extractNestedValue(obj, "commission_value") ??
-        0,
-    ),
-    totalCustomers: toNumber(
-      extractNestedValue(obj, "total_customers") ??
-        extractNestedValue(obj, "customers_count") ??
-        extractNestedValue(obj, "customer_count") ??
-        0,
-    ),
-    totalOrders: toNumber(
-      extractNestedValue(obj, "total_orders") ??
-        extractNestedValue(obj, "orders_count") ??
-        extractNestedValue(obj, "order_count") ??
-        0,
-    ),
-    totalSales: toNumber(
-      extractNestedValue(obj, "total_sales") ??
-        extractNestedValue(obj, "sales_total") ??
-        extractNestedValue(obj, "orders_total") ??
-        0,
-    ),
-    pendingCommission: toNumber(
-      extractNestedValue(obj, "pending_commission") ??
-        extractNestedValue(obj, "pending_commissions") ??
-        0,
-    ),
-    approvedCommission: toNumber(
-      extractNestedValue(obj, "approved_commission") ??
-        extractNestedValue(obj, "approved_commissions") ??
-        extractNestedValue(obj, "total_commission") ??
-        0,
-    ),
-    paidCommission: toNumber(
-      extractNestedValue(obj, "paid_commission") ??
-        extractNestedValue(obj, "paid_commissions") ??
-        0,
-    ),
-    accountingPostedCommission: toNumber(
-      extractNestedValue(obj, "accounting_posted_commission") ??
-        extractNestedValue(obj, "posted_commission") ??
-        0,
-    ),
-    bankName: String(extractNestedValue(obj, "bank_name") ?? ""),
-    bankAccountName: String(extractNestedValue(obj, "bank_account_name") ?? ""),
-    iban: String(extractNestedValue(obj, "iban") ?? ""),
-    notes: String(extractNestedValue(obj, "notes") ?? ""),
-    isFeatured: Boolean(
-      extractNestedValue(obj, "is_featured") ??
-        extractNestedValue(obj, "featured") ??
-        false,
-    ),
-    createdAt: String(extractNestedValue(obj, "created_at") ?? ""),
-    updatedAt: String(extractNestedValue(obj, "updated_at") ?? ""),
-    raw: obj,
-  };
+  return true;
 }
 
 /* ============================================================
@@ -609,171 +408,141 @@ function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    pageTitle: isArabic ? "إدارة المندوبين" : "Agents Management",
-    pageSubtitle: isArabic
-      ? "متابعة المندوبين، العملاء المرتبطين، الطلبات، العمولات، وحالة التشغيل."
-      : "Monitor agents, linked customers, orders, commissions, and operational status.",
+    title: isArabic ? "المندوبون" : "Agents",
+    subtitle: isArabic
+      ? "لوحة متابعة المندوبين والمبيعات والعملاء والعمولات المرتبطة بهم."
+      : "Overview for agents, sales, customers, and related commissions.",
 
-    addAgent: isArabic ? "إنشاء مندوب" : "Create Agent",
-    agentsList: isArabic ? "قائمة المندوبين" : "Agents List",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
     refresh: isArabic ? "تحديث" : "Refresh",
     retry: isArabic ? "إعادة المحاولة" : "Retry",
+    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
+    agentsList: isArabic ? "قائمة المندوبين" : "Agents List",
+    createAgent: isArabic ? "إنشاء مندوب" : "Create Agent",
 
-    featuredAgents: isArabic ? "المندوبون المميزون" : "Featured Agents",
-    featuredSubtitle: isArabic
-      ? "عرض مختصر لأهم المندوبين حسب التمييز أو المبيعات."
-      : "A compact view of key agents based on featured status or sales.",
-
-    trackStatus: isArabic
-      ? "حالة المندوبين والعمولات"
-      : "Agents & Commissions Status",
-    trackSubtitle: isArabic
-      ? "تحليل سريع لحالة المندوبين والطلبات والعمولات."
-      : "Quick analysis of agents, orders, and commissions.",
-
-    filterPlaceholder: isArabic ? "ابحث في المندوبين..." : "Filter agents...",
-
-    all: isArabic ? "الكل" : "All",
-    total: isArabic ? "الإجمالي" : "Total",
-    active: isArabic ? "نشط" : "Active",
-    draft: isArabic ? "مسودة" : "Draft",
-    suspended: isArabic ? "موقوف" : "Suspended",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    loaded: isArabic ? "محمّلة" : "Loaded",
-    operational: isArabic ? "تشغيلي" : "Operational",
-    needsReview: isArabic ? "يحتاج مراجعة" : "Needs Review",
-    stopped: isArabic ? "متوقف" : "Stopped",
-
+    totalAgents: isArabic ? "إجمالي المندوبين" : "Total Agents",
+    activeAgents: isArabic ? "مندوبون نشطون" : "Active Agents",
+    totalCustomers: isArabic ? "عملاء المندوبين" : "Agent Customers",
+    totalOrders: isArabic ? "طلبات المندوبين" : "Agent Orders",
     totalSales: isArabic ? "إجمالي المبيعات" : "Total Sales",
-    approvedCommissions: isArabic ? "العمولات المعتمدة" : "Approved Commissions",
-    paidCommissions: isArabic ? "العمولات المدفوعة" : "Paid Commissions",
-    pendingCommissions: isArabic ? "عمولات معلقة" : "Pending Commissions",
-    linkedOrders: isArabic ? "الطلبات المرتبطة" : "Linked Orders",
-    linkedCustomers: isArabic ? "العملاء المرتبطون" : "Linked Customers",
-    accountingPosted: isArabic ? "مرحّل محاسبيًا" : "Accounting Posted",
+    pendingCommission: isArabic ? "عمولات معلقة" : "Pending Commission",
+    approvedCommission: isArabic ? "عمولات معتمدة" : "Approved Commission",
+    paidCommission: isArabic ? "عمولات مدفوعة" : "Paid Commission",
+    accountingPostedCommission: isArabic ? "مرحلة محاسبيًا" : "Accounting Posted",
+    featuredAgents: isArabic ? "مندوبون مميزون" : "Featured Agents",
+    suspendedAgents: isArabic ? "مندوبون موقوفون" : "Suspended Agents",
 
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    latestRecords: isArabic ? "آخر السجلات" : "Latest records",
-    viewFullList: isArabic ? "عرض القائمة الكاملة" : "View Full List",
+    shortcutsTitle: isArabic ? "اختصارات المندوبين" : "Agent Shortcuts",
+    shortcutsDesc: isArabic
+      ? "الوصول السريع لقائمة المندوبين أو إنشاء مندوب بعد تنظيف السايدر."
+      : "Quick access to agent list and create page after sidebar cleanup.",
+
+    latestTitle: isArabic ? "أحدث المندوبين" : "Latest Agents",
+    latestDesc: isArabic
+      ? "أحدث المندوبين مع الحالة والمبيعات والعمولات."
+      : "Latest agents with status, sales, and commissions.",
+
+    searchPlaceholder: isArabic
+      ? "ابحث باسم المندوب أو الكود أو الجوال أو المدينة..."
+      : "Search by agent name, code, phone, or city...",
 
     table: {
-      id: isArabic ? "الكود" : "Code",
-      name: isArabic ? "اسم المندوب" : "Agent Name",
-      code: isArabic ? "كود الإحالة" : "Referral Code",
+      agent: isArabic ? "المندوب" : "Agent",
+      code: isArabic ? "الكود" : "Code",
       city: isArabic ? "المدينة" : "City",
+      contact: isArabic ? "التواصل" : "Contact",
+      status: isArabic ? "الحالة" : "Status",
       customers: isArabic ? "العملاء" : "Customers",
       orders: isArabic ? "الطلبات" : "Orders",
+      sales: isArabic ? "المبيعات" : "Sales",
       commission: isArabic ? "العمولة" : "Commission",
-      status: isArabic ? "الحالة" : "Status",
+      paid: isArabic ? "المدفوع" : "Paid",
+      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
       action: isArabic ? "الإجراء" : "Action",
     },
 
-    emptyTitle: isArabic ? "لا يوجد مندوبون بعد" : "No agents yet",
+    active: isArabic ? "نشط" : "Active",
+    inactive: isArabic ? "غير نشط" : "Inactive",
+    suspended: isArabic ? "موقوف" : "Suspended",
+    draft: isArabic ? "مسودة" : "Draft",
+    unknown: isArabic ? "غير محدد" : "Unknown",
+
+    percentage: isArabic ? "نسبة" : "Percentage",
+    fixed: isArabic ? "مبلغ ثابت" : "Fixed",
+    featured: isArabic ? "مميز" : "Featured",
+    view: isArabic ? "عرض" : "View",
+
+    emptyTitle: isArabic ? "لا توجد بيانات مندوبين" : "No agent data",
     emptyText: isArabic
-      ? "عند إضافة مندوبين جدد ستظهر بياناتهم هنا مباشرة."
-      : "New agents will appear here once they are added.",
+      ? "ستظهر بيانات المندوبين هنا بعد إنشاء أول مندوب."
+      : "Agent data will appear here after creating the first agent.",
     noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
     noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو فلتر الحالة لعرض نتائج أكثر."
-      : "Try changing the search keywords or status filter to show more results.",
+      ? "جرّب تغيير كلمات البحث."
+      : "Try changing your search terms.",
 
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
+    accessDeniedTitle: isArabic ? "غير مصرح بعرض المندوبين" : "Access denied",
     accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض بيانات المندوبين. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view agents data. Contact your system administrator if you need access.",
+      ? "لا تملك صلاحية عرض المندوبين. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to view agents. Contact your system administrator if you need access.",
 
-    apiError: isArabic
+    loadError: isArabic
       ? "تعذر تحميل بيانات المندوبين."
-      : "Unable to load agents data.",
-    apiErrorHint: isArabic
+      : "Unable to load agents.",
+    loadErrorHint: isArabic
       ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
       : "Check the connection or permissions, then try again.",
-    refreshSuccess: isArabic
-      ? "تم تحديث بيانات المندوبين بنجاح"
-      : "Agents data refreshed successfully",
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح"
-      : "Excel file prepared successfully",
+    loadSuccess: isArabic
+      ? "تم تحديث بيانات المندوبين."
+      : "Agents refreshed.",
+
+    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
     exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير"
-      : "No data available to export",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة"
-      : "Print window prepared",
+      ? "لا توجد بيانات قابلة للتصدير."
+      : "No data available to export.",
+    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
     printError: isArabic
-      ? "تعذر فتح نافذة الطباعة"
-      : "Unable to open print window",
+      ? "تعذر فتح نافذة الطباعة."
+      : "Unable to open print window.",
 
-    quickAccessTitle: isArabic
-      ? "إجراءات وحدة المندوبين"
-      : "Agents Module Actions",
-    quickAccessSubtitle: isArabic
-      ? "اختصارات منظمة للوصول إلى أهم صفحات وحدة المندوبين."
-      : "Organized shortcuts to the key agents module pages.",
-
-    open: isArabic ? "فتح" : "Open",
-    manage: isArabic ? "إدارة" : "Manage",
-
-    actionListTitle: isArabic ? "قائمة المندوبين" : "Agents List",
-    actionListDesc: isArabic
-      ? "استعراض جميع المندوبين، البحث، التصفية، وإدارة السجلات."
-      : "Browse all agents, search, filter, and manage records.",
-
-    actionCreateTitle: isArabic ? "إنشاء مندوب" : "Create Agent",
-    actionCreateDesc: isArabic
-      ? "إضافة مندوب جديد وربطه لاحقًا بالعملاء والطلبات والعمولات."
-      : "Add a new agent and later connect it with customers, orders, and commissions.",
-
-    commissionTypeLabels: {
-      PERCENTAGE: isArabic ? "نسبة" : "Percentage",
-      FIXED: isArabic ? "مبلغ ثابت" : "Fixed",
-      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
-    } satisfies Record<CommissionType, string>,
-
-    export: {
-      generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-      scope: isArabic ? "نطاق التقرير" : "Report Scope",
-      currentData: isArabic ? "البيانات الظاهرة" : "Visible Data",
-      search: isArabic ? "البحث" : "Search",
-      status: isArabic ? "فلتر الحالة" : "Status Filter",
-      summary: isArabic ? "ملخص القائمة" : "List Summary",
-      filters: isArabic ? "الفلاتر المستخدمة" : "Applied Filters",
-    },
-
-    printTitle: isArabic ? "لوحة المندوبين" : "Agents Dashboard",
+    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
     printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
   };
 }
 
 /* ============================================================
-   UI Helpers
+   Helpers
 ============================================================ */
 
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0";
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(numericValue);
+function toNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatMoney(value: number | string): string {
-  const numericValue = Number(value);
+function formatNumber(value: unknown): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(toNumber(value));
+}
 
-  if (!Number.isFinite(numericValue)) return "0.00";
-
-  return numericValue.toLocaleString("en-US", {
+function formatMoney(value: unknown): string {
+  return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  });
+  }).format(toNumber(value));
+}
+
+function formatDate(value: string, locale: AppLocale): string {
+  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  }).format(date);
 }
 
 function escapeHtml(value: string | number) {
@@ -785,9 +554,204 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function percent(value: number, total: number) {
-  if (!total) return 0;
-  return Math.min(100, Math.max(0, Math.round((value / total) * 100)));
+function getNestedValue(obj: Dict, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = obj[key];
+
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+
+  for (const container of ["agent", "user", "profile", "data", "stats"]) {
+    const nested = obj[container];
+
+    if (nested && typeof nested === "object") {
+      const value = getNestedValue(nested as Dict, keys);
+
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+  }
+
+  return undefined;
+}
+
+function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
+  if (!payload) return [];
+
+  const data = asDict(payload.data);
+  const directValue = (payload as Dict)[key];
+
+  if (Array.isArray(directValue)) return directValue;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.rows)) return payload.rows;
+
+  if (Array.isArray(data[key])) return data[key] as unknown[];
+  if (Array.isArray(data.results)) return data.results as unknown[];
+  if (Array.isArray(data.items)) return data.items as unknown[];
+  if (Array.isArray(data.rows)) return data.rows as unknown[];
+
+  if (Array.isArray(payload.data)) return payload.data;
+
+  return [];
+}
+
+function extractSummary(payload: ApiEnvelope<unknown> | null) {
+  if (!payload) return {};
+
+  const data = asDict(payload.data);
+
+  return {
+    ...asDict(payload.summary),
+    ...asDict(payload.stats),
+    ...asDict(data.summary),
+    ...asDict(data.stats),
+    ...asDict(data.totals),
+    ...asDict(data),
+  } as Partial<AgentsSummary>;
+}
+
+function normalizeStatus(value: unknown): AgentStatus {
+  const clean = String(value || "").toUpperCase();
+
+  if (["ACTIVE", "ENABLED", "APPROVED"].includes(clean)) return "ACTIVE";
+  if (["INACTIVE", "DISABLED"].includes(clean)) return "INACTIVE";
+  if (["SUSPENDED", "BLOCKED", "BANNED"].includes(clean)) return "SUSPENDED";
+  if (["DRAFT", "PENDING", "NEW"].includes(clean)) return "DRAFT";
+
+  return "UNKNOWN";
+}
+
+function normalizeCommissionType(value: unknown): CommissionType {
+  const clean = String(value || "").toUpperCase();
+
+  if (["PERCENTAGE", "PERCENT", "RATE"].includes(clean)) return "PERCENTAGE";
+  if (["FIXED", "AMOUNT"].includes(clean)) return "FIXED";
+
+  return "UNKNOWN";
+}
+
+function normalizeAgent(item: unknown, index: number): AgentRow {
+  const obj = asDict(item);
+
+  return {
+    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
+    agent_code: String(getNestedValue(obj, ["agent_code", "code", "number"]) || "-"),
+    referral_code: String(
+      getNestedValue(obj, ["referral_code", "ref_code", "affiliate_code"]) || "",
+    ),
+    name: String(
+      getNestedValue(obj, ["full_name", "name", "agent_name", "username"]) || "-",
+    ),
+    phone: String(getNestedValue(obj, ["phone", "mobile", "phone_number"]) || ""),
+    email: String(getNestedValue(obj, ["email", "agent_email"]) || ""),
+    city: String(getNestedValue(obj, ["city", "city_name"]) || ""),
+    address: String(getNestedValue(obj, ["address", "full_address"]) || ""),
+    status: normalizeStatus(getNestedValue(obj, ["status", "state"])),
+    commission_type: normalizeCommissionType(
+      getNestedValue(obj, [
+        "default_commission_type",
+        "commission_type",
+        "defaultCommissionType",
+      ]),
+    ),
+    commission_value: toNumber(
+      getNestedValue(obj, [
+        "default_commission_value",
+        "commission_value",
+        "defaultCommissionValue",
+      ]),
+    ),
+    total_customers: toNumber(
+      getNestedValue(obj, ["total_customers", "customers_count"]),
+    ),
+    total_orders: toNumber(getNestedValue(obj, ["total_orders", "orders_count"])),
+    total_sales: toNumber(getNestedValue(obj, ["total_sales", "sales_total"])),
+    pending_commission: toNumber(
+      getNestedValue(obj, ["pending_commission", "pending_commission_amount"]),
+    ),
+    approved_commission: toNumber(
+      getNestedValue(obj, ["approved_commission", "approved_commission_amount"]),
+    ),
+    paid_commission: toNumber(
+      getNestedValue(obj, ["paid_commission", "paid_commission_amount"]),
+    ),
+    accounting_posted_commission: toNumber(
+      getNestedValue(obj, [
+        "accounting_posted_commission",
+        "posted_commission",
+        "accounting_posted_commission_amount",
+      ]),
+    ),
+    bank_name: String(getNestedValue(obj, ["bank_name", "bank"]) || ""),
+    iban: String(getNestedValue(obj, ["iban", "bank_iban"]) || ""),
+    is_featured: Boolean(getNestedValue(obj, ["is_featured", "featured"])),
+    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
+  };
+}
+
+function buildSummary(
+  rows: AgentRow[],
+  apiSummary?: Partial<AgentsSummary>,
+): AgentsSummary {
+  const fallback: AgentsSummary = {
+    total_agents: rows.length,
+    active_agents: rows.filter((item) => item.status === "ACTIVE").length,
+    inactive_agents: rows.filter((item) => item.status === "INACTIVE").length,
+    suspended_agents: rows.filter((item) => item.status === "SUSPENDED").length,
+    draft_agents: rows.filter((item) => item.status === "DRAFT").length,
+    featured_agents: rows.filter((item) => item.is_featured).length,
+    total_customers: rows.reduce((sum, item) => sum + item.total_customers, 0),
+    total_orders: rows.reduce((sum, item) => sum + item.total_orders, 0),
+    total_sales: rows.reduce((sum, item) => sum + item.total_sales, 0),
+    pending_commission: rows.reduce(
+      (sum, item) => sum + item.pending_commission,
+      0,
+    ),
+    approved_commission: rows.reduce(
+      (sum, item) => sum + item.approved_commission,
+      0,
+    ),
+    paid_commission: rows.reduce((sum, item) => sum + item.paid_commission, 0),
+    accounting_posted_commission: rows.reduce(
+      (sum, item) => sum + item.accounting_posted_commission,
+      0,
+    ),
+  };
+
+  const api = asDict(apiSummary);
+
+  return {
+    total_agents:
+      toNumber(api.total_agents) ||
+      toNumber(api.agents_count) ||
+      fallback.total_agents,
+    active_agents: toNumber(api.active_agents) || fallback.active_agents,
+    inactive_agents: toNumber(api.inactive_agents) || fallback.inactive_agents,
+    suspended_agents:
+      toNumber(api.suspended_agents) || fallback.suspended_agents,
+    draft_agents: toNumber(api.draft_agents) || fallback.draft_agents,
+    featured_agents: toNumber(api.featured_agents) || fallback.featured_agents,
+    total_customers:
+      toNumber(api.total_customers) ||
+      toNumber(api.customers_count) ||
+      fallback.total_customers,
+    total_orders:
+      toNumber(api.total_orders) ||
+      toNumber(api.orders_count) ||
+      fallback.total_orders,
+    total_sales:
+      toNumber(api.total_sales) ||
+      toNumber(api.sales_total) ||
+      fallback.total_sales,
+    pending_commission:
+      toNumber(api.pending_commission) || fallback.pending_commission,
+    approved_commission:
+      toNumber(api.approved_commission) || fallback.approved_commission,
+    paid_commission: toNumber(api.paid_commission) || fallback.paid_commission,
+    accounting_posted_commission:
+      toNumber(api.accounting_posted_commission) ||
+      fallback.accounting_posted_commission,
+  };
 }
 
 function statusLabel(status: AgentStatus, locale: AppLocale) {
@@ -804,6 +768,18 @@ function statusLabel(status: AgentStatus, locale: AppLocale) {
   return labels[status];
 }
 
+function commissionTypeLabel(type: CommissionType, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<CommissionType, string> = {
+    PERCENTAGE: t.percentage,
+    FIXED: t.fixed,
+    UNKNOWN: t.unknown,
+  };
+
+  return labels[type];
+}
+
 function statusBadge(status: AgentStatus, locale: AppLocale) {
   const label = statusLabel(status, locale);
 
@@ -817,52 +793,50 @@ function statusBadge(status: AgentStatus, locale: AppLocale) {
 
   if (status === "DRAFT") {
     return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
         {label}
       </Badge>
     );
   }
 
-  if (status === "SUSPENDED") {
+  if (status === "INACTIVE" || status === "SUSPENDED") {
     return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "INACTIVE") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
+      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
         {label}
       </Badge>
     );
   }
 
   return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
+    <Badge variant="outline" className="rounded-full px-3 py-1">
       {label}
     </Badge>
   );
 }
 
-function isValidAgentId(id: Agent["id"]) {
-  const value = String(id || "").trim();
+function isValidId(value: unknown) {
+  const id = String(value || "").trim();
 
-  return value.length > 0 && value !== "-" && value !== "undefined";
+  return id && id !== "-" && id !== "undefined" && id !== "null";
 }
 
-function SarAmount({ value }: { value: number | string }) {
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
+}
+
+function MoneyText({ value }: { value: unknown }) {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       <span>{formatMoney(value)}</span>
-      <Image
-        src={SAR_ICON_PATH}
-        alt=""
-        width={14}
-        height={14}
-        className="h-3.5 w-3.5"
-      />
+      <SarIcon className="h-3.5 w-3.5" />
     </span>
   );
 }
@@ -871,100 +845,37 @@ function SkeletonLine({ className = "" }: { className?: string }) {
   return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
 }
 
-function SummaryCardsSkeleton() {
+function PageSkeleton() {
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      {Array.from({ length: 3 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="flex items-start justify-between gap-4 p-5">
-            <div className="space-y-3">
-              <SkeletonLine className="h-11 w-11 rounded-2xl" />
-              <div className="space-y-2">
-                <SkeletonLine className="h-4 w-28" />
-                <SkeletonLine className="h-7 w-32" />
-              </div>
-            </div>
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-5">
+              <SkeletonLine className="h-8 w-28" />
+              <SkeletonLine className="mt-3 h-4 w-24" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
-            <div className="space-y-2 rounded-2xl border bg-background px-3 py-2">
-              <SkeletonLine className="h-3 w-20" />
-              <SkeletonLine className="h-4 w-16" />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-function FeaturedAgentsSkeleton() {
-  return (
-    <div className="space-y-3">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <div
-          key={index}
-          className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3"
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            <SkeletonLine className="h-11 w-11 shrink-0 rounded-xl" />
-            <div className="space-y-2">
-              <SkeletonLine className="h-3 w-28" />
-              <SkeletonLine className="h-3 w-20" />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <SkeletonLine className="h-3 w-16" />
-            <SkeletonLine className="h-3 w-12" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function StatusCardsSkeleton() {
-  return (
-    <div className="grid gap-3 md:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <div
-          key={index}
-          className="space-y-3 rounded-xl border bg-background/70 p-3"
-        >
-          <div className="flex items-center gap-2">
-            <SkeletonLine className="h-4 w-4" />
-            <SkeletonLine className="h-7 w-14" />
-          </div>
-          <div className="space-y-2">
-            <SkeletonLine className="h-3 w-20" />
-            <SkeletonLine className="h-2 w-full" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TableRowsSkeleton({ showCommission, showAction }: { showCommission: boolean; showAction: boolean }) {
-  const columns = 7 + (showCommission ? 1 : 0) + (showAction ? 1 : 0);
-
-  return (
-    <>
-      {Array.from({ length: 6 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: columns }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 1
-                    ? "h-8 w-40 rounded-lg"
-                    : "h-4 w-20 rounded-lg"
-                }
-              />
-            </TableCell>
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="grid gap-3 p-5 md:grid-cols-2">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-24 w-full rounded-2xl" />
           ))}
-        </TableRow>
-      ))}
-    </>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="space-y-3 p-5">
+          <SkeletonLine className="h-7 w-48" />
+          {Array.from({ length: 7 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
+          ))}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -972,40 +883,40 @@ function TableRowsSkeleton({ showCommission, showAction }: { showCommission: boo
    Export / Print
 ============================================================ */
 
-function downloadExcel(options: ExcelSheetOptions) {
-  const dir = options.locale === "ar" ? "rtl" : "ltr";
-  const align = options.locale === "ar" ? "right" : "left";
-  const colspan = Math.max(options.headers.length, 2);
+function downloadExcel({
+  filename,
+  title,
+  locale,
+  summary,
+  rows,
+}: {
+  filename: string;
+  title: string;
+  locale: AppLocale;
+  summary: AgentsSummary;
+  rows: AgentRow[];
+}) {
+  const isArabic = locale === "ar";
+  const dir = isArabic ? "rtl" : "ltr";
+  const align = isArabic ? "right" : "left";
+  const t = dictionary(locale);
 
-  const summaryHtml = options.summaryRows
+  const rowsHtml = rows
     .map(
-      ([label, value]) => `
+      (item) => `
         <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const filterHtml = options.filterRows
-    .map(
-      ([label, value]) => `
-        <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const headerHtml = options.headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
-    .join("");
-
-  const rowsHtml = options.rows
-    .map(
-      (row) => `
-        <tr>
-          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
+          <td>${escapeHtml(item.agent_code)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(item.referral_code || "-")}</td>
+          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
+          <td>${escapeHtml(item.city || "-")}</td>
+          <td>${escapeHtml(item.phone || "-")}</td>
+          <td>${escapeHtml(formatNumber(item.total_customers))}</td>
+          <td>${escapeHtml(formatNumber(item.total_orders))}</td>
+          <td>${escapeHtml(formatMoney(item.total_sales))}</td>
+          <td>${escapeHtml(formatMoney(item.pending_commission))}</td>
+          <td>${escapeHtml(formatMoney(item.paid_commission))}</td>
+          <td>${escapeHtml(formatDate(item.created_at, locale))}</td>
         </tr>`,
     )
     .join("");
@@ -1016,81 +927,47 @@ function downloadExcel(options: ExcelSheetOptions) {
           xmlns="http://www.w3.org/TR/REC-html40">
       <head>
         <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(options.worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${options.locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
         <style>
-          body {
-            direction: ${dir};
-            font-family: Arial, sans-serif;
-          }
-          table {
-            border-collapse: collapse;
-            width: 100%;
-          }
-          th,
-          td {
+          body { direction: ${dir}; font-family: Arial, sans-serif; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td {
             border: 1px solid #d9e2ef;
             padding: 8px;
             text-align: ${align};
             vertical-align: top;
             mso-number-format: "\\@";
           }
-          th {
-            background: #d8ecfb;
-            color: #000000;
-            font-weight: 700;
-          }
-          .title {
-            font-size: 20px;
-            font-weight: 700;
-            text-align: center;
-            background: #ffffff;
-          }
-          .section {
-            font-weight: 700;
-            background: #eef6ff;
-          }
-          .summary-label {
-            font-weight: 700;
-            background: #f8fafc;
-            width: 240px;
-          }
-          .summary-value {
-            font-weight: 700;
-          }
+          th { background: #d8ecfb; font-weight: 700; }
+          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
+          .section { font-weight: 700; background: #eef6ff; }
+          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
         </style>
       </head>
       <body dir="${dir}">
         <table>
+          <tr><td class="title" colspan="12">${escapeHtml(title)}</td></tr>
+          <tr><td colspan="12"></td></tr>
+          <tr><td class="section" colspan="12">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalAgents)}</td><td colspan="11">${escapeHtml(formatNumber(summary.total_agents))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.activeAgents)}</td><td colspan="11">${escapeHtml(formatNumber(summary.active_agents))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalSales)}</td><td colspan="11">${escapeHtml(formatMoney(summary.total_sales))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.pendingCommission)}</td><td colspan="11">${escapeHtml(formatMoney(summary.pending_commission))}</td></tr>
+
+          <tr><td colspan="12"></td></tr>
           <tr>
-            <td class="title" colspan="${colspan}">
-              ${escapeHtml(options.title)}
-            </td>
+            <th>${escapeHtml(t.table.code)}</th>
+            <th>${escapeHtml(t.table.agent)}</th>
+            <th>${escapeHtml("Referral")}</th>
+            <th>${escapeHtml(t.table.status)}</th>
+            <th>${escapeHtml(t.table.city)}</th>
+            <th>${escapeHtml(t.table.contact)}</th>
+            <th>${escapeHtml(t.table.customers)}</th>
+            <th>${escapeHtml(t.table.orders)}</th>
+            <th>${escapeHtml(t.table.sales)}</th>
+            <th>${escapeHtml(t.pendingCommission)}</th>
+            <th>${escapeHtml(t.paidCommission)}</th>
+            <th>${escapeHtml(t.table.createdAt)}</th>
           </tr>
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "ملخص القائمة" : "List Summary"}
-          </td></tr>
-          ${summaryHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "الفلاتر المستخدمة" : "Applied Filters"}
-          </td></tr>
-          ${filterHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr>${headerHtml}</tr>
           ${rowsHtml}
         </table>
       </body>
@@ -1104,7 +981,7 @@ function downloadExcel(options: ExcelSheetOptions) {
   const anchor = document.createElement("a");
 
   anchor.href = url;
-  anchor.download = options.filename;
+  anchor.download = filename;
   anchor.click();
 
   URL.revokeObjectURL(url);
@@ -1113,33 +990,29 @@ function downloadExcel(options: ExcelSheetOptions) {
 function buildPrintHtml({
   locale,
   title,
+  summary,
   rows,
-  t,
 }: {
   locale: AppLocale;
   title: string;
-  rows: Agent[];
-  t: ReturnType<typeof dictionary>;
+  summary: AgentsSummary;
+  rows: AgentRow[];
 }) {
   const isArabic = locale === "ar";
-  const now = new Date().toLocaleString("en-US");
+  const t = dictionary(locale);
 
   const tableRows = rows
+    .slice(0, 40)
     .map(
-      (agent, index) => `
+      (item) => `
         <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(agent.agentCode || "-")}</td>
-          <td>${escapeHtml(agent.fullName || "-")}</td>
-          <td>${escapeHtml(agent.referralCode || "-")}</td>
-          <td>${escapeHtml(agent.city || "-")}</td>
-          <td>${escapeHtml(formatNumber(agent.totalCustomers))}</td>
-          <td>${escapeHtml(formatNumber(agent.totalOrders))}</td>
-          <td>${escapeHtml(formatMoney(agent.totalSales))}</td>
-          <td>${escapeHtml(formatMoney(agent.approvedCommission))}</td>
-          <td>${escapeHtml(statusLabel(agent.status, locale))}</td>
-        </tr>
-      `,
+          <td>${escapeHtml(item.agent_code)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
+          <td>${escapeHtml(item.city || "-")}</td>
+          <td>${escapeHtml(formatNumber(item.total_orders))}</td>
+          <td>${escapeHtml(formatMoney(item.total_sales))}</td>
+        </tr>`,
     )
     .join("");
 
@@ -1156,101 +1029,79 @@ function buildPrintHtml({
             padding: 24px;
             font-family: Arial, Tahoma, sans-serif;
             color: #111827;
-            background: #ffffff;
+            background: #fff;
             direction: ${isArabic ? "rtl" : "ltr"};
             text-align: ${isArabic ? "right" : "left"};
           }
-          .print-header {
+          .header {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
             gap: 16px;
-            margin-bottom: 18px;
             border-bottom: 1px solid #e5e7eb;
             padding-bottom: 14px;
+            margin-bottom: 18px;
           }
-          h1 {
-            margin: 0;
-            font-size: 22px;
-            font-weight: 800;
-          }
-          .meta {
-            margin-top: 8px;
-            color: #6b7280;
-            font-size: 12px;
-            line-height: 1.8;
-          }
+          h1 { margin: 0; font-size: 22px; font-weight: 800; }
+          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
           .badge {
-            display: inline-block;
             border: 1px solid #d1d5db;
             border-radius: 999px;
-            padding: 4px 10px;
+            padding: 5px 12px;
             font-size: 12px;
-            color: #374151;
+            height: fit-content;
           }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 18px;
           }
-          th {
-            background: #f3f4f6;
-            color: #111827;
-            font-weight: 700;
-          }
-          th,
-          td {
+          .box {
             border: 1px solid #e5e7eb;
-            padding: 9px 8px;
+            border-radius: 12px;
+            padding: 10px;
+          }
+          .box span { color: #6b7280; display: block; font-size: 11px; }
+          .box strong { display: block; margin-top: 6px; font-size: 16px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+          th { background: #f3f4f6; font-weight: 700; }
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 8px;
             text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
           }
-          tr:nth-child(even) td {
-            background: #fafafa;
-          }
-          @page {
-            size: A4 landscape;
-            margin: 12mm;
-          }
-          @media print {
-            body { padding: 0; }
-          }
+          @page { size: A4 landscape; margin: 12mm; }
+          @media print { body { padding: 0; } }
         </style>
       </head>
-
       <body>
-        <div class="print-header">
+        <div class="header">
           <div>
             <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
+            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
           </div>
           <div class="badge">Primey Care</div>
+        </div>
+
+        <div class="grid">
+          <div class="box"><span>${escapeHtml(t.totalAgents)}</span><strong>${escapeHtml(formatNumber(summary.total_agents))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.activeAgents)}</span><strong>${escapeHtml(formatNumber(summary.active_agents))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.totalSales)}</span><strong>${escapeHtml(formatMoney(summary.total_sales))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.pendingCommission)}</span><strong>${escapeHtml(formatMoney(summary.pending_commission))}</strong></div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th>#</th>
-              <th>${escapeHtml(t.table.id)}</th>
-              <th>${escapeHtml(t.table.name)}</th>
               <th>${escapeHtml(t.table.code)}</th>
-              <th>${escapeHtml(t.table.city)}</th>
-              <th>${escapeHtml(t.table.customers)}</th>
-              <th>${escapeHtml(t.table.orders)}</th>
-              <th>${escapeHtml(t.totalSales)}</th>
-              <th>${escapeHtml(t.approvedCommissions)}</th>
+              <th>${escapeHtml(t.table.agent)}</th>
               <th>${escapeHtml(t.table.status)}</th>
+              <th>${escapeHtml(t.table.city)}</th>
+              <th>${escapeHtml(t.table.orders)}</th>
+              <th>${escapeHtml(t.table.sales)}</th>
             </tr>
           </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="10" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
+          <tbody>${tableRows || `<tr><td colspan="6">${escapeHtml(t.emptyTitle)}</td></tr>`}</tbody>
         </table>
 
         <script>
@@ -1272,298 +1123,74 @@ export default function SystemAgentsPage() {
   const auth = useAuth() as unknown;
 
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [apiStats, setApiStats] = useState<AgentsApiStats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [rows, setRows] = useState<AgentRow[]>([]);
+  const [summary, setSummary] = useState<AgentsSummary>(DEFAULT_SUMMARY);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
-
   const authResolving = isAuthResolving(auth);
 
-  const canViewAgents = hasSafePermission(
-    auth,
-    ["agents.view", "agents.list"],
-    "view",
-  );
+  const canView = hasAnyPermission(auth, ["agents.view", "agents.list"], "view");
+  const canCreate = hasAnyPermission(auth, ["agents.create"], "action");
 
-  const canCreateAgents = hasSafePermission(
-    auth,
-    ["agents.create"],
-    "action",
-  );
-
-  const canExportAgents = hasSafePermission(
+  const canExport = hasAnyPermission(
     auth,
     ["agents.export", "reports.export"],
     "action",
   );
 
-  const canPrintAgents = hasSafePermission(
+  const canPrint = hasAnyPermission(
     auth,
     ["agents.print", "reports.print"],
     "action",
   );
 
-  const canViewAgentDetails = hasSafePermission(
-    auth,
-    ["agents.view", "agents.detail"],
-    "view",
-  );
+  const canViewDetails = hasAnyPermission(auth, ["agents.view"], "view");
 
-  const canViewCommissions = hasSafePermission(
-    auth,
-    ["agents.commissions.view"],
-    "view",
-  );
+  const filteredRows = useMemo(() => {
+    const clean = query.trim().toLowerCase();
 
-  const filteredAgents = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
-
-    return agents.filter((agent) => {
-      const matchesStatus =
-        statusFilter === "ALL" ? true : agent.status === statusFilter;
-
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            agent.fullName,
-            agent.agentCode,
-            agent.referralCode,
-            agent.city,
-            agent.phone,
-            agent.email,
-            agent.status,
-            agent.defaultCommissionType,
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
-
-      return matchesStatus && matchesQuery;
-    });
-  }, [agents, query, statusFilter]);
-
-  const stats = useMemo(() => {
-    const total = toNumber(apiStats?.total_agents) || agents.length;
-    const active =
-      toNumber(apiStats?.active_agents) ||
-      agents.filter((item) => item.status === "ACTIVE").length;
-    const draft =
-      toNumber(apiStats?.draft_agents) ||
-      agents.filter((item) => item.status === "DRAFT").length;
-    const suspended =
-      toNumber(apiStats?.suspended_agents) ||
-      agents.filter((item) => item.status === "SUSPENDED").length;
-    const inactive =
-      toNumber(apiStats?.inactive_agents) ||
-      agents.filter((item) => item.status === "INACTIVE").length;
-
-    const totalCustomers = agents.reduce(
-      (sum, item) => sum + item.totalCustomers,
-      0,
-    );
-    const totalOrders = agents.reduce((sum, item) => sum + item.totalOrders, 0);
-
-    const totalSales =
-      toNumber(apiStats?.total_sales) ||
-      agents.reduce((sum, item) => sum + item.totalSales, 0);
-
-    const pendingCommission = agents.reduce(
-      (sum, item) => sum + item.pendingCommission,
-      0,
+    const sorted = [...rows].sort((a, b) =>
+      String(b.created_at).localeCompare(String(a.created_at)),
     );
 
-    const approvedCommission =
-      toNumber(apiStats?.total_commission) ||
-      agents.reduce((sum, item) => sum + item.approvedCommission, 0);
+    if (!clean) return sorted.slice(0, 12);
 
-    const paidCommission =
-      toNumber(apiStats?.total_paid) ||
-      agents.reduce((sum, item) => sum + item.paidCommission, 0);
+    return sorted
+      .filter((item) =>
+        [
+          item.agent_code,
+          item.referral_code,
+          item.name,
+          item.phone,
+          item.email,
+          item.city,
+          item.address,
+          statusLabel(item.status, locale),
+          commissionTypeLabel(item.commission_type, locale),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(clean),
+      )
+      .slice(0, 12);
+  }, [locale, query, rows]);
 
-    const accountingPostedCommission = agents.reduce(
-      (sum, item) => sum + item.accountingPostedCommission,
-      0,
-    );
+  const activeSummary = useMemo(() => buildSummary(filteredRows), [filteredRows]);
 
-    return {
-      total,
-      active,
-      draft,
-      suspended,
-      inactive,
-      stopped: suspended + inactive,
-      totalCustomers,
-      totalOrders,
-      totalSales,
-      pendingCommission,
-      approvedCommission,
-      paidCommission,
-      accountingPostedCommission,
-    };
-  }, [agents, apiStats]);
-
-  const featuredAgents = useMemo(() => {
-    const featured = agents.filter((item) => item.isFeatured);
-
-    if (featured.length > 0) {
-      return featured.slice(0, 6);
-    }
-
-    return [...agents]
-      .sort((a, b) => b.totalSales - a.totalSales)
-      .slice(0, 6);
-  }, [agents]);
-
-  const tableRows = useMemo(() => filteredAgents.slice(0, 8), [filteredAgents]);
-
-  const statusCards = useMemo(
-    () => [
-      {
-        title: t.total,
-        value: stats.total,
-        helper: t.loaded,
-        helperValue: stats.total > 0 ? "100%" : "0%",
-        icon: Users,
-        percent: stats.total > 0 ? 100 : 0,
-        filter: "ALL" as StatusFilter,
-      },
-      {
-        title: t.active,
-        value: stats.active,
-        helper: t.operational,
-        helperValue: `${percent(stats.active, stats.total)}%`,
-        icon: BadgeCheck,
-        percent: percent(stats.active, stats.total),
-        filter: "ACTIVE" as StatusFilter,
-      },
-      {
-        title: t.draft,
-        value: stats.draft,
-        helper: t.needsReview,
-        helperValue: `${percent(stats.draft, stats.total)}%`,
-        icon: ShieldCheck,
-        percent: percent(stats.draft, stats.total),
-        filter: "DRAFT" as StatusFilter,
-      },
-      {
-        title: t.suspended,
-        value: stats.stopped,
-        helper: t.stopped,
-        helperValue: `${percent(stats.stopped, stats.total)}%`,
-        icon: HandCoins,
-        percent: percent(stats.stopped, stats.total),
-        filter: "SUSPENDED" as StatusFilter,
-      },
-    ],
-    [stats, t],
-  );
-
-  const statusFilters = useMemo(
-    () =>
-      [
-        {
-          value: "ALL" as StatusFilter,
-          label: t.all,
-          count: agents.length,
-        },
-        {
-          value: "ACTIVE" as StatusFilter,
-          label: t.active,
-          count: stats.active,
-        },
-        {
-          value: "DRAFT" as StatusFilter,
-          label: t.draft,
-          count: stats.draft,
-        },
-        {
-          value: "SUSPENDED" as StatusFilter,
-          label: t.suspended,
-          count: stats.suspended,
-        },
-        {
-          value: "INACTIVE" as StatusFilter,
-          label: t.inactive,
-          count: stats.inactive,
-        },
-      ],
-    [agents.length, stats, t],
-  );
-
-  const summaryCards = useMemo(
-    () => [
-      {
-        title: t.totalSales,
-        value: stats.totalSales,
-        icon: TrendingUp,
-        helper: t.linkedOrders,
-        helperValue: formatNumber(stats.totalOrders),
-      },
-      {
-        title: t.approvedCommissions,
-        value: stats.approvedCommission,
-        icon: Calculator,
-        helper: t.pendingCommissions,
-        helperValue: formatMoney(stats.pendingCommission),
-      },
-      {
-        title: t.paidCommissions,
-        value: stats.paidCommission,
-        icon: Wallet,
-        helper: t.accountingPosted,
-        helperValue: formatMoney(stats.accountingPostedCommission),
-      },
-    ],
-    [stats, t],
-  );
-
-  const moduleActions = useMemo(
-    () =>
-      [
-        canViewAgents
-          ? {
-              title: t.actionListTitle,
-              description: t.actionListDesc,
-              href: "/system/agents/list",
-              icon: Users,
-              badge: `${formatNumber(stats.total)}`,
-              cta: t.manage,
-            }
-          : null,
-        canCreateAgents
-          ? {
-              title: t.actionCreateTitle,
-              description: t.actionCreateDesc,
-              href: "/system/agents/create",
-              icon: Plus,
-              badge: isArabic ? "جديد" : "New",
-              cta: t.open,
-            }
-          : null,
-      ].filter(Boolean) as Array<{
-        title: string;
-        description: string;
-        href: string;
-        icon: typeof Users;
-        badge: string;
-        cta: string;
-      }>,
-    [canCreateAgents, canViewAgents, isArabic, stats.total, t],
-  );
-
-  const hasSearchOrFilter = query.trim().length > 0 || statusFilter !== "ALL";
+  const displaySummary = query.trim() ? activeSummary : summary;
+  const hasData = rows.length > 0;
+  const hasSearch = query.trim().length > 0;
 
   const loadAgents = useCallback(
     async (showToast = false) => {
-      if (!canViewAgents) {
+      if (!canView) {
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
         setIsLoading(false);
-        setAgents([]);
-        setApiStats(null);
         return;
       }
 
@@ -1571,118 +1198,59 @@ export default function SystemAgentsPage() {
         setIsLoading(true);
         setErrorMessage("");
 
-        const response = await fetch(apiUrl("/api/agents/?page_size=100"), {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-          },
-        });
+        const payload = await loadFirstAvailable([
+          "/api/agents/list/?page_size=500",
+          "/api/agents/?page_size=500",
+        ]);
 
-        const payload = (await response.json().catch(() => null)) as
-          | AgentsApiResponse
-          | null;
-
-        if (!response.ok || payload?.ok === false) {
-          throw new Error(payload?.message || `HTTP ${response.status}`);
+        if (!payload) {
+          throw new Error(t.loadError);
         }
 
-        const normalized = normalizeApiList(payload).map(normalizeAgent);
+        const normalizedRows = extractRows(payload, "agents")
+          .map(normalizeAgent)
+          .filter((item) => item.id || item.name);
 
-        setAgents(normalized);
-        setApiStats(payload?.stats || null);
+        setRows(normalizedRows);
+        setSummary(buildSummary(normalizedRows, extractSummary(payload)));
 
-        if (showToast) {
-          toast.success(t.refreshSuccess);
-        }
+        if (showToast) toast.success(t.loadSuccess);
       } catch (error) {
-        console.error("Failed to load agents:", error);
-        setAgents([]);
-        setApiStats(null);
-        setErrorMessage(t.apiError);
-        toast.error(t.apiError);
+        console.error("Agents overview load error:", error);
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
+        setErrorMessage(t.loadError);
+        toast.error(t.loadError);
       } finally {
         setIsLoading(false);
       }
     },
-    [canViewAgents, t.apiError, t.refreshSuccess],
+    [canView, t.loadError, t.loadSuccess],
   );
 
-  function exportAgents() {
-    if (!canExportAgents) return;
+  function exportExcel() {
+    if (!canExport) return;
 
-    if (filteredAgents.length === 0) {
+    if (!hasData) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    const generatedAt = new Date();
-    const statusFilterLabel =
-      statusFilters.find((item) => item.value === statusFilter)?.label || t.all;
-
     downloadExcel({
-      filename: `primey-care-agents-dashboard-${generatedAt
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "لوحة المندوبين" : "Agents Dashboard",
-      title: t.pageTitle,
+      filename: `primey-care-agents-${new Date().toISOString().slice(0, 10)}.xls`,
+      title: t.title,
       locale,
-      summaryRows: [
-        [t.export.generatedAt, generatedAt.toLocaleString("en-US")],
-        [t.export.scope, t.export.currentData],
-        [
-          t.showing,
-          `${formatNumber(filteredAgents.length)} / ${formatNumber(agents.length)}`,
-        ],
-        [t.total, stats.total],
-        [t.active, stats.active],
-        [t.linkedCustomers, stats.totalCustomers],
-        [t.linkedOrders, stats.totalOrders],
-        [t.totalSales, formatMoney(stats.totalSales)],
-        [t.approvedCommissions, formatMoney(stats.approvedCommission)],
-        [t.paidCommissions, formatMoney(stats.paidCommission)],
-      ],
-      filterRows: [
-        [t.export.search, query || t.all],
-        [t.export.status, statusFilterLabel],
-      ],
-      headers: [
-        t.table.id,
-        t.table.name,
-        t.table.code,
-        t.table.city,
-        t.table.customers,
-        t.table.orders,
-        t.totalSales,
-        t.pendingCommissions,
-        t.approvedCommissions,
-        t.paidCommissions,
-        t.accountingPosted,
-        t.table.status,
-      ],
-      rows: filteredAgents.map((agent) => [
-        agent.agentCode || "-",
-        agent.fullName || "-",
-        agent.referralCode || "-",
-        agent.city || "-",
-        agent.totalCustomers,
-        agent.totalOrders,
-        formatMoney(agent.totalSales),
-        formatMoney(agent.pendingCommission),
-        formatMoney(agent.approvedCommission),
-        formatMoney(agent.paidCommission),
-        formatMoney(agent.accountingPostedCommission),
-        statusLabel(agent.status, locale),
-      ]),
+      summary: displaySummary,
+      rows: hasSearch ? filteredRows : rows,
     });
 
     toast.success(t.exportSuccess);
   }
 
-  function printAgents() {
-    if (!canPrintAgents) return;
+  function printPage() {
+    if (!canPrint) return;
 
-    if (filteredAgents.length === 0) {
+    if (!hasData) {
       toast.error(t.exportEmpty);
       return;
     }
@@ -1698,63 +1266,14 @@ export default function SystemAgentsPage() {
     printWindow.document.write(
       buildPrintHtml({
         locale,
-        title: t.printTitle,
-        rows: filteredAgents,
-        t,
+        title: t.title,
+        summary: displaySummary,
+        rows: hasSearch ? filteredRows : rows,
       }),
     );
     printWindow.document.close();
 
     toast.success(t.printSuccess);
-  }
-
-  function renderFeaturedAgent(agent: Agent) {
-    const content = (
-      <div className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3 transition hover:bg-muted/50">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-            <UserRound className="h-5 w-5" />
-          </div>
-
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="truncate text-sm font-semibold">{agent.fullName}</p>
-
-              {agent.isFeatured ? (
-                <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-500" />
-              ) : null}
-            </div>
-
-            <p className="mt-1 truncate text-xs text-muted-foreground">
-              {agent.agentCode}
-            </p>
-          </div>
-        </div>
-
-        <div className="shrink-0 text-end">
-          <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-            {agent.referralCode || "-"}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {formatNumber(agent.totalOrders)} / {formatNumber(agent.totalCustomers)}
-          </p>
-        </div>
-      </div>
-    );
-
-    if (!canViewAgentDetails || !isValidAgentId(agent.id)) {
-      return (
-        <div key={`${agent.agentCode}-${agent.fullName}`} className="block">
-          {content}
-        </div>
-      );
-    }
-
-    return (
-      <Link key={agent.id} href={`/system/agents/${agent.id}`} className="block">
-        {content}
-      </Link>
-    );
   }
 
   useEffect(() => {
@@ -1767,10 +1286,7 @@ export default function SystemAgentsPage() {
 
     const syncAfterPaint = () => {
       syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
+      window.setTimeout(syncLocale, 0);
     };
 
     syncAfterPaint();
@@ -1789,7 +1305,7 @@ export default function SystemAgentsPage() {
     loadAgents(false);
   }, [authResolving, loadAgents]);
 
-  if (!authResolving && !canViewAgents) {
+  if (!authResolving && !canView) {
     return (
       <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
         <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
@@ -1814,14 +1330,14 @@ export default function SystemAgentsPage() {
 
   return (
     <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.pageTitle}
+            {t.title}
           </h1>
+
           <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.pageSubtitle}
+            {t.subtitle}
           </p>
         </div>
 
@@ -1840,42 +1356,31 @@ export default function SystemAgentsPage() {
             <span>{t.refresh}</span>
           </Button>
 
-          {canExportAgents ? (
+          {canExport ? (
             <Button
-              variant="outline"
               className="h-10 rounded-xl"
-              onClick={exportAgents}
-              disabled={isLoading || filteredAgents.length === 0 || Boolean(errorMessage)}
+              onClick={exportExcel}
+              disabled={isLoading || !hasData || Boolean(errorMessage)}
             >
               <Download className="h-4 w-4" />
               <span>{t.exportExcel}</span>
             </Button>
           ) : null}
 
-          {canPrintAgents ? (
+          {canPrint ? (
             <Button
               variant="outline"
               className="h-10 rounded-xl"
-              onClick={printAgents}
-              disabled={isLoading || filteredAgents.length === 0 || Boolean(errorMessage)}
+              onClick={printPage}
+              disabled={isLoading || !hasData || Boolean(errorMessage)}
             >
               <Printer className="h-4 w-4" />
               <span>{t.print}</span>
             </Button>
           ) : null}
-
-          {canCreateAgents ? (
-            <Link href="/system/agents/create">
-              <Button className="h-10 w-full rounded-xl sm:w-auto">
-                <Plus className="h-4 w-4" />
-                <span>{t.addAgent}</span>
-              </Button>
-            </Link>
-          ) : null}
         </div>
       </div>
 
-      {/* Error State */}
       {!isLoading && errorMessage ? (
         <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -1887,7 +1392,7 @@ export default function SystemAgentsPage() {
               <div>
                 <p className="font-semibold text-destructive">{errorMessage}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {t.apiErrorHint}
+                  {t.loadErrorHint}
                 </p>
               </div>
             </div>
@@ -1904,430 +1409,411 @@ export default function SystemAgentsPage() {
         </Card>
       ) : null}
 
-      {!errorMessage ? (
+      {isLoading ? (
+        <PageSkeleton />
+      ) : (
         <>
-          {/* Financial Summary */}
-          {isLoading ? (
-            <SummaryCardsSkeleton />
-          ) : (
-            <div className="grid gap-4 md:grid-cols-3">
-              {summaryCards.map((item) => {
-                const Icon = item.icon;
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              title={t.totalAgents}
+              value={formatNumber(displaySummary.total_agents)}
+              icon={<Users className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.activeAgents}
+              value={formatNumber(displaySummary.active_agents)}
+              icon={<BadgeCheck className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.totalSales}
+              value={<MoneyText value={displaySummary.total_sales} />}
+              icon={<TrendingUp className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.pendingCommission}
+              value={<MoneyText value={displaySummary.pending_commission} />}
+              icon={<HandCoins className="h-5 w-5" />}
+            />
+          </div>
 
-                return (
-                  <Card
-                    key={item.title}
-                    className="rounded-2xl border bg-card shadow-sm"
-                  >
-                    <CardContent className="flex items-start justify-between gap-4 p-5">
-                      <div className="space-y-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-muted">
-                          <Icon className="h-5 w-5" />
-                        </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MiniStat title={t.totalCustomers} value={displaySummary.total_customers} />
+            <MiniStat title={t.totalOrders} value={displaySummary.total_orders} />
+            <MiniMoneyStat
+              title={t.approvedCommission}
+              value={displaySummary.approved_commission}
+            />
+            <MiniMoneyStat title={t.paidCommission} value={displaySummary.paid_commission} />
+          </div>
 
-                        <div>
-                          <p className="text-sm text-muted-foreground">
-                            {item.title}
-                          </p>
-                          <p className="mt-1 text-2xl font-bold">
-                            <SarAmount value={item.value} />
-                          </p>
-                        </div>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base font-bold">
+                {t.shortcutsTitle}
+              </CardTitle>
+              <CardDescription>{t.shortcutsDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Link href="/system/agents/list">
+                  <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
+                    <CardContent className="flex h-full items-start gap-3 p-4">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                        <FileText className="h-5 w-5" />
                       </div>
 
-                      <div className="rounded-2xl border bg-background px-3 py-2 text-end">
-                        <p className="text-xs text-muted-foreground">
-                          {item.helper}
-                        </p>
-                        <p className="mt-1 text-sm font-semibold">
-                          {item.helperValue}
+                      <div className="min-w-0">
+                        <p className="font-semibold">{t.agentsList}</p>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {isArabic
+                            ? "عرض المندوبين مع البحث والفلاتر والإجراءات."
+                            : "Open agents with search, filters, and actions."}
                         </p>
                       </div>
                     </CardContent>
                   </Card>
-                );
-              })}
-            </div>
-          )}
+                </Link>
 
-          {/* Main Layout */}
-          <div className="grid gap-4 xl:grid-cols-3">
-            {/* Featured Agents */}
-            <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
-              <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-                <div>
-                  <CardTitle className="text-base font-bold">
-                    {t.featuredAgents}
-                  </CardTitle>
-                  <CardDescription className="mt-1 text-sm leading-6">
-                    {t.featuredSubtitle}
-                  </CardDescription>
-                </div>
+                {canCreate ? (
+                  <Link href="/system/agents/create">
+                    <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
+                      <CardContent className="flex h-full items-start gap-3 p-4">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                          <PlusCircle className="h-5 w-5" />
+                        </div>
 
-                {canViewAgents ? (
-                  <Link href="/system/agents/list">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-9 w-9 rounded-xl"
-                    >
-                      <ListChecks className="h-4 w-4" />
-                    </Button>
+                        <div className="min-w-0">
+                          <p className="font-semibold">{t.createAgent}</p>
+                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                            {isArabic
+                              ? "إضافة مندوب جديد وربطه بعمليات البيع."
+                              : "Add a new agent and link them to sales operations."}
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
                   </Link>
                 ) : null}
-              </CardHeader>
+              </div>
+            </CardContent>
+          </Card>
 
-              <CardContent className="space-y-3">
-                {isLoading ? (
-                  <FeaturedAgentsSkeleton />
-                ) : featuredAgents.length === 0 ? (
-                  <div className="rounded-xl border border-dashed p-5 text-center">
-                    <p className="font-semibold">{t.emptyTitle}</p>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      {t.emptyText}
-                    </p>
-                  </div>
-                ) : (
-                  featuredAgents.map((agent) => renderFeaturedAgent(agent))
-                )}
-              </CardContent>
-            </Card>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="relative w-full">
+                <Search
+                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+                    isArabic ? "right-3" : "left-3"
+                  }`}
+                />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t.searchPlaceholder}
+                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+                />
+              </div>
+            </CardContent>
+          </Card>
 
-            {/* Status + Table */}
-            <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-2">
-              <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <CardTitle className="text-base font-bold">
-                    {t.trackStatus}
-                  </CardTitle>
-                  <CardDescription className="mt-1 text-sm leading-6">
-                    {t.trackSubtitle}
-                  </CardDescription>
-                </div>
-
-                {canViewAgents ? (
-                  <Link href="/system/agents/list">
-                    <Button variant="outline" className="h-9 rounded-xl">
-                      <ListChecks className="h-4 w-4" />
-                      <span>{t.viewFullList}</span>
-                    </Button>
-                  </Link>
-                ) : null}
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                {/* Status Cards */}
-                {isLoading ? (
-                  <StatusCardsSkeleton />
-                ) : (
-                  <div className="grid gap-3 md:grid-cols-4">
-                    {statusCards.map((card) => {
-                      const Icon = card.icon;
-
-                      return (
-                        <button
-                          key={card.title}
-                          type="button"
-                          className="space-y-2 rounded-xl border bg-background/70 p-3 text-start transition hover:bg-muted/40"
-                          onClick={() => setStatusFilter(card.filter)}
-                        >
-                          <div className="flex items-center gap-2">
-                            <Icon className="h-4 w-4 text-muted-foreground" />
-                            <p className="text-2xl font-bold">
-                              {formatNumber(card.value)}
-                            </p>
-                          </div>
-
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-sm text-muted-foreground">
-                                {card.title}
-                              </p>
-                              <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                                {card.helperValue}
-                              </span>
-                            </div>
-
-                            <div className="h-2 overflow-hidden rounded-full bg-muted">
-                              <div
-                                className="h-full rounded-full bg-primary transition-all"
-                                style={{ width: `${card.percent}%` }}
-                              />
-                            </div>
-
-                            <p className="pt-1 text-xs text-muted-foreground">
-                              {card.helper}
-                            </p>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Search + Filters */}
-                <div className="grid gap-3">
-                  <div className="relative">
-                    <Search
-                      className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                        isArabic ? "right-3" : "left-3"
-                      }`}
-                    />
-                    <Input
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder={t.filterPlaceholder}
-                      className={`h-10 rounded-xl ${
-                        isArabic ? "pr-10" : "pl-10"
-                      }`}
-                    />
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {statusFilters.map((item) => {
-                      const isSelected = statusFilter === item.value;
-
-                      return (
-                        <Button
-                          key={item.value}
-                          type="button"
-                          variant={isSelected ? "default" : "outline"}
-                          size="sm"
-                          className="rounded-xl"
-                          onClick={() => setStatusFilter(item.value)}
-                        >
-                          <span>{item.label}</span>
-                          <Badge
-                            variant={isSelected ? "secondary" : "outline"}
-                            className="ms-1 rounded-full"
-                          >
-                            {formatNumber(item.count)}
-                          </Badge>
-                        </Button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Table */}
-                <div className="overflow-hidden rounded-xl border">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t.table.id}</TableHead>
-                          <TableHead>{t.table.name}</TableHead>
-                          <TableHead>{t.table.code}</TableHead>
-                          <TableHead>{t.table.city}</TableHead>
-                          <TableHead>{t.table.customers}</TableHead>
-                          <TableHead>{t.table.orders}</TableHead>
-                          {canViewCommissions ? (
-                            <TableHead>{t.table.commission}</TableHead>
-                          ) : null}
-                          <TableHead>{t.table.status}</TableHead>
-                          {canViewAgentDetails ? (
-                            <TableHead>{t.table.action}</TableHead>
-                          ) : null}
-                        </TableRow>
-                      </TableHeader>
-
-                      <TableBody>
-                        {isLoading ? (
-                          <TableRowsSkeleton
-                            showCommission={canViewCommissions}
-                            showAction={canViewAgentDetails}
-                          />
-                        ) : tableRows.length === 0 ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={
-                                7 +
-                                (canViewCommissions ? 1 : 0) +
-                                (canViewAgentDetails ? 1 : 0)
-                              }
-                            >
-                              <div className="py-12 text-center">
-                                <p className="font-semibold">
-                                  {hasSearchOrFilter
-                                    ? t.noResultsTitle
-                                    : t.emptyTitle}
-                                </p>
-                                <p className="mt-2 text-sm text-muted-foreground">
-                                  {hasSearchOrFilter
-                                    ? t.noResultsText
-                                    : t.emptyText}
-                                </p>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          tableRows.map((agent) => (
-                            <TableRow key={`${agent.id}-${agent.agentCode}`}>
-                              <TableCell className="font-medium">
-                                {agent.agentCode || `#${agent.id}`}
-                              </TableCell>
-
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                                    <UserRound className="h-4 w-4" />
-                                  </div>
-                                  <div className="min-w-0">
-                                    <p className="truncate font-medium">
-                                      {agent.fullName}
-                                    </p>
-                                    <p className="truncate text-xs text-muted-foreground">
-                                      {agent.email || agent.phone || "-"}
-                                    </p>
-                                  </div>
-                                </div>
-                              </TableCell>
-
-                              <TableCell>
-                                <Badge variant="secondary" className="rounded-full">
-                                  {agent.referralCode || "-"}
-                                </Badge>
-                              </TableCell>
-
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
-                                  <span>{agent.city || "-"}</span>
-                                </div>
-                              </TableCell>
-
-                              <TableCell>{formatNumber(agent.totalCustomers)}</TableCell>
-                              <TableCell>{formatNumber(agent.totalOrders)}</TableCell>
-
-                              {canViewCommissions ? (
-                                <TableCell>
-                                  <div className="space-y-1">
-                                    <p className="text-sm font-semibold">
-                                      <SarAmount
-                                        value={
-                                          agent.approvedCommission ||
-                                          agent.pendingCommission ||
-                                          agent.paidCommission
-                                        }
-                                      />
-                                    </p>
-                                    <p className="text-xs text-muted-foreground">
-                                      {
-                                        t.commissionTypeLabels[
-                                          agent.defaultCommissionType
-                                        ]
-                                      }{" "}
-                                      {agent.defaultCommissionValue
-                                        ? formatNumber(agent.defaultCommissionValue)
-                                        : "-"}
-                                    </p>
-                                  </div>
-                                </TableCell>
-                              ) : null}
-
-                              <TableCell>{statusBadge(agent.status, locale)}</TableCell>
-
-                              {canViewAgentDetails ? (
-                                <TableCell>
-                                  {isValidAgentId(agent.id) ? (
-                                    <Link href={`/system/agents/${agent.id}`}>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-8 rounded-lg"
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                      </Button>
-                                    </Link>
-                                  ) : null}
-                                </TableCell>
-                              ) : null}
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                  <p>
-                    {t.showing} {formatNumber(tableRows.length)} {t.from}{" "}
-                    {formatNumber(filteredAgents.length)} · {t.latestRecords}
-                  </p>
-
-                  {canViewAgents ? (
-                    <Link href="/system/agents/list">
-                      <Button variant="outline" size="sm" className="rounded-xl">
-                        <ListChecks className="h-4 w-4" />
-                        {t.viewFullList}
-                      </Button>
-                    </Link>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Action Cards */}
-          {moduleActions.length > 0 ? (
+          {!hasData ? (
             <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base font-bold">
-                  {t.quickAccessTitle}
-                </CardTitle>
-                <CardDescription className="leading-6">
-                  {t.quickAccessSubtitle}
-                </CardDescription>
-              </CardHeader>
+              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+                <Users className="h-12 w-12 text-muted-foreground/40" />
+                <p className="text-lg font-semibold">{t.emptyTitle}</p>
+                <p className="max-w-md text-sm text-muted-foreground">
+                  {t.emptyText}
+                </p>
 
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-2">
-                  {moduleActions.map((item) => {
-                    const Icon = item.icon;
-
-                    return (
-                      <Link key={item.href} href={item.href} className="block">
-                        <Card className="h-full rounded-2xl border bg-background shadow-none transition hover:bg-muted/40 hover:shadow-sm">
-                          <CardContent className="flex h-full items-start justify-between gap-4 p-4">
-                            <div className="min-w-0 space-y-3">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-                                  <Icon className="h-5 w-5" />
-                                </div>
-
-                                <Badge variant="secondary" className="rounded-full">
-                                  {item.badge}
-                                </Badge>
-                              </div>
-
-                              <div>
-                                <p className="font-semibold">{item.title}</p>
-                                <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
-                                  {item.description}
-                                </p>
-                              </div>
-
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-xl"
-                              >
-                                {item.cta}
-                              </Button>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </Link>
-                    );
-                  })}
-                </div>
+                {canCreate ? (
+                  <Link href="/system/agents/create">
+                    <Button className="mt-2 rounded-xl">
+                      <PlusCircle className="h-4 w-4" />
+                      {t.createAgent}
+                    </Button>
+                  </Link>
+                ) : null}
               </CardContent>
             </Card>
           ) : null}
+
+          {hasData && hasSearch && filteredRows.length === 0 ? (
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+                <Search className="h-12 w-12 text-muted-foreground/40" />
+                <p className="text-lg font-semibold">{t.noResultsTitle}</p>
+                <p className="max-w-md text-sm text-muted-foreground">
+                  {t.noResultsText}
+                </p>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.latestTitle}
+                  </CardTitle>
+                  <CardDescription>{t.latestDesc}</CardDescription>
+                </div>
+
+                <Link href="/system/agents/list">
+                  <Button variant="outline" className="h-10 rounded-xl">
+                    <ArrowUpRight className="h-4 w-4" />
+                    {t.agentsList}
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+
+            <CardContent>
+              <div className="overflow-hidden rounded-xl border">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[230px]">
+                          {t.table.agent}
+                        </TableHead>
+                        <TableHead className="min-w-[120px]">
+                          {t.table.code}
+                        </TableHead>
+                        <TableHead className="min-w-[120px]">
+                          {t.table.city}
+                        </TableHead>
+                        <TableHead className="min-w-[160px]">
+                          {t.table.contact}
+                        </TableHead>
+                        <TableHead className="min-w-[120px]">
+                          {t.table.status}
+                        </TableHead>
+                        <TableHead className="min-w-[90px]">
+                          {t.table.orders}
+                        </TableHead>
+                        <TableHead className="min-w-[130px]">
+                          {t.table.sales}
+                        </TableHead>
+                        <TableHead className="min-w-[130px]">
+                          {t.table.commission}
+                        </TableHead>
+                        <TableHead className="min-w-[120px]">
+                          {t.table.paid}
+                        </TableHead>
+                        {canViewDetails ? (
+                          <TableHead className="min-w-[90px]">
+                            {t.table.action}
+                          </TableHead>
+                        ) : null}
+                      </TableRow>
+                    </TableHeader>
+
+                    <TableBody>
+                      {filteredRows.length > 0 ? (
+                        filteredRows.map((item) => (
+                          <TableRow key={`${item.id}-${item.agent_code}`}>
+                            <TableCell>
+                              <div className="min-w-[210px]">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-semibold">{item.name}</p>
+                                  {item.is_featured ? (
+                                    <Badge variant="outline" className="rounded-full">
+                                      <Star className="h-3 w-3" />
+                                      {t.featured}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+
+                                <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
+                                  {item.referral_code || item.email || "-"}
+                                </p>
+                              </div>
+                            </TableCell>
+
+                            <TableCell className="font-medium" dir="ltr">
+                              {item.agent_code}
+                            </TableCell>
+
+                            <TableCell>
+                              <span className="inline-flex items-center gap-1.5">
+                                <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                                {item.city || "-"}
+                              </span>
+                            </TableCell>
+
+                            <TableCell>
+                              <div className="min-w-[140px]">
+                                <p
+                                  className="inline-flex items-center gap-1.5 text-sm"
+                                  dir="ltr"
+                                >
+                                  <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                                  {item.phone || "-"}
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {item.email || "-"}
+                                </p>
+                              </div>
+                            </TableCell>
+
+                            <TableCell>{statusBadge(item.status, locale)}</TableCell>
+                            <TableCell>{formatNumber(item.total_orders)}</TableCell>
+
+                            <TableCell>
+                              <MoneyText value={item.total_sales} />
+                            </TableCell>
+
+                            <TableCell>
+                              <div className="flex flex-col gap-1">
+                                <MoneyText value={item.pending_commission} />
+                                <span className="text-xs text-muted-foreground">
+                                  {commissionTypeLabel(item.commission_type, locale)}{" "}
+                                  {item.commission_type === "PERCENTAGE"
+                                    ? `${formatNumber(item.commission_value)}%`
+                                    : item.commission_value > 0
+                                      ? formatMoney(item.commission_value)
+                                      : ""}
+                                </span>
+                              </div>
+                            </TableCell>
+
+                            <TableCell>
+                              <MoneyText value={item.paid_commission} />
+                            </TableCell>
+
+                            {canViewDetails ? (
+                              <TableCell>
+                                {isValidId(item.id) ? (
+                                  <Link href={`/system/agents/${item.id}`}>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 rounded-lg"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                      <span className="sr-only">{t.view}</span>
+                                    </Button>
+                                  </Link>
+                                ) : (
+                                  <span className="text-sm text-muted-foreground">
+                                    -
+                                  </span>
+                                )}
+                              </TableCell>
+                            ) : null}
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={canViewDetails ? 10 : 9}
+                            className="h-32 text-center"
+                          >
+                            <p className="text-sm text-muted-foreground">
+                              {hasSearch ? t.noResultsText : t.emptyText}
+                            </p>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </>
-      ) : null}
+      )}
     </div>
+  );
+}
+
+/* ============================================================
+   Small Components
+============================================================ */
+
+async function loadFirstAvailable(endpoints: string[]) {
+  let lastError = "";
+
+  for (const endpoint of endpoints) {
+    const response = await fetch(apiUrl(endpoint), {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | ApiEnvelope<unknown>
+      | null;
+
+    if (response.ok && payload?.ok !== false && payload?.success !== false) {
+      return payload;
+    }
+
+    lastError =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `HTTP ${response.status}`;
+  }
+
+  console.warn("Agents endpoint fallback failed:", lastError);
+  return null;
+}
+
+function KpiCard({
+  title,
+  value,
+  icon,
+}: {
+  title: string;
+  value: ReactNode;
+  icon: ReactNode;
+}) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-2xl font-bold">{value}</div>
+            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
+          </div>
+
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            {icon}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MiniStat({ title, value }: { title: string; value: number }) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="text-muted-foreground">{title}</span>
+          <span className="text-lg font-bold">{formatNumber(value)}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MiniMoneyStat({ title, value }: { title: string; value: number }) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="text-muted-foreground">{title}</span>
+          <span className="text-lg font-bold">
+            <MoneyText value={value} />
+          </span>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

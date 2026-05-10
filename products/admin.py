@@ -5,6 +5,8 @@
 # ✅ يدير:
 #    - Product Categories
 #    - Products / Cards / Programs / Services
+#    - Provider-linked Medical Offers
+#    - Landing / Mobile / Offers Marketing Images
 #    - Benefits
 #    - Pricing Tiers
 #    - Product Service Items
@@ -162,28 +164,39 @@ class ProductAdmin(admin.ModelAdmin):
     list_display = (
         "code",
         "name",
+        "provider",
         "product_type",
         "category",
         "status",
-        "billing_type",
-        "fulfillment_type",
         "price",
         "sale_price",
         "currency_code",
+        "is_offer",
         "is_public",
         "is_featured",
+        "show_on_landing",
+        "show_on_mobile",
+        "show_on_offers",
         "can_be_ordered",
         "can_be_used_in_contracts",
         "requires_provider",
+        "has_thumbnail_image_display",
+        "has_marketing_image_display",
+        "is_current_offer_display",
         "created_at",
     )
 
     list_filter = (
         "product_type",
         "category",
+        "provider",
         "status",
         "billing_type",
         "fulfillment_type",
+        "is_offer",
+        "show_on_landing",
+        "show_on_mobile",
+        "show_on_offers",
         "is_public",
         "is_featured",
         "requires_approval",
@@ -195,6 +208,8 @@ class ProductAdmin(admin.ModelAdmin):
         "requires_provider",
         "is_taxable",
         "currency_code",
+        "offer_start_date",
+        "offer_end_date",
         "created_at",
     )
 
@@ -206,6 +221,14 @@ class ProductAdmin(admin.ModelAdmin):
         "description",
         "features",
         "tags",
+        "offer_title",
+        "offer_subtitle",
+        "offer_badge",
+        "offer_terms",
+        "provider__code",
+        "provider__name",
+        "provider__name_ar",
+        "provider__name_en",
     )
 
     readonly_fields = (
@@ -214,8 +237,17 @@ class ProductAdmin(admin.ModelAdmin):
         "effective_price_display",
         "tax_amount_display",
         "total_price_with_tax_display",
+        "is_provider_product_display",
+        "has_thumbnail_image_display",
+        "has_marketing_image_display",
+        "is_current_offer_display",
         "created_at",
         "updated_at",
+    )
+
+    autocomplete_fields = (
+        "category",
+        "provider",
     )
 
     ordering = (
@@ -242,10 +274,12 @@ class ProductAdmin(admin.ModelAdmin):
                     "slug",
                     "product_type",
                     "category",
+                    "provider",
                     "status",
                     "billing_type",
                     "fulfillment_type",
                     "sort_order",
+                    "is_provider_product_display",
                 )
             },
         ),
@@ -258,6 +292,34 @@ class ProductAdmin(admin.ModelAdmin):
                     "features",
                     "terms_and_conditions",
                     "tags",
+                )
+            },
+        ),
+        (
+            "Thumbnail Image - صورة رمزية داخل النظام",
+            {
+                "fields": (
+                    "thumbnail_image_url",
+                    "thumbnail_image_drive_file_id",
+                    "thumbnail_image_drive_view_url",
+                    "thumbnail_image_folder_id",
+                    "thumbnail_image_folder_url",
+                    "thumbnail_image_alt_text",
+                    "has_thumbnail_image_display",
+                )
+            },
+        ),
+        (
+            "Marketing Image - صورة الهبوط والتطبيق والعروض",
+            {
+                "fields": (
+                    "marketing_image_url",
+                    "marketing_image_drive_file_id",
+                    "marketing_image_drive_view_url",
+                    "marketing_image_folder_id",
+                    "marketing_image_folder_url",
+                    "marketing_image_alt_text",
+                    "has_marketing_image_display",
                 )
             },
         ),
@@ -283,6 +345,24 @@ class ProductAdmin(admin.ModelAdmin):
                 "fields": (
                     "duration_value",
                     "duration_unit",
+                )
+            },
+        ),
+        (
+            "Marketing / Offer Controls",
+            {
+                "fields": (
+                    "is_offer",
+                    "offer_title",
+                    "offer_subtitle",
+                    "offer_badge",
+                    "offer_terms",
+                    "offer_start_date",
+                    "offer_end_date",
+                    "show_on_landing",
+                    "show_on_mobile",
+                    "show_on_offers",
+                    "is_current_offer_display",
                 )
             },
         ),
@@ -333,6 +413,14 @@ class ProductAdmin(admin.ModelAdmin):
         "disable_online_purchase",
         "enable_ordering",
         "disable_ordering",
+        "mark_as_offer",
+        "unmark_as_offer",
+        "show_selected_on_landing",
+        "hide_selected_from_landing",
+        "show_selected_on_mobile",
+        "hide_selected_from_mobile",
+        "show_selected_on_offers",
+        "hide_selected_from_offers",
     )
 
     @admin.display(description="Effective Price")
@@ -346,6 +434,22 @@ class ProductAdmin(admin.ModelAdmin):
     @admin.display(description="Total With Tax")
     def total_price_with_tax_display(self, obj):
         return obj.total_price_with_tax
+
+    @admin.display(boolean=True, description="Provider Product")
+    def is_provider_product_display(self, obj):
+        return obj.is_provider_product
+
+    @admin.display(boolean=True, description="Thumbnail")
+    def has_thumbnail_image_display(self, obj):
+        return obj.has_thumbnail_image
+
+    @admin.display(boolean=True, description="Marketing Image")
+    def has_marketing_image_display(self, obj):
+        return obj.has_marketing_image
+
+    @admin.display(boolean=True, description="Current Offer")
+    def is_current_offer_display(self, obj):
+        return obj.is_current_offer
 
     @admin.action(description="Mark selected products as active")
     def mark_as_active(self, request, queryset):
@@ -374,6 +478,38 @@ class ProductAdmin(admin.ModelAdmin):
     @admin.action(description="Disable ordering")
     def disable_ordering(self, request, queryset):
         queryset.update(can_be_ordered=False)
+
+    @admin.action(description="Mark as offer")
+    def mark_as_offer(self, request, queryset):
+        queryset.update(is_offer=True)
+
+    @admin.action(description="Unmark as offer")
+    def unmark_as_offer(self, request, queryset):
+        queryset.update(is_offer=False)
+
+    @admin.action(description="Show on landing")
+    def show_selected_on_landing(self, request, queryset):
+        queryset.update(show_on_landing=True)
+
+    @admin.action(description="Hide from landing")
+    def hide_selected_from_landing(self, request, queryset):
+        queryset.update(show_on_landing=False)
+
+    @admin.action(description="Show on mobile")
+    def show_selected_on_mobile(self, request, queryset):
+        queryset.update(show_on_mobile=True)
+
+    @admin.action(description="Hide from mobile")
+    def hide_selected_from_mobile(self, request, queryset):
+        queryset.update(show_on_mobile=False)
+
+    @admin.action(description="Show on offers")
+    def show_selected_on_offers(self, request, queryset):
+        queryset.update(show_on_offers=True)
+
+    @admin.action(description="Hide from offers")
+    def hide_selected_from_offers(self, request, queryset):
+        queryset.update(show_on_offers=False)
 
     def save_model(self, request, obj, form, change):
         if not change and not obj.created_by:

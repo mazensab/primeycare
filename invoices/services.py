@@ -1,15 +1,25 @@
 # ============================================================
 # 📂 invoices/services.py
-# 🧠 Invoice Services — Primey Care
+# 🧠 Invoice Services — Primey Care V2
 # ------------------------------------------------------------
 # ✅ إنشاء فاتورة من الطلب
 # ✅ توليد رقم فاتورة آمن
 # ✅ مزامنة عناصر الفاتورة من عناصر الطلب
 # ✅ إصدار الفاتورة رسميًا
 # ✅ جدولة الترحيل المحاسبي بعد commit
+# ✅ ربط الفاتورة مع Accounting Backend الجديد
 # ✅ منع paid أثناء الإصدار فقط
 # ✅ إلغاء آمن بدون حذف مالي
 # ✅ إدارة أخطاء واضحة + logging
+# ------------------------------------------------------------
+# المسار المالي المعتمد:
+# Invoice Issue
+# → Accounting JournalEntry via accounting.services.post_invoice_issue
+#
+# مبدأ مهم:
+# Issue != Paid
+# الإصدار لا يعني الدفع.
+# الدفع يتم عبر payments لاحقًا.
 # ============================================================
 
 from __future__ import annotations
@@ -17,7 +27,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from importlib import import_module
 from typing import Any, Callable, Optional
 
@@ -58,10 +68,13 @@ ISSUABLE_BASE_STATUSES = {
 }
 
 CANDIDATE_POSTING_TARGETS = [
+    # ✅ الدالة الرسمية الحالية بعد إعادة بناء Backend المالي
+    ("accounting.services", "post_invoice_issue"),
+
+    # توافق خلفي لأي أسماء قديمة
+    ("accounting.services", "post_invoice"),
     ("accounting.services.posting", "post_invoice_issue"),
     ("accounting.services.posting", "post_invoice"),
-    ("accounting.services", "post_invoice_issue"),
-    ("accounting.services", "post_invoice"),
     ("accounting.services.invoice_posting", "post_invoice_issue"),
     ("accounting.services.invoice_posting", "post_invoice"),
 ]
@@ -132,14 +145,19 @@ def _first_non_empty(*values: Any) -> Any:
 
 def _call_if_exists(obj: Any, method_name: str, *args: Any, **kwargs: Any) -> Any:
     method = getattr(obj, method_name, None)
+
     if callable(method):
         return method(*args, **kwargs)
+
     return None
 
 
 def _money(value: Any) -> Decimal:
     try:
-        return Decimal(str(value or "0.00")).quantize(Decimal("0.01"))
+        return Decimal(str(value or "0.00")).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
     except Exception:
         return Decimal("0.00")
 
@@ -177,6 +195,7 @@ def _resolve_invoice_total(invoice: Any) -> Decimal:
     for value in candidates:
         if value is not None:
             resolved = _money(value)
+
             if resolved > Decimal("0.00"):
                 return resolved
 
@@ -199,8 +218,10 @@ def _resolve_issue_date(invoice: Any) -> date:
 
 def _resolve_order_customer(order: Any) -> Any:
     customer = _safe_getattr(order, "customer")
+
     if not customer:
         raise InvoiceValidationError("لا يمكن إنشاء فاتورة لأن الطلب غير مرتبط بعميل.")
+
     return customer
 
 
@@ -243,6 +264,7 @@ def _order_item_total(order_item: Any) -> Decimal:
 
 def _order_item_discount(order_item: Any) -> Decimal:
     explicit_discount = _safe_getattr(order_item, "discount_amount")
+
     if explicit_discount not in (None, ""):
         return _money(explicit_discount)
 
@@ -252,6 +274,7 @@ def _order_item_discount(order_item: Any) -> Decimal:
     line_total = _order_item_total(order_item)
 
     discount = _money(line_subtotal - line_total)
+
     if discount < Decimal("0.00"):
         return Decimal("0.00")
 
@@ -270,6 +293,7 @@ def _generate_invoice_number(order: Any) -> str:
 
     for counter in range(2, 1000):
         candidate = f"{base}-{counter}"
+
         if not Invoice.objects.filter(invoice_number=candidate).exists():
             return candidate
 
@@ -303,9 +327,32 @@ def _resolve_posting_callable() -> Optional[Callable[..., Any]]:
     return None
 
 
+def _call_posting_with_fallbacks(
+    posting_callable: Callable[..., Any],
+    invoice: Invoice,
+    actor: Any = None,
+) -> Any:
+    """
+    الدالة الرسمية الحالية:
+      accounting.services.post_invoice_issue(invoice, actor=None)
+    """
+    try:
+        return posting_callable(invoice=invoice, actor=actor)
+    except TypeError:
+        try:
+            return posting_callable(invoice=invoice)
+        except TypeError:
+            return posting_callable(invoice)
+
+
 def _save_invoice(invoice: Invoice, update_fields: Optional[list[str]] = None) -> None:
     if update_fields:
-        valid_update_fields = [field for field in update_fields if hasattr(invoice, field)]
+        valid_update_fields = [
+            field
+            for field in list(dict.fromkeys(update_fields))
+            if hasattr(invoice, field)
+        ]
+
         if valid_update_fields:
             invoice.save(update_fields=valid_update_fields)
             return
@@ -319,6 +366,48 @@ def _refresh_invoice(invoice: Invoice) -> None:
 
 def _should_force_issued_status(status_before: str) -> bool:
     return status_before not in FINAL_PAYMENT_STATUSES
+
+
+def _mark_invoice_accounting_posted(invoice: Invoice, result: Any) -> None:
+    """
+    تحديث مرجع القيد المحاسبي داخل الفاتورة إن كانت الحقول موجودة.
+    لا نفترض وجود الحقول حتى لا نكسر الموديل الحالي.
+    """
+    update_fields: list[str] = []
+
+    reference = _first_non_empty(
+        _safe_getattr(result, "entry_number"),
+        _safe_getattr(result, "journal_number"),
+        _safe_getattr(result, "reference"),
+        _safe_getattr(result, "number"),
+        _safe_getattr(result, "id"),
+    )
+
+    if hasattr(invoice, "is_accounting_posted"):
+        invoice.is_accounting_posted = True
+        update_fields.append("is_accounting_posted")
+
+    if reference and hasattr(invoice, "accounting_entry_reference"):
+        invoice.accounting_entry_reference = str(reference)
+        update_fields.append("accounting_entry_reference")
+
+    if hasattr(invoice, "posted_at") and not _safe_getattr(invoice, "posted_at"):
+        invoice.posted_at = timezone.now()
+        update_fields.append("posted_at")
+
+    if hasattr(invoice, "updated_at"):
+        update_fields.append("updated_at")
+
+    if update_fields:
+        _save_invoice(invoice, update_fields)
+
+
+def _is_invoice_accounting_posted(invoice: Invoice) -> bool:
+    if hasattr(invoice, "is_accounting_posted"):
+        return bool(_safe_getattr(invoice, "is_accounting_posted", False))
+
+    reference = _safe_getattr(invoice, "accounting_entry_reference", "")
+    return bool(reference)
 
 
 # ============================================================
@@ -403,6 +492,7 @@ def create_invoice_from_order(
         raise InvoiceValidationError("order is required.")
 
     order_id = _safe_getattr(order, "id")
+
     if not order_id:
         raise InvoiceValidationError("لا يمكن إنشاء فاتورة من طلب غير محفوظ.")
 
@@ -410,6 +500,7 @@ def create_invoice_from_order(
     customer = _resolve_order_customer(locked_order)
 
     existing_invoice = Invoice.objects.select_for_update().filter(order=locked_order).first()
+
     if existing_invoice:
         if sync_items and existing_invoice.status == InvoiceStatus.DRAFT:
             sync_invoice_items_from_order(existing_invoice, reset=True)
@@ -527,10 +618,9 @@ def _prepare_invoice_issue_fields(invoice: Invoice, status_before: str) -> list[
         changed_fields.append("issue_date")
 
     if hasattr(invoice, "updated_at"):
-        if "updated_at" not in changed_fields:
-            changed_fields.append("updated_at")
+        changed_fields.append("updated_at")
 
-    return changed_fields
+    return list(dict.fromkeys(changed_fields))
 
 
 def _enforce_post_save_status(invoice: Invoice, status_before: str) -> None:
@@ -561,28 +651,52 @@ def _enforce_post_save_status(invoice: Invoice, status_before: str) -> None:
 # 📘 الترحيل المحاسبي
 # ============================================================
 
-def dispatch_invoice_accounting_post(invoice: Invoice, actor: Any = None) -> tuple[bool, str]:
+def dispatch_invoice_accounting_post(
+    invoice: Invoice,
+    actor: Any = None,
+) -> tuple[bool, str]:
     invoice_id = _resolve_invoice_identifier(invoice)
+
+    if invoice is None:
+        raise InvoicePostingError("invoice is required for accounting posting.")
+
+    invoice.refresh_from_db()
+
+    if _is_invoice_accounting_posted(invoice):
+        message = f"تم تجاوز الترحيل المحاسبي لأن الفاتورة {invoice_id} مرحلة محاسبيًا مسبقًا."
+        logger.info(message)
+        return True, message
+
+    if invoice.status not in {
+        InvoiceStatus.ISSUED,
+        InvoiceStatus.PAID,
+        InvoiceStatus.PARTIALLY_PAID,
+    }:
+        message = f"لا يمكن ترحيل الفاتورة {invoice_id} محاسبيًا لأنها غير مصدرة."
+        logger.warning(message)
+        return False, message
+
     posting_callable = _resolve_posting_callable()
 
     if posting_callable is None:
         message = (
             "لم يتم العثور على دالة ترحيل محاسبي للفواتير. "
-            "تحقق من ربط accounting.services.posting."
+            "تحقق من ربط accounting.services.post_invoice_issue."
         )
         logger.warning("Invoice %s: %s", invoice_id, message)
         return False, message
 
     try:
+        result = _call_posting_with_fallbacks(
+            posting_callable,
+            invoice=invoice,
+            actor=actor,
+        )
+
         invoice.refresh_from_db()
 
-        try:
-            posting_callable(invoice=invoice, actor=actor)
-        except TypeError:
-            try:
-                posting_callable(invoice=invoice)
-            except TypeError:
-                posting_callable(invoice)
+        if not _is_invoice_accounting_posted(invoice):
+            _mark_invoice_accounting_posted(invoice, result)
 
         message = f"تم إطلاق الترحيل المحاسبي للفواتير بنجاح للفاتورة {invoice_id}."
         logger.info(message)
@@ -626,7 +740,11 @@ def issue_invoice(
     invoice_id = _resolve_invoice_identifier(invoice)
     status_before = _resolve_invoice_status(invoice)
 
-    logger.info("🚀 بدء إصدار الفاتورة %s | status_before=%s", invoice_id, status_before)
+    logger.info(
+        "🚀 بدء إصدار الفاتورة %s | status_before=%s",
+        invoice_id,
+        status_before,
+    )
 
     validate_invoice_for_issue(invoice)
 
@@ -641,7 +759,10 @@ def issue_invoice(
                 exc,
             )
 
-    changed_fields = _prepare_invoice_issue_fields(invoice, status_before=status_before)
+    changed_fields = _prepare_invoice_issue_fields(
+        invoice,
+        status_before=status_before,
+    )
 
     _save_invoice(invoice, changed_fields)
     _refresh_invoice(invoice)
@@ -655,9 +776,12 @@ def issue_invoice(
     if auto_post_accounting:
         invoice_pk = invoice.pk
 
-        def _post_after_commit() -> None:
-            fresh_invoice = Invoice.objects.get(pk=invoice_pk)
-            dispatch_invoice_accounting_post(invoice=fresh_invoice, actor=actor)
+        def _post_after_commit(invoice_id_for_callback: int = invoice_pk) -> None:
+            fresh_invoice = Invoice.objects.get(pk=invoice_id_for_callback)
+            dispatch_invoice_accounting_post(
+                invoice=fresh_invoice,
+                actor=actor,
+            )
 
         transaction.on_commit(_post_after_commit)
         accounting_post_message = "تم جدولة الترحيل المحاسبي بعد نجاح commit."
@@ -744,11 +868,18 @@ def cancel_invoice(
 # 🔁 إعادة الترحيل عند الحاجة
 # ============================================================
 
-def repost_invoice_accounting(invoice: Invoice, *, actor: Any = None) -> tuple[bool, str]:
+def repost_invoice_accounting(
+    invoice: Invoice,
+    *,
+    actor: Any = None,
+) -> tuple[bool, str]:
     if invoice is None:
         raise InvoiceValidationError("invoice is required for reposting.")
 
     invoice_id = _resolve_invoice_identifier(invoice)
     logger.info("🔁 إعادة ترحيل محاسبي للفاتورة %s", invoice_id)
 
-    return dispatch_invoice_accounting_post(invoice=invoice, actor=actor)
+    return dispatch_invoice_accounting_post(
+        invoice=invoice,
+        actor=actor,
+    )

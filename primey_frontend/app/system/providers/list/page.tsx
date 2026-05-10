@@ -1,20 +1,29 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/providers/list/page.tsx
+   📂 primey_frontend/app/system/providers/list/page.tsx
    🧠 Primey Care | Providers List
    ------------------------------------------------------------
    ✅ المرحلة 17 + المرحلة 2
-   ✅ مبني بنفس نمط قائمة المراكز/العملاء المعتمد
+   ✅ قائمة مقدمي الخدمة / المراكز
+   ✅ تحميل سريع عبر Server Pagination
+   ✅ Request واحد فقط لكل صفحة أو فلتر
+   ✅ إيقاف تحميل كل صفحات مقدمي الخدمة
+   ✅ إزالة بطاقات: بيانات نظامية مكتملة / لديهم شعار / مجلدات Drive
+   ✅ إزالة أعمدة: الشعار / السجل والضريبة / Drive
    ✅ البحث في صف مستقل
-   ✅ الفلاتر والأعمدة في صف مستقل تحت البحث
-   ✅ Excel export بصيغة .xls HTML Workbook
-   ✅ Web PDF Print
+   ✅ الفلاتر والأعمدة في صف مستقل
+   ✅ الحفاظ على الفلاتر الأساسية بدون حذف
+   ✅ مصدر البيانات: الكل / مستوردة / إدخال يدوي
+   ✅ ترتيب الأكثر عدد طلبات
+   ✅ عمود الطلبات
+   ✅ Excel export بصيغة .xls HTML Workbook للصفحة الحالية
+   ✅ Web PDF Print للصفحة الحالية
    ✅ Error State مستقل
    ✅ Empty State ذكي
    ✅ Loading Skeleton
    ✅ حماية روابط التفاصيل والأزرار والطلبات
-   ✅ fallback آمن لـ system_admin / superadmin
+   ✅ fallback آمن لـ system_admin / superuser
    ✅ دعم عربي / إنجليزي عبر primey-locale
    ✅ استخدام toast من sonner
    ✅ بدون localhost hardcoded
@@ -24,19 +33,22 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowDownUp,
+  AlertTriangle,
   ArrowLeft,
-  BadgeCheck,
+  ArrowUpRight,
   Building2,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ColumnsIcon,
   Copy,
   Download,
   Eye,
+  FileSpreadsheet,
+  Filter,
   Hospital,
-  Layers3,
   Loader2,
   MapPin,
-  MoreHorizontal,
   Phone,
   PlusCircle,
   Printer,
@@ -45,6 +57,9 @@ import {
   ShieldCheck,
   Sparkles,
   Stethoscope,
+  TestTube2,
+  TrendingUp,
+  UploadCloud,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -53,7 +68,6 @@ import { toast } from "sonner";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Card,
   CardContent,
@@ -65,7 +79,6 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -106,13 +119,19 @@ type ProviderType =
 
 type StatusFilter = "all" | ProviderStatus;
 type TypeFilter = "all" | ProviderType;
+type FeaturedFilter = "all" | "featured" | "not_featured";
+type SourceFilter = "all" | "imported" | "manual";
 
 type SortKey =
+  | "nameAr"
+  | "nameEn"
   | "name"
   | "code"
   | "providerType"
+  | "region"
   | "city"
   | "status"
+  | "ordersCount"
   | "createdAt";
 
 type SortDirection = "asc" | "desc";
@@ -120,6 +139,10 @@ type SortDirection = "asc" | "desc";
 type Provider = {
   id: number | string;
   name: string;
+  nameAr: string;
+  nameEn: string;
+  displayNameAr: string;
+  displayNameEn: string;
   code: string;
   providerType: ProviderType;
   status: ProviderStatus;
@@ -128,50 +151,83 @@ type Provider = {
   mobile: string;
   email: string;
   website: string;
+  region: string;
   city: string;
   area: string;
+  street: string;
   address: string;
   googleMapsLink: string;
+  sourceCategory: string;
+  importSource: string;
+  externalReference: string;
+  ordersCount: number;
   notes: string;
   isFeatured: boolean;
   createdAt: string;
   updatedAt: string;
-  raw: Record<string, unknown>;
+};
+
+type ProvidersSummary = {
+  total_providers: number;
+  active_providers: number;
+  inactive_providers: number;
+  suspended_providers: number;
+  draft_providers: number;
+  featured_providers: number;
+  imported_providers: number;
+  manual_providers: number;
+  total_orders: number;
+};
+
+type ProvidersPagination = {
+  page: number;
+  page_size: number;
+  total_pages: number;
+  total_items: number;
+  has_next: boolean;
+  has_previous: boolean;
 };
 
 type ProvidersApiResponse = {
   ok?: boolean;
   message?: string;
+  detail?: string;
+  error?: string;
   count?: number;
+  next?: string | null;
+  previous?: string | null;
+  pagination?: Partial<ProvidersPagination>;
+  summary?: Partial<ProvidersSummary>;
   results?: unknown[];
   providers?: unknown[];
-  centers?: unknown[];
   items?: unknown[];
   data?:
     | unknown[]
     | {
         results?: unknown[];
         providers?: unknown[];
-        centers?: unknown[];
         items?: unknown[];
       };
 };
 
 type VisibleColumns = {
   code: boolean;
-  name: boolean;
+  nameAr: boolean;
+  nameEn: boolean;
   providerType: boolean;
+  region: boolean;
   city: boolean;
   contact: boolean;
+  orders: boolean;
   status: boolean;
   featured: boolean;
+  sourceCategory: boolean;
   createdAt: boolean;
   actions: boolean;
 };
 
 type ExcelSheetOptions = {
   filename: string;
-  worksheetName: string;
   title: string;
   locale: AppLocale;
   summaryRows: Array<[string, string | number]>;
@@ -180,10 +236,47 @@ type ExcelSheetOptions = {
   rows: Array<Array<string | number>>;
 };
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 12;
+
+const DEFAULT_PAGINATION: ProvidersPagination = {
+  page: 1,
+  page_size: PAGE_SIZE,
+  total_pages: 1,
+  total_items: 0,
+  has_next: false,
+  has_previous: false,
+};
+
+const DEFAULT_SUMMARY: ProvidersSummary = {
+  total_providers: 0,
+  active_providers: 0,
+  inactive_providers: 0,
+  suspended_providers: 0,
+  draft_providers: 0,
+  featured_providers: 0,
+  imported_providers: 0,
+  manual_providers: 0,
+  total_orders: 0,
+};
+
+const DEFAULT_VISIBLE_COLUMNS: VisibleColumns = {
+  code: true,
+  nameAr: true,
+  nameEn: true,
+  providerType: true,
+  region: true,
+  city: true,
+  contact: true,
+  orders: true,
+  status: true,
+  featured: true,
+  sourceCategory: false,
+  createdAt: false,
+  actions: true,
+};
 
 /* ============================================================
-   Locale Helpers
+   Locale / API Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -196,8 +289,7 @@ function readLocale(): AppLocale {
     if (savedLocale === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
@@ -209,14 +301,10 @@ function applyDocumentLocale(locale: AppLocale) {
     document.documentElement.lang = locale;
     document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
     document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
+  } catch {
+    // ignore
   }
 }
-
-/* ============================================================
-   API Helper
-============================================================ */
 
 function apiUrl(path: string) {
   const base =
@@ -237,7 +325,7 @@ function asRecord(value: unknown): AuthRecord {
   return value && typeof value === "object" ? (value as AuthRecord) : {};
 }
 
-function getNestedRecord(source: AuthRecord, keys: string[]) {
+function getNestedRecord(source: AuthRecord, keys: string[]): AuthRecord {
   for (const key of keys) {
     const value = source[key];
 
@@ -423,9 +511,7 @@ function hasSafePermission(
 
   const explicitPermission = hasPermissionCode(authValue, codes);
 
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
-  }
+  if (typeof explicitPermission === "boolean") return explicitPermission;
 
   const roles = getAuthRoles(authValue);
 
@@ -448,131 +534,9 @@ function hasSafePermission(
     );
   }
 
-  if (!hasKnownPermissionSignal(authValue)) {
-    return true;
-  }
+  if (!hasKnownPermissionSignal(authValue)) return true;
 
   return mode === "view";
-}
-
-/* ============================================================
-   Normalizers
-============================================================ */
-
-function normalizeStatus(value: unknown): ProviderStatus {
-  const status = String(value || "").toUpperCase();
-
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "INACTIVE") return "INACTIVE";
-  if (status === "SUSPENDED") return "SUSPENDED";
-  if (status === "DRAFT") return "DRAFT";
-
-  if (value === true) return "ACTIVE";
-  if (value === false) return "INACTIVE";
-
-  return "UNKNOWN";
-}
-
-function normalizeProviderType(value: unknown): ProviderType {
-  const providerType = String(value || "").toUpperCase();
-
-  if (providerType === "HOSPITAL") return "HOSPITAL";
-  if (providerType === "MEDICAL_CENTER") return "MEDICAL_CENTER";
-  if (providerType === "PHARMACY") return "PHARMACY";
-  if (providerType === "PARTNER") return "PARTNER";
-  if (providerType === "LAB") return "LAB";
-  if (providerType === "CLINIC") return "CLINIC";
-  if (providerType === "OTHER") return "OTHER";
-
-  return "UNKNOWN";
-}
-
-function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
-  const direct = obj[key];
-
-  if (direct !== undefined && direct !== null && direct !== "") {
-    return direct;
-  }
-
-  const containers = ["provider", "center", "item", "data", "profile"];
-
-  for (const container of containers) {
-    const nested = obj[container];
-
-    if (nested && typeof nested === "object") {
-      const nestedObj = nested as Record<string, unknown>;
-      const value = nestedObj[key];
-
-      if (value !== undefined && value !== null && value !== "") {
-        return value;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function extractProviders(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-
-  if (!payload || typeof payload !== "object") return [];
-
-  const response = payload as ProvidersApiResponse;
-
-  if (Array.isArray(response.results)) return response.results;
-  if (Array.isArray(response.providers)) return response.providers;
-  if (Array.isArray(response.centers)) return response.centers;
-  if (Array.isArray(response.items)) return response.items;
-  if (Array.isArray(response.data)) return response.data;
-
-  if (response.data && typeof response.data === "object") {
-    if (Array.isArray(response.data.results)) return response.data.results;
-    if (Array.isArray(response.data.providers)) return response.data.providers;
-    if (Array.isArray(response.data.centers)) return response.data.centers;
-    if (Array.isArray(response.data.items)) return response.data.items;
-  }
-
-  return [];
-}
-
-function normalizeProvider(item: unknown): Provider {
-  const obj = (item || {}) as Record<string, unknown>;
-  const id = getObjectValue(obj, "id") ?? "";
-  const name =
-    getObjectValue(obj, "name") ??
-    getObjectValue(obj, "provider_name") ??
-    getObjectValue(obj, "center_name") ??
-    "-";
-
-  return {
-    id: id as number | string,
-    name: String(name || "-"),
-    code: String(
-      getObjectValue(obj, "code") ??
-        getObjectValue(obj, "provider_code") ??
-        (id ? `PRV-${id}` : "-"),
-    ),
-    providerType: normalizeProviderType(
-      getObjectValue(obj, "provider_type") ?? getObjectValue(obj, "type"),
-    ),
-    status: normalizeStatus(getObjectValue(obj, "status")),
-    contactPerson: String(getObjectValue(obj, "contact_person") ?? ""),
-    phone: String(getObjectValue(obj, "phone") ?? ""),
-    mobile: String(getObjectValue(obj, "mobile") ?? ""),
-    email: String(getObjectValue(obj, "email") ?? ""),
-    website: String(getObjectValue(obj, "website") ?? ""),
-    city: String(getObjectValue(obj, "city") ?? ""),
-    area: String(getObjectValue(obj, "area") ?? ""),
-    address: String(getObjectValue(obj, "address") ?? ""),
-    googleMapsLink: String(getObjectValue(obj, "google_maps_link") ?? ""),
-    notes: String(getObjectValue(obj, "notes") ?? ""),
-    isFeatured: Boolean(
-      getObjectValue(obj, "is_featured") ?? getObjectValue(obj, "featured"),
-    ),
-    createdAt: String(getObjectValue(obj, "created_at") ?? ""),
-    updatedAt: String(getObjectValue(obj, "updated_at") ?? ""),
-    raw: obj,
-  };
 }
 
 /* ============================================================
@@ -585,130 +549,109 @@ function dictionary(locale: AppLocale) {
   return {
     title: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
     subtitle: isArabic
-      ? "استعراض مقدمي الخدمة والمراكز مع البحث، الفلاتر، الأعمدة، الفرز، التصدير والطباعة."
-      : "Browse providers and centers with search, filters, columns, sorting, export, and print.",
+      ? "إدارة وعرض مقدمي الخدمة والمراكز الطبية مع البحث والتصفية والتصدير."
+      : "Manage and browse providers and medical centers with search, filters, and export.",
 
-    back: isArabic ? "لوحة مقدمي الخدمة" : "Providers Overview",
-    addProvider: isArabic ? "إنشاء مقدم خدمة" : "Create Provider",
+    back: isArabic ? "رجوع" : "Back",
+    overview: isArabic ? "لوحة مقدمي الخدمة" : "Providers Overview",
     refresh: isArabic ? "تحديث" : "Refresh",
     exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
-    columns: isArabic ? "الأعمدة" : "Columns",
+    print: isArabic ? "طباعة" : "Print",
+    createProvider: isArabic ? "إضافة مقدم خدمة" : "Create Provider",
+    importProviders: isArabic ? "استيراد الشبكة الطبية" : "Import Medical Network",
 
-    tableTitle: isArabic ? "بيانات مقدمي الخدمة" : "Providers Data",
-    tableSubtitle: isArabic
-      ? "استعرض السجلات، رتّب البيانات، وخصص الأعمدة حسب احتياجك."
-      : "Browse records, sort data, and customize columns as needed.",
-
+    search: isArabic ? "بحث سريع" : "Quick Search",
     searchPlaceholder: isArabic
-      ? "ابحث باسم مقدم الخدمة أو الكود أو المدينة أو التصنيف أو بيانات التواصل..."
-      : "Search by provider name, code, city, type, or contact details...",
+      ? "ابحث بالاسم العربي أو الإنجليزي، الكود، المنطقة، المدينة، الجوال..."
+      : "Search by Arabic/English name, code, region, city, phone...",
+    filters: isArabic ? "الفلاتر" : "Filters",
+    columns: isArabic ? "الأعمدة" : "Columns",
+    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
 
-    all: isArabic ? "الكل" : "All",
     allStatuses: isArabic ? "كل الحالات" : "All Statuses",
     allTypes: isArabic ? "كل التصنيفات" : "All Types",
+    allRegions: isArabic ? "كل المناطق" : "All Regions",
+    allCities: isArabic ? "كل المدن" : "All Cities",
+    allFeatured: isArabic ? "الكل" : "All",
+    featuredOnly: isArabic ? "المميزون فقط" : "Featured only",
+    notFeaturedOnly: isArabic ? "غير المميزين" : "Not featured",
+    allSources: isArabic ? "كل المصادر" : "All Sources",
+    importedOnly: isArabic ? "مستوردة من الشبكة" : "Imported Network",
+    manualOnly: isArabic ? "إدخال يدوي" : "Manual Entry",
+    sortBy: isArabic ? "الترتيب" : "Sort",
+    sortAsc: isArabic ? "تصاعدي" : "Ascending",
+    sortDesc: isArabic ? "تنازلي" : "Descending",
+    sortName: isArabic ? "ترتيب بالاسم العام" : "Sort by General Name",
+    sortNameAr: isArabic ? "ترتيب بالاسم العربي" : "Sort by Arabic Name",
+    sortNameEn: isArabic ? "ترتيب بالاسم الإنجليزي" : "Sort by English Name",
+    sortMostOrders: isArabic ? "الأكثر عدد طلبات" : "Most Orders",
+    sortNewest: isArabic ? "الأحدث" : "Newest",
 
-    active: isArabic ? "نشط" : "Active",
-    draft: isArabic ? "مسودة" : "Draft",
-    suspended: isArabic ? "موقوف" : "Suspended",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    unknown: isArabic ? "غير محدد" : "Unknown",
+    accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية عرض قائمة مقدمي الخدمة."
+      : "You do not have permission to view providers.",
 
-    totalProviders: isArabic ? "إجمالي مقدمي الخدمة" : "Total Providers",
-    activeProviders: isArabic ? "النشطون" : "Active Providers",
-    featuredProviders: isArabic ? "المميزون" : "Featured Providers",
-    citiesCount: isArabic ? "المدن" : "Cities",
+    loadError: isArabic
+      ? "تعذر تحميل بيانات مقدمي الخدمة."
+      : "Unable to load providers.",
+    loadErrorHint: isArabic
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
+    retry: isArabic ? "إعادة المحاولة" : "Retry",
+    refreshSuccess: isArabic
+      ? "تم تحديث بيانات مقدمي الخدمة."
+      : "Providers refreshed successfully.",
+    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
+    printReady: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
+    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
+    copied: isArabic ? "تم النسخ." : "Copied.",
 
-    selectedRows: isArabic ? "صفوف محددة" : "row(s) selected",
+    emptyTitle: isArabic ? "لا يوجد مقدمو خدمة" : "No providers found",
+    emptyText: isArabic
+      ? "ابدأ بإضافة مقدم خدمة جديد أو استيراد الشبكة الطبية من ملف Excel."
+      : "Start by creating a provider or importing the medical network from Excel.",
+    noSearchTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
+    noSearchText: isArabic
+      ? "جرّب تعديل البحث أو الفلاتر لعرض نتائج أكثر."
+      : "Try changing search or filters to show more results.",
+
+    totalResults: isArabic ? "إجمالي النتائج" : "Total Results",
+    activeProviders: isArabic ? "النشطون" : "Active",
+    featuredProviders: isArabic ? "المميزون" : "Featured",
+    importedProviders: isArabic ? "مستوردة من الشبكة" : "Imported Network",
+    ordersCount: isArabic ? "عدد الطلبات" : "Orders Count",
+
     previous: isArabic ? "السابق" : "Previous",
     next: isArabic ? "التالي" : "Next",
     page: isArabic ? "صفحة" : "Page",
     from: isArabic ? "من" : "of",
 
-    emptyTitle: isArabic
-      ? "لا يوجد مقدمو خدمة بعد"
-      : "No providers yet",
-    emptyText: isArabic
-      ? "عند إضافة مقدمي خدمة جدد ستظهر بياناتهم هنا مباشرة."
-      : "New providers will appear here once they are created.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو فلاتر الحالة والتصنيف."
-      : "Try changing search keywords, status filters, or type filters.",
-
-    actions: isArabic ? "الإجراءات" : "Actions",
-    viewDetails: isArabic ? "عرض التفاصيل" : "View Details",
-    copyCode: isArabic ? "نسخ الكود" : "Copy Code",
-    copyId: isArabic ? "نسخ المعرف" : "Copy ID",
-    copyPhone: isArabic ? "نسخ رقم التواصل" : "Copy Contact Number",
-    copied: isArabic ? "تم النسخ بنجاح" : "Copied successfully",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض بيانات مقدمي الخدمة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view providers data. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل قائمة مقدمي الخدمة."
-      : "Unable to load providers list.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    refreshSuccess: isArabic
-      ? "تم تحديث قائمة مقدمي الخدمة بنجاح."
-      : "Providers list refreshed successfully.",
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printReady: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    reportScope: isArabic ? "نطاق التقرير" : "Report Scope",
-    currentFilteredData: isArabic
-      ? "حسب الفلاتر الحالية"
-      : "Current filtered data",
-    selectedScope: isArabic ? "الصفوف المحددة" : "Selected rows",
-    filterSearch: isArabic ? "البحث" : "Search",
-    filterStatus: isArabic ? "فلتر الحالة" : "Status Filter",
-    filterType: isArabic ? "فلتر التصنيف" : "Type Filter",
-
     table: {
-      id: isArabic ? "المعرف" : "ID",
       code: isArabic ? "الكود" : "Code",
-      provider: isArabic ? "مقدم الخدمة" : "Provider",
+      nameAr: isArabic ? "الاسم العربي" : "Arabic Name",
+      nameEn: isArabic ? "الاسم الإنجليزي" : "English Name",
       type: isArabic ? "التصنيف" : "Type",
+      region: isArabic ? "المنطقة" : "Region",
       city: isArabic ? "المدينة" : "City",
-      area: isArabic ? "الحي / المنطقة" : "Area",
-      address: isArabic ? "العنوان" : "Address",
       contact: isArabic ? "التواصل" : "Contact",
-      phone: isArabic ? "الهاتف" : "Phone",
-      mobile: isArabic ? "الجوال" : "Mobile",
-      email: isArabic ? "البريد الإلكتروني" : "Email",
-      contactPerson: isArabic ? "مسؤول التواصل" : "Contact Person",
+      orders: isArabic ? "الطلبات" : "Orders",
       status: isArabic ? "الحالة" : "Status",
       featured: isArabic ? "مميز" : "Featured",
+      sourceCategory: isArabic ? "تصنيف المصدر" : "Source Category",
       createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-      updatedAt: isArabic ? "آخر تحديث" : "Updated At",
-      actions: isArabic ? "الإجراء" : "Action",
+      actions: isArabic ? "الإجراءات" : "Actions",
     },
 
-    yes: isArabic ? "نعم" : "Yes",
-    no: isArabic ? "لا" : "No",
-    printTitle: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
+    statuses: {
+      ACTIVE: isArabic ? "نشط" : "Active",
+      INACTIVE: isArabic ? "غير نشط" : "Inactive",
+      SUSPENDED: isArabic ? "موقوف" : "Suspended",
+      DRAFT: isArabic ? "مسودة" : "Draft",
+      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
+    } satisfies Record<ProviderStatus, string>,
 
-    typeLabels: {
+    types: {
       HOSPITAL: isArabic ? "مستشفى" : "Hospital",
       MEDICAL_CENTER: isArabic ? "مركز طبي" : "Medical Center",
       PHARMACY: isArabic ? "صيدلية" : "Pharmacy",
@@ -718,12 +661,203 @@ function dictionary(locale: AppLocale) {
       OTHER: isArabic ? "أخرى" : "Other",
       UNKNOWN: isArabic ? "غير محدد" : "Unknown",
     } satisfies Record<ProviderType, string>,
+
+    yes: isArabic ? "نعم" : "Yes",
+    no: isArabic ? "لا" : "No",
+    details: isArabic ? "التفاصيل" : "Details",
+    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
   };
 }
 
 /* ============================================================
-   UI Helpers
+   Data Helpers
 ============================================================ */
+
+function pickString(...values: unknown[]): string {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+
+    const text = String(value).trim();
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function pickNumber(...values: unknown[]): number {
+  for (const value of values) {
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue)) return numericValue;
+  }
+
+  return 0;
+}
+
+function pickBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  const text = String(value || "").trim().toLowerCase();
+
+  return ["1", "true", "yes", "on", "نعم"].includes(text);
+}
+
+function normalizeStatus(value: unknown): ProviderStatus {
+  const status = String(value || "").trim().toUpperCase();
+
+  if (["ACTIVE", "INACTIVE", "SUSPENDED", "DRAFT"].includes(status)) {
+    return status as ProviderStatus;
+  }
+
+  return "UNKNOWN";
+}
+
+function normalizeProviderType(value: unknown): ProviderType {
+  const type = String(value || "").trim().toUpperCase();
+
+  if (
+    [
+      "HOSPITAL",
+      "MEDICAL_CENTER",
+      "PHARMACY",
+      "PARTNER",
+      "LAB",
+      "CLINIC",
+      "OTHER",
+    ].includes(type)
+  ) {
+    return type as ProviderType;
+  }
+
+  return "UNKNOWN";
+}
+
+function normalizeProvider(item: unknown): Provider {
+  const obj = asRecord(item);
+
+  const name = pickString(obj.name, obj.provider_name, obj.title);
+  const nameAr = pickString(obj.name_ar, obj.arabic_name, obj.nameAr);
+  const nameEn = pickString(obj.name_en, obj.english_name, obj.nameEn);
+
+  return {
+    id: pickString(obj.id, obj.pk, obj.provider_id),
+    name,
+    nameAr,
+    nameEn,
+    displayNameAr: pickString(obj.display_name_ar, nameAr, name),
+    displayNameEn: pickString(obj.display_name_en, nameEn, name),
+    code: pickString(obj.code, obj.provider_code),
+    providerType: normalizeProviderType(obj.provider_type ?? obj.type),
+    status: normalizeStatus(obj.status),
+    contactPerson: pickString(obj.contact_person, obj.contactPerson),
+    phone: pickString(obj.phone),
+    mobile: pickString(obj.mobile),
+    email: pickString(obj.email),
+    website: pickString(obj.website),
+    region: pickString(obj.region),
+    city: pickString(obj.city),
+    area: pickString(obj.area),
+    street: pickString(obj.street),
+    address: pickString(obj.address),
+    googleMapsLink: pickString(obj.google_maps_link, obj.googleMapsLink),
+    sourceCategory: pickString(obj.source_category, obj.sourceCategory),
+    importSource: pickString(obj.import_source, obj.importSource),
+    externalReference: pickString(obj.external_reference, obj.externalReference),
+    ordersCount: pickNumber(
+      obj.orders_count,
+      obj.order_count,
+      obj.total_orders,
+      obj.requests_count,
+      obj.completed_orders_count,
+    ),
+    notes: pickString(obj.notes),
+    isFeatured: pickBoolean(obj.is_featured ?? obj.isFeatured),
+    createdAt: pickString(obj.created_at, obj.createdAt),
+    updatedAt: pickString(obj.updated_at, obj.updatedAt),
+  };
+}
+
+function extractProviders(payload: ProvidersApiResponse | null): Provider[] {
+  if (!payload) return [];
+
+  const data = asRecord(payload.data);
+
+  const source =
+    payload.results ||
+    payload.items ||
+    payload.providers ||
+    (Array.isArray(payload.data) ? payload.data : undefined) ||
+    (Array.isArray(data.results) ? data.results : undefined) ||
+    (Array.isArray(data.items) ? data.items : undefined) ||
+    (Array.isArray(data.providers) ? data.providers : undefined) ||
+    [];
+
+  return source
+    .map(normalizeProvider)
+    .filter(
+      (provider) =>
+        provider.id || provider.name || provider.nameAr || provider.nameEn,
+    );
+}
+
+function normalizePagination(
+  payload: ProvidersApiResponse | null,
+): ProvidersPagination {
+  const pagination = payload?.pagination || {};
+  const totalItems =
+    Number(pagination.total_items || payload?.count || 0) || 0;
+  const pageSize = Number(pagination.page_size || PAGE_SIZE) || PAGE_SIZE;
+  const totalPages =
+    Number(pagination.total_pages) ||
+    Math.max(1, Math.ceil(totalItems / pageSize));
+
+  return {
+    page: Number(pagination.page || 1) || 1,
+    page_size: pageSize,
+    total_pages: Math.max(1, totalPages),
+    total_items: totalItems,
+    has_next: Boolean(pagination.has_next || payload?.next),
+    has_previous: Boolean(pagination.has_previous || payload?.previous),
+  };
+}
+
+function normalizeSummary(
+  payload: ProvidersApiResponse | null,
+  rows: Provider[],
+): ProvidersSummary {
+  const summary = payload?.summary || {};
+
+  return {
+    total_providers:
+      Number(summary.total_providers) ||
+      Number(payload?.count) ||
+      rows.length,
+    active_providers:
+      Number(summary.active_providers) ||
+      rows.filter((provider) => provider.status === "ACTIVE").length,
+    inactive_providers:
+      Number(summary.inactive_providers) ||
+      rows.filter((provider) => provider.status === "INACTIVE").length,
+    suspended_providers:
+      Number(summary.suspended_providers) ||
+      rows.filter((provider) => provider.status === "SUSPENDED").length,
+    draft_providers:
+      Number(summary.draft_providers) ||
+      rows.filter((provider) => provider.status === "DRAFT").length,
+    featured_providers:
+      Number(summary.featured_providers) ||
+      rows.filter((provider) => provider.isFeatured).length,
+    imported_providers:
+      Number(summary.imported_providers) ||
+      rows.filter((provider) => provider.importSource).length,
+    manual_providers:
+      Number(summary.manual_providers) ||
+      rows.filter((provider) => !provider.importSource).length,
+    total_orders:
+      Number(summary.total_orders) ||
+      rows.reduce((total, provider) => total + provider.ordersCount, 0),
+  };
+}
 
 function formatNumber(value: number | string): string {
   const numericValue = Number(value);
@@ -735,11 +869,10 @@ function formatNumber(value: number | string): string {
   }).format(numericValue);
 }
 
-function formatDate(value: string): string {
+function formatDate(value: string) {
   if (!value) return "-";
 
   const date = new Date(value);
-
   if (Number.isNaN(date.getTime())) return "-";
 
   return new Intl.DateTimeFormat("en-US", {
@@ -758,280 +891,173 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function percent(value: number, total: number) {
-  if (!total) return 0;
-  return Math.min(100, Math.max(0, Math.round((value / total) * 100)));
+function getProviderTypeLabel(type: ProviderType, locale: AppLocale) {
+  return dictionary(locale).types[type] || dictionary(locale).types.UNKNOWN;
 }
 
-function isValidProviderId(id: Provider["id"]) {
-  const value = String(id || "").trim();
-
-  return value.length > 0 && value !== "-" && value !== "undefined";
-}
-
-function statusLabel(status: ProviderStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<ProviderStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
-    SUSPENDED: t.suspended,
-    DRAFT: t.draft,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function typeLabel(type: ProviderType, locale: AppLocale) {
-  return dictionary(locale).typeLabels[type];
-}
-
-function statusBadge(status: ProviderStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "DRAFT") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "SUSPENDED") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "INACTIVE") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
+function getProviderStatusLabel(status: ProviderStatus, locale: AppLocale) {
   return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
+    dictionary(locale).statuses[status] || dictionary(locale).statuses.UNKNOWN
   );
 }
 
-function providerIcon(type: ProviderType): LucideIcon {
+function getProviderIcon(type: ProviderType): LucideIcon {
   if (type === "HOSPITAL") return Hospital;
   if (type === "MEDICAL_CENTER") return Stethoscope;
-  if (type === "PHARMACY") return ShieldCheck;
-  if (type === "LAB") return Layers3;
+  if (type === "LAB") return TestTube2;
   if (type === "CLINIC") return Stethoscope;
+  if (type === "PHARMACY") return ShieldCheck;
 
   return Building2;
 }
 
-function getColumnLabels(locale: AppLocale) {
-  const t = dictionary(locale);
+function getStatusBadgeClass(status: ProviderStatus) {
+  if (status === "ACTIVE") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
 
-  return {
-    code: t.table.code,
-    name: t.table.provider,
-    providerType: t.table.type,
-    city: t.table.city,
-    contact: t.table.contact,
-    status: t.table.status,
-    featured: t.table.featured,
-    createdAt: t.table.createdAt,
-    actions: t.actions,
-  } satisfies Record<keyof VisibleColumns, string>;
+  if (status === "SUSPENDED") {
+    return "border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-50";
+  }
+
+  if (status === "DRAFT") {
+    return "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  if (status === "INACTIVE") {
+    return "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-50";
+  }
+
+  return "border-slate-200 bg-white text-slate-700";
 }
 
-function copyToClipboard(value: string, successMessage: string) {
-  if (!value || value === "-") return;
+function visibleColumnCount(columns: VisibleColumns) {
+  return Object.values(columns).filter(Boolean).length;
+}
 
-  navigator.clipboard.writeText(value);
-  toast.success(successMessage);
+function copyText(value: string, successMessage: string) {
+  if (!value) return;
+
+  navigator.clipboard
+    ?.writeText(value)
+    .then(() => toast.success(successMessage))
+    .catch(() => toast.success(successMessage));
 }
 
 /* ============================================================
-   Export / Print
+   Excel / Print
 ============================================================ */
 
-function downloadExcel(options: ExcelSheetOptions) {
-  const dir = options.locale === "ar" ? "rtl" : "ltr";
-  const align = options.locale === "ar" ? "right" : "left";
-  const colspan = Math.max(options.headers.length, 2);
+function buildExcelWorkbook(options: ExcelSheetOptions) {
+  const isArabic = options.locale === "ar";
 
-  const summaryHtml = options.summaryRows
+  const summary = options.summaryRows
     .map(
       ([label, value]) => `
         <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
+          <td style="font-weight:700;background:#f3f4f6;">${escapeHtml(label)}</td>
+          <td>${escapeHtml(value)}</td>
+        </tr>
+      `,
     )
     .join("");
 
-  const filterHtml = options.filterRows
+  const filters = options.filterRows
     .map(
       ([label, value]) => `
         <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
+          <td style="font-weight:700;background:#f3f4f6;">${escapeHtml(label)}</td>
+          <td>${escapeHtml(value)}</td>
+        </tr>
+      `,
     )
     .join("");
 
-  const headerHtml = options.headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
+  const headers = options.headers
+    .map(
+      (header) =>
+        `<th style="background:#432a58;color:#ffffff;">${escapeHtml(header)}</th>`,
+    )
     .join("");
 
-  const rowsHtml = options.rows
+  const rows = options.rows
     .map(
       (row) => `
         <tr>
           ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
-        </tr>`,
+        </tr>
+      `,
     )
     .join("");
 
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
+  return `
+    <html lang="${options.locale}" dir="${isArabic ? "rtl" : "ltr"}">
       <head>
-        <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(options.worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${options.locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-        <style>
-          body {
-            direction: ${dir};
-            font-family: Arial, sans-serif;
-          }
-          table {
-            border-collapse: collapse;
-            width: 100%;
-          }
-          th,
-          td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th {
-            background: #d8ecfb;
-            color: #000000;
-            font-weight: 700;
-          }
-          .title {
-            font-size: 20px;
-            font-weight: 700;
-            text-align: center;
-            background: #ffffff;
-          }
-          .section {
-            font-weight: 700;
-            background: #eef6ff;
-          }
-          .summary-label {
-            font-weight: 700;
-            background: #f8fafc;
-            width: 240px;
-          }
-          .summary-value {
-            font-weight: 700;
-          }
-        </style>
+        <meta charset="utf-8" />
       </head>
-      <body dir="${dir}">
-        <table>
-          <tr>
-            <td class="title" colspan="${colspan}">
-              ${escapeHtml(options.title)}
-            </td>
-          </tr>
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "ملخص القائمة" : "List Summary"}
-          </td></tr>
-          ${summaryHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "الفلاتر المستخدمة" : "Applied Filters"}
-          </td></tr>
-          ${filterHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr>${headerHtml}</tr>
-          ${rowsHtml}
+      <body>
+        <h2>${escapeHtml(options.title)}</h2>
+        <table border="1"><tbody>${summary}</tbody></table>
+        <br />
+        <table border="1"><tbody>${filters}</tbody></table>
+        <br />
+        <table border="1">
+          <thead><tr>${headers}</tr></thead>
+          <tbody>${rows}</tbody>
         </table>
       </body>
-    </html>`;
+    </html>
+  `;
+}
 
-  const blob = new Blob([workbook], {
+function downloadExcelFile(options: ExcelSheetOptions) {
+  const html = buildExcelWorkbook(options);
+  const blob = new Blob(["\ufeff", html], {
     type: "application/vnd.ms-excel;charset=utf-8;",
   });
-
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
+  const link = document.createElement("a");
 
-  anchor.href = url;
-  anchor.download = options.filename;
-  anchor.click();
+  link.href = url;
+  link.download = options.filename.endsWith(".xls")
+    ? options.filename
+    : `${options.filename}.xls`;
 
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
 
 function buildPrintHtml({
   locale,
+  providers,
   title,
-  rows,
-  t,
+  printedAtLabel,
 }: {
   locale: AppLocale;
+  providers: Provider[];
   title: string;
-  rows: Provider[];
-  t: ReturnType<typeof dictionary>;
+  printedAtLabel: string;
 }) {
+  const t = dictionary(locale);
   const isArabic = locale === "ar";
   const now = new Date().toLocaleString("en-US");
 
-  const tableRows = rows
+  const rows = providers
     .map(
-      (provider, index) => `
+      (provider) => `
         <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(provider.name || "-")}</td>
           <td>${escapeHtml(provider.code || "-")}</td>
-          <td>${escapeHtml(typeLabel(provider.providerType, locale))}</td>
-          <td>${escapeHtml(provider.city || "-")}</td>
-          <td>${escapeHtml(provider.area || "-")}</td>
-          <td>${escapeHtml(provider.phone || provider.mobile || "-")}</td>
-          <td>${escapeHtml(provider.email || "-")}</td>
-          <td>${escapeHtml(statusLabel(provider.status, locale))}</td>
-          <td>${escapeHtml(formatDate(provider.createdAt))}</td>
+          <td>${escapeHtml(provider.nameAr || provider.displayNameAr || "-")}</td>
+          <td>${escapeHtml(provider.nameEn || provider.displayNameEn || "-")}</td>
+          <td>${escapeHtml(getProviderTypeLabel(provider.providerType, locale))}</td>
+          <td>${escapeHtml(provider.region || "-")}</td>
+          <td>${escapeHtml([provider.city, provider.area].filter(Boolean).join(" - ") || "-")}</td>
+          <td>${escapeHtml(provider.phone || provider.mobile || provider.email || "-")}</td>
+          <td>${escapeHtml(provider.ordersCount)}</td>
+          <td>${escapeHtml(getProviderStatusLabel(provider.status, locale))}</td>
+          <td>${escapeHtml(provider.isFeatured ? t.yes : t.no)}</td>
         </tr>
       `,
     )
@@ -1054,97 +1080,67 @@ function buildPrintHtml({
             direction: ${isArabic ? "rtl" : "ltr"};
             text-align: ${isArabic ? "right" : "left"};
           }
-          .print-header {
+          .header {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
             gap: 16px;
-            margin-bottom: 18px;
             border-bottom: 1px solid #e5e7eb;
             padding-bottom: 14px;
+            margin-bottom: 18px;
           }
           h1 {
             margin: 0;
-            font-size: 22px;
+            font-size: 24px;
             font-weight: 800;
           }
           .meta {
             margin-top: 8px;
             color: #6b7280;
             font-size: 12px;
-            line-height: 1.8;
-          }
-          .badge {
-            display: inline-block;
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            color: #374151;
           }
           table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 12px;
-          }
-          th {
-            background: #f3f4f6;
-            color: #111827;
-            font-weight: 700;
+            font-size: 11px;
           }
           th,
           td {
             border: 1px solid #e5e7eb;
-            padding: 9px 8px;
+            padding: 8px;
             text-align: ${isArabic ? "right" : "left"};
             vertical-align: top;
           }
-          tr:nth-child(even) td {
-            background: #fafafa;
-          }
-          @page {
-            size: A4 landscape;
-            margin: 12mm;
-          }
-          @media print {
-            body { padding: 0; }
-          }
+          th { background: #f3f4f6; }
+          @page { size: A4 landscape; margin: 10mm; }
+          @media print { body { padding: 0; } }
         </style>
       </head>
 
       <body>
-        <div class="print-header">
+        <div class="header">
           <div>
             <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
+            <div class="meta">${escapeHtml(printedAtLabel)}: ${escapeHtml(now)}</div>
           </div>
-          <div class="badge">Primey Care</div>
+          <strong>Primey Care</strong>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th>#</th>
-              <th>${escapeHtml(t.table.provider)}</th>
               <th>${escapeHtml(t.table.code)}</th>
+              <th>${escapeHtml(t.table.nameAr)}</th>
+              <th>${escapeHtml(t.table.nameEn)}</th>
               <th>${escapeHtml(t.table.type)}</th>
+              <th>${escapeHtml(t.table.region)}</th>
               <th>${escapeHtml(t.table.city)}</th>
-              <th>${escapeHtml(t.table.area)}</th>
-              <th>${escapeHtml(t.table.phone)}</th>
-              <th>${escapeHtml(t.table.email)}</th>
+              <th>${escapeHtml(t.table.contact)}</th>
+              <th>${escapeHtml(t.table.orders)}</th>
               <th>${escapeHtml(t.table.status)}</th>
-              <th>${escapeHtml(t.table.createdAt)}</th>
+              <th>${escapeHtml(t.table.featured)}</th>
             </tr>
           </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="10" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
+          <tbody>${rows}</tbody>
         </table>
 
         <script>
@@ -1159,52 +1155,104 @@ function buildPrintHtml({
 }
 
 /* ============================================================
-   Skeleton
+   UI Helpers
 ============================================================ */
 
 function SkeletonLine({ className = "" }: { className?: string }) {
   return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
 }
 
-function StatCardSkeleton() {
+function ListSkeleton() {
+  return (
+    <div className="space-y-4">
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="space-y-3 p-5">
+          <SkeletonLine className="h-11 w-full rounded-xl" />
+          <SkeletonLine className="h-11 w-full rounded-xl" />
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="space-y-3 p-5">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function KpiCard({
+  icon: Icon,
+  title,
+  value,
+  description,
+}: {
+  icon: LucideIcon;
+  title: string;
+  value: number;
+  description: string;
+}) {
   return (
     <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-4">
+      <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
-          <div className="space-y-2">
-            <SkeletonLine className="h-7 w-16" />
-            <SkeletonLine className="h-4 w-28" />
+          <div className="min-w-0">
+            <p className="text-sm text-muted-foreground">{title}</p>
+            <p className="mt-2 text-2xl font-bold tracking-tight">
+              {formatNumber(value)}
+            </p>
+            <p className="mt-1 truncate text-xs text-muted-foreground">
+              {description}
+            </p>
           </div>
-          <SkeletonLine className="h-10 w-10 rounded-xl" />
-        </div>
-        <div className="mt-4 flex items-center gap-2">
-          <SkeletonLine className="h-3 w-8" />
-          <SkeletonLine className="h-2 flex-1" />
+
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-muted">
+            <Icon className="h-5 w-5" />
+          </div>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
+function SelectButton({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ label: string; value: string }>;
+  onChange: (value: string) => void;
+}) {
+  const activeLabel =
+    options.find((item) => item.value === value)?.label || label;
+
   return (
-    <>
-      {Array.from({ length: 8 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 2
-                    ? "h-10 w-56 rounded-lg"
-                    : "h-4 w-24 rounded-lg"
-                }
-              />
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" className="h-10 rounded-xl">
+          <Filter className="h-4 w-4" />
+          <span>{activeLabel}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuLabel>{label}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {options.map((option) => (
+          <DropdownMenuCheckboxItem
+            key={option.value}
+            checked={option.value === value}
+            onCheckedChange={() => onChange(option.value)}
+          >
+            {option.label}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1217,29 +1265,25 @@ export default function SystemProvidersListPage() {
 
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [summary, setSummary] = useState<ProvidersSummary>(DEFAULT_SUMMARY);
+  const [pagination, setPagination] =
+    useState<ProvidersPagination>(DEFAULT_PAGINATION);
 
-  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
-
-  const [sortKey, setSortKey] = useState<SortKey>("createdAt");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [selectedIds, setSelectedIds] = useState<Array<string | number>>([]);
-  const [pageIndex, setPageIndex] = useState(0);
-
-  const [visibleColumns, setVisibleColumns] = useState<VisibleColumns>({
-    code: true,
-    name: true,
-    providerType: true,
-    city: true,
-    contact: true,
-    status: true,
-    featured: true,
-    createdAt: true,
-    actions: true,
-  });
+  const [regionFilter, setRegionFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("all");
+  const [featuredFilter, setFeaturedFilter] = useState<FeaturedFilter>("all");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [sortKey, setSortKey] = useState<SortKey>("nameAr");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [visibleColumns, setVisibleColumns] =
+    useState<VisibleColumns>(DEFAULT_VISIBLE_COLUMNS);
+  const [page, setPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
@@ -1247,274 +1291,64 @@ export default function SystemProvidersListPage() {
 
   const canViewProviders = hasSafePermission(
     auth,
-    ["providers.view", "providers.list", "centers.view", "centers.list"],
+    ["providers.view", "providers.list"],
     "view",
   );
 
   const canCreateProviders = hasSafePermission(
     auth,
-    ["providers.create", "centers.create"],
+    ["providers.create"],
+    "action",
+  );
+
+  const canImportProviders = hasSafePermission(
+    auth,
+    ["providers.import", "providers.create"],
     "action",
   );
 
   const canExportProviders = hasSafePermission(
     auth,
-    ["providers.export", "centers.export", "reports.export"],
+    ["providers.export", "reports.export"],
     "action",
   );
 
   const canPrintProviders = hasSafePermission(
     auth,
-    ["providers.print", "centers.print", "reports.print"],
+    ["providers.print", "reports.print"],
     "action",
   );
 
-  const canViewProviderDetails = hasSafePermission(
+  const canViewDetails = hasSafePermission(
     auth,
-    ["providers.view", "providers.detail", "centers.view", "centers.detail"],
+    ["providers.view", "providers.detail"],
     "view",
   );
 
-  const safeVisibleColumns = useMemo<VisibleColumns>(
-    () => ({
-      ...visibleColumns,
-      actions: visibleColumns.actions && canViewProviderDetails,
-    }),
-    [canViewProviderDetails, visibleColumns],
-  );
-
-  const columnLabels = useMemo(() => getColumnLabels(locale), [locale]);
-
-  const stats = useMemo(() => {
-    const total = providers.length;
-    const active = providers.filter((item) => item.status === "ACTIVE").length;
-    const featured = providers.filter((item) => item.isFeatured).length;
-    const cities = new Set(
-      providers.map((item) => item.city.trim()).filter(Boolean),
-    ).size;
-
-    return {
-      total,
-      active,
-      featured,
-      cities,
-    };
+  const regions = useMemo(() => {
+    return Array.from(
+      new Set(providers.map((provider) => provider.region).filter(Boolean)),
+    ).sort((a, b) => a.localeCompare(b, "ar"));
   }, [providers]);
 
-  const statusOptions = useMemo(
-    () => [
-      {
-        value: "all" as StatusFilter,
-        label: t.allStatuses,
-        count: providers.length,
-      },
-      {
-        value: "ACTIVE" as StatusFilter,
-        label: t.active,
-        count: providers.filter((item) => item.status === "ACTIVE").length,
-      },
-      {
-        value: "DRAFT" as StatusFilter,
-        label: t.draft,
-        count: providers.filter((item) => item.status === "DRAFT").length,
-      },
-      {
-        value: "SUSPENDED" as StatusFilter,
-        label: t.suspended,
-        count: providers.filter((item) => item.status === "SUSPENDED").length,
-      },
-      {
-        value: "INACTIVE" as StatusFilter,
-        label: t.inactive,
-        count: providers.filter((item) => item.status === "INACTIVE").length,
-      },
-    ],
-    [providers, t],
-  );
+  const cities = useMemo(() => {
+    const source =
+      regionFilter === "all"
+        ? providers
+        : providers.filter((provider) => provider.region === regionFilter);
 
-  const typeOptions = useMemo(
-    () => [
-      {
-        value: "all" as TypeFilter,
-        label: t.allTypes,
-        count: providers.length,
-      },
-      ...(
-        [
-          "HOSPITAL",
-          "MEDICAL_CENTER",
-          "PHARMACY",
-          "LAB",
-          "CLINIC",
-          "PARTNER",
-          "OTHER",
-        ] as ProviderType[]
-      ).map((type) => ({
-        value: type as TypeFilter,
-        label: typeLabel(type, locale),
-        count: providers.filter((item) => item.providerType === type).length,
-      })),
-    ],
-    [locale, providers, t.allTypes],
-  );
-
-  const filteredProviders = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
-
-    return providers.filter((provider) => {
-      const matchesStatus =
-        statusFilter === "all" ? true : provider.status === statusFilter;
-
-      const matchesType =
-        typeFilter === "all" ? true : provider.providerType === typeFilter;
-
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            provider.name,
-            provider.code,
-            provider.city,
-            provider.area,
-            provider.address,
-            provider.contactPerson,
-            provider.phone,
-            provider.mobile,
-            provider.email,
-            provider.status,
-            provider.providerType,
-            statusLabel(provider.status, locale),
-            typeLabel(provider.providerType, locale),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
-
-      return matchesStatus && matchesType && matchesQuery;
-    });
-  }, [locale, providers, query, statusFilter, typeFilter]);
-
-  const sortedProviders = useMemo(() => {
-    const rows = [...filteredProviders];
-
-    rows.sort((firstProvider, secondProvider) => {
-      let first: string | number = "";
-      let second: string | number = "";
-
-      if (sortKey === "name") {
-        first = firstProvider.name.toLowerCase();
-        second = secondProvider.name.toLowerCase();
-      }
-
-      if (sortKey === "code") {
-        first = firstProvider.code.toLowerCase();
-        second = secondProvider.code.toLowerCase();
-      }
-
-      if (sortKey === "providerType") {
-        first = firstProvider.providerType.toLowerCase();
-        second = secondProvider.providerType.toLowerCase();
-      }
-
-      if (sortKey === "city") {
-        first = firstProvider.city.toLowerCase();
-        second = secondProvider.city.toLowerCase();
-      }
-
-      if (sortKey === "status") {
-        first = firstProvider.status.toLowerCase();
-        second = secondProvider.status.toLowerCase();
-      }
-
-      if (sortKey === "createdAt") {
-        first = new Date(
-          firstProvider.createdAt || firstProvider.updatedAt || 0,
-        ).getTime();
-        second = new Date(
-          secondProvider.createdAt || secondProvider.updatedAt || 0,
-        ).getTime();
-      }
-
-      if (first < second) return sortDirection === "asc" ? -1 : 1;
-      if (first > second) return sortDirection === "asc" ? 1 : -1;
-
-      return 0;
-    });
-
-    return rows;
-  }, [filteredProviders, sortDirection, sortKey]);
-
-  const exportRows = useMemo(() => {
-    if (selectedIds.length > 0) {
-      return sortedProviders.filter((provider) =>
-        selectedIds.includes(provider.id),
-      );
-    }
-
-    return sortedProviders;
-  }, [selectedIds, sortedProviders]);
-
-  const pageCount = Math.max(1, Math.ceil(sortedProviders.length / PAGE_SIZE));
-
-  const pageRows = useMemo(() => {
-    const start = pageIndex * PAGE_SIZE;
-    return sortedProviders.slice(start, start + PAGE_SIZE);
-  }, [pageIndex, sortedProviders]);
-
-  const selectedOnPage = pageRows.filter((row) =>
-    selectedIds.includes(row.id),
-  ).length;
-
-  const allPageSelected =
-    pageRows.length > 0 && selectedOnPage === pageRows.length;
-
-  const hasSearchOrFilter =
-    query.trim().length > 0 || statusFilter !== "all" || typeFilter !== "all";
-
-  const visibleTableColumnsCount =
-    1 + Object.values(safeVisibleColumns).filter(Boolean).length;
-
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
-
-    setSortKey(key);
-    setSortDirection("asc");
-  }
-
-  function toggleRow(id: string | number) {
-    setSelectedIds((current) =>
-      current.includes(id)
-        ? current.filter((item) => item !== id)
-        : [...current, id],
-    );
-  }
-
-  function toggleAllPageRows() {
-    const pageIds = pageRows.map((row) => row.id);
-
-    if (allPageSelected) {
-      setSelectedIds((current) =>
-        current.filter((id) => !pageIds.includes(id)),
-      );
-      return;
-    }
-
-    setSelectedIds((current) => Array.from(new Set([...current, ...pageIds])));
-  }
-
-  function clearFilters() {
-    setQuery("");
-    setStatusFilter("all");
-    setTypeFilter("all");
-  }
+    return Array.from(
+      new Set(source.map((provider) => provider.city).filter(Boolean)),
+    ).sort((a, b) => a.localeCompare(b, "ar"));
+  }, [providers, regionFilter]);
 
   const loadProviders = useCallback(
     async (showToast = false) => {
       if (!canViewProviders) {
         setIsLoading(false);
         setProviders([]);
+        setSummary(DEFAULT_SUMMARY);
+        setPagination(DEFAULT_PAGINATION);
         return;
       }
 
@@ -1522,7 +1356,74 @@ export default function SystemProvidersListPage() {
         setIsLoading(true);
         setErrorMessage("");
 
-        const response = await fetch(apiUrl("/api/providers/?page_size=200"), {
+        const params = new URLSearchParams();
+
+        params.set("page", String(page));
+        params.set("page_size", String(PAGE_SIZE));
+
+        if (debouncedSearch.trim()) {
+          params.set("q", debouncedSearch.trim());
+          params.set("search", debouncedSearch.trim());
+        }
+
+        if (statusFilter !== "all") {
+          params.set("status", statusFilter);
+        }
+
+        if (typeFilter !== "all") {
+          params.set("provider_type", typeFilter);
+          params.set("type", typeFilter);
+        }
+
+        if (regionFilter !== "all") {
+          params.set("region", regionFilter);
+        }
+
+        if (cityFilter !== "all") {
+          params.set("city", cityFilter);
+        }
+
+        if (featuredFilter === "featured") {
+          params.set("is_featured", "true");
+        }
+
+        if (featuredFilter === "not_featured") {
+          params.set("is_featured", "false");
+        }
+
+        if (sourceFilter === "imported") {
+          params.set("source", "imported");
+        }
+
+        if (sourceFilter === "manual") {
+          params.set("source", "manual");
+        }
+
+        if (sortKey === "ordersCount") {
+          params.set("sort", "most_orders");
+          params.set("ordering", sortDirection === "asc" ? "orders_count" : "-orders_count");
+        } else if (sortKey === "createdAt") {
+          params.set("ordering", sortDirection === "asc" ? "created_at" : "-created_at");
+        } else if (sortKey === "nameAr") {
+          params.set("ordering", sortDirection === "asc" ? "name_ar" : "-name_ar");
+        } else if (sortKey === "nameEn") {
+          params.set("ordering", sortDirection === "asc" ? "name_en" : "-name_en");
+        } else if (sortKey === "providerType") {
+          params.set("ordering", sortDirection === "asc" ? "provider_type" : "-provider_type");
+        } else {
+          const orderingMap: Record<string, string> = {
+            name: "name",
+            code: "code",
+            region: "region",
+            city: "city",
+            status: "status",
+          };
+
+          const field = orderingMap[sortKey] || "name_ar";
+          params.set("ordering", sortDirection === "asc" ? field : `-${field}`);
+        }
+
+        const response = await fetch(apiUrl(`/api/providers/?${params.toString()}`), {
           method: "GET",
           credentials: "include",
           headers: {
@@ -1535,104 +1436,127 @@ export default function SystemProvidersListPage() {
           | null;
 
         if (!response.ok || payload?.ok === false) {
-          throw new Error(payload?.message || `HTTP ${response.status}`);
+          throw new Error(
+            payload?.message ||
+              payload?.detail ||
+              payload?.error ||
+              `HTTP ${response.status}`,
+          );
         }
 
-        setProviders(extractProviders(payload).map(normalizeProvider));
+        const rows = extractProviders(payload);
+
+        setProviders(rows);
+        setSummary(normalizeSummary(payload, rows));
+        setPagination(normalizePagination(payload));
 
         if (showToast) {
           toast.success(t.refreshSuccess);
         }
       } catch (error) {
-        console.error("Failed to load providers list:", error);
+        console.error("Failed to load providers:", error);
         setProviders([]);
+        setSummary(DEFAULT_SUMMARY);
+        setPagination(DEFAULT_PAGINATION);
         setErrorMessage(t.loadError);
         toast.error(t.loadError);
       } finally {
         setIsLoading(false);
       }
     },
-    [canViewProviders, t.loadError, t.refreshSuccess],
+    [
+      canViewProviders,
+      cityFilter,
+      debouncedSearch,
+      featuredFilter,
+      page,
+      regionFilter,
+      sortDirection,
+      sortKey,
+      sourceFilter,
+      statusFilter,
+      t.loadError,
+      t.refreshSuccess,
+      typeFilter,
+    ],
   );
+
+  const hasActiveFilters = Boolean(
+    debouncedSearch.trim() ||
+      statusFilter !== "all" ||
+      typeFilter !== "all" ||
+      regionFilter !== "all" ||
+      cityFilter !== "all" ||
+      featuredFilter !== "all" ||
+      sourceFilter !== "all",
+  );
+
+  const columnCount = visibleColumnCount(visibleColumns);
+
+  function resetFilters() {
+    setSearch("");
+    setDebouncedSearch("");
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setRegionFilter("all");
+    setCityFilter("all");
+    setFeaturedFilter("all");
+    setSourceFilter("all");
+    setSortKey("nameAr");
+    setSortDirection("asc");
+    setPage(1);
+  }
 
   function exportExcel() {
     if (!canExportProviders) return;
 
-    if (exportRows.length === 0) {
-      toast.error(t.exportEmpty);
-      return;
-    }
-
-    const generatedAt = new Date();
-
-    const statusLabelText =
-      statusOptions.find((item) => item.value === statusFilter)?.label || t.all;
-
-    const typeLabelText =
-      typeOptions.find((item) => item.value === typeFilter)?.label || t.all;
-
-    downloadExcel({
-      filename: `primey-care-providers-list-${generatedAt
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
+    downloadExcelFile({
+      filename: "primey-care-providers-current-page.xls",
       title: t.title,
       locale,
       summaryRows: [
-        [t.generatedAt, generatedAt.toLocaleString("en-US")],
-        [
-          t.reportScope,
-          selectedIds.length > 0 ? t.selectedScope : t.currentFilteredData,
-        ],
-        [
-          t.table.provider,
-          `${formatNumber(exportRows.length)} / ${formatNumber(
-            providers.length,
-          )}`,
-        ],
-        [t.totalProviders, stats.total],
-        [t.activeProviders, stats.active],
-        [t.featuredProviders, stats.featured],
-        [t.citiesCount, stats.cities],
+        [t.totalResults, summary.total_providers],
+        [t.activeProviders, summary.active_providers],
+        [t.featuredProviders, summary.featured_providers],
+        [t.importedProviders, summary.imported_providers],
+        [t.ordersCount, summary.total_orders],
       ],
       filterRows: [
-        [t.filterSearch, query || t.all],
-        [t.filterStatus, statusLabelText],
-        [t.filterType, typeLabelText],
+        [t.search, debouncedSearch || "-"],
+        [t.allStatuses, statusFilter],
+        [t.allTypes, typeFilter],
+        [t.allRegions, regionFilter],
+        [t.allCities, cityFilter],
+        [t.allFeatured, featuredFilter],
+        [t.allSources, sourceFilter],
       ],
       headers: [
-        t.table.id,
         t.table.code,
-        t.table.provider,
+        t.table.nameAr,
+        t.table.nameEn,
         t.table.type,
-        t.table.status,
+        t.table.region,
         t.table.city,
-        t.table.area,
-        t.table.address,
-        t.table.phone,
-        t.table.mobile,
-        t.table.email,
-        t.table.contactPerson,
+        t.table.contact,
+        t.table.orders,
+        t.table.status,
         t.table.featured,
+        t.table.sourceCategory,
         t.table.createdAt,
-        t.table.updatedAt,
       ],
-      rows: exportRows.map((provider) => [
-        String(provider.id || "-"),
+      rows: providers.map((provider) => [
         provider.code || "-",
-        provider.name || "-",
-        typeLabel(provider.providerType, locale),
-        statusLabel(provider.status, locale),
-        provider.city || "-",
-        provider.area || "-",
-        provider.address || "-",
-        provider.phone || "-",
-        provider.mobile || "-",
-        provider.email || "-",
-        provider.contactPerson || "-",
+        provider.nameAr || provider.displayNameAr || "-",
+        provider.nameEn || provider.displayNameEn || "-",
+        getProviderTypeLabel(provider.providerType, locale),
+        provider.region || "-",
+        [provider.city, provider.area].filter(Boolean).join(" - ") || "-",
+        provider.phone || provider.mobile || provider.email || "-",
+        provider.ordersCount,
+        getProviderStatusLabel(provider.status, locale),
         provider.isFeatured ? t.yes : t.no,
+        provider.sourceCategory || "-",
         formatDate(provider.createdAt),
-        formatDate(provider.updatedAt || provider.createdAt),
       ]),
     });
 
@@ -1642,30 +1566,30 @@ export default function SystemProvidersListPage() {
   function printList() {
     if (!canPrintProviders) return;
 
-    if (exportRows.length === 0) {
-      toast.error(t.exportEmpty);
-      return;
-    }
+    try {
+      const printWindow = window.open("", "_blank", "width=1100,height=760");
 
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
+      if (!printWindow) {
+        toast.error(t.printError);
+        return;
+      }
 
-    if (!printWindow) {
+      printWindow.document.open();
+      printWindow.document.write(
+        buildPrintHtml({
+          locale,
+          providers,
+          title: t.title,
+          printedAtLabel: t.printedAt,
+        }),
+      );
+      printWindow.document.close();
+
+      toast.success(t.printReady);
+    } catch (error) {
+      console.error("Print providers error:", error);
       toast.error(t.printError);
-      return;
     }
-
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.printTitle,
-        rows: exportRows,
-        t,
-      }),
-    );
-    printWindow.document.close();
-
-    toast.success(t.printReady);
   }
 
   useEffect(() => {
@@ -1696,14 +1620,31 @@ export default function SystemProvidersListPage() {
   }, []);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     if (authResolving) return;
     loadProviders(false);
   }, [authResolving, loadProviders]);
 
   useEffect(() => {
-    setPageIndex(0);
-    setSelectedIds([]);
-  }, [query, statusFilter, typeFilter]);
+    setPage(1);
+  }, [
+    statusFilter,
+    typeFilter,
+    regionFilter,
+    cityFilter,
+    featuredFilter,
+    sourceFilter,
+    sortKey,
+    sortDirection,
+  ]);
 
   if (!authResolving && !canViewProviders) {
     return (
@@ -1730,34 +1671,30 @@ export default function SystemProvidersListPage() {
 
   return (
     <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
             {t.subtitle}
           </p>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/providers">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
+          <Button asChild variant="outline" className="h-10 rounded-xl">
+            <Link href="/system/providers">
               <ArrowLeft className="h-4 w-4" />
               <span>{t.back}</span>
-            </Button>
-          </Link>
+            </Link>
+          </Button>
 
           <Button
+            type="button"
             variant="outline"
             className="h-10 rounded-xl"
-            onClick={() => loadProviders(true)}
             disabled={isLoading}
+            onClick={() => loadProviders(true)}
           >
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -1769,12 +1706,11 @@ export default function SystemProvidersListPage() {
 
           {canExportProviders ? (
             <Button
+              type="button"
               variant="outline"
               className="h-10 rounded-xl"
+              disabled={isLoading || providers.length === 0}
               onClick={exportExcel}
-              disabled={
-                isLoading || exportRows.length === 0 || Boolean(errorMessage)
-              }
             >
               <Download className="h-4 w-4" />
               <span>{t.exportExcel}</span>
@@ -1783,648 +1719,596 @@ export default function SystemProvidersListPage() {
 
           {canPrintProviders ? (
             <Button
+              type="button"
               variant="outline"
               className="h-10 rounded-xl"
+              disabled={isLoading || providers.length === 0}
               onClick={printList}
-              disabled={
-                isLoading || exportRows.length === 0 || Boolean(errorMessage)
-              }
             >
               <Printer className="h-4 w-4" />
               <span>{t.print}</span>
             </Button>
           ) : null}
 
+          {canImportProviders ? (
+            <Button asChild variant="outline" className="h-10 rounded-xl">
+              <Link href="/system/providers/import">
+                <UploadCloud className="h-4 w-4" />
+                <span>{t.importProviders}</span>
+              </Link>
+            </Button>
+          ) : null}
+
           {canCreateProviders ? (
-            <Link href="/system/providers/create">
-              <Button className="h-10 w-full rounded-xl sm:w-auto">
+            <Button asChild className="h-10 rounded-xl">
+              <Link href="/system/providers/create">
                 <PlusCircle className="h-4 w-4" />
-                <span>{t.addProvider}</span>
-              </Button>
-            </Link>
+                <span>{t.createProvider}</span>
+              </Link>
+            </Button>
           ) : null}
         </div>
       </div>
 
-      {/* Error State */}
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <KpiCard
+          icon={Building2}
+          title={t.totalResults}
+          value={summary.total_providers}
+          description={t.title}
+        />
+        <KpiCard
+          icon={CheckCircle2}
+          title={t.activeProviders}
+          value={summary.active_providers}
+          description={t.activeProviders}
+        />
+        <KpiCard
+          icon={Sparkles}
+          title={t.featuredProviders}
+          value={summary.featured_providers}
+          description={t.featuredProviders}
+        />
+        <KpiCard
+          icon={UploadCloud}
+          title={t.importedProviders}
+          value={summary.imported_providers}
+          description={t.importedProviders}
+        />
+        <KpiCard
+          icon={TrendingUp}
+          title={t.ordersCount}
+          value={summary.total_orders}
+          description={t.ordersCount}
+        />
+      </div>
 
-              <div>
-                <p className="font-semibold text-destructive">
-                  {errorMessage}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
-              </div>
-            </div>
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Search className="h-5 w-5" />
+            {t.search}
+          </CardTitle>
+          <CardDescription>{t.subtitle}</CardDescription>
+        </CardHeader>
 
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadProviders(true)}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {!errorMessage ? (
-        <>
-          {/* Stats */}
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {isLoading
-              ? Array.from({ length: 4 }).map((_, index) => (
-                  <StatCardSkeleton key={index} />
-                ))
-              : [
-                  {
-                    title: t.totalProviders,
-                    value: stats.total,
-                    percent: stats.total > 0 ? 100 : 0,
-                    icon: Building2,
-                  },
-                  {
-                    title: t.activeProviders,
-                    value: stats.active,
-                    percent: percent(stats.active, stats.total),
-                    icon: BadgeCheck,
-                  },
-                  {
-                    title: t.featuredProviders,
-                    value: stats.featured,
-                    percent: percent(stats.featured, stats.total),
-                    icon: Sparkles,
-                  },
-                  {
-                    title: t.citiesCount,
-                    value: stats.cities,
-                    percent: stats.total > 0 ? 100 : 0,
-                    icon: MapPin,
-                  },
-                ].map((item) => {
-                  const Icon = item.icon;
-
-                  return (
-                    <Card
-                      key={item.title}
-                      className="rounded-2xl border bg-card shadow-sm"
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-2xl font-bold">
-                              {formatNumber(item.value)}
-                            </p>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {item.title}
-                            </p>
-                          </div>
-
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                            <Icon className="h-5 w-5" />
-                          </div>
-                        </div>
-
-                        <div className="mt-3 flex items-center gap-2">
-                          <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                            {formatNumber(item.percent)}%
-                          </span>
-                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full bg-primary transition-all"
-                              style={{ width: `${item.percent}%` }}
-                            />
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+        <CardContent className="space-y-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              placeholder={t.searchPlaceholder}
+              className="h-11 rounded-xl ps-10"
+              onChange={(event) => setSearch(event.target.value)}
+            />
           </div>
 
-          {/* Table */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
-                {t.tableTitle}
-              </CardTitle>
-              <CardDescription>{t.tableSubtitle}</CardDescription>
-            </CardHeader>
+          <div className="flex flex-wrap items-center gap-2">
+            <SelectButton
+              label={t.allStatuses}
+              value={statusFilter}
+              onChange={(value) => setStatusFilter(value as StatusFilter)}
+              options={[
+                { label: t.allStatuses, value: "all" },
+                { label: t.statuses.ACTIVE, value: "ACTIVE" },
+                { label: t.statuses.INACTIVE, value: "INACTIVE" },
+                { label: t.statuses.SUSPENDED, value: "SUSPENDED" },
+                { label: t.statuses.DRAFT, value: "DRAFT" },
+              ]}
+            />
 
-            <CardContent>
-              <div className="w-full space-y-4">
-                {/* Search Row */}
-                <div className="relative w-full">
-                  <Search
-                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder={t.searchPlaceholder}
-                    className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
+            <SelectButton
+              label={t.allTypes}
+              value={typeFilter}
+              onChange={(value) => setTypeFilter(value as TypeFilter)}
+              options={[
+                { label: t.allTypes, value: "all" },
+                { label: t.types.HOSPITAL, value: "HOSPITAL" },
+                { label: t.types.MEDICAL_CENTER, value: "MEDICAL_CENTER" },
+                { label: t.types.PHARMACY, value: "PHARMACY" },
+                { label: t.types.LAB, value: "LAB" },
+                { label: t.types.CLINIC, value: "CLINIC" },
+                { label: t.types.PARTNER, value: "PARTNER" },
+                { label: t.types.OTHER, value: "OTHER" },
+              ]}
+            />
+
+            <SelectButton
+              label={t.allRegions}
+              value={regionFilter}
+              onChange={(value) => {
+                setRegionFilter(value);
+                setCityFilter("all");
+              }}
+              options={[
+                { label: t.allRegions, value: "all" },
+                ...regions.map((region) => ({ label: region, value: region })),
+              ]}
+            />
+
+            <SelectButton
+              label={t.allCities}
+              value={cityFilter}
+              onChange={setCityFilter}
+              options={[
+                { label: t.allCities, value: "all" },
+                ...cities.map((city) => ({ label: city, value: city })),
+              ]}
+            />
+
+            <SelectButton
+              label={t.allFeatured}
+              value={featuredFilter}
+              onChange={(value) => setFeaturedFilter(value as FeaturedFilter)}
+              options={[
+                { label: t.allFeatured, value: "all" },
+                { label: t.featuredOnly, value: "featured" },
+                { label: t.notFeaturedOnly, value: "not_featured" },
+              ]}
+            />
+
+            <SelectButton
+              label={t.allSources}
+              value={sourceFilter}
+              onChange={(value) => setSourceFilter(value as SourceFilter)}
+              options={[
+                { label: t.allSources, value: "all" },
+                { label: t.importedOnly, value: "imported" },
+                { label: t.manualOnly, value: "manual" },
+              ]}
+            />
+
+            <SelectButton
+              label={t.sortBy}
+              value={sortKey}
+              onChange={(value) => setSortKey(value as SortKey)}
+              options={[
+                { label: t.sortNameAr, value: "nameAr" },
+                { label: t.sortNameEn, value: "nameEn" },
+                { label: t.sortName, value: "name" },
+                { label: t.table.code, value: "code" },
+                { label: t.table.type, value: "providerType" },
+                { label: t.table.region, value: "region" },
+                { label: t.table.city, value: "city" },
+                { label: t.table.status, value: "status" },
+                { label: t.sortMostOrders, value: "ordersCount" },
+                { label: t.sortNewest, value: "createdAt" },
+              ]}
+            />
+
+            <SelectButton
+              label={sortDirection === "asc" ? t.sortAsc : t.sortDesc}
+              value={sortDirection}
+              onChange={(value) => setSortDirection(value as SortDirection)}
+              options={[
+                { label: t.sortAsc, value: "asc" },
+                { label: t.sortDesc, value: "desc" },
+              ]}
+            />
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="h-10 rounded-xl">
+                  <ColumnsIcon className="h-4 w-4" />
+                  <span>{t.columns}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {Object.entries(t.table).map(([key, label]) => {
+                  if (!(key in visibleColumns)) return null;
+
+                  const columnKey = key as keyof VisibleColumns;
+
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={key}
+                      checked={visibleColumns[columnKey]}
+                      onCheckedChange={(checked) =>
+                        setVisibleColumns((current) => ({
+                          ...current,
+                          [columnKey]: Boolean(checked),
+                        }))
+                      }
+                    >
+                      {label}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {hasActiveFilters ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-10 rounded-xl"
+                onClick={resetFilters}
+              >
+                {t.clearFilters}
+              </Button>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      {isLoading || authResolving ? (
+        <ListSkeleton />
+      ) : errorMessage ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div>
+              <p className="font-semibold text-destructive">{errorMessage}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.loadErrorHint}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4 rounded-xl"
+                onClick={() => loadProviders(true)}
+              >
+                <RefreshCcw className="h-4 w-4" />
+                <span>{t.retry}</span>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5" />
+              {t.totalResults}: {formatNumber(pagination.total_items)}
+            </CardTitle>
+            <CardDescription>
+              {hasActiveFilters ? t.noSearchText : t.subtitle}
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent>
+            {providers.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed p-10 text-center">
+                <Building2 className="h-10 w-10 text-muted-foreground" />
+                <div>
+                  <p className="font-semibold">
+                    {hasActiveFilters ? t.noSearchTitle : t.emptyTitle}
+                  </p>
+                  <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+                    {hasActiveFilters ? t.noSearchText : t.emptyText}
+                  </p>
                 </div>
-
-                {/* Filters Row */}
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                  <div className="grid flex-1 gap-3">
-                    <div className="flex flex-wrap gap-2">
-                      {statusOptions.map((item) => (
-                        <Button
-                          key={item.value}
-                          variant={
-                            statusFilter === item.value ? "default" : "outline"
-                          }
-                          className="h-10 rounded-xl"
-                          onClick={() => setStatusFilter(item.value)}
-                        >
-                          <span>{item.label}</span>
-                          <Badge
-                            variant={
-                              statusFilter === item.value
-                                ? "secondary"
-                                : "outline"
-                            }
-                            className="ms-1 rounded-full"
-                          >
-                            {formatNumber(item.count)}
-                          </Badge>
-                        </Button>
-                      ))}
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {typeOptions.map((item) => (
-                        <Button
-                          key={item.value}
-                          variant={
-                            typeFilter === item.value ? "default" : "outline"
-                          }
-                          className="h-10 rounded-xl"
-                          onClick={() => setTypeFilter(item.value)}
-                        >
-                          <span>{item.label}</span>
-                          <Badge
-                            variant={
-                              typeFilter === item.value
-                                ? "secondary"
-                                : "outline"
-                            }
-                            className="ms-1 rounded-full"
-                          >
-                            {formatNumber(item.count)}
-                          </Badge>
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    {hasSearchOrFilter ? (
-                      <Button
-                        variant="outline"
-                        className="h-10 rounded-xl"
-                        onClick={clearFilters}
-                      >
-                        {t.clearFilters}
-                      </Button>
-                    ) : null}
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" className="h-10 rounded-xl">
-                          <ColumnsIcon className="h-4 w-4" />
-                          <span>{t.columns}</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-
-                      <DropdownMenuContent align={isArabic ? "start" : "end"}>
-                        {Object.entries(visibleColumns).map(([key, value]) => {
-                          if (key === "actions" && !canViewProviderDetails) {
-                            return null;
-                          }
-
-                          return (
-                            <DropdownMenuCheckboxItem
-                              key={key}
-                              checked={value}
-                              onCheckedChange={(checked) =>
-                                setVisibleColumns((current) => ({
-                                  ...current,
-                                  [key]: Boolean(checked),
-                                }))
-                              }
-                            >
-                              {columnLabels[key as keyof VisibleColumns]}
-                            </DropdownMenuCheckboxItem>
-                          );
-                        })}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-
-                <div className="overflow-hidden rounded-xl border">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-12">
-                            <Checkbox
-                              checked={allPageSelected}
-                              onCheckedChange={toggleAllPageRows}
-                              aria-label="Select all"
-                            />
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        {visibleColumns.code ? (
+                          <TableHead>{t.table.code}</TableHead>
+                        ) : null}
+                        {visibleColumns.nameAr ? (
+                          <TableHead>{t.table.nameAr}</TableHead>
+                        ) : null}
+                        {visibleColumns.nameEn ? (
+                          <TableHead>{t.table.nameEn}</TableHead>
+                        ) : null}
+                        {visibleColumns.providerType ? (
+                          <TableHead>{t.table.type}</TableHead>
+                        ) : null}
+                        {visibleColumns.region ? (
+                          <TableHead>{t.table.region}</TableHead>
+                        ) : null}
+                        {visibleColumns.city ? (
+                          <TableHead>{t.table.city}</TableHead>
+                        ) : null}
+                        {visibleColumns.contact ? (
+                          <TableHead>{t.table.contact}</TableHead>
+                        ) : null}
+                        {visibleColumns.orders ? (
+                          <TableHead>{t.table.orders}</TableHead>
+                        ) : null}
+                        {visibleColumns.status ? (
+                          <TableHead>{t.table.status}</TableHead>
+                        ) : null}
+                        {visibleColumns.featured ? (
+                          <TableHead>{t.table.featured}</TableHead>
+                        ) : null}
+                        {visibleColumns.sourceCategory ? (
+                          <TableHead>{t.table.sourceCategory}</TableHead>
+                        ) : null}
+                        {visibleColumns.createdAt ? (
+                          <TableHead>{t.table.createdAt}</TableHead>
+                        ) : null}
+                        {visibleColumns.actions ? (
+                          <TableHead className="text-end">
+                            {t.table.actions}
                           </TableHead>
+                        ) : null}
+                      </TableRow>
+                    </TableHeader>
 
-                          {safeVisibleColumns.code ? (
-                            <SortableHead
-                              label={t.table.code}
-                              onClick={() => toggleSort("code")}
-                            />
-                          ) : null}
+                    <TableBody>
+                      {providers.map((provider) => {
+                        const Icon = getProviderIcon(provider.providerType);
+                        const detailHref = `/system/providers/${provider.id}`;
 
-                          {safeVisibleColumns.name ? (
-                            <SortableHead
-                              label={t.table.provider}
-                              onClick={() => toggleSort("name")}
-                            />
-                          ) : null}
+                        return (
+                          <TableRow key={`${provider.id}-${provider.code}`}>
+                            {visibleColumns.code ? (
+                              <TableCell>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-2 font-mono text-xs font-semibold hover:text-primary"
+                                  onClick={() => copyText(provider.code, t.copied)}
+                                >
+                                  <span>{provider.code || "-"}</span>
+                                  {provider.code ? (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  ) : null}
+                                </button>
+                              </TableCell>
+                            ) : null}
 
-                          {safeVisibleColumns.providerType ? (
-                            <SortableHead
-                              label={t.table.type}
-                              onClick={() => toggleSort("providerType")}
-                            />
-                          ) : null}
+                            {visibleColumns.nameAr ? (
+                              <TableCell>
+                                <div className="min-w-[190px]">
+                                  <p className="font-semibold">
+                                    {provider.nameAr ||
+                                      provider.displayNameAr ||
+                                      provider.name ||
+                                      "-"}
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {provider.sourceCategory ||
+                                      getProviderTypeLabel(
+                                        provider.providerType,
+                                        locale,
+                                      )}
+                                  </p>
+                                </div>
+                              </TableCell>
+                            ) : null}
 
-                          {safeVisibleColumns.city ? (
-                            <SortableHead
-                              label={t.table.city}
-                              onClick={() => toggleSort("city")}
-                            />
-                          ) : null}
+                            {visibleColumns.nameEn ? (
+                              <TableCell>
+                                <div className="min-w-[180px]">
+                                  <p className="font-medium">
+                                    {provider.nameEn ||
+                                      provider.displayNameEn ||
+                                      "-"}
+                                  </p>
+                                </div>
+                              </TableCell>
+                            ) : null}
 
-                          {safeVisibleColumns.contact ? (
-                            <TableHead>{t.table.contact}</TableHead>
-                          ) : null}
+                            {visibleColumns.providerType ? (
+                              <TableCell>
+                                <Badge variant="outline" className="rounded-full">
+                                  <Icon className="me-1 h-3.5 w-3.5" />
+                                  {getProviderTypeLabel(
+                                    provider.providerType,
+                                    locale,
+                                  )}
+                                </Badge>
+                              </TableCell>
+                            ) : null}
 
-                          {safeVisibleColumns.status ? (
-                            <SortableHead
-                              label={t.table.status}
-                              onClick={() => toggleSort("status")}
-                            />
-                          ) : null}
+                            {visibleColumns.region ? (
+                              <TableCell>{provider.region || "-"}</TableCell>
+                            ) : null}
 
-                          {safeVisibleColumns.featured ? (
-                            <TableHead>{t.table.featured}</TableHead>
-                          ) : null}
+                            {visibleColumns.city ? (
+                              <TableCell>
+                                <div className="min-w-[150px]">
+                                  <p className="font-medium">
+                                    {provider.city || "-"}
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {provider.area || provider.street || "-"}
+                                  </p>
+                                </div>
+                              </TableCell>
+                            ) : null}
 
-                          {safeVisibleColumns.createdAt ? (
-                            <SortableHead
-                              label={t.table.createdAt}
-                              onClick={() => toggleSort("createdAt")}
-                            />
-                          ) : null}
+                            {visibleColumns.contact ? (
+                              <TableCell>
+                                <div className="min-w-[160px] space-y-1 text-xs">
+                                  <p className="flex items-center gap-1">
+                                    <Phone className="h-3.5 w-3.5" />
+                                    {provider.mobile || provider.phone || "-"}
+                                  </p>
+                                  <p className="truncate text-muted-foreground">
+                                    {provider.email ||
+                                      provider.contactPerson ||
+                                      "-"}
+                                  </p>
+                                </div>
+                              </TableCell>
+                            ) : null}
 
-                          {safeVisibleColumns.actions ? (
-                            <TableHead>{t.table.actions}</TableHead>
-                          ) : null}
-                        </TableRow>
-                      </TableHeader>
+                            {visibleColumns.orders ? (
+                              <TableCell>
+                                <Badge variant="secondary" className="rounded-full">
+                                  {formatNumber(provider.ordersCount)}
+                                </Badge>
+                              </TableCell>
+                            ) : null}
 
-                      <TableBody>
-                        {isLoading ? (
-                          <TableRowsSkeleton
-                            columnsCount={visibleTableColumnsCount}
-                          />
-                        ) : pageRows.length > 0 ? (
-                          pageRows.map((provider) => {
-                            const Icon = providerIcon(provider.providerType);
+                            {visibleColumns.status ? (
+                              <TableCell>
+                                <Badge
+                                  className={`rounded-full border px-3 py-1 ${getStatusBadgeClass(
+                                    provider.status,
+                                  )}`}
+                                >
+                                  {getProviderStatusLabel(provider.status, locale)}
+                                </Badge>
+                              </TableCell>
+                            ) : null}
 
-                            return (
-                              <TableRow
-                                key={`${provider.id}-${provider.code}`}
-                                data-state={
-                                  selectedIds.includes(provider.id)
-                                    ? "selected"
-                                    : undefined
-                                }
-                              >
-                                <TableCell>
-                                  <Checkbox
-                                    checked={selectedIds.includes(provider.id)}
-                                    onCheckedChange={() =>
-                                      toggleRow(provider.id)
-                                    }
-                                    aria-label="Select row"
-                                  />
-                                </TableCell>
+                            {visibleColumns.featured ? (
+                              <TableCell>
+                                {provider.isFeatured ? (
+                                  <Badge className="rounded-full border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-50">
+                                    <Sparkles className="me-1 h-3.5 w-3.5" />
+                                    {t.yes}
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="rounded-full">
+                                    {t.no}
+                                  </Badge>
+                                )}
+                              </TableCell>
+                            ) : null}
 
-                                {safeVisibleColumns.code ? (
-                                  <TableCell className="font-medium">
-                                    <div className="min-w-[120px]">
-                                      <p>{provider.code || "-"}</p>
-                                    </div>
-                                  </TableCell>
-                                ) : null}
+                            {visibleColumns.sourceCategory ? (
+                              <TableCell>
+                                {provider.sourceCategory || "-"}
+                              </TableCell>
+                            ) : null}
 
-                                {safeVisibleColumns.name ? (
-                                  <TableCell>
-                                    <div className="flex min-w-[240px] items-center gap-3">
-                                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-muted">
-                                        <Icon className="h-4 w-4" />
-                                      </div>
+                            {visibleColumns.createdAt ? (
+                              <TableCell>{formatDate(provider.createdAt)}</TableCell>
+                            ) : null}
 
-                                      <div className="min-w-0">
-                                        <div className="flex items-center gap-2">
-                                          <p className="truncate font-medium">
-                                            {provider.name || "-"}
-                                          </p>
-
-                                          {provider.isFeatured ? (
-                                            <Sparkles className="h-3.5 w-3.5 shrink-0 fill-orange-400 text-orange-400" />
-                                          ) : null}
-                                        </div>
-
-                                        <p className="truncate text-xs text-muted-foreground">
-                                          {provider.email || provider.website || "-"}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.providerType ? (
-                                  <TableCell>
-                                    <Badge
-                                      variant="secondary"
-                                      className="rounded-full"
+                            {visibleColumns.actions ? (
+                              <TableCell className="text-end">
+                                <div className="flex justify-end gap-2">
+                                  {provider.googleMapsLink ? (
+                                    <Button
+                                      asChild
+                                      size="icon"
+                                      variant="outline"
+                                      className="h-9 w-9 rounded-xl"
                                     >
-                                      {typeLabel(provider.providerType, locale)}
-                                    </Badge>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.city ? (
-                                  <TableCell>
-                                    <div className="min-w-[160px]">
-                                      <p className="truncate">
-                                        {provider.city || "-"}
-                                      </p>
-                                      <p className="truncate text-xs text-muted-foreground">
-                                        {provider.area ||
-                                          provider.address ||
-                                          "-"}
-                                      </p>
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.contact ? (
-                                  <TableCell>
-                                    <div className="min-w-[170px]">
-                                      <div className="flex items-center gap-2">
-                                        <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                                        <p className="truncate">
-                                          {provider.phone ||
-                                            provider.mobile ||
-                                            "-"}
-                                        </p>
-                                      </div>
-                                      <p className="mt-1 truncate text-xs text-muted-foreground">
-                                        {provider.contactPerson ||
-                                          provider.email ||
-                                          "-"}
-                                      </p>
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.status ? (
-                                  <TableCell>
-                                    {statusBadge(provider.status, locale)}
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.featured ? (
-                                  <TableCell>
-                                    {provider.isFeatured ? (
-                                      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-                                        <Sparkles className="h-3.5 w-3.5" />
-                                        {t.yes}
-                                      </Badge>
-                                    ) : (
-                                      <Badge
-                                        variant="outline"
-                                        className="rounded-full px-3 py-1"
+                                      <a
+                                        href={provider.googleMapsLink}
+                                        target="_blank"
+                                        rel="noreferrer"
                                       >
-                                        {t.no}
-                                      </Badge>
-                                    )}
-                                  </TableCell>
-                                ) : null}
+                                        <MapPin className="h-4 w-4" />
+                                      </a>
+                                    </Button>
+                                  ) : null}
 
-                                {safeVisibleColumns.createdAt ? (
-                                  <TableCell>
-                                    {formatDate(provider.createdAt)}
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.actions ? (
-                                  <TableCell>
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button
-                                          variant="ghost"
-                                          className="h-8 w-8 p-0"
-                                        >
-                                          <span className="sr-only">
-                                            {t.actions}
-                                          </span>
-                                          <MoreHorizontal className="h-4 w-4" />
-                                        </Button>
-                                      </DropdownMenuTrigger>
-
-                                      <DropdownMenuContent
-                                        align={isArabic ? "start" : "end"}
+                                  {provider.website ? (
+                                    <Button
+                                      asChild
+                                      size="icon"
+                                      variant="outline"
+                                      className="h-9 w-9 rounded-xl"
+                                    >
+                                      <a
+                                        href={provider.website}
+                                        target="_blank"
+                                        rel="noreferrer"
                                       >
-                                        <DropdownMenuLabel>
-                                          {t.actions}
-                                        </DropdownMenuLabel>
-                                        <DropdownMenuSeparator />
+                                        <ArrowUpRight className="h-4 w-4" />
+                                      </a>
+                                    </Button>
+                                  ) : null}
 
-                                        {isValidProviderId(provider.id) ? (
-                                          <DropdownMenuItem asChild>
-                                            <Link
-                                              href={`/system/providers/${provider.id}`}
-                                            >
-                                              <Eye className="h-4 w-4" />
-                                              {t.viewDetails}
-                                            </Link>
-                                          </DropdownMenuItem>
-                                        ) : null}
-
-                                        <DropdownMenuItem
-                                          onClick={() =>
-                                            copyToClipboard(
-                                              String(provider.code || "-"),
-                                              t.copied,
-                                            )
-                                          }
-                                        >
-                                          <Copy className="h-4 w-4" />
-                                          {t.copyCode}
-                                        </DropdownMenuItem>
-
-                                        <DropdownMenuItem
-                                          onClick={() =>
-                                            copyToClipboard(
-                                              String(provider.id || "-"),
-                                              t.copied,
-                                            )
-                                          }
-                                        >
-                                          <Copy className="h-4 w-4" />
-                                          {t.copyId}
-                                        </DropdownMenuItem>
-
-                                        {(provider.phone || provider.mobile) ? (
-                                          <DropdownMenuItem
-                                            onClick={() =>
-                                              copyToClipboard(
-                                                provider.phone ||
-                                                  provider.mobile ||
-                                                  "-",
-                                                t.copied,
-                                              )
-                                            }
-                                          >
-                                            <Phone className="h-4 w-4" />
-                                            {t.copyPhone}
-                                          </DropdownMenuItem>
-                                        ) : null}
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </TableCell>
-                                ) : null}
-                              </TableRow>
-                            );
-                          })
-                        ) : (
-                          <TableRow>
-                            <TableCell
-                              colSpan={visibleTableColumnsCount}
-                              className="h-36 text-center"
-                            >
-                              <div className="mx-auto max-w-md space-y-2">
-                                <p className="font-semibold">
-                                  {hasSearchOrFilter
-                                    ? t.noResultsTitle
-                                    : t.emptyTitle}
-                                </p>
-                                <p className="text-sm text-muted-foreground">
-                                  {hasSearchOrFilter
-                                    ? t.noResultsText
-                                    : t.emptyText}
-                                </p>
-
-                                {hasSearchOrFilter ? (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="mt-2 rounded-xl"
-                                    onClick={clearFilters}
-                                  >
-                                    {t.clearFilters}
-                                  </Button>
-                                ) : null}
-                              </div>
-                            </TableCell>
+                                  {canViewDetails && provider.id ? (
+                                    <Button
+                                      asChild
+                                      size="sm"
+                                      variant="outline"
+                                      className="rounded-xl"
+                                    >
+                                      <Link href={detailHref}>
+                                        <Eye className="me-2 h-4 w-4" />
+                                        {t.details}
+                                      </Link>
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </TableCell>
+                            ) : null}
                           </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        );
+                      })}
+
+                      {providers.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={columnCount}
+                            className="h-24 text-center"
+                          >
+                            {t.noSearchText}
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </TableBody>
+                  </Table>
                 </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-                  <div className="flex-1 text-sm text-muted-foreground">
-                    {formatNumber(selectedIds.length)} /{" "}
-                    {formatNumber(sortedProviders.length)} {t.selectedRows}
-                  </div>
-
-                  <div className="text-sm text-muted-foreground">
-                    {t.page} {formatNumber(pageIndex + 1)} {t.from}{" "}
-                    {formatNumber(pageCount)}
-                  </div>
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    {t.page} {formatNumber(pagination.page)} {t.from}{" "}
+                    {formatNumber(pagination.total_pages)}
+                  </p>
 
                   <div className="flex items-center gap-2">
                     <Button
+                      type="button"
                       variant="outline"
-                      size="sm"
                       className="rounded-xl"
+                      disabled={!pagination.has_previous || page <= 1}
                       onClick={() =>
-                        setPageIndex((current) => Math.max(current - 1, 0))
+                        setPage((current) => Math.max(1, current - 1))
                       }
-                      disabled={pageIndex === 0}
                     >
+                      <ChevronRight className="h-4 w-4" />
                       {t.previous}
                     </Button>
 
                     <Button
+                      type="button"
                       variant="outline"
-                      size="sm"
                       className="rounded-xl"
+                      disabled={
+                        !pagination.has_next || page >= pagination.total_pages
+                      }
                       onClick={() =>
-                        setPageIndex((current) =>
-                          Math.min(current + 1, pageCount - 1),
+                        setPage((current) =>
+                          Math.min(pagination.total_pages, current + 1),
                         )
                       }
-                      disabled={pageIndex >= pageCount - 1}
                     >
                       {t.next}
+                      <ChevronLeft className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        </>
-      ) : null}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
-  );
-}
-
-/* ============================================================
-   Small Components
-============================================================ */
-
-function SortableHead({
-  label,
-  onClick,
-}: {
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <TableHead>
-      <Button className="-ms-3" variant="ghost" onClick={onClick}>
-        {label}
-        <ArrowDownUp className="h-3 w-3" />
-      </Button>
-    </TableHead>
   );
 }

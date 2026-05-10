@@ -1,6 +1,15 @@
 # ============================================================
 # 📂 api/reports/urls.py
-# 🧠 Primey Care | Reports API Router
+# 🧠 Primey Care | Reports API Router V2
+# ------------------------------------------------------------
+# ✅ Reports overview
+# ✅ Customers report
+# ✅ Providers report
+# ✅ Orders report
+# ✅ Invoices report
+# ✅ Payments report
+# ✅ Accounting report
+# ✅ Compatible with rebuilt Accounting / Treasury / Payments flow
 # ============================================================
 
 from django.urls import path
@@ -14,13 +23,75 @@ from .payments import payments_report
 from .providers import providers_report
 
 
+app_name = "api_reports"
+
+
 urlpatterns = [
-    path("", reports_overview, name="reports-overview"),
-    path("overview/", reports_overview, name="reports-overview-alias"),
-    path("customers/", customers_report, name="reports-customers"),
-    path("providers/", providers_report, name="reports-providers"),
-    path("orders/", orders_report, name="reports-orders"),
-    path("invoices/", invoices_report, name="reports-invoices"),
-    path("payments/", payments_report, name="reports-payments"),
-    path("accounting/", accounting_report, name="reports-accounting"),
+    # ========================================================
+    # 📊 Reports Overview
+    # --------------------------------------------------------
+    # GET /api/reports/
+    # GET /api/reports/overview/
+    # ========================================================
+    path(
+        "",
+        reports_overview,
+        name="overview",
+    ),
+    path(
+        "overview/",
+        reports_overview,
+        name="overview_alias",
+    ),
+
+    # ========================================================
+    # 👥 Customers / Providers
+    # --------------------------------------------------------
+    # GET /api/reports/customers/
+    # GET /api/reports/providers/
+    # ========================================================
+    path(
+        "customers/",
+        customers_report,
+        name="customers",
+    ),
+    path(
+        "providers/",
+        providers_report,
+        name="providers",
+    ),
+
+    # ========================================================
+    # 📦 Operations
+    # --------------------------------------------------------
+    # GET /api/reports/orders/
+    # GET /api/reports/invoices/
+    # GET /api/reports/payments/
+    # ========================================================
+    path(
+        "orders/",
+        orders_report,
+        name="orders",
+    ),
+    path(
+        "invoices/",
+        invoices_report,
+        name="invoices",
+    ),
+    path(
+        "payments/",
+        payments_report,
+        name="payments",
+    ),
+
+    # ========================================================
+    # 🧾 Accounting
+    # --------------------------------------------------------
+    # GET /api/reports/accounting/
+    # ========================================================
+    path(
+        "accounting/",
+        accounting_report,
+        name="accounting",
+    ),
 ]

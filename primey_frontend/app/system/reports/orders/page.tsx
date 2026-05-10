@@ -3,55 +3,76 @@
 /* ============================================================
    📂 app/system/reports/orders/page.tsx
    🧠 Primey Care | Orders Reports Page
-   ------------------------------------------------------------
+
    ✅ المسار:
-      /system/reports/orders
+      app/system/reports/orders/page.tsx
 
    ✅ العمل:
-      تقرير الطلبات المركزي ضمن وحدة التقارير الشاملة.
+      صفحة تقرير الطلبات المركزية داخل وحدة التقارير.
+      تعرض ملخص الطلبات وجدولًا تحليليًا قابلًا للبحث والتصفية والتصدير والطباعة.
+
+   ✅ الإصدار:
+      Phase 17 UX Refinement + Central Reports Orders Review
 
    ✅ يعتمد على:
-      GET /api/reports/orders/
+      - /api/reports/orders/
+      - /api/orders/ كـ fallback آمن عند عدم توفر تقرير مخصص
+      - primey-locale
+      - AuthProvider
+      - sonner
+      - /currency/sar.svg
+
+   ✅ متوافق مع صفحات:
+      - Centers approved UX pattern
+      - Customers approved UX pattern
+      - Central Reports module
 
    ✅ الوظائف:
-      - عرض ملخص الطلبات من API التقارير
-      - فلاتر متقدمة: من تاريخ / إلى تاريخ / الحالة
-      - بحث داخل النتائج
-      - جدول بيانات الطلبات
-      - تحليل حسب الحالة / حالة الدفع / حالة التنفيذ
-      - تصدير Excel
-      - طباعة Web PDF
-      - دعم تبديل عربي / إنجليزي عبر primey-locale
-      - استخدام toast من sonner
-      - استخدام UI الداخلي فقط
-      - استخدام رمز العملة /currency/sar.svg
-      - الأرقام إنجليزية دائمًا
+      - عرض مؤشرات تقرير الطلبات.
+      - تحليل الطلبات حسب حالة الطلب وحالة الدفع وحالة التنفيذ.
+      - عرض القيم المالية: الإجمالي والمدفوع والمتبقي.
+      - البحث في صف مستقل.
+      - فلاتر حالة الطلب وحالة الدفع في صفوف منظمة.
+      - جدول تحليلي للبيانات.
+      - Excel export بصيغة .xls HTML Workbook.
+      - Web PDF Print.
+      - Skeleton Loading.
+      - Error State مستقل.
+      - Empty State ذكي.
+      - إخفاء الإجراءات حسب الصلاحيات قدر الإمكان.
+
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+      - توحيد الترويسة الداخلية حسب النمط المعتمد.
+      - الحفاظ على التقارير داخل المسار المركزي فقط.
+      - دعم fallback آمن للصلاحيات بدون كسر system_admin/superuser.
+      - استخدام الرقم ثم رمز SAR عند عرض القيم المالية.
+      - منع عرض أي مسارات تقنية أو عبارات API داخل واجهة المستخدم.
 ============================================================ */
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowUpRight,
-  BarChart3,
-  CalendarDays,
+  ArrowLeft,
+  CheckCircle2,
   CreditCard,
   Download,
   Eye,
-  Filter,
-  Languages,
+  FileText,
   Loader2,
   PackageCheck,
   Printer,
   RefreshCcw,
   Search,
-  ShieldCheck,
   ShoppingCart,
-  type LucideIcon,
+  UserRound,
+  Wallet,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { API_PATHS, apiGet } from "@/lib/api";
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -76,109 +97,127 @@ import {
 ============================================================ */
 
 type AppLocale = "ar" | "en";
+type Dict = Record<string, unknown>;
 
-type ReportMeta = {
-  key?: string;
-  title_ar?: string;
-  title_en?: string;
-  generated_at?: string;
-  currency?: string;
+type OrderStatus =
+  | "PENDING"
+  | "CONFIRMED"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "REFUNDED"
+  | "UNKNOWN";
+
+type PaymentStatus =
+  | "UNPAID"
+  | "PARTIAL"
+  | "PAID"
+  | "REFUNDED"
+  | "FAILED"
+  | "UNKNOWN";
+
+type FulfillmentStatus =
+  | "NOT_STARTED"
+  | "IN_PROGRESS"
+  | "DELIVERED"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "UNKNOWN";
+
+type StatusFilter = "ALL" | OrderStatus;
+type PaymentFilter = "ALL" | PaymentStatus;
+
+type OrderReportRow = {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  providerName: string;
+  productName: string;
+  agentName: string;
+  status: OrderStatus;
+  paymentStatus: PaymentStatus;
+  fulfillmentStatus: FulfillmentStatus;
+  totalAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  invoiceId: string;
+  invoiceNumber: string;
+  createdAt: string;
+  confirmedAt: string;
+  completedAt: string;
+  cancelledAt: string;
 };
 
-type ReportChartItem = {
-  key?: string | number | null;
-  count?: number | null;
-  total?: number | string | null;
-};
-
-type OrderReportRow = Record<string, unknown>;
-
-type OrdersReportData = {
-  meta?: ReportMeta;
-  filters?: Record<string, unknown>;
-  summary?: Record<string, unknown>;
-  charts?: {
-    by_status?: ReportChartItem[];
-    by_payment_status?: ReportChartItem[];
-    by_fulfillment_status?: ReportChartItem[];
-    [key: string]: ReportChartItem[] | undefined;
-  };
-  rows?: OrderReportRow[];
+type OrdersReportSummary = {
+  total_orders: number;
+  pending_orders: number;
+  confirmed_orders: number;
+  processing_orders: number;
+  completed_orders: number;
+  cancelled_orders: number;
+  refunded_orders: number;
+  paid_orders: number;
+  unpaid_orders: number;
+  partial_orders: number;
+  invoiced_orders: number;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
 };
 
 type OrdersReportResponse = {
+  ok?: boolean;
   success?: boolean;
   message?: string;
-  data?: OrdersReportData;
+  data?: {
+    summary?: Partial<OrdersReportSummary>;
+    results?: unknown[];
+    orders?: unknown[];
+    items?: unknown[];
+    rows?: unknown[];
+  };
+  summary?: Partial<OrdersReportSummary>;
+  results?: unknown[];
+  orders?: unknown[];
+  items?: unknown[];
+  rows?: unknown[];
 };
 
-type FilterState = {
-  date_from: string;
-  date_to: string;
-  status: string;
-  search: string;
-};
+const SAR_ICON_PATH = "/currency/sar.svg";
 
-type SummaryCard = {
-  key: string;
-  titleAr: string;
-  titleEn: string;
-  descriptionAr: string;
-  descriptionEn: string;
-  value: unknown;
-  icon: LucideIcon;
-  isMoney?: boolean;
+const DEFAULT_SUMMARY: OrdersReportSummary = {
+  total_orders: 0,
+  pending_orders: 0,
+  confirmed_orders: 0,
+  processing_orders: 0,
+  completed_orders: 0,
+  cancelled_orders: 0,
+  refunded_orders: 0,
+  paid_orders: 0,
+  unpaid_orders: 0,
+  partial_orders: 0,
+  invoiced_orders: 0,
+  total_amount: 0,
+  paid_amount: 0,
+  remaining_amount: 0,
 };
 
 /* ============================================================
-   Constants
-============================================================ */
-
-const ORDER_COLUMNS = [
-  "id",
-  "order_number",
-  "code",
-  "customer_name",
-  "customer",
-  "product_name",
-  "product",
-  "provider_name",
-  "provider",
-  "agent_name",
-  "agent",
-  "status",
-  "payment_status",
-  "fulfillment_status",
-  "total_amount",
-  "amount",
-  "created_at",
-];
-
-const MONEY_KEYS = [
-  "amount",
-  "total",
-  "total_amount",
-  "grand_total",
-  "net_amount",
-  "subtotal",
-];
-
-/* ============================================================
-   Locale Helpers
+   Locale / API
 ============================================================ */
 
 function readLocale(): AppLocale {
   try {
     if (typeof window === "undefined") return "ar";
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+    const saved = window.localStorage.getItem("primey-locale");
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
@@ -195,456 +234,1614 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
-function setStoredLocale(locale: AppLocale) {
-  try {
-    if (typeof window === "undefined") return;
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
 
-    window.localStorage.setItem("primey-locale", locale);
-    applyDocumentLocale(locale);
-    window.dispatchEvent(new Event("primey-locale-changed"));
-  } catch (error) {
-    console.error("Set locale error:", error);
-  }
+  if (!base) return path;
+
+  return `${base.replace(/\/$/, "")}${path}`;
 }
 
-function getDictionary(locale: AppLocale) {
+/* ============================================================
+   Auth / Permissions
+============================================================ */
+
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
+}
+
+function getNested(source: Dict, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+
+    if (value && typeof value === "object") {
+      return value as Dict;
+    }
+  }
+
+  return {};
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
+
+          if (typeof value === "string") return [value];
+
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
+
+              if (item && typeof item === "object") {
+                const obj = item as Dict;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as Dict;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return getNested(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
+}
+
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
+  );
+}
+
+function isSystemAdmin(authValue: unknown) {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
+
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
+}
+
+function hasSafePermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const permissions = getAuthPermissionCodes(authValue);
+
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "support",
+          "accountant",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
+    );
+  }
+
+  return true;
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
+
+function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    pageTitle: isArabic ? "تقارير الطلبات" : "Orders Reports",
-    pageSubtitle: isArabic
-      ? "تحليل الطلبات حسب الحالة والفترة والمنتج ومقدم الخدمة والمندوب من مصدر التقارير المركزي."
-      : "Analyze orders by status, period, product, provider, and agent from the central reports source.",
+    title: isArabic ? "تقارير الطلبات" : "Orders Reports",
+    subtitle: isArabic
+      ? "تحليل الطلبات حسب الحالة والدفع والتنفيذ والعميل والمركز والمنتج والفاتورة."
+      : "Analyze orders by status, payment, fulfillment, customer, provider, product, and invoice.",
 
-    language: isArabic ? "English" : "العربية",
-    languageChanged: isArabic
-      ? "تم تحويل اللغة إلى الإنجليزية"
-      : "Language switched to Arabic",
-
-    backToReports: isArabic ? "لوحة التقارير" : "Reports Dashboard",
+    back: isArabic ? "مركز التقارير" : "Reports Center",
     refresh: isArabic ? "تحديث" : "Refresh",
+    retry: isArabic ? "إعادة المحاولة" : "Retry",
     exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    printPdf: isArabic ? "طباعة PDF" : "Print PDF",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
+    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
+    viewDetails: isArabic ? "عرض التفاصيل" : "View Details",
 
-    summaryTitle: isArabic ? "ملخص الطلبات" : "Orders Summary",
-    summaryDescription: isArabic
-      ? "قراءة سريعة لأهم مؤشرات الطلبات حسب البيانات الحالية."
-      : "A quick reading of order indicators based on current data.",
-
-    filtersTitle: isArabic ? "الفلاتر المتقدمة" : "Advanced Filters",
-    filtersDescription: isArabic
-      ? "استخدم الفترة والحالة لتحديث التقرير من API التقارير."
-      : "Use date range and status to refresh the report from the reports API.",
-
-    dateFrom: isArabic ? "من تاريخ" : "Date From",
-    dateTo: isArabic ? "إلى تاريخ" : "Date To",
-    status: isArabic ? "الحالة" : "Status",
     searchPlaceholder: isArabic
-      ? "بحث داخل نتائج الطلبات..."
-      : "Search inside order rows...",
+      ? "ابحث برقم الطلب أو العميل أو المركز أو المنتج أو المندوب أو الفاتورة..."
+      : "Search by order number, customer, provider, product, agent, or invoice...",
 
-    tableTitle: isArabic ? "نتائج الطلبات" : "Order Rows",
-    tableDescription: isArabic
-      ? "يعرض الجدول آخر نتائج الطلبات القادمة من API التقارير المركزي."
-      : "The table shows the latest order rows returned from the central reports API.",
-
-    analysisTitle: isArabic ? "تحليل سريع" : "Quick Analysis",
-    byStatus: isArabic ? "حسب الحالة" : "By Status",
-    byPaymentStatus: isArabic ? "حسب حالة الدفع" : "By Payment Status",
-    byFulfillmentStatus: isArabic ? "حسب حالة التنفيذ" : "By Fulfillment Status",
+    all: isArabic ? "الكل" : "All",
+    allStatuses: isArabic ? "كل حالات الطلب" : "All Order Statuses",
+    allPaymentStatuses: isArabic ? "كل حالات الدفع" : "All Payment Statuses",
 
     totalOrders: isArabic ? "إجمالي الطلبات" : "Total Orders",
-    totalAmount: isArabic ? "قيمة الطلبات" : "Orders Value",
-    returnedRows: isArabic ? "النتائج المعروضة" : "Returned Rows",
-    filteredRows: isArabic ? "بعد البحث" : "Filtered Rows",
+    completedOrders: isArabic ? "طلبات مكتملة" : "Completed Orders",
+    paidOrders: isArabic ? "طلبات مدفوعة" : "Paid Orders",
+    totalAmount: isArabic ? "إجمالي قيمة الطلبات" : "Total Orders Value",
+    paidAmount: isArabic ? "المدفوع" : "Paid Amount",
+    remainingAmount: isArabic ? "المتبقي" : "Remaining Amount",
 
-    totalOrdersDesc: isArabic
-      ? "عدد الطلبات ضمن التقرير الحالي."
-      : "Orders included in the current report.",
-    totalAmountDesc: isArabic
-      ? "إجمالي قيمة الطلبات الحالية."
-      : "Total value of current orders.",
-    returnedRowsDesc: isArabic
-      ? "عدد الصفوف القادمة من API."
-      : "Rows returned from the API.",
-    filteredRowsDesc: isArabic
-      ? "عدد الصفوف بعد البحث الداخلي."
-      : "Rows after local search.",
+    pending: isArabic ? "قيد الانتظار" : "Pending",
+    confirmed: isArabic ? "مؤكد" : "Confirmed",
+    processing: isArabic ? "قيد التنفيذ" : "Processing",
+    completed: isArabic ? "مكتمل" : "Completed",
+    cancelled: isArabic ? "ملغي" : "Cancelled",
+    refunded: isArabic ? "مسترد" : "Refunded",
+    unknown: isArabic ? "غير محدد" : "Unknown",
 
-    generatedAt: isArabic ? "تاريخ التوليد" : "Generated At",
-    action: isArabic ? "الإجراء" : "Action",
-    open: isArabic ? "فتح" : "Open",
-    orderBadge: isArabic ? "الطلبات" : "Orders",
+    unpaid: isArabic ? "غير مدفوع" : "Unpaid",
+    partial: isArabic ? "مدفوع جزئيًا" : "Partial",
+    paid: isArabic ? "مدفوع" : "Paid",
+    failed: isArabic ? "فشل الدفع" : "Failed",
 
-    loading: isArabic
-      ? "جاري تحميل تقرير الطلبات..."
-      : "Loading orders report...",
-    emptyTitle: isArabic ? "لا توجد بيانات طلبات" : "No order data",
+    distributionTitle: isArabic ? "توزيع حالات الطلب" : "Order Status Distribution",
+    distributionDesc: isArabic
+      ? "تحليل سريع لحالات الطلبات."
+      : "Quick analysis of order statuses.",
+
+    paymentDistributionTitle: isArabic
+      ? "توزيع حالات الدفع"
+      : "Payment Status Distribution",
+    paymentDistributionDesc: isArabic
+      ? "تحليل سريع لحالات الدفع المرتبطة بالطلبات."
+      : "Quick analysis of payment statuses linked to orders.",
+
+    financialTitle: isArabic ? "المؤشرات المالية" : "Financial Indicators",
+    financialDesc: isArabic
+      ? "ملخص قيمة الطلبات والمدفوع والمتبقي."
+      : "Summary of total order value, paid amount, and remaining amount.",
+
+    tableTitle: isArabic ? "بيانات تقرير الطلبات" : "Orders Report Data",
+    tableDesc: isArabic
+      ? "جدول تحليلي للطلبات حسب الفلاتر الحالية."
+      : "Analytical orders table based on current filters.",
+
+    table: {
+      order: isArabic ? "الطلب" : "Order",
+      customer: isArabic ? "العميل" : "Customer",
+      provider: isArabic ? "المركز" : "Provider",
+      product: isArabic ? "المنتج / البرنامج" : "Product / Program",
+      agent: isArabic ? "المندوب" : "Agent",
+      status: isArabic ? "حالة الطلب" : "Order Status",
+      paymentStatus: isArabic ? "حالة الدفع" : "Payment Status",
+      fulfillmentStatus: isArabic ? "حالة التنفيذ" : "Fulfillment Status",
+      totalAmount: isArabic ? "الإجمالي" : "Total",
+      paidAmount: isArabic ? "المدفوع" : "Paid",
+      remainingAmount: isArabic ? "المتبقي" : "Remaining",
+      invoice: isArabic ? "الفاتورة" : "Invoice",
+      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
+      completedAt: isArabic ? "تاريخ الإكمال" : "Completed At",
+      action: isArabic ? "الإجراء" : "Action",
+    },
+
+    emptyTitle: isArabic ? "لا توجد بيانات طلبات" : "No orders data",
     emptyText: isArabic
-      ? "غيّر الفلاتر أو تأكد من وجود بيانات الطلبات في النظام."
-      : "Change filters or make sure order data exists in the system.",
+      ? "ستظهر بيانات تقرير الطلبات هنا عند توفر سجلات."
+      : "Orders report data will appear here when records are available.",
+    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
+    noResultsText: isArabic
+      ? "جرّب تغيير كلمات البحث أو فلاتر الحالة والدفع."
+      : "Try changing search keywords, order status, or payment status.",
 
-    loadError: isArabic
-      ? "تعذر تحميل تقرير الطلبات"
-      : "Unable to load orders report",
+    accessDeniedTitle: isArabic ? "غير مصرح بعرض التقرير" : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية عرض تقارير الطلبات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to view orders reports. Contact your system administrator if you need access.",
+
+    apiError: isArabic
+      ? "تعذر تحميل تقرير الطلبات."
+      : "Unable to load orders report.",
+    apiErrorHint: isArabic
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
     refreshSuccess: isArabic
-      ? "تم تحديث تقرير الطلبات بنجاح"
-      : "Orders report refreshed successfully",
+      ? "تم تحديث تقرير الطلبات بنجاح."
+      : "Orders report refreshed successfully.",
     exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel"
-      : "Excel file has been prepared",
-    printReady: isArabic ? "تم تجهيز الطباعة" : "Print is ready",
+      ? "تم تجهيز ملف Excel بنجاح."
+      : "Excel file prepared successfully.",
+    exportEmpty: isArabic
+      ? "لا توجد بيانات قابلة للتصدير."
+      : "No data available to export.",
+    printSuccess: isArabic
+      ? "تم تجهيز نافذة الطباعة."
+      : "Print window prepared.",
+    printError: isArabic
+      ? "تعذر فتح نافذة الطباعة."
+      : "Unable to open print window.",
+
+    showing: isArabic ? "عرض" : "Showing",
+    from: isArabic ? "من" : "of",
+    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
+    reportScope: isArabic ? "نطاق التقرير" : "Report Scope",
+    currentFilteredData: isArabic
+      ? "حسب الفلاتر الحالية"
+      : "Current filtered data",
+    filterSearch: isArabic ? "البحث" : "Search",
+    filterStatus: isArabic ? "فلتر حالة الطلب" : "Order Status Filter",
+    filterPayment: isArabic ? "فلتر حالة الدفع" : "Payment Status Filter",
+    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
+    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
+    printTitle: isArabic ? "تقرير الطلبات" : "Orders Report",
   };
 }
 
 /* ============================================================
-   Format Helpers
+   Normalizers
 ============================================================ */
 
-function formatNumber(value: unknown) {
-  const number = Number(value || 0);
+function toNumber(value: unknown): number {
+  const parsed = Number(value);
 
-  if (!Number.isFinite(number)) return "0";
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 2,
-  }).format(number);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatDate(value: unknown) {
-  if (!value) return "-";
+function normalizeOrderStatus(value: unknown): OrderStatus {
+  const status = String(value || "").toUpperCase();
 
-  const date = new Date(String(value));
+  if (status === "PENDING") return "PENDING";
+  if (status === "CONFIRMED" || status === "APPROVED") return "CONFIRMED";
+  if (status === "PROCESSING" || status === "IN_PROGRESS") return "PROCESSING";
+  if (status === "COMPLETED" || status === "DONE") return "COMPLETED";
+  if (status === "CANCELLED" || status === "CANCELED") return "CANCELLED";
+  if (status === "REFUNDED") return "REFUNDED";
 
-  if (Number.isNaN(date.getTime())) return String(value);
-
-  return date.toLocaleDateString("en-GB");
+  return "UNKNOWN";
 }
 
-function isMoneyKey(key: string) {
-  const cleanKey = key.toLowerCase();
+function normalizePaymentStatus(value: unknown): PaymentStatus {
+  const status = String(value || "").toUpperCase();
 
-  return MONEY_KEYS.some((item) => cleanKey.includes(item));
+  if (status === "UNPAID" || status === "PENDING") return "UNPAID";
+  if (status === "PARTIAL" || status === "PARTIALLY_PAID") return "PARTIAL";
+  if (status === "PAID" || status === "CONFIRMED") return "PAID";
+  if (status === "REFUNDED") return "REFUNDED";
+  if (status === "FAILED") return "FAILED";
+
+  return "UNKNOWN";
 }
 
-function formatCellValue(key: string, value: unknown, locale: AppLocale) {
-  if (value === null || value === undefined || value === "") return "-";
+function normalizeFulfillmentStatus(value: unknown): FulfillmentStatus {
+  const status = String(value || "").toUpperCase();
 
-  if (
-    key.includes("date") ||
-    key.includes("created") ||
-    key.includes("updated") ||
-    key.endsWith("_at")
-  ) {
-    return formatDate(value);
+  if (status === "NOT_STARTED" || status === "PENDING") return "NOT_STARTED";
+  if (status === "IN_PROGRESS" || status === "PROCESSING") return "IN_PROGRESS";
+  if (status === "DELIVERED") return "DELIVERED";
+  if (status === "COMPLETED" || status === "DONE") return "COMPLETED";
+  if (status === "CANCELLED" || status === "CANCELED") return "CANCELLED";
+
+  return "UNKNOWN";
+}
+
+function getValue(obj: Dict, key: string): unknown {
+  const direct = obj[key];
+
+  if (direct !== undefined && direct !== null && direct !== "") {
+    return direct;
   }
 
-  if (typeof value === "number") return formatNumber(value);
+  for (const container of [
+    "order",
+    "customer",
+    "provider",
+    "center",
+    "product",
+    "program",
+    "agent",
+    "invoice",
+    "summary",
+    "data",
+    "item",
+  ]) {
+    const nested = obj[container];
 
-  if (typeof value === "boolean") {
-    return locale === "ar" ? (value ? "نعم" : "لا") : value ? "Yes" : "No";
+    if (nested && typeof nested === "object") {
+      const value = (nested as Dict)[key];
+
+      if (value !== undefined && value !== null && value !== "") {
+        return value;
+      }
+    }
   }
 
-  if (typeof value === "object") return JSON.stringify(value);
-
-  return String(value);
+  return undefined;
 }
 
-function labelizeKey(key: string, locale: AppLocale) {
-  const labels: Record<string, { ar: string; en: string }> = {
-    id: { ar: "الرقم", en: "ID" },
-    order_number: { ar: "رقم الطلب", en: "Order No." },
-    code: { ar: "الكود", en: "Code" },
-    customer_name: { ar: "اسم العميل", en: "Customer Name" },
-    customer: { ar: "العميل", en: "Customer" },
-    product_name: { ar: "المنتج", en: "Product Name" },
-    product: { ar: "المنتج", en: "Product" },
-    provider_name: { ar: "مقدم الخدمة", en: "Provider Name" },
-    provider: { ar: "مقدم الخدمة", en: "Provider" },
-    agent_name: { ar: "المندوب", en: "Agent Name" },
-    agent: { ar: "المندوب", en: "Agent" },
-    status: { ar: "الحالة", en: "Status" },
-    payment_status: { ar: "حالة الدفع", en: "Payment Status" },
-    fulfillment_status: { ar: "حالة التنفيذ", en: "Fulfillment Status" },
-    total_amount: { ar: "الإجمالي", en: "Total Amount" },
-    amount: { ar: "المبلغ", en: "Amount" },
-    created_at: { ar: "تاريخ الإنشاء", en: "Created At" },
-    updated_at: { ar: "آخر تحديث", en: "Updated At" },
+function extractRows(payload: OrdersReportResponse | null): unknown[] {
+  if (!payload) return [];
+
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.orders)) return payload.orders;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.rows)) return payload.rows;
+
+  if (Array.isArray(payload.data?.results)) return payload.data.results;
+  if (Array.isArray(payload.data?.orders)) return payload.data.orders;
+  if (Array.isArray(payload.data?.items)) return payload.data.items;
+  if (Array.isArray(payload.data?.rows)) return payload.data.rows;
+
+  return [];
+}
+
+function extractSummary(
+  payload: OrdersReportResponse | null,
+): Partial<OrdersReportSummary> {
+  return payload?.data?.summary || payload?.summary || {};
+}
+
+function normalizeOrder(item: unknown): OrderReportRow {
+  const obj = asDict(item);
+
+  const id = String(getValue(obj, "id") || "");
+  const customer = asDict(obj.customer);
+  const provider = asDict(obj.provider || obj.center);
+  const product = asDict(obj.product || obj.program);
+  const agent = asDict(obj.agent);
+  const invoice = asDict(obj.invoice);
+
+  const totalAmount =
+    getValue(obj, "total_amount") ||
+    getValue(obj, "grand_total") ||
+    getValue(obj, "amount") ||
+    0;
+
+  const paidAmount =
+    getValue(obj, "paid_amount") || getValue(obj, "total_paid") || 0;
+
+  const remainingAmount =
+    getValue(obj, "remaining_amount") ||
+    getValue(obj, "balance_due") ||
+    Math.max(0, toNumber(totalAmount) - toNumber(paidAmount));
+
+  return {
+    id,
+    orderNumber: String(
+      getValue(obj, "order_number") ||
+        getValue(obj, "number") ||
+        getValue(obj, "reference") ||
+        getValue(obj, "issue_reference") ||
+        id ||
+        "-",
+    ),
+    customerName: String(
+      getValue(obj, "customer_name") ||
+        customer.full_name ||
+        customer.name ||
+        "-",
+    ),
+    customerPhone: String(
+      getValue(obj, "customer_phone") ||
+        customer.mobile ||
+        customer.phone ||
+        "",
+    ),
+    providerName: String(
+      getValue(obj, "provider_name") ||
+        getValue(obj, "center_name") ||
+        provider.name ||
+        "-",
+    ),
+    productName: String(
+      getValue(obj, "product_name") ||
+        getValue(obj, "program_name") ||
+        product.name ||
+        product.title ||
+        "-",
+    ),
+    agentName: String(
+      getValue(obj, "agent_name") || agent.name || agent.full_name || "-",
+    ),
+    status: normalizeOrderStatus(getValue(obj, "status")),
+    paymentStatus: normalizePaymentStatus(
+      getValue(obj, "payment_status") || getValue(obj, "payment_state"),
+    ),
+    fulfillmentStatus: normalizeFulfillmentStatus(
+      getValue(obj, "fulfillment_status") || getValue(obj, "execution_status"),
+    ),
+    totalAmount: toNumber(totalAmount),
+    paidAmount: toNumber(paidAmount),
+    remainingAmount: toNumber(remainingAmount),
+    invoiceId: String(invoice.id || getValue(obj, "invoice_id") || ""),
+    invoiceNumber: String(
+      invoice.number ||
+        invoice.invoice_number ||
+        getValue(obj, "invoice_number") ||
+        "",
+    ),
+    createdAt: String(getValue(obj, "created_at") || ""),
+    confirmedAt: String(getValue(obj, "confirmed_at") || ""),
+    completedAt: String(getValue(obj, "completed_at") || ""),
+    cancelledAt: String(getValue(obj, "cancelled_at") || ""),
+  };
+}
+
+function normalizeSummary(
+  rows: OrderReportRow[],
+  summary?: Partial<OrdersReportSummary>,
+): OrdersReportSummary {
+  const fallback: OrdersReportSummary = {
+    total_orders: rows.length,
+    pending_orders: rows.filter((item) => item.status === "PENDING").length,
+    confirmed_orders: rows.filter((item) => item.status === "CONFIRMED").length,
+    processing_orders: rows.filter((item) => item.status === "PROCESSING").length,
+    completed_orders: rows.filter((item) => item.status === "COMPLETED").length,
+    cancelled_orders: rows.filter((item) => item.status === "CANCELLED").length,
+    refunded_orders: rows.filter((item) => item.status === "REFUNDED").length,
+    paid_orders: rows.filter((item) => item.paymentStatus === "PAID").length,
+    unpaid_orders: rows.filter((item) => item.paymentStatus === "UNPAID").length,
+    partial_orders: rows.filter((item) => item.paymentStatus === "PARTIAL")
+      .length,
+    invoiced_orders: rows.filter((item) => item.invoiceId || item.invoiceNumber)
+      .length,
+    total_amount: rows.reduce((sum, item) => sum + item.totalAmount, 0),
+    paid_amount: rows.reduce((sum, item) => sum + item.paidAmount, 0),
+    remaining_amount: rows.reduce((sum, item) => sum + item.remainingAmount, 0),
   };
 
-  const label = labels[key];
-
-  if (label) return locale === "ar" ? label.ar : label.en;
-
-  return key.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  return {
+    total_orders: toNumber(summary?.total_orders ?? fallback.total_orders),
+    pending_orders: toNumber(summary?.pending_orders ?? fallback.pending_orders),
+    confirmed_orders: toNumber(
+      summary?.confirmed_orders ?? fallback.confirmed_orders,
+    ),
+    processing_orders: toNumber(
+      summary?.processing_orders ?? fallback.processing_orders,
+    ),
+    completed_orders: toNumber(
+      summary?.completed_orders ?? fallback.completed_orders,
+    ),
+    cancelled_orders: toNumber(
+      summary?.cancelled_orders ?? fallback.cancelled_orders,
+    ),
+    refunded_orders: toNumber(
+      summary?.refunded_orders ?? fallback.refunded_orders,
+    ),
+    paid_orders: toNumber(summary?.paid_orders ?? fallback.paid_orders),
+    unpaid_orders: toNumber(summary?.unpaid_orders ?? fallback.unpaid_orders),
+    partial_orders: toNumber(summary?.partial_orders ?? fallback.partial_orders),
+    invoiced_orders: toNumber(
+      summary?.invoiced_orders ?? fallback.invoiced_orders,
+    ),
+    total_amount: toNumber(summary?.total_amount ?? fallback.total_amount),
+    paid_amount: toNumber(summary?.paid_amount ?? fallback.paid_amount),
+    remaining_amount: toNumber(
+      summary?.remaining_amount ?? fallback.remaining_amount,
+    ),
+  };
 }
 
-function escapeHtml(value: unknown) {
+/* ============================================================
+   UI Helpers
+============================================================ */
+
+function formatNumber(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0";
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(numericValue);
+}
+
+function formatMoney(value: number | string): string {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) return "0.00";
+
+  return numericValue.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatDate(value: string): string {
+  if (!value) return "-";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  }).format(date);
+}
+
+function escapeHtml(value: string | number) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function normalizeReportPayload(payload: unknown): OrdersReportData | null {
-  if (!payload || typeof payload !== "object") return null;
+function percent(value: number, total: number) {
+  if (!total) return 0;
 
-  const response = payload as OrdersReportResponse;
+  return Math.min(100, Math.max(0, Math.round((value / total) * 100)));
+}
 
-  if (response.data && typeof response.data === "object") {
-    return response.data;
+function isValidId(id: unknown) {
+  const value = String(id || "").trim();
+
+  return value.length > 0 && value !== "-" && value !== "undefined";
+}
+
+function statusLabel(status: OrderStatus, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<OrderStatus, string> = {
+    PENDING: t.pending,
+    CONFIRMED: t.confirmed,
+    PROCESSING: t.processing,
+    COMPLETED: t.completed,
+    CANCELLED: t.cancelled,
+    REFUNDED: t.refunded,
+    UNKNOWN: t.unknown,
+  };
+
+  return labels[status];
+}
+
+function paymentLabel(status: PaymentStatus, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<PaymentStatus, string> = {
+    UNPAID: t.unpaid,
+    PARTIAL: t.partial,
+    PAID: t.paid,
+    REFUNDED: t.refunded,
+    FAILED: t.failed,
+    UNKNOWN: t.unknown,
+  };
+
+  return labels[status];
+}
+
+function fulfillmentLabel(status: FulfillmentStatus, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<FulfillmentStatus, string> = {
+    NOT_STARTED: t.pending,
+    IN_PROGRESS: t.processing,
+    DELIVERED: t.confirmed,
+    COMPLETED: t.completed,
+    CANCELLED: t.cancelled,
+    UNKNOWN: t.unknown,
+  };
+
+  return labels[status];
+}
+
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
+}
+
+function MoneyText({ value }: { value: number | string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span>{formatMoney(value)}</span>
+      <SarIcon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function orderStatusBadge(status: OrderStatus, locale: AppLocale) {
+  const label = statusLabel(status, locale);
+
+  if (status === "COMPLETED" || status === "CONFIRMED") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
+    );
   }
 
-  return payload as OrdersReportData;
-}
+  if (status === "PENDING" || status === "PROCESSING") {
+    return (
+      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+        {label}
+      </Badge>
+    );
+  }
 
-function getRows(data: OrdersReportData | null): OrderReportRow[] {
-  return Array.isArray(data?.rows) ? data.rows : [];
-}
+  if (status === "CANCELLED" || status === "REFUNDED") {
+    return (
+      <Badge variant="destructive" className="rounded-full px-3 py-1">
+        {label}
+      </Badge>
+    );
+  }
 
-function getColumns(rows: OrderReportRow[]) {
-  const firstRow = rows[0] || {};
-  const availableColumns = Object.keys(firstRow);
-
-  const preferredColumns = ORDER_COLUMNS.filter((column) =>
-    availableColumns.includes(column),
+  return (
+    <Badge variant="secondary" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
   );
+}
 
-  const fallbackColumns = availableColumns.filter(
-    (column) => !preferredColumns.includes(column),
+function paymentStatusBadge(status: PaymentStatus, locale: AppLocale) {
+  const label = paymentLabel(status, locale);
+
+  if (status === "PAID") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "PARTIAL") {
+    return (
+      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "FAILED" || status === "REFUNDED") {
+    return (
+      <Badge variant="destructive" className="rounded-full px-3 py-1">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "UNPAID") {
+    return (
+      <Badge variant="outline" className="rounded-full px-3 py-1">
+        {label}
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="secondary" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
   );
-
-  return [...preferredColumns, ...fallbackColumns].slice(0, 8);
 }
 
-function buildQuery(filters: FilterState) {
-  return {
-    date_from: filters.date_from || undefined,
-    date_to: filters.date_to || undefined,
-    status: filters.status || undefined,
-  };
+/* ============================================================
+   Skeleton
+============================================================ */
+
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
 }
 
-function downloadExcel(
-  filename: string,
-  rows: OrderReportRow[],
-  columns: string[],
-  locale: AppLocale,
-) {
-  const title = locale === "ar" ? "تقرير الطلبات" : "Orders Report";
+function SummaryCardsSkeleton() {
+  return (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-2">
+                <SkeletonLine className="h-7 w-20" />
+                <SkeletonLine className="h-4 w-32" />
+              </div>
+              <SkeletonLine className="h-10 w-10 rounded-xl" />
+            </div>
+            <div className="mt-4 flex items-center gap-2">
+              <SkeletonLine className="h-3 w-8" />
+              <SkeletonLine className="h-2 flex-1" />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
 
-  const header = columns
-    .map((column) => `<th>${escapeHtml(labelizeKey(column, locale))}</th>`)
+function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
+  return (
+    <>
+      {Array.from({ length: 8 }).map((_, rowIndex) => (
+        <TableRow key={rowIndex}>
+          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
+            <TableCell key={columnIndex}>
+              <SkeletonLine
+                className={
+                  columnIndex === 0
+                    ? "h-10 w-56 rounded-lg"
+                    : "h-4 w-24 rounded-lg"
+                }
+              />
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
+/* ============================================================
+   Export / Print
+============================================================ */
+
+function downloadExcel({
+  filename,
+  worksheetName,
+  title,
+  locale,
+  summaryRows,
+  filterRows,
+  headers,
+  rows,
+}: {
+  filename: string;
+  worksheetName: string;
+  title: string;
+  locale: AppLocale;
+  summaryRows: Array<[string, string | number]>;
+  filterRows: Array<[string, string | number]>;
+  headers: string[];
+  rows: Array<Array<string | number>>;
+}) {
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const align = locale === "ar" ? "right" : "left";
+  const colspan = Math.max(headers.length, 2);
+
+  const summaryHtml = summaryRows
+    .map(
+      ([label, value]) => `
+        <tr>
+          <td class="summary-label">${escapeHtml(label)}</td>
+          <td class="summary-value">${escapeHtml(value)}</td>
+        </tr>`,
+    )
     .join("");
 
-  const body = rows
-    .map((row) => {
-      const cells = columns
-        .map(
-          (column) =>
-            `<td>${escapeHtml(
-              formatCellValue(column, row[column], locale),
-            )}</td>`,
-        )
-        .join("");
-
-      return `<tr>${cells}</tr>`;
-    })
+  const filterHtml = filterRows
+    .map(
+      ([label, value]) => `
+        <tr>
+          <td class="summary-label">${escapeHtml(label)}</td>
+          <td class="summary-value">${escapeHtml(value)}</td>
+        </tr>`,
+    )
     .join("");
 
-  const html = `
-    <html dir="${locale === "ar" ? "rtl" : "ltr"}">
+  const headerHtml = headers
+    .map((header) => `<th>${escapeHtml(header)}</th>`)
+    .join("");
+
+  const rowsHtml = rows
+    .map(
+      (row) => `
+        <tr>
+          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
+        </tr>`,
+    )
+    .join("");
+
+  const workbook = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office"
+          xmlns:x="urn:schemas-microsoft-com:office:excel"
+          xmlns="http://www.w3.org/TR/REC-html40">
       <head>
-        <meta charset="utf-8" />
+        <meta charset="UTF-8" />
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>${escapeHtml(worksheetName)}</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayRightToLeft>${locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <style>
+          body { direction: ${dir}; font-family: Arial, sans-serif; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td {
+            border: 1px solid #d9e2ef;
+            padding: 8px;
+            text-align: ${align};
+            vertical-align: top;
+            mso-number-format: "\\@";
+          }
+          th { background: #d8ecfb; color: #000; font-weight: 700; }
+          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
+          .section { font-weight: 700; background: #eef6ff; }
+          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
+          .summary-value { font-weight: 700; }
+        </style>
       </head>
-      <body>
-        <table border="1">
-          <thead>
-            <tr>
-              <th colspan="${columns.length}">${escapeHtml(title)}</th>
-            </tr>
-            <tr>${header}</tr>
-          </thead>
-          <tbody>${body}</tbody>
+      <body dir="${dir}">
+        <table>
+          <tr><td class="title" colspan="${colspan}">${escapeHtml(title)}</td></tr>
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr><td class="section" colspan="${colspan}">
+            ${locale === "ar" ? "ملخص التقرير" : "Report Summary"}
+          </td></tr>
+          ${summaryHtml}
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr><td class="section" colspan="${colspan}">
+            ${locale === "ar" ? "الفلاتر المستخدمة" : "Applied Filters"}
+          </td></tr>
+          ${filterHtml}
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr>${headerHtml}</tr>
+          ${rowsHtml}
         </table>
       </body>
-    </html>
-  `;
+    </html>`;
 
-  const blob = new Blob([html], {
-    type: "application/vnd.ms-excel;charset=utf-8",
+  const blob = new Blob([workbook], {
+    type: "application/vnd.ms-excel;charset=utf-8;",
   });
 
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
 
   anchor.href = url;
-  anchor.download = `${filename}.xls`;
+  anchor.download = filename;
   anchor.click();
 
   URL.revokeObjectURL(url);
 }
 
-function buildSummaryCards(
-  data: OrdersReportData | null,
-  filteredRowsCount: number,
-  locale: AppLocale,
-): SummaryCard[] {
-  const t = getDictionary(locale);
-  const summary = data?.summary || {};
-  const rows = getRows(data);
+function buildPrintHtml({
+  locale,
+  title,
+  rows,
+  summary,
+  t,
+}: {
+  locale: AppLocale;
+  title: string;
+  rows: OrderReportRow[];
+  summary: OrdersReportSummary;
+  t: ReturnType<typeof dictionary>;
+}) {
+  const isArabic = locale === "ar";
+  const now = new Date().toLocaleString("en-US");
 
-  return [
-    {
-      key: "total_orders",
-      titleAr: "إجمالي الطلبات",
-      titleEn: "Total Orders",
-      descriptionAr: t.totalOrdersDesc,
-      descriptionEn: t.totalOrdersDesc,
-      value: summary.total_orders ?? rows.length,
-      icon: ShoppingCart,
-    },
-    {
-      key: "total_amount",
-      titleAr: "قيمة الطلبات",
-      titleEn: "Orders Value",
-      descriptionAr: t.totalAmountDesc,
-      descriptionEn: t.totalAmountDesc,
-      value: summary.total_amount ?? 0,
-      icon: BarChart3,
-      isMoney: true,
-    },
-    {
-      key: "returned_rows",
-      titleAr: "النتائج المعروضة",
-      titleEn: "Returned Rows",
-      descriptionAr: t.returnedRowsDesc,
-      descriptionEn: t.returnedRowsDesc,
-      value: rows.length,
-      icon: PackageCheck,
-    },
-    {
-      key: "filtered_rows",
-      titleAr: "بعد البحث",
-      titleEn: "Filtered Rows",
-      descriptionAr: t.filteredRowsDesc,
-      descriptionEn: t.filteredRowsDesc,
-      value: filteredRowsCount,
-      icon: Search,
-    },
-  ];
+  const tableRows = rows
+    .map(
+      (item, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(item.orderNumber || "-")}</td>
+          <td>${escapeHtml(item.customerName || "-")}</td>
+          <td>${escapeHtml(item.providerName || "-")}</td>
+          <td>${escapeHtml(item.productName || "-")}</td>
+          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
+          <td>${escapeHtml(paymentLabel(item.paymentStatus, locale))}</td>
+          <td>${escapeHtml(formatMoney(item.totalAmount))}</td>
+          <td>${escapeHtml(formatMoney(item.paidAmount))}</td>
+          <td>${escapeHtml(formatDate(item.createdAt))}</td>
+        </tr>
+      `,
+    )
+    .join("");
+
+  return `
+    <!doctype html>
+    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            padding: 24px;
+            font-family: Arial, Tahoma, sans-serif;
+            color: #111827;
+            background: #ffffff;
+            direction: ${isArabic ? "rtl" : "ltr"};
+            text-align: ${isArabic ? "right" : "left"};
+          }
+          .print-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 18px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 14px;
+          }
+          h1 { margin: 0; font-size: 22px; font-weight: 800; }
+          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
+          .badge {
+            display: inline-block;
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: #374151;
+          }
+          .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 18px;
+          }
+          .summary-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 10px;
+          }
+          .summary-card span {
+            display: block;
+            color: #6b7280;
+            font-size: 11px;
+            margin-bottom: 5px;
+          }
+          .summary-card strong { font-size: 16px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th { background: #f3f4f6; color: #111827; font-weight: 700; }
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 9px 8px;
+            text-align: ${isArabic ? "right" : "left"};
+            vertical-align: top;
+          }
+          tr:nth-child(even) td { background: #fafafa; }
+          @page { size: A4 landscape; margin: 12mm; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+
+      <body>
+        <div class="print-header">
+          <div>
+            <h1>${escapeHtml(title)}</h1>
+            <div class="meta">
+              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
+              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
+            </div>
+          </div>
+          <div class="badge">Primey Care</div>
+        </div>
+
+        <div class="summary-grid">
+          <div class="summary-card"><span>${escapeHtml(t.totalOrders)}</span><strong>${formatNumber(summary.total_orders)}</strong></div>
+          <div class="summary-card"><span>${escapeHtml(t.completedOrders)}</span><strong>${formatNumber(summary.completed_orders)}</strong></div>
+          <div class="summary-card"><span>${escapeHtml(t.paidOrders)}</span><strong>${formatNumber(summary.paid_orders)}</strong></div>
+          <div class="summary-card"><span>${escapeHtml(t.totalAmount)}</span><strong>${formatMoney(summary.total_amount)}</strong></div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>${escapeHtml(t.table.order)}</th>
+              <th>${escapeHtml(t.table.customer)}</th>
+              <th>${escapeHtml(t.table.provider)}</th>
+              <th>${escapeHtml(t.table.product)}</th>
+              <th>${escapeHtml(t.table.status)}</th>
+              <th>${escapeHtml(t.table.paymentStatus)}</th>
+              <th>${escapeHtml(t.table.totalAmount)}</th>
+              <th>${escapeHtml(t.table.paidAmount)}</th>
+              <th>${escapeHtml(t.table.createdAt)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              tableRows ||
+              `<tr><td colspan="10" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
+            }
+          </tbody>
+        </table>
+
+        <script>
+          window.addEventListener("load", () => {
+            window.focus();
+            window.print();
+          });
+        </script>
+      </body>
+    </html>
+  `;
 }
 
 /* ============================================================
-   Component
+   Page
 ============================================================ */
 
 export default function SystemOrdersReportsPage() {
+  const auth = useAuth() as unknown;
+
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [data, setData] = useState<OrdersReportData | null>(null);
+  const [rows, setRows] = useState<OrderReportRow[]>([]);
+  const [summary, setSummary] = useState<OrdersReportSummary>(DEFAULT_SUMMARY);
   const [isLoading, setIsLoading] = useState(true);
-  const [filters, setFilters] = useState<FilterState>({
-    date_from: "",
-    date_to: "",
-    status: "",
-    search: "",
-  });
+  const [errorMessage, setErrorMessage] = useState("");
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("ALL");
 
+  const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
-  const t = useMemo(() => getDictionary(locale), [locale]);
+  const authResolving = isAuthResolving(auth);
 
-  const rows = useMemo(() => getRows(data), [data]);
+  const canViewReport = hasSafePermission(
+    auth,
+    ["reports.view", "reports.orders.view", "orders.view"],
+    "view",
+  );
+
+  const canViewOrderDetails = hasSafePermission(
+    auth,
+    ["orders.view", "orders.detail"],
+    "view",
+  );
+
+  const canExportReport = hasSafePermission(
+    auth,
+    ["reports.export", "reports.orders.export", "orders.export"],
+    "action",
+  );
+
+  const canPrintReport = hasSafePermission(
+    auth,
+    ["reports.print", "reports.orders.print"],
+    "action",
+  );
 
   const filteredRows = useMemo(() => {
-    const query = filters.search.trim().toLowerCase();
+    const cleanQuery = query.trim().toLowerCase();
 
-    if (!query) return rows;
+    return rows.filter((item) => {
+      const matchesStatus =
+        statusFilter === "ALL" ? true : item.status === statusFilter;
 
-    return rows.filter((row) =>
-      Object.values(row).some((value) =>
-        String(value ?? "").toLowerCase().includes(query),
-      ),
-    );
-  }, [filters.search, rows]);
+      const matchesPayment =
+        paymentFilter === "ALL" ? true : item.paymentStatus === paymentFilter;
 
-  const columns = useMemo(() => getColumns(rows), [rows]);
+      const matchesQuery = !cleanQuery
+        ? true
+        : [
+            item.orderNumber,
+            item.customerName,
+            item.customerPhone,
+            item.providerName,
+            item.productName,
+            item.agentName,
+            item.invoiceNumber,
+            statusLabel(item.status, locale),
+            paymentLabel(item.paymentStatus, locale),
+            fulfillmentLabel(item.fulfillmentStatus, locale),
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(cleanQuery);
 
-  const summaryCards = useMemo(() => {
-    return buildSummaryCards(data, filteredRows.length, locale);
-  }, [data, filteredRows.length, locale]);
+      return matchesStatus && matchesPayment && matchesQuery;
+    });
+  }, [locale, paymentFilter, query, rows, statusFilter]);
 
-  const chartGroups = useMemo(() => {
-    return [
+  const filteredSummary = useMemo(
+    () => normalizeSummary(filteredRows),
+    [filteredRows],
+  );
+
+  const hasSearchOrFilter =
+    query.trim().length > 0 ||
+    statusFilter !== "ALL" ||
+    paymentFilter !== "ALL";
+
+  const statusOptions = useMemo(
+    () => [
+      { value: "ALL" as StatusFilter, label: t.allStatuses, count: rows.length },
       {
-        key: "by_status",
-        title: t.byStatus,
-        items: data?.charts?.by_status || [],
-        icon: ShieldCheck,
+        value: "PENDING" as StatusFilter,
+        label: t.pending,
+        count: rows.filter((item) => item.status === "PENDING").length,
       },
       {
-        key: "by_payment_status",
-        title: t.byPaymentStatus,
-        items: data?.charts?.by_payment_status || [],
+        value: "CONFIRMED" as StatusFilter,
+        label: t.confirmed,
+        count: rows.filter((item) => item.status === "CONFIRMED").length,
+      },
+      {
+        value: "PROCESSING" as StatusFilter,
+        label: t.processing,
+        count: rows.filter((item) => item.status === "PROCESSING").length,
+      },
+      {
+        value: "COMPLETED" as StatusFilter,
+        label: t.completed,
+        count: rows.filter((item) => item.status === "COMPLETED").length,
+      },
+      {
+        value: "CANCELLED" as StatusFilter,
+        label: t.cancelled,
+        count: rows.filter((item) => item.status === "CANCELLED").length,
+      },
+    ],
+    [rows, t],
+  );
+
+  const paymentOptions = useMemo(
+    () => [
+      {
+        value: "ALL" as PaymentFilter,
+        label: t.allPaymentStatuses,
+        count: rows.length,
+      },
+      {
+        value: "UNPAID" as PaymentFilter,
+        label: t.unpaid,
+        count: rows.filter((item) => item.paymentStatus === "UNPAID").length,
+      },
+      {
+        value: "PARTIAL" as PaymentFilter,
+        label: t.partial,
+        count: rows.filter((item) => item.paymentStatus === "PARTIAL").length,
+      },
+      {
+        value: "PAID" as PaymentFilter,
+        label: t.paid,
+        count: rows.filter((item) => item.paymentStatus === "PAID").length,
+      },
+      {
+        value: "REFUNDED" as PaymentFilter,
+        label: t.refunded,
+        count: rows.filter((item) => item.paymentStatus === "REFUNDED").length,
+      },
+      {
+        value: "FAILED" as PaymentFilter,
+        label: t.failed,
+        count: rows.filter((item) => item.paymentStatus === "FAILED").length,
+      },
+    ],
+    [rows, t],
+  );
+
+  const summaryCards = useMemo(
+    () => [
+      {
+        title: t.totalOrders,
+        value: summary.total_orders,
+        icon: ShoppingCart,
+        helper: t.completedOrders,
+        helperValue: formatNumber(summary.completed_orders),
+        percent: summary.total_orders > 0 ? 100 : 0,
+        isMoney: false,
+      },
+      {
+        title: t.completedOrders,
+        value: summary.completed_orders,
+        icon: CheckCircle2,
+        helper: t.totalOrders,
+        helperValue: `${percent(
+          summary.completed_orders,
+          summary.total_orders,
+        )}%`,
+        percent: percent(summary.completed_orders, summary.total_orders),
+        isMoney: false,
+      },
+      {
+        title: t.paidOrders,
+        value: summary.paid_orders,
         icon: CreditCard,
+        helper: t.paidAmount,
+        helperValue: formatMoney(summary.paid_amount),
+        percent: percent(summary.paid_orders, summary.total_orders),
+        isMoney: false,
       },
       {
-        key: "by_fulfillment_status",
-        title: t.byFulfillmentStatus,
-        items: data?.charts?.by_fulfillment_status || [],
-        icon: PackageCheck,
+        title: t.totalAmount,
+        value: summary.total_amount,
+        icon: Wallet,
+        helper: t.remainingAmount,
+        helperValue: formatMoney(summary.remaining_amount),
+        percent: summary.total_amount > 0 ? 100 : 0,
+        isMoney: true,
       },
-    ];
-  }, [data, t]);
+    ],
+    [summary, t],
+  );
 
-  async function loadOrdersReport(showToast = false) {
-    try {
-      setIsLoading(true);
+  const statusCards = useMemo(
+    () => [
+      {
+        title: t.pending,
+        value: summary.pending_orders,
+        icon: ShoppingCart,
+        filter: "PENDING" as StatusFilter,
+        percent: percent(summary.pending_orders, summary.total_orders),
+      },
+      {
+        title: t.processing,
+        value: summary.processing_orders,
+        icon: PackageCheck,
+        filter: "PROCESSING" as StatusFilter,
+        percent: percent(summary.processing_orders, summary.total_orders),
+      },
+      {
+        title: t.completed,
+        value: summary.completed_orders,
+        icon: CheckCircle2,
+        filter: "COMPLETED" as StatusFilter,
+        percent: percent(summary.completed_orders, summary.total_orders),
+      },
+      {
+        title: t.cancelled,
+        value: summary.cancelled_orders,
+        icon: XCircle,
+        filter: "CANCELLED" as StatusFilter,
+        percent: percent(summary.cancelled_orders, summary.total_orders),
+      },
+    ],
+    [summary, t],
+  );
 
-      const result = await apiGet<OrdersReportResponse>(
-        API_PATHS.reports.orders,
-        buildQuery(filters),
-      );
+  const paymentCards = useMemo(
+    () => [
+      {
+        title: t.unpaid,
+        value: summary.unpaid_orders,
+        icon: Wallet,
+        filter: "UNPAID" as PaymentFilter,
+        percent: percent(summary.unpaid_orders, summary.total_orders),
+      },
+      {
+        title: t.partial,
+        value: summary.partial_orders,
+        icon: CreditCard,
+        filter: "PARTIAL" as PaymentFilter,
+        percent: percent(summary.partial_orders, summary.total_orders),
+      },
+      {
+        title: t.paid,
+        value: summary.paid_orders,
+        icon: CheckCircle2,
+        filter: "PAID" as PaymentFilter,
+        percent: percent(summary.paid_orders, summary.total_orders),
+      },
+      {
+        title: t.refunded,
+        value: summary.refunded_orders,
+        icon: XCircle,
+        filter: "REFUNDED" as PaymentFilter,
+        percent: percent(summary.refunded_orders, summary.total_orders),
+      },
+    ],
+    [summary, t],
+  );
 
-      if (!result.ok) {
-        throw new Error(result.message);
+  const loadReport = useCallback(
+    async (showToast = false) => {
+      if (!canViewReport) {
+        setIsLoading(false);
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
+        return;
       }
 
-      const normalizedData = normalizeReportPayload(result.data);
+      try {
+        setIsLoading(true);
+        setErrorMessage("");
 
-      setData(normalizedData);
+        const endpoints = [
+          "/api/reports/orders/",
+          "/api/orders/?page_size=300",
+        ];
 
-      if (showToast) {
-        toast.success(t.refreshSuccess);
+        let loadedPayload: OrdersReportResponse | null = null;
+        let loaded = false;
+
+        for (const endpoint of endpoints) {
+          const response = await fetch(apiUrl(endpoint), {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+            headers: {
+              Accept: "application/json",
+            },
+          });
+
+          const payload = (await response.json().catch(() => null)) as
+            | OrdersReportResponse
+            | null;
+
+          if (response.status === 404 || response.status === 405) {
+            loadedPayload = payload;
+            continue;
+          }
+
+          if (
+            !response.ok ||
+            payload?.ok === false ||
+            payload?.success === false
+          ) {
+            throw new Error(payload?.message || `HTTP ${response.status}`);
+          }
+
+          loadedPayload = payload;
+          loaded = true;
+          break;
+        }
+
+        if (!loaded) {
+          throw new Error(
+            loadedPayload?.message || "Unable to load orders report",
+          );
+        }
+
+        const normalizedRows = extractRows(loadedPayload).map(normalizeOrder);
+
+        setRows(normalizedRows);
+        setSummary(
+          normalizeSummary(normalizedRows, extractSummary(loadedPayload)),
+        );
+
+        if (showToast) {
+          toast.success(t.refreshSuccess);
+        }
+      } catch (error) {
+        console.error("Orders report load error:", error);
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
+        setErrorMessage(t.apiError);
+        toast.error(t.apiError);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error("Load orders report error:", error);
-      setData(null);
-      toast.error(t.loadError);
-    } finally {
-      setIsLoading(false);
+    },
+    [canViewReport, t.apiError, t.refreshSuccess],
+  );
+
+  function clearFilters() {
+    setQuery("");
+    setStatusFilter("ALL");
+    setPaymentFilter("ALL");
+  }
+
+  function exportExcel() {
+    if (!canExportReport) return;
+
+    if (filteredRows.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
     }
-  }
 
-  function handleLocaleToggle() {
-    const nextLocale: AppLocale = locale === "ar" ? "en" : "ar";
+    const generatedAt = new Date();
 
-    setStoredLocale(nextLocale);
-    setLocale(nextLocale);
-    toast.success(t.languageChanged);
-  }
+    const statusFilterLabel =
+      statusOptions.find((item) => item.value === statusFilter)?.label || t.all;
 
-  function handleExport() {
-    downloadExcel("primey-care-orders-report", filteredRows, columns, locale);
+    const paymentFilterLabel =
+      paymentOptions.find((item) => item.value === paymentFilter)?.label ||
+      t.all;
+
+    downloadExcel({
+      filename: `primey-care-orders-report-${generatedAt
+        .toISOString()
+        .slice(0, 10)}.xls`,
+      worksheetName: isArabic ? "تقرير الطلبات" : "Orders Report",
+      title: t.title,
+      locale,
+      summaryRows: [
+        [t.generatedAt, generatedAt.toLocaleString("en-US")],
+        [t.reportScope, t.currentFilteredData],
+        [t.totalOrders, filteredSummary.total_orders],
+        [t.completedOrders, filteredSummary.completed_orders],
+        [t.paidOrders, filteredSummary.paid_orders],
+        [t.totalAmount, formatMoney(filteredSummary.total_amount)],
+        [t.paidAmount, formatMoney(filteredSummary.paid_amount)],
+        [t.remainingAmount, formatMoney(filteredSummary.remaining_amount)],
+      ],
+      filterRows: [
+        [t.filterSearch, query || t.all],
+        [t.filterStatus, statusFilterLabel],
+        [t.filterPayment, paymentFilterLabel],
+      ],
+      headers: [
+        "ID",
+        t.table.order,
+        t.table.customer,
+        t.table.provider,
+        t.table.product,
+        t.table.agent,
+        t.table.status,
+        t.table.paymentStatus,
+        t.table.fulfillmentStatus,
+        t.table.totalAmount,
+        t.table.paidAmount,
+        t.table.remainingAmount,
+        t.table.invoice,
+        t.table.createdAt,
+        t.table.completedAt,
+      ],
+      rows: filteredRows.map((item) => [
+        item.id || "-",
+        item.orderNumber || "-",
+        item.customerName || "-",
+        item.providerName || "-",
+        item.productName || "-",
+        item.agentName || "-",
+        statusLabel(item.status, locale),
+        paymentLabel(item.paymentStatus, locale),
+        fulfillmentLabel(item.fulfillmentStatus, locale),
+        formatMoney(item.totalAmount),
+        formatMoney(item.paidAmount),
+        formatMoney(item.remainingAmount),
+        item.invoiceNumber || item.invoiceId || "-",
+        formatDate(item.createdAt),
+        formatDate(item.completedAt),
+      ]),
+    });
+
     toast.success(t.exportSuccess);
   }
 
-  function handlePrint() {
-    toast.success(t.printReady);
+  function printReport() {
+    if (!canPrintReport) return;
 
-    window.setTimeout(() => {
-      window.print();
-    }, 100);
+    if (filteredRows.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(t.printError);
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(
+      buildPrintHtml({
+        locale,
+        title: t.printTitle,
+        rows: filteredRows,
+        summary: filteredSummary,
+        t,
+      }),
+    );
+    printWindow.document.close();
+
+    toast.success(t.printSuccess);
   }
 
   useEffect(() => {
@@ -655,7 +1852,7 @@ export default function SystemOrdersReportsPage() {
       setLocale(nextLocale);
     };
 
-    const syncLocaleAfterPaint = () => {
+    const syncAfterPaint = () => {
       syncLocale();
 
       window.setTimeout(() => {
@@ -663,63 +1860,73 @@ export default function SystemOrdersReportsPage() {
       }, 0);
     };
 
-    syncLocaleAfterPaint();
+    syncAfterPaint();
 
-    window.addEventListener("primey-locale-changed", syncLocaleAfterPaint);
-    window.addEventListener("storage", syncLocaleAfterPaint);
+    window.addEventListener("primey-locale-changed", syncAfterPaint);
+    window.addEventListener("storage", syncAfterPaint);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncLocaleAfterPaint);
-      window.removeEventListener("storage", syncLocaleAfterPaint);
+      window.removeEventListener("primey-locale-changed", syncAfterPaint);
+      window.removeEventListener("storage", syncAfterPaint);
     };
   }, []);
 
   useEffect(() => {
-    loadOrdersReport(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
+    if (authResolving) return;
+    loadReport(false);
+  }, [authResolving, loadReport]);
+
+  if (!authResolving && !canViewReport) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
-            <ShoppingCart className="h-3.5 w-3.5" />
-            <span>Primey Care Reports</span>
-          </div>
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+            {t.title}
+          </h1>
 
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              {t.pageTitle}
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              {t.pageSubtitle}
-            </p>
-          </div>
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
+          </p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row print:hidden">
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={handleLocaleToggle}
-          >
-            <Languages className="h-4 w-4" />
-            <span>{t.language}</span>
-          </Button>
-
-          <Button variant="outline" className="h-10 rounded-xl" asChild>
-            <Link href="/system/reports">
-              <BarChart3 className="h-4 w-4" />
-              <span>{t.backToReports}</span>
-            </Link>
-          </Button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Link href="/system/reports">
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>{t.back}</span>
+            </Button>
+          </Link>
 
           <Button
             variant="outline"
             className="h-10 rounded-xl"
-            onClick={() => loadOrdersReport(true)}
+            onClick={() => loadReport(true)}
             disabled={isLoading}
           >
             {isLoading ? (
@@ -730,403 +1937,551 @@ export default function SystemOrdersReportsPage() {
             <span>{t.refresh}</span>
           </Button>
 
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={handleExport}
-            disabled={filteredRows.length === 0 || columns.length === 0}
-          >
-            <Download className="h-4 w-4" />
-            <span>{t.exportExcel}</span>
-          </Button>
+          {canExportReport ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl"
+              onClick={exportExcel}
+              disabled={
+                isLoading || filteredRows.length === 0 || Boolean(errorMessage)
+              }
+            >
+              <Download className="h-4 w-4" />
+              <span>{t.exportExcel}</span>
+            </Button>
+          ) : null}
 
-          <Button className="h-10 rounded-xl" onClick={handlePrint}>
-            <Printer className="h-4 w-4" />
-            <span>{t.printPdf}</span>
-          </Button>
+          {canPrintReport ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl"
+              onClick={printReport}
+              disabled={
+                isLoading || filteredRows.length === 0 || Boolean(errorMessage)
+              }
+            >
+              <Printer className="h-4 w-4" />
+              <span>{t.print}</span>
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      {/* Filters */}
-      <Card className="print:hidden">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Filter className="h-5 w-5" />
-            {t.filtersTitle}
-          </CardTitle>
-          <CardDescription>{t.filtersDescription}</CardDescription>
-        </CardHeader>
+      {!isLoading && errorMessage ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                <XCircle className="h-5 w-5" />
+              </div>
 
-        <CardContent>
-          <div className="grid gap-3 md:grid-cols-4">
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">
-                {t.dateFrom}
-              </label>
-              <Input
-                type="date"
-                value={filters.date_from}
-                onChange={(event) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    date_from: event.target.value,
-                  }))
-                }
-                className="h-10 rounded-xl"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">
-                {t.dateTo}
-              </label>
-              <Input
-                type="date"
-                value={filters.date_to}
-                onChange={(event) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    date_to: event.target.value,
-                  }))
-                }
-                className="h-10 rounded-xl"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">
-                {t.status}
-              </label>
-              <Input
-                value={filters.status}
-                onChange={(event) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    status: event.target.value,
-                  }))
-                }
-                placeholder={t.status}
-                className="h-10 rounded-xl"
-              />
-            </div>
-
-            <div className="flex items-end">
-              <Button
-                className="h-10 w-full rounded-xl"
-                onClick={() => loadOrdersReport(true)}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="h-4 w-4" />
-                )}
-                <span>{t.refresh}</span>
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Summary */}
-      <Card>
-        <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <ShoppingCart className="h-5 w-5" />
-              {t.summaryTitle}
-            </CardTitle>
-            <CardDescription className="mt-1">
-              {data?.meta?.generated_at
-                ? `${t.generatedAt}: ${formatDate(data.meta.generated_at)}`
-                : t.summaryDescription}
-            </CardDescription>
-          </div>
-
-          <Badge variant="secondary" className="w-fit rounded-full">
-            {t.orderBadge}
-          </Badge>
-        </CardHeader>
-
-        <CardContent>
-          {isLoading ? (
-            <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t.loading}</span>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {summaryCards.map((card) => {
-                const Icon = card.icon;
-                const title = isArabic ? card.titleAr : card.titleEn;
-                const description = isArabic
-                  ? card.descriptionAr
-                  : card.descriptionEn;
-
-                return (
-                  <Card key={card.key} className="shadow-none">
-                    <CardContent className="p-5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <p className="text-sm text-muted-foreground">
-                            {title}
-                          </p>
-                          <p className="text-2xl font-bold">
-                            {formatNumber(card.value)}
-                          </p>
-                        </div>
-
-                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-muted">
-                          {card.isMoney ? (
-                            <Image
-                              src="/currency/sar.svg"
-                              alt="SAR"
-                              width={20}
-                              height={20}
-                            />
-                          ) : (
-                            <Icon className="h-5 w-5" />
-                          )}
-                        </div>
-                      </div>
-
-                      <p className="mt-4 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                        {description}
-                      </p>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Analysis */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <BarChart3 className="h-5 w-5" />
-            {t.analysisTitle}
-          </CardTitle>
-          <CardDescription>{t.summaryDescription}</CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          {isLoading ? (
-            <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t.loading}</span>
-            </div>
-          ) : (
-            <div className="grid gap-4 xl:grid-cols-3">
-              {chartGroups.map((group) => {
-                const GroupIcon = group.icon;
-
-                return (
-                  <Card key={group.key} className="shadow-none">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="flex items-center gap-2 text-base">
-                        <GroupIcon className="h-4 w-4" />
-                        {group.title}
-                      </CardTitle>
-                    </CardHeader>
-
-                    <CardContent className="space-y-3">
-                      {group.items.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                          {t.emptyText}
-                        </div>
-                      ) : (
-                        group.items.slice(0, 6).map((item, index) => {
-                          const count = Number(item.count || item.total || 0);
-                          const width = Math.min(count * 10, 100);
-
-                          return (
-                            <div
-                              key={`${group.key}-${String(item.key)}-${index}`}
-                              className="space-y-2"
-                            >
-                              <div className="flex items-center justify-between gap-3 text-sm">
-                                <span className="truncate">
-                                  {String(item.key || "-")}
-                                </span>
-                                <span className="font-semibold">
-                                  {formatNumber(count)}
-                                </span>
-                              </div>
-
-                              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                                <div
-                                  className="h-full rounded-full bg-primary"
-                                  style={{ width: `${width}%` }}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Table */}
-      <Card>
-        <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <CardTitle>{t.tableTitle}</CardTitle>
-            <CardDescription>{t.tableDescription}</CardDescription>
-          </div>
-
-          <div className="relative w-full lg:w-80 print:hidden">
-            <Search
-              className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                isArabic ? "right-3" : "left-3"
-              }`}
-            />
-            <Input
-              value={filters.search}
-              onChange={(event) =>
-                setFilters((prev) => ({
-                  ...prev,
-                  search: event.target.value,
-                }))
-              }
-              placeholder={t.searchPlaceholder}
-              className={`h-10 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-            />
-          </div>
-        </CardHeader>
-
-        <CardContent>
-          <div className="overflow-hidden rounded-2xl border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {columns.map((column) => (
-                    <TableHead key={column}>
-                      {labelizeKey(column, locale)}
-                    </TableHead>
-                  ))}
-                  <TableHead className="print:hidden">{t.action}</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={Math.max(columns.length + 1, 2)}>
-                      <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>{t.loading}</span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : filteredRows.length === 0 || columns.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={Math.max(columns.length + 1, 2)}>
-                      <div className="py-12 text-center">
-                        <p className="font-semibold">{t.emptyTitle}</p>
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          {t.emptyText}
-                        </p>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredRows.slice(0, 80).map((row, index) => (
-                    <TableRow key={String(row.id || index)}>
-                      {columns.map((column) => (
-                        <TableCell
-                          key={column}
-                          className={
-                            column === "order_number" || column === "code"
-                              ? "font-medium"
-                              : undefined
-                          }
-                        >
-                          {column === "status" ||
-                          column === "payment_status" ||
-                          column === "fulfillment_status" ? (
-                            <Badge variant="secondary" className="rounded-full">
-                              {formatCellValue(column, row[column], locale)}
-                            </Badge>
-                          ) : isMoneyKey(column) ? (
-                            <span className="inline-flex items-center gap-1">
-                              <Image
-                                src="/currency/sar.svg"
-                                alt="SAR"
-                                width={14}
-                                height={14}
-                              />
-                              <span>
-                                {formatCellValue(column, row[column], locale)}
-                              </span>
-                            </span>
-                          ) : (
-                            formatCellValue(column, row[column], locale)
-                          )}
-                        </TableCell>
-                      ))}
-
-                      <TableCell className="print:hidden">
-                        {row.id ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 rounded-xl"
-                            asChild
-                          >
-                            <Link href={`/system/orders/${String(row.id)}`}>
-                              <Eye className="h-4 w-4" />
-                              <span className="sr-only">{t.open}</span>
-                            </Link>
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 rounded-xl"
-                            disabled
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="mt-4 flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <div className="inline-flex items-center gap-2">
-              <CalendarDays className="h-4 w-4" />
-              <span>
-                {formatNumber(filteredRows.length)} / {formatNumber(rows.length)}
-              </span>
+              <div>
+                <p className="font-semibold text-destructive">
+                  {errorMessage}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t.apiErrorHint}
+                </p>
+              </div>
             </div>
 
             <Button
               variant="outline"
-              size="sm"
-              className="rounded-xl print:hidden"
-              asChild
+              className="rounded-xl"
+              onClick={() => loadReport(true)}
             >
-              <Link href="/system/reports">
-                <span>{t.backToReports}</span>
-                <ArrowUpRight className="h-4 w-4" />
-              </Link>
+              <RefreshCcw className="h-4 w-4" />
+              {t.retry}
             </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!errorMessage ? (
+        <>
+          {isLoading ? (
+            <SummaryCardsSkeleton />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {summaryCards.map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <Card
+                    key={item.title}
+                    className="rounded-2xl border bg-card shadow-sm"
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-2xl font-bold">
+                            {item.isMoney ? (
+                              <MoneyText value={item.value} />
+                            ) : (
+                              formatNumber(item.value)
+                            )}
+                          </div>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {item.title}
+                          </p>
+                        </div>
+
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex items-center gap-2">
+                        <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                          {formatNumber(item.percent)}%
+                        </span>
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary transition-all"
+                            style={{ width: `${item.percent}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        {item.helper}
+                        {item.helperValue ? `: ${item.helperValue}` : ""}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-bold">
+                {t.financialTitle}
+              </CardTitle>
+              <CardDescription>{t.financialDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-2xl border bg-background p-4">
+                <p className="text-xs text-muted-foreground">{t.totalAmount}</p>
+                <div className="mt-2 text-lg font-bold">
+                  <MoneyText value={summary.total_amount} />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-background p-4">
+                <p className="text-xs text-muted-foreground">{t.paidAmount}</p>
+                <div className="mt-2 text-lg font-bold">
+                  <MoneyText value={summary.paid_amount} />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-background p-4">
+                <p className="text-xs text-muted-foreground">
+                  {t.remainingAmount}
+                </p>
+                <div className="mt-2 text-lg font-bold">
+                  <MoneyText value={summary.remaining_amount} />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-bold">
+                {t.distributionTitle}
+              </CardTitle>
+              <CardDescription>{t.distributionDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {isLoading
+                  ? Array.from({ length: 4 }).map((_, index) => (
+                      <div
+                        key={index}
+                        className="space-y-3 rounded-xl border bg-background/70 p-3"
+                      >
+                        <SkeletonLine className="h-7 w-14" />
+                        <SkeletonLine className="h-4 w-20" />
+                        <SkeletonLine className="h-2 w-full" />
+                      </div>
+                    ))
+                  : statusCards.map((card) => {
+                      const Icon = card.icon;
+
+                      return (
+                        <button
+                          key={card.filter}
+                          type="button"
+                          className="space-y-2 rounded-xl border bg-background/70 p-3 text-start transition hover:bg-muted/40"
+                          onClick={() => setStatusFilter(card.filter)}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-2xl font-bold">
+                              {formatNumber(card.value)}
+                            </p>
+                            <Icon className="h-4 w-4 text-muted-foreground" />
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm text-muted-foreground">
+                                {card.title}
+                              </p>
+                              <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                {formatNumber(card.percent)}%
+                              </span>
+                            </div>
+
+                            <div className="h-2 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="h-full rounded-full bg-primary transition-all"
+                                style={{ width: `${card.percent}%` }}
+                              />
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-bold">
+                {t.paymentDistributionTitle}
+              </CardTitle>
+              <CardDescription>{t.paymentDistributionDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {isLoading
+                  ? Array.from({ length: 4 }).map((_, index) => (
+                      <div
+                        key={index}
+                        className="space-y-3 rounded-xl border bg-background/70 p-3"
+                      >
+                        <SkeletonLine className="h-7 w-14" />
+                        <SkeletonLine className="h-4 w-20" />
+                        <SkeletonLine className="h-2 w-full" />
+                      </div>
+                    ))
+                  : paymentCards.map((card) => {
+                      const Icon = card.icon;
+
+                      return (
+                        <button
+                          key={card.filter}
+                          type="button"
+                          className="space-y-2 rounded-xl border bg-background/70 p-3 text-start transition hover:bg-muted/40"
+                          onClick={() => setPaymentFilter(card.filter)}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-2xl font-bold">
+                              {formatNumber(card.value)}
+                            </p>
+                            <Icon className="h-4 w-4 text-muted-foreground" />
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm text-muted-foreground">
+                                {card.title}
+                              </p>
+                              <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                {formatNumber(card.percent)}%
+                              </span>
+                            </div>
+
+                            <div className="h-2 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="h-full rounded-full bg-primary transition-all"
+                                style={{ width: `${card.percent}%` }}
+                              />
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <FileText className="h-4 w-4" />
+                {t.tableTitle}
+              </CardTitle>
+              <CardDescription>{t.tableDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="relative w-full">
+                <Search
+                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+                    isArabic ? "right-3" : "left-3"
+                  }`}
+                />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t.searchPlaceholder}
+                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+                />
+              </div>
+
+              <div className="grid gap-3">
+                <div className="flex flex-wrap gap-2">
+                  {statusOptions.map((item) => {
+                    const isSelected = statusFilter === item.value;
+
+                    return (
+                      <Button
+                        key={item.value}
+                        type="button"
+                        variant={isSelected ? "default" : "outline"}
+                        className="h-10 rounded-xl"
+                        onClick={() => setStatusFilter(item.value)}
+                      >
+                        <span>{item.label}</span>
+                        <Badge
+                          variant={isSelected ? "secondary" : "outline"}
+                          className="ms-1 rounded-full"
+                        >
+                          {formatNumber(item.count)}
+                        </Badge>
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    {paymentOptions.map((item) => {
+                      const isSelected = paymentFilter === item.value;
+
+                      return (
+                        <Button
+                          key={item.value}
+                          type="button"
+                          variant={isSelected ? "default" : "outline"}
+                          className="h-10 rounded-xl"
+                          onClick={() => setPaymentFilter(item.value)}
+                        >
+                          <span>{item.label}</span>
+                          <Badge
+                            variant={isSelected ? "secondary" : "outline"}
+                            className="ms-1 rounded-full"
+                          >
+                            {formatNumber(item.count)}
+                          </Badge>
+                        </Button>
+                      );
+                    })}
+                  </div>
+
+                  {hasSearchOrFilter ? (
+                    <Button
+                      variant="outline"
+                      className="h-10 rounded-xl"
+                      onClick={clearFilters}
+                    >
+                      {t.clearFilters}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t.table.order}</TableHead>
+                        <TableHead>{t.table.customer}</TableHead>
+                        <TableHead>{t.table.provider}</TableHead>
+                        <TableHead>{t.table.product}</TableHead>
+                        <TableHead>{t.table.agent}</TableHead>
+                        <TableHead>{t.table.status}</TableHead>
+                        <TableHead>{t.table.paymentStatus}</TableHead>
+                        <TableHead>{t.table.fulfillmentStatus}</TableHead>
+                        <TableHead>{t.table.totalAmount}</TableHead>
+                        <TableHead>{t.table.paidAmount}</TableHead>
+                        <TableHead>{t.table.remainingAmount}</TableHead>
+                        <TableHead>{t.table.invoice}</TableHead>
+                        <TableHead>{t.table.createdAt}</TableHead>
+                        {canViewOrderDetails ? (
+                          <TableHead>{t.table.action}</TableHead>
+                        ) : null}
+                      </TableRow>
+                    </TableHeader>
+
+                    <TableBody>
+                      {isLoading ? (
+                        <TableRowsSkeleton
+                          columnsCount={canViewOrderDetails ? 14 : 13}
+                        />
+                      ) : filteredRows.length > 0 ? (
+                        filteredRows.map((item) => (
+                          <TableRow key={`${item.id}-${item.orderNumber}`}>
+                            <TableCell>
+                              <div className="flex min-w-[180px] items-center gap-3">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-muted">
+                                  <ShoppingCart className="h-4 w-4" />
+                                </div>
+
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium">
+                                    {item.orderNumber || "-"}
+                                  </p>
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {formatDate(item.createdAt)}
+                                  </p>
+                                </div>
+                              </div>
+                            </TableCell>
+
+                            <TableCell>
+                              <div className="flex min-w-[170px] items-center gap-2">
+                                <UserRound className="h-4 w-4 text-muted-foreground" />
+                                <div className="min-w-0">
+                                  <p className="truncate">
+                                    {item.customerName || "-"}
+                                  </p>
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {item.customerPhone || "-"}
+                                  </p>
+                                </div>
+                              </div>
+                            </TableCell>
+
+                            <TableCell>
+                              <span className="min-w-[150px] whitespace-nowrap">
+                                {item.providerName || "-"}
+                              </span>
+                            </TableCell>
+
+                            <TableCell>
+                              <span className="min-w-[160px] whitespace-nowrap">
+                                {item.productName || "-"}
+                              </span>
+                            </TableCell>
+
+                            <TableCell>
+                              <span className="whitespace-nowrap">
+                                {item.agentName || "-"}
+                              </span>
+                            </TableCell>
+
+                            <TableCell>
+                              {orderStatusBadge(item.status, locale)}
+                            </TableCell>
+
+                            <TableCell>
+                              {paymentStatusBadge(item.paymentStatus, locale)}
+                            </TableCell>
+
+                            <TableCell>
+                              <Badge variant="secondary" className="rounded-full px-3 py-1">
+                                {fulfillmentLabel(item.fulfillmentStatus, locale)}
+                              </Badge>
+                            </TableCell>
+
+                            <TableCell>
+                              <MoneyText value={item.totalAmount} />
+                            </TableCell>
+
+                            <TableCell>
+                              <MoneyText value={item.paidAmount} />
+                            </TableCell>
+
+                            <TableCell>
+                              <MoneyText value={item.remainingAmount} />
+                            </TableCell>
+
+                            <TableCell>
+                              <span className="whitespace-nowrap">
+                                {item.invoiceNumber || item.invoiceId || "-"}
+                              </span>
+                            </TableCell>
+
+                            <TableCell>
+                              <span className="whitespace-nowrap">
+                                {formatDate(item.createdAt)}
+                              </span>
+                            </TableCell>
+
+                            {canViewOrderDetails ? (
+                              <TableCell>
+                                {isValidId(item.id) ? (
+                                  <Link href={`/system/orders/${item.id}`}>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 rounded-lg"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                      <span className="sr-only">
+                                        {t.viewDetails}
+                                      </span>
+                                    </Button>
+                                  </Link>
+                                ) : null}
+                              </TableCell>
+                            ) : null}
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={canViewOrderDetails ? 14 : 13}
+                            className="h-36 text-center"
+                          >
+                            <div className="mx-auto max-w-md space-y-2">
+                              <p className="font-semibold">
+                                {hasSearchOrFilter
+                                  ? t.noResultsTitle
+                                  : t.emptyTitle}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {hasSearchOrFilter
+                                  ? t.noResultsText
+                                  : t.emptyText}
+                              </p>
+
+                              {hasSearchOrFilter ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="mt-2 rounded-xl"
+                                  onClick={clearFilters}
+                                >
+                                  {t.clearFilters}
+                                </Button>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              <p className="text-sm text-muted-foreground">
+                {t.showing} {formatNumber(filteredRows.length)} {t.from}{" "}
+                {formatNumber(rows.length)}
+              </p>
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
     </div>
   );
 }

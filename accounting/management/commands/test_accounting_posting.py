@@ -3,11 +3,13 @@
 # 🧠 Primey Care | Test Accounting Posting
 # ------------------------------------------------------------
 # ✅ أمر اختباري عملي لاختبار:
+#    - زرع شجرة الحسابات
 #    - ترحيل الفاتورة
 #    - ترحيل الدفعة
 #    - حركة الخزينة من الدفعة
 #    - ترحيل استحقاق عمولة المندوب
 #    - ميزان المراجعة
+#    - الأستاذ العام
 #    - قائمة الدخل
 #    - الميزانية العمومية
 # ------------------------------------------------------------
@@ -17,6 +19,7 @@
 # python manage.py test_accounting_posting --create-sample-data --seed-coa
 # python manage.py test_accounting_posting --create-sample-data --reset-entries
 # python manage.py test_accounting_posting --create-sample-data --seed-coa --reset-entries
+# python manage.py test_accounting_posting --create-sample-data --seed-coa --reset-entries --skip-treasury
 # ============================================================
 
 from __future__ import annotations
@@ -30,16 +33,23 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from accounting.models import Account, JournalEntry, JournalEntryStatus
+from accounting.models import (
+    Account,
+    JournalEntry,
+    JournalEntryStatus,
+    TaxTransaction,
+)
 from accounting.services import (
     ACCOUNT_CODE_ACCOUNTS_RECEIVABLE,
     ACCOUNT_CODE_AGENT_COMMISSION_EXPENSE,
     ACCOUNT_CODE_AGENT_COMMISSION_PAYABLE,
     ACCOUNT_CODE_BANK,
     ACCOUNT_CODE_CASH_ON_HAND,
+    ACCOUNT_CODE_GATEWAY_FEES,
     ACCOUNT_CODE_OUTPUT_VAT,
     ACCOUNT_CODE_REVENUE,
     build_balance_sheet_payload,
+    build_general_ledger_payload,
     build_profit_and_loss_payload,
     build_trial_balance_payload,
     post_agent_commission_accrual,
@@ -86,18 +96,22 @@ TEST_ORDER_NUMBER = "ORD-POST-001"
 TEST_ORDER_ITEM_CODE = "ORD-ITEM-POST-001"
 TEST_INVOICE_NUMBER = "INV-POST-001"
 TEST_PAYMENT_NUMBER = "PAY-POST-001"
+
 TEST_AGENT_CODE = "AGT-POST-001"
 TEST_AGENT_REFERRAL_CODE = "REF-POST-001"
+
 TEST_TREASURY_ACCOUNT_CODE = "CASH-POST-001"
 
+
 REQUIRED_ACCOUNT_CODES = {
-    ACCOUNT_CODE_ACCOUNTS_RECEIVABLE: "المدينون",
+    ACCOUNT_CODE_ACCOUNTS_RECEIVABLE: "الذمم المدينة - العملاء",
     ACCOUNT_CODE_CASH_ON_HAND: "النقدية في الخزينة",
     ACCOUNT_CODE_BANK: "حساب البنك الجاري",
-    ACCOUNT_CODE_REVENUE: "إيرادات المبيعات/ الخدمات",
-    ACCOUNT_CODE_OUTPUT_VAT: "ضريبة القيمة المضافة المستحقة",
+    ACCOUNT_CODE_REVENUE: "إيرادات المبيعات والخدمات",
+    ACCOUNT_CODE_OUTPUT_VAT: "ضريبة مخرجات",
     ACCOUNT_CODE_AGENT_COMMISSION_EXPENSE: "عمولات البيع",
-    ACCOUNT_CODE_AGENT_COMMISSION_PAYABLE: "مصروفات مستحقة",
+    ACCOUNT_CODE_AGENT_COMMISSION_PAYABLE: "مستحقات المندوبين",
+    ACCOUNT_CODE_GATEWAY_FEES: "رسوم بوابات الدفع",
 }
 
 
@@ -145,6 +159,15 @@ def set_field_if_exists(instance: Any, field_name: str, value: Any) -> None:
         setattr(instance, field_name, value)
 
 
+def get_field_if_exists(instance: Any, field_name: str, default: Any = None) -> Any:
+    """
+    قراءة آمنة لحقل اختياري.
+    """
+    if model_has_field(instance, field_name):
+        return getattr(instance, field_name, default)
+    return default
+
+
 def safe_save(instance: Any) -> Any:
     """
     حفظ موحد.
@@ -153,6 +176,23 @@ def safe_save(instance: Any) -> Any:
     """
     instance.save()
     return instance
+
+
+def set_choice_if_available(instance: Any, field_name: str, value: Any) -> None:
+    """
+    تعيين قيمة choice إذا كان الحقل موجودًا.
+    """
+    if model_has_field(instance, field_name):
+        setattr(instance, field_name, value)
+
+
+def get_required_account(code: str) -> Account:
+    try:
+        account = Account.objects.get(code=code, is_active=True, is_group=False)
+    except Account.DoesNotExist as exc:
+        raise ValidationError(f"الحساب التشغيلي غير موجود أو غير قابل للترحيل: {code}") from exc
+
+    return account
 
 
 # ============================================================
@@ -230,6 +270,7 @@ class Command(BaseCommand):
                         treasury_account=treasury_account,
                     )
                     self._print_treasury_transaction(treasury_txn)
+                    self._assert_treasury_transaction_valid(treasury_txn)
 
                 self.stdout.write("")
                 self.stdout.write(self.style.NOTICE("بدء اختبار ترحيل استحقاق عمولة المندوب..."))
@@ -293,12 +334,39 @@ class Command(BaseCommand):
         if not entry.lines.exists():
             raise ValidationError(f"القيد {entry.entry_number} لا يحتوي على أسطر.")
 
+    def _assert_treasury_transaction_valid(self, txn: TreasuryTransaction):
+        txn.refresh_from_db()
+
+        if txn.status != "CONFIRMED":
+            raise ValidationError(f"حركة الخزينة {txn.transaction_number} لم يتم تأكيدها.")
+
+        if txn.amount <= money("0.00"):
+            raise ValidationError(f"حركة الخزينة {txn.transaction_number} مبلغها غير صحيح.")
+
+        if model_has_field(txn, "balance_applied") and not txn.balance_applied:
+            raise ValidationError(f"حركة الخزينة {txn.transaction_number} لم تطبق أثر الرصيد.")
+
     # ========================================================
     # 🔄 Reset
     # ========================================================
 
     def _reset_test_postings(self):
         self.stdout.write(self.style.WARNING("حذف القيود والحركات التجريبية السابقة..."))
+
+        # ----------------------------------------------------
+        # مهم:
+        # TaxTransaction لديه PROTECT على القيد/السطر، لذلك نحذفه قبل القيود.
+        # ----------------------------------------------------
+        tax_deleted, _ = TaxTransaction.objects.filter(
+            source_number=TEST_INVOICE_NUMBER,
+        ).delete()
+
+        tax_deleted_by_source, _ = TaxTransaction.objects.filter(
+            source_type="invoice",
+            source_id__in=list(
+                Invoice.objects.filter(invoice_number=TEST_INVOICE_NUMBER).values_list("id", flat=True)
+            ),
+        ).delete()
 
         treasury_deleted = 0
 
@@ -307,6 +375,7 @@ class Command(BaseCommand):
             TreasuryTransaction.objects.filter(transaction_number__startswith="TRX-COM-"),
             TreasuryTransaction.objects.filter(reference__icontains=TEST_PAYMENT_NUMBER),
             TreasuryTransaction.objects.filter(reference__icontains="PAYMENT:"),
+            TreasuryTransaction.objects.filter(source_number=TEST_PAYMENT_NUMBER),
         ]:
             deleted_count, _ = qs.delete()
             treasury_deleted += deleted_count
@@ -326,10 +395,26 @@ class Command(BaseCommand):
                 entry_number__startswith="COM-",
                 reference__startswith="AGENT_COMMISSION:",
             ),
+            JournalEntry.objects.filter(
+                entry_number__startswith="REV-INV-",
+            ),
+            JournalEntry.objects.filter(
+                entry_number__startswith="REV-PAY-",
+            ),
+            JournalEntry.objects.filter(
+                entry_number__startswith="REV-COM-",
+            ),
         ]:
             deleted_count, _ = qs.delete()
             entries_deleted += deleted_count
 
+        # إعادة رصيد الصندوق التجريبي فقط لتجنب تراكم أثر حركات اختبار محذوفة.
+        TreasuryAccount.objects.filter(code=TEST_TREASURY_ACCOUNT_CODE).update(
+            current_balance=money("0.00"),
+            opening_balance=money("0.00"),
+        )
+
+        self.stdout.write(f"تم حذف حركات ضريبية: {tax_deleted + tax_deleted_by_source}")
         self.stdout.write(f"تم حذف حركات خزينة: {treasury_deleted}")
         self.stdout.write(f"تم حذف قيود محاسبية: {entries_deleted}")
 
@@ -435,7 +520,6 @@ class Command(BaseCommand):
         product.code = TEST_PRODUCT_CODE
         product.name = "خدمة تجريبية للترحيل"
 
-        # مهم جدًا:
         # بعض إصدارات Product تطلب slug صالحًا ولا تقبل الاسم العربي كـ slug.
         set_field_if_exists(product, "slug", TEST_PRODUCT_SLUG)
 
@@ -509,6 +593,10 @@ class Command(BaseCommand):
         order.customer_notes = "طلب تجريبي"
         order.internal_notes = "طلب تجريبي لاختبار posting services"
 
+        set_field_if_exists(order, "subtotal_amount", money("100.00"))
+        set_field_if_exists(order, "total_amount", money("115.00"))
+        set_field_if_exists(order, "final_amount", money("115.00"))
+
         return safe_save(order)
 
     # ========================================================
@@ -537,6 +625,9 @@ class Command(BaseCommand):
             fulfillment_status=FulfillmentStatus.NOT_STARTED,
         )
 
+        set_field_if_exists(item, "tax_amount", money("15.00"))
+        set_field_if_exists(item, "total_amount", money("115.00"))
+
         return safe_save(item)
 
     # ========================================================
@@ -561,6 +652,15 @@ class Command(BaseCommand):
         invoice.currency = "SAR"
         invoice.notes = "فاتورة تجريبية لاختبار الترحيل"
 
+        # حقول اختيارية حسب نسخة Invoice.
+        set_field_if_exists(invoice, "taxable_amount", money("100.00"))
+        set_field_if_exists(invoice, "subtotal_amount", money("100.00"))
+        set_field_if_exists(invoice, "tax_amount", money("15.00"))
+        set_field_if_exists(invoice, "discount_amount", money("0.00"))
+        set_field_if_exists(invoice, "total_amount", money("115.00"))
+        set_field_if_exists(invoice, "paid_amount", money("0.00"))
+        set_field_if_exists(invoice, "remaining_amount", money("115.00"))
+
         return safe_save(invoice)
 
     # ========================================================
@@ -575,7 +675,11 @@ class Command(BaseCommand):
         if not payment:
             payment = Payment()
 
-        invoice_total = money(getattr(invoice, "total_amount", None) or "115.00")
+        invoice_total = money(
+            get_field_if_exists(invoice, "total_amount", None)
+            or getattr(invoice, "total_amount", None)
+            or "115.00"
+        )
 
         payment.payment_number = TEST_PAYMENT_NUMBER
         payment.order = order
@@ -590,6 +694,11 @@ class Command(BaseCommand):
         payment.currency = "SAR"
         payment.paid_at = payment.paid_at or current_dt()
         payment.notes = "دفعة تجريبية لاختبار الترحيل"
+
+        set_field_if_exists(payment, "gateway_reference", "")
+        set_field_if_exists(payment, "external_reference", "")
+        set_field_if_exists(payment, "fees_amount", money("0.00"))
+        set_field_if_exists(payment, "net_amount", invoice_total)
 
         return safe_save(payment)
 
@@ -675,24 +784,28 @@ class Command(BaseCommand):
         ).first()
 
         if treasury_account:
+            ledger_account = get_required_account(ACCOUNT_CODE_CASH_ON_HAND)
+            treasury_account.ledger_account = ledger_account
+            treasury_account.allow_negative_balance = False
+            treasury_account.currency = "SAR"
+            treasury_account.save()
             return treasury_account
 
-        treasury_account = TreasuryAccount.objects.filter(
-            status=TreasuryAccountStatus.ACTIVE,
-            account_type=TreasuryAccountType.CASHBOX,
-        ).order_by("id").first()
-
-        if treasury_account:
-            return treasury_account
+        ledger_account = get_required_account(ACCOUNT_CODE_CASH_ON_HAND)
 
         treasury_account = TreasuryAccount.objects.create(
             name="صندوق تجريبي للترحيل",
             code=TEST_TREASURY_ACCOUNT_CODE,
             account_type=TreasuryAccountType.CASHBOX,
             status=TreasuryAccountStatus.ACTIVE,
+            ledger_account=ledger_account,
             opening_balance=money("0.00"),
             current_balance=money("0.00"),
             currency="SAR",
+            is_default=True,
+            allow_negative_balance=False,
+            description="صندوق تجريبي لاختبار الترحيل المحاسبي وحركة الخزينة",
+            metadata={"seeded_by": "test_accounting_posting"},
         )
 
         return treasury_account
@@ -708,14 +821,15 @@ class Command(BaseCommand):
         treasury_account: TreasuryAccount,
     ):
         existing = TreasuryTransaction.objects.filter(
-            reference__icontains=str(payment.payment_number),
+            reference=f"PAYMENT:{payment.pk}:TREASURY_RECEIPT",
         ).order_by("-id").first()
 
         if existing:
             return existing
 
         existing = TreasuryTransaction.objects.filter(
-            reference=f"PAYMENT:{payment.pk}:TREASURY_RECEIPT",
+            source_type="payment",
+            source_id=str(payment.pk),
         ).order_by("-id").first()
 
         if existing:
@@ -737,10 +851,22 @@ class Command(BaseCommand):
         profit_loss = build_profit_and_loss_payload()
         balance_sheet = build_balance_sheet_payload()
 
+        receivable_account = get_required_account(ACCOUNT_CODE_ACCOUNTS_RECEIVABLE)
+        ledger = build_general_ledger_payload(account=receivable_account)
+
         self.stdout.write(self.style.SUCCESS("ملخص ميزان المراجعة:"))
         self.stdout.write(f"  إجمالي المدين: {trial_balance.get('total_debit')}")
         self.stdout.write(f"  إجمالي الدائن: {trial_balance.get('total_credit')}")
         self.stdout.write(f"  متوازن: {trial_balance.get('is_balanced')}")
+        self.stdout.write(f"  عدد الحسابات: {trial_balance.get('total_accounts')}")
+
+        self.stdout.write(self.style.SUCCESS("ملخص الأستاذ العام لحساب الذمم المدينة:"))
+        self.stdout.write(f"  الحساب: {ledger.get('account_code')} - {ledger.get('account_name')}")
+        self.stdout.write(f"  رصيد افتتاحي: {ledger.get('opening_balance')}")
+        self.stdout.write(f"  إجمالي مدين: {ledger.get('total_debit')}")
+        self.stdout.write(f"  إجمالي دائن: {ledger.get('total_credit')}")
+        self.stdout.write(f"  رصيد ختامي: {ledger.get('closing_balance')}")
+        self.stdout.write(f"  عدد الحركات: {len(ledger.get('lines') or [])}")
 
         self.stdout.write(self.style.SUCCESS("ملخص قائمة الدخل:"))
         self.stdout.write(
@@ -773,21 +899,34 @@ class Command(BaseCommand):
         self.stdout.write(f"المصدر: {entry.posting_source}")
         self.stdout.write(f"الحالة: {entry.status}")
         self.stdout.write(f"المرجع: {entry.reference}")
+        self.stdout.write(f"مصدر الربط: {entry.source_type}:{entry.source_id}")
         self.stdout.write(f"إجمالي المدين: {entry.total_debit}")
         self.stdout.write(f"إجمالي الدائن: {entry.total_credit}")
         self.stdout.write("الأسطر:")
 
-        for line in entry.lines.select_related("account").order_by("sort_order", "id"):
+        for line in entry.lines.select_related("account", "cost_center", "tax_rate").order_by("sort_order", "id"):
+            cost_center = f" | مركز تكلفة={line.cost_center}" if line.cost_center_id else ""
+            tax_rate = f" | ضريبة={line.tax_rate}" if line.tax_rate_id else ""
+
             self.stdout.write(
                 f"  - [{line.account.code}] {line.account.name} | "
                 f"مدين={line.debit_amount} | دائن={line.credit_amount}"
+                f"{cost_center}{tax_rate}"
             )
 
     def _print_treasury_transaction(self, txn: TreasuryTransaction):
+        txn.refresh_from_db()
+
         self.stdout.write(self.style.SUCCESS(f"حركة الخزينة: {txn.transaction_number}"))
         self.stdout.write(f"النوع: {txn.transaction_type}")
+        self.stdout.write(f"المصدر: {getattr(txn, 'source', '-')}")
         self.stdout.write(f"الحالة: {txn.status}")
         self.stdout.write(f"الحساب: {txn.treasury_account}")
         self.stdout.write(f"المبلغ: {txn.amount}")
+        self.stdout.write(f"الرسوم: {getattr(txn, 'fees_amount', '-')}")
+        self.stdout.write(f"الصافي: {getattr(txn, 'net_amount', '-')}")
+        self.stdout.write(f"الرصيد قبل: {getattr(txn, 'balance_before', '-')}")
+        self.stdout.write(f"الرصيد بعد: {getattr(txn, 'balance_after', '-')}")
+        self.stdout.write(f"تم تطبيق أثر الرصيد: {getattr(txn, 'balance_applied', '-')}")
         self.stdout.write(f"المرجع: {txn.reference}")
         self.stdout.write(f"مرجع القيد: {txn.journal_entry_reference or '-'}")

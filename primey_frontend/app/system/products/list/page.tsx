@@ -4,50 +4,47 @@
    📂 app/system/products/list/page.tsx
    🧠 Primey Care | Products List
    ------------------------------------------------------------
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ مبني بنفس نمط قائمة المراكز/العملاء المعتمد
-   ✅ البحث في صف مستقل
-   ✅ الفلاتر والأعمدة في صف مستقل تحت البحث
-   ✅ Excel export بصيغة .xls HTML Workbook
+   ✅ قائمة المنتجات والبرامج والعروض الطبية
+   ✅ Server Pagination
+   ✅ دعم مقدم الخدمة + صور المنتج + الظهور التسويقي
+   ✅ Excel .xls HTML Workbook
    ✅ Web PDF Print
-   ✅ Error State مستقل
-   ✅ Empty State ذكي
-   ✅ Loading Skeleton
-   ✅ حماية روابط التفاصيل والأزرار والطلبات
-   ✅ fallback آمن لـ system_admin / superadmin
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ استخدام toast من sonner
-   ✅ استخدام رمز SAR الرسمي /currency/sar.svg
-   ✅ بدون localhost hardcoded
-   ✅ الأرقام تبقى بالإنجليزية
+   ✅ Centers/Customers Pattern + Phase 2 Permissions
 ============================================================ */
 
 import Image from "next/image";
 import Link from "next/link";
+import type { ComponentType } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowDownUp,
+  AlertTriangle,
   ArrowLeft,
   BadgeCheck,
   Boxes,
-  ColumnsIcon,
-  CreditCard,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  CircleDollarSign,
+  Columns3,
   Download,
   Eye,
+  FileImage,
+  FileSpreadsheet,
+  Globe2,
+  ImageIcon,
   Layers3,
   Loader2,
-  MoreHorizontal,
   Package,
-  PlusCircle,
+  Plus,
   Printer,
   RefreshCcw,
   Search,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   Stethoscope,
   Tag,
   XCircle,
-  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -62,15 +59,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -88,137 +76,129 @@ import {
 type AppLocale = "ar" | "en";
 type AuthRecord = Record<string, unknown>;
 
-type ProductStatus =
-  | "draft"
-  | "active"
-  | "inactive"
-  | "archived"
-  | "UNKNOWN";
-
-type ProductType =
-  | "membership"
-  | "card"
-  | "program"
-  | "service"
-  | "other"
-  | "UNKNOWN";
-
+type ProductStatus = "draft" | "active" | "inactive" | "archived" | "UNKNOWN";
+type ProductType = "membership" | "card" | "program" | "service" | "other" | "UNKNOWN";
 type BillingType = "one_time" | "recurring" | "UNKNOWN";
+type FulfillmentType = "digital" | "physical" | "both" | "service_based" | "none" | "UNKNOWN";
 
-type FulfillmentType =
-  | "digital"
-  | "physical"
-  | "both"
-  | "service_based"
-  | "none"
-  | "UNKNOWN";
-
-type StatusFilter = "all" | ProductStatus;
-type TypeFilter = "all" | ProductType;
-type BillingFilter = "all" | BillingType;
-
+type StatusFilter = "all" | "draft" | "active" | "inactive" | "archived";
+type TypeFilter = "all" | "membership" | "card" | "program" | "service" | "other";
+type OfferFilter = "all" | "offer" | "not_offer";
+type VisibilityFilter = "all" | "yes" | "no";
 type SortKey =
+  | "-created_at"
+  | "created_at"
   | "name"
-  | "code"
-  | "productType"
-  | "categoryName"
-  | "status"
+  | "-name"
   | "price"
-  | "updatedAt";
+  | "-price"
+  | "offer_start_date"
+  | "-offer_start_date"
+  | "offer_end_date"
+  | "-offer_end_date";
 
-type SortDirection = "asc" | "desc";
-
-type ProductCategory = {
-  id?: number | string | null;
+type ProviderSummary = {
+  id?: string | number | null;
   code?: string | null;
   name?: string | null;
-  category_type?: string | null;
+  name_ar?: string | null;
+  name_en?: string | null;
+  provider_type?: string | null;
   status?: string | null;
+  city?: string | null;
+  region?: string | null;
+  logo_url?: string | null;
 };
 
 type Product = {
-  id: number | string;
+  id: string | number;
   code: string;
   name: string;
   slug: string;
   productType: ProductType;
   categoryName: string;
+  providerId: string;
+  provider: ProviderSummary | null;
   status: ProductStatus;
   billingType: BillingType;
   fulfillmentType: FulfillmentType;
   shortDescription: string;
-  description: string;
-  tags: string;
   price: number;
   salePrice: number;
   effectivePrice: number;
-  taxAmount: number;
   totalPriceWithTax: number;
-  hasDiscount: boolean;
-  isTaxable: boolean;
-  taxRate: number;
-  durationValue: number;
-  durationUnit: string;
+  isOffer: boolean;
+  offerTitle: string;
+  offerStartDate: string;
+  offerEndDate: string;
+  showOnLanding: boolean;
+  showOnMobile: boolean;
+  showOnOffers: boolean;
   isPublic: boolean;
   isFeatured: boolean;
-  requiresApproval: boolean;
   allowOnlinePurchase: boolean;
-  allowAgentSale: boolean;
-  allowProviderSale: boolean;
   canBeOrdered: boolean;
   canBeUsedInContracts: boolean;
   requiresProvider: boolean;
-  maxDiscountRate: number;
-  defaultAgentCommissionRate: number;
-  serviceItemsCount: number;
+  thumbnailImageUrl: string;
+  marketingImageUrl: string;
+  hasThumbnailImage: boolean;
+  hasMarketingImage: boolean;
   createdAt: string;
   updatedAt: string;
-  raw: Record<string, unknown>;
+};
+
+type Pagination = {
+  page: number;
+  page_size: number;
+  total_pages: number;
+  total_items: number;
+  has_next: boolean;
+  has_previous: boolean;
 };
 
 type ProductsApiResponse = {
   ok?: boolean;
   message?: string;
-  count?: number;
   results?: unknown[];
-  products?: unknown[];
+  data?: unknown[] | { results?: unknown[]; items?: unknown[] };
   items?: unknown[];
-  data?:
-    | unknown[]
-    | {
-        results?: unknown[];
-        products?: unknown[];
-        items?: unknown[];
-      };
+  pagination?: Partial<Pagination>;
+};
+
+type ListApiResponse<T> = {
+  ok?: boolean;
+  results?: T[];
+  data?: T[] | { results?: T[]; items?: T[] };
+  items?: T[];
+};
+
+type SelectOption = {
+  id: string | number;
+  name?: string;
+  name_ar?: string;
+  name_en?: string;
+  code?: string;
+  title?: string;
 };
 
 type VisibleColumns = {
+  image: boolean;
   product: boolean;
-  code: boolean;
+  provider: boolean;
   type: boolean;
   category: boolean;
   price: boolean;
-  billing: boolean;
+  offer: boolean;
+  visibility: boolean;
   readiness: boolean;
-  channels: boolean;
   status: boolean;
   updated: boolean;
   actions: boolean;
 };
 
-type ExcelSheetOptions = {
-  filename: string;
-  worksheetName: string;
-  title: string;
-  locale: AppLocale;
-  summaryRows: Array<[string, string | number]>;
-  filterRows: Array<[string, string | number]>;
-  headers: string[];
-  rows: Array<Array<string | number>>;
-};
-
 const SAR_ICON_PATH = "/currency/sar.svg";
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 20;
 
 /* ============================================================
    Locale Helpers
@@ -253,7 +233,7 @@ function applyDocumentLocale(locale: AppLocale) {
 }
 
 /* ============================================================
-   API Helper
+   API Helpers
 ============================================================ */
 
 function apiUrl(path: string) {
@@ -267,8 +247,36 @@ function apiUrl(path: string) {
   return `${base.replace(/\/$/, "")}${path}`;
 }
 
+function extractList<T>(payload: ListApiResponse<T>): T[] {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.data)) return payload.data;
+
+  if (payload.data && typeof payload.data === "object") {
+    if (Array.isArray(payload.data.results)) return payload.data.results;
+    if (Array.isArray(payload.data.items)) return payload.data.items;
+  }
+
+  return [];
+}
+
+function extractProducts(payload: ProductsApiResponse | null): unknown[] {
+  if (!payload) return [];
+
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.data)) return payload.data;
+
+  if (payload.data && typeof payload.data === "object") {
+    if (Array.isArray(payload.data.results)) return payload.data.results;
+    if (Array.isArray(payload.data.items)) return payload.data.items;
+  }
+
+  return [];
+}
+
 /* ============================================================
-   Permission Helpers
+   Permissions
 ============================================================ */
 
 function asRecord(value: unknown): AuthRecord {
@@ -500,98 +508,29 @@ function hasSafePermission(
 function toNumber(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
 
-  const clean = String(value ?? "")
-    .replace(/,/g, "")
-    .replace(/[^\d.-]/g, "");
-
-  const parsed = Number(clean);
+  const parsed = Number(
+    String(value ?? "")
+      .replace(/,/g, "")
+      .replace(/[^\d.-]/g, ""),
+  );
 
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function normalizeStatus(status: unknown): ProductStatus {
-  const value = String(status || "").toLowerCase();
-
-  if (value === "draft") return "draft";
-  if (value === "active") return "active";
-  if (value === "inactive") return "inactive";
-  if (value === "archived") return "archived";
-
-  if (status === true) return "active";
-  if (status === false) return "inactive";
-
-  return "UNKNOWN";
-}
-
-function normalizeType(type: unknown): ProductType {
-  const value = String(type || "").toLowerCase();
-
-  if (value === "membership") return "membership";
-  if (value === "card") return "card";
-  if (value === "program") return "program";
-  if (value === "service") return "service";
-  if (value === "other") return "other";
-
-  return "UNKNOWN";
-}
-
-function normalizeBillingType(type: unknown): BillingType {
-  const value = String(type || "").toLowerCase();
-
-  if (value === "one_time") return "one_time";
-  if (value === "recurring") return "recurring";
-
-  return "UNKNOWN";
-}
-
-function normalizeFulfillmentType(type: unknown): FulfillmentType {
-  const value = String(type || "").toLowerCase();
-
-  if (value === "digital") return "digital";
-  if (value === "physical") return "physical";
-  if (value === "both") return "both";
-  if (value === "service_based") return "service_based";
-  if (value === "none") return "none";
-
-  return "UNKNOWN";
-}
-
-function extractProducts(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-
-  if (!payload || typeof payload !== "object") return [];
-
-  const response = payload as ProductsApiResponse;
-
-  if (Array.isArray(response.results)) return response.results;
-  if (Array.isArray(response.products)) return response.products;
-  if (Array.isArray(response.items)) return response.items;
-  if (Array.isArray(response.data)) return response.data;
-
-  if (response.data && typeof response.data === "object") {
-    if (Array.isArray(response.data.results)) return response.data.results;
-    if (Array.isArray(response.data.products)) return response.data.products;
-    if (Array.isArray(response.data.items)) return response.data.items;
-  }
-
-  return [];
-}
-
-function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
+function getValue(obj: Record<string, unknown>, key: string): unknown {
   const direct = obj[key];
 
   if (direct !== undefined && direct !== null && direct !== "") {
     return direct;
   }
 
-  const containers = ["product", "pricing", "stats", "summary"];
+  const containers = ["product", "pricing", "summary", "stats"];
 
   for (const container of containers) {
     const nested = obj[container];
 
     if (nested && typeof nested === "object") {
-      const nestedObj = nested as Record<string, unknown>;
-      const value = nestedObj[key];
+      const value = (nested as Record<string, unknown>)[key];
 
       if (value !== undefined && value !== null && value !== "") {
         return value;
@@ -602,91 +541,130 @@ function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
   return undefined;
 }
 
+function normalizeStatus(value: unknown): ProductStatus {
+  const status = String(value || "").toLowerCase();
+
+  if (status === "draft") return "draft";
+  if (status === "active") return "active";
+  if (status === "inactive") return "inactive";
+  if (status === "archived") return "archived";
+
+  if (value === true) return "active";
+  if (value === false) return "inactive";
+
+  return "UNKNOWN";
+}
+
+function normalizeType(value: unknown): ProductType {
+  const type = String(value || "").toLowerCase();
+
+  if (type === "membership") return "membership";
+  if (type === "card") return "card";
+  if (type === "program") return "program";
+  if (type === "service") return "service";
+  if (type === "other") return "other";
+
+  return "UNKNOWN";
+}
+
+function normalizeBilling(value: unknown): BillingType {
+  const billing = String(value || "").toLowerCase();
+
+  if (billing === "one_time") return "one_time";
+  if (billing === "recurring") return "recurring";
+
+  return "UNKNOWN";
+}
+
+function normalizeFulfillment(value: unknown): FulfillmentType {
+  const fulfillment = String(value || "").toLowerCase();
+
+  if (fulfillment === "digital") return "digital";
+  if (fulfillment === "physical") return "physical";
+  if (fulfillment === "both") return "both";
+  if (fulfillment === "service_based") return "service_based";
+  if (fulfillment === "none") return "none";
+
+  return "UNKNOWN";
+}
+
+function normalizeProvider(value: unknown): ProviderSummary | null {
+  if (!value || typeof value !== "object") return null;
+
+  const obj = value as Record<string, unknown>;
+
+  return {
+    id: (obj.id as string | number | null) || null,
+    code: String(obj.code || ""),
+    name: String(obj.name || ""),
+    name_ar: String(obj.name_ar || ""),
+    name_en: String(obj.name_en || ""),
+    provider_type: String(obj.provider_type || ""),
+    status: String(obj.status || ""),
+    city: String(obj.city || ""),
+    region: String(obj.region || ""),
+    logo_url: String(obj.logo_url || ""),
+  };
+}
+
 function normalizeProduct(item: unknown): Product {
   const obj = (item || {}) as Record<string, unknown>;
-  const category = obj.category as ProductCategory | null | undefined;
+  const category = obj.category as Record<string, unknown> | null | undefined;
+  const provider = normalizeProvider(obj.provider);
 
-  const id = getObjectValue(obj, "id") ?? "";
+  const id = getValue(obj, "id") ?? "";
+  const price = toNumber(getValue(obj, "price"));
+  const salePrice = toNumber(getValue(obj, "sale_price"));
+  const effectivePrice = toNumber(getValue(obj, "effective_price") || salePrice || price);
 
-  const name =
-    getObjectValue(obj, "name") ??
-    getObjectValue(obj, "title") ??
-    getObjectValue(obj, "product_name") ??
-    "-";
-
-  const code =
-    getObjectValue(obj, "code") ??
-    getObjectValue(obj, "product_code") ??
-    (id ? `PRD-${id}` : "-");
-
-  const price = toNumber(
-    getObjectValue(obj, "price") ??
-      getObjectValue(obj, "base_price") ??
-      getObjectValue(obj, "amount") ??
-      0,
+  const thumbnailImageUrl = String(
+    getValue(obj, "thumbnail_image_url") ||
+      getValue(obj, "thumbnail_image_drive_view_url") ||
+      "",
   );
 
-  const salePrice = toNumber(getObjectValue(obj, "sale_price"));
-
-  const effectivePrice = toNumber(
-    getObjectValue(obj, "effective_price") || salePrice || price,
+  const marketingImageUrl = String(
+    getValue(obj, "marketing_image_url") ||
+      getValue(obj, "marketing_image_drive_view_url") ||
+      "",
   );
 
   return {
-    id: id as number | string,
-    code: String(code || "-"),
-    name: String(name || "-"),
-    slug: String(getObjectValue(obj, "slug") ?? ""),
-    productType: normalizeType(
-      getObjectValue(obj, "product_type") ?? getObjectValue(obj, "type"),
-    ),
-    categoryName: String(
-      category?.name ||
-        getObjectValue(obj, "category_name") ||
-        getObjectValue(obj, "category") ||
-        "",
-    ),
-    status: normalizeStatus(getObjectValue(obj, "status")),
-    billingType: normalizeBillingType(getObjectValue(obj, "billing_type")),
-    fulfillmentType: normalizeFulfillmentType(
-      getObjectValue(obj, "fulfillment_type"),
-    ),
-    shortDescription: String(getObjectValue(obj, "short_description") ?? ""),
-    description: String(getObjectValue(obj, "description") ?? ""),
-    tags: String(getObjectValue(obj, "tags") ?? ""),
+    id: id as string | number,
+    code: String(getValue(obj, "code") || "-"),
+    name: String(getValue(obj, "name") || getValue(obj, "title") || "-"),
+    slug: String(getValue(obj, "slug") || ""),
+    productType: normalizeType(getValue(obj, "product_type")),
+    categoryName: String(category?.name || getValue(obj, "category_name") || ""),
+    providerId: String(getValue(obj, "provider_id") || provider?.id || ""),
+    provider,
+    status: normalizeStatus(getValue(obj, "status")),
+    billingType: normalizeBilling(getValue(obj, "billing_type")),
+    fulfillmentType: normalizeFulfillment(getValue(obj, "fulfillment_type")),
+    shortDescription: String(getValue(obj, "short_description") || ""),
     price,
     salePrice,
     effectivePrice,
-    taxAmount: toNumber(getObjectValue(obj, "tax_amount")),
-    totalPriceWithTax: toNumber(
-      getObjectValue(obj, "total_price_with_tax") || effectivePrice,
-    ),
-    hasDiscount: Boolean(getObjectValue(obj, "has_discount") ?? salePrice > 0),
-    isTaxable: Boolean(getObjectValue(obj, "is_taxable")),
-    taxRate: toNumber(getObjectValue(obj, "tax_rate")),
-    durationValue: toNumber(getObjectValue(obj, "duration_value")),
-    durationUnit: String(getObjectValue(obj, "duration_unit") ?? ""),
-    isPublic: Boolean(getObjectValue(obj, "is_public")),
-    isFeatured: Boolean(getObjectValue(obj, "is_featured")),
-    requiresApproval: Boolean(getObjectValue(obj, "requires_approval")),
-    allowOnlinePurchase: Boolean(getObjectValue(obj, "allow_online_purchase")),
-    allowAgentSale: Boolean(getObjectValue(obj, "allow_agent_sale")),
-    allowProviderSale: Boolean(getObjectValue(obj, "allow_provider_sale")),
-    canBeOrdered: Boolean(getObjectValue(obj, "can_be_ordered")),
-    canBeUsedInContracts: Boolean(
-      getObjectValue(obj, "can_be_used_in_contracts"),
-    ),
-    requiresProvider: Boolean(getObjectValue(obj, "requires_provider")),
-    maxDiscountRate: toNumber(getObjectValue(obj, "max_discount_rate")),
-    defaultAgentCommissionRate: toNumber(
-      getObjectValue(obj, "default_agent_commission_rate"),
-    ),
-    serviceItemsCount: Array.isArray(obj.service_items)
-      ? obj.service_items.length
-      : toNumber(getObjectValue(obj, "service_items_count")),
-    createdAt: String(getObjectValue(obj, "created_at") ?? ""),
-    updatedAt: String(getObjectValue(obj, "updated_at") ?? ""),
-    raw: obj,
+    totalPriceWithTax: toNumber(getValue(obj, "total_price_with_tax") || effectivePrice),
+    isOffer: Boolean(getValue(obj, "is_offer")),
+    offerTitle: String(getValue(obj, "offer_title") || ""),
+    offerStartDate: String(getValue(obj, "offer_start_date") || ""),
+    offerEndDate: String(getValue(obj, "offer_end_date") || ""),
+    showOnLanding: Boolean(getValue(obj, "show_on_landing")),
+    showOnMobile: Boolean(getValue(obj, "show_on_mobile")),
+    showOnOffers: Boolean(getValue(obj, "show_on_offers")),
+    isPublic: Boolean(getValue(obj, "is_public")),
+    isFeatured: Boolean(getValue(obj, "is_featured")),
+    allowOnlinePurchase: Boolean(getValue(obj, "allow_online_purchase")),
+    canBeOrdered: Boolean(getValue(obj, "can_be_ordered")),
+    canBeUsedInContracts: Boolean(getValue(obj, "can_be_used_in_contracts")),
+    requiresProvider: Boolean(getValue(obj, "requires_provider")),
+    thumbnailImageUrl,
+    marketingImageUrl,
+    hasThumbnailImage: Boolean(getValue(obj, "has_thumbnail_image") || thumbnailImageUrl),
+    hasMarketingImage: Boolean(getValue(obj, "has_marketing_image") || marketingImageUrl),
+    createdAt: String(getValue(obj, "created_at") || ""),
+    updatedAt: String(getValue(obj, "updated_at") || getValue(obj, "created_at") || ""),
   };
 }
 
@@ -700,150 +678,159 @@ function dictionary(locale: AppLocale) {
   return {
     title: isArabic ? "قائمة المنتجات" : "Products List",
     subtitle: isArabic
-      ? "إدارة المنتجات والبطاقات والبرامج والخدمات مع البحث والفلاتر والأعمدة والفرز والتصدير."
-      : "Manage products, cards, programs, and services with search, filters, columns, sorting, and export.",
+      ? "إدارة المنتجات والبرامج والعروض الطبية وربطها بمقدمي الخدمة."
+      : "Manage products, programs, medical offers, and provider-linked products.",
 
-    back: isArabic ? "لوحة المنتجات" : "Products Overview",
-    createProduct: isArabic ? "إنشاء منتج" : "Create Product",
+    back: isArabic ? "العودة للمنتجات" : "Back to Products",
     refresh: isArabic ? "تحديث" : "Refresh",
+    create: isArabic ? "إنشاء منتج" : "Create Product",
     exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
     print: isArabic ? "طباعة PDF" : "Print PDF",
     retry: isArabic ? "إعادة المحاولة" : "Retry",
-    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
-    columns: isArabic ? "الأعمدة" : "Columns",
-
-    tableTitle: isArabic ? "بيانات المنتجات" : "Products Data",
-    tableSubtitle: isArabic
-      ? "استعرض المنتجات، رتّب البيانات، وخصص الأعمدة حسب احتياجك."
-      : "Browse products, sort data, and customize columns as needed.",
 
     searchPlaceholder: isArabic
-      ? "ابحث باسم المنتج أو الكود أو التصنيف أو الوسوم..."
-      : "Search by product name, code, category, or tags...",
-
+      ? "ابحث باسم المنتج أو الكود أو مقدم الخدمة أو العرض..."
+      : "Search by product, code, provider, or offer...",
+    filters: isArabic ? "الفلاتر" : "Filters",
+    columns: isArabic ? "الأعمدة" : "Columns",
     all: isArabic ? "الكل" : "All",
-    allStatuses: isArabic ? "كل الحالات" : "All Statuses",
-    allTypes: isArabic ? "كل الأنواع" : "All Types",
-    allBilling: isArabic ? "كل طرق الفوترة" : "All Billing",
+    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
 
     totalProducts: isArabic ? "إجمالي المنتجات" : "Total Products",
     activeProducts: isArabic ? "المنتجات النشطة" : "Active Products",
-    orderReadyProducts: isArabic ? "جاهزة للطلبات" : "Order Ready",
-    contractReadyProducts: isArabic ? "جاهزة للعقود" : "Contract Ready",
+    offersProducts: isArabic ? "العروض" : "Offers",
+    landingProducts: isArabic ? "تظهر في الهبوط" : "Landing Visible",
+    mobileProducts: isArabic ? "تظهر في التطبيق" : "Mobile Visible",
+    marketingImages: isArabic ? "لديها صورة تسويقية" : "Marketing Images",
 
-    active: isArabic ? "نشط" : "Active",
-    draft: isArabic ? "مسودة" : "Draft",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    archived: isArabic ? "مؤرشف" : "Archived",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    membership: isArabic ? "عضوية" : "Membership",
-    card: isArabic ? "بطاقة" : "Card",
-    program: isArabic ? "برنامج" : "Program",
-    service: isArabic ? "خدمة" : "Service",
-    other: isArabic ? "أخرى" : "Other",
-
-    oneTime: isArabic ? "مرة واحدة" : "One Time",
-    recurring: isArabic ? "متكرر" : "Recurring",
-
-    digital: isArabic ? "رقمي" : "Digital",
-    physical: isArabic ? "فعلي" : "Physical",
-    both: isArabic ? "رقمي وفعلي" : "Digital & Physical",
-    serviceBased: isArabic ? "خدمة" : "Service Based",
-    none: isArabic ? "بدون" : "None",
-
-    public: isArabic ? "عام" : "Public",
-    private: isArabic ? "خاص" : "Private",
-    featured: isArabic ? "مميز" : "Featured",
-    online: isArabic ? "شراء إلكتروني" : "Online",
-    agentSale: isArabic ? "بيع مندوب" : "Agent Sale",
-    providerSale: isArabic ? "بيع مقدم" : "Provider Sale",
-    orderReady: isArabic ? "جاهز للطلبات" : "Order Ready",
-    contractReady: isArabic ? "جاهز للعقود" : "Contract Ready",
-    requiresProvider: isArabic ? "يتطلب مقدم" : "Requires Provider",
-    noCategory: isArabic ? "بدون تصنيف" : "No Category",
-
-    selectedRows: isArabic ? "صفوف محددة" : "row(s) selected",
-    previous: isArabic ? "السابق" : "Previous",
-    next: isArabic ? "التالي" : "Next",
-    page: isArabic ? "صفحة" : "Page",
-    from: isArabic ? "من" : "of",
-
-    emptyTitle: isArabic ? "لا توجد منتجات بعد" : "No products yet",
-    emptyText: isArabic
-      ? "عند إضافة منتجات أو برامج جديدة ستظهر بياناتها هنا مباشرة."
-      : "New products or programs will appear here once they are added.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو فلاتر الحالة والنوع والفوترة."
-      : "Try changing search keywords, status filters, type filters, or billing filters.",
-
-    actions: isArabic ? "الإجراءات" : "Actions",
-    viewDetails: isArabic ? "عرض التفاصيل" : "View Details",
-    copyCode: isArabic ? "نسخ كود المنتج" : "Copy Product Code",
-    copyId: isArabic ? "نسخ المعرف" : "Copy ID",
-    copied: isArabic ? "تم النسخ بنجاح" : "Copied successfully",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
+    accessDeniedTitle: isArabic ? "غير مصرح بعرض المنتجات" : "Access denied",
     accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض بيانات المنتجات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view products data. Contact your system administrator if you need access.",
+      ? "لا تملك صلاحية عرض قائمة المنتجات."
+      : "You do not have permission to view products.",
 
-    loadError: isArabic
-      ? "تعذر تحميل قائمة المنتجات."
-      : "Unable to load products list.",
+    loadError: isArabic ? "تعذر تحميل قائمة المنتجات." : "Unable to load products.",
     loadErrorHint: isArabic
       ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
       : "Check the connection or permissions, then try again.",
-    refreshSuccess: isArabic
-      ? "تم تحديث قائمة المنتجات بنجاح."
-      : "Products list refreshed successfully.",
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printReady: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
+    refreshSuccess: isArabic ? "تم تحديث قائمة المنتجات." : "Products refreshed.",
+    exportEmpty: isArabic ? "لا توجد بيانات للتصدير." : "No data to export.",
+    printEmpty: isArabic ? "لا توجد بيانات للطباعة." : "No data to print.",
+    printReady: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
+    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
+
+    emptyTitle: isArabic ? "لا توجد منتجات مطابقة" : "No matching products",
+    emptyText: isArabic
+      ? "غيّر البحث أو الفلاتر لعرض نتائج أخرى."
+      : "Change search or filters to see other results.",
+    emptyDefaultTitle: isArabic ? "لا توجد منتجات بعد" : "No products yet",
+    emptyDefaultText: isArabic
+      ? "ابدأ بإنشاء منتج أو برنامج أو عرض طبي جديد."
+      : "Start by creating a product, program, or medical offer.",
 
     generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
     reportScope: isArabic ? "نطاق التقرير" : "Report Scope",
-    currentFilteredData: isArabic
-      ? "حسب الفلاتر الحالية"
-      : "Current filtered data",
-    selectedScope: isArabic ? "الصفوف المحددة" : "Selected rows",
+    currentPage: isArabic ? "الصفحة الحالية" : "Current Page",
     filterSearch: isArabic ? "البحث" : "Search",
-    filterStatus: isArabic ? "فلتر الحالة" : "Status Filter",
-    filterType: isArabic ? "فلتر النوع" : "Type Filter",
-    filterBilling: isArabic ? "فلتر الفوترة" : "Billing Filter",
+    filterStatus: isArabic ? "الحالة" : "Status",
+    filterType: isArabic ? "النوع" : "Type",
+    filterProvider: isArabic ? "مقدم الخدمة" : "Provider",
+    filterOffer: isArabic ? "العرض" : "Offer",
+    filterLanding: isArabic ? "الهبوط" : "Landing",
+    filterMobile: isArabic ? "التطبيق" : "Mobile",
+    filterOffers: isArabic ? "العروض" : "Offers",
+    filterSort: isArabic ? "الترتيب" : "Sort",
+
+    noProvider: isArabic ? "بدون مقدم خدمة" : "No Provider",
+    yes: isArabic ? "نعم" : "Yes",
+    no: isArabic ? "لا" : "No",
+    page: isArabic ? "صفحة" : "Page",
+    of: isArabic ? "من" : "of",
+    rows: isArabic ? "صفوف" : "Rows",
+    details: isArabic ? "التفاصيل" : "Details",
+    currentFilteredData: isArabic ? "بيانات الصفحة الحالية" : "Current page data",
+
+    status: {
+      all: isArabic ? "كل الحالات" : "All Statuses",
+      draft: isArabic ? "مسودة" : "Draft",
+      active: isArabic ? "نشط" : "Active",
+      inactive: isArabic ? "غير نشط" : "Inactive",
+      archived: isArabic ? "مؤرشف" : "Archived",
+      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
+    },
+
+    type: {
+      all: isArabic ? "كل الأنواع" : "All Types",
+      membership: isArabic ? "عضوية" : "Membership",
+      card: isArabic ? "بطاقة" : "Card",
+      program: isArabic ? "برنامج" : "Program",
+      service: isArabic ? "خدمة" : "Service",
+      other: isArabic ? "أخرى" : "Other",
+      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
+    },
+
+    billing: {
+      one_time: isArabic ? "مرة واحدة" : "One Time",
+      recurring: isArabic ? "متكرر" : "Recurring",
+      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
+    },
+
+    offerFilter: {
+      all: isArabic ? "كل المنتجات" : "All Products",
+      offer: isArabic ? "العروض فقط" : "Offers Only",
+      not_offer: isArabic ? "ليست عروض" : "Not Offers",
+    },
+
+    visibilityFilter: {
+      all: isArabic ? "الكل" : "All",
+      yes: isArabic ? "يظهر" : "Visible",
+      no: isArabic ? "لا يظهر" : "Hidden",
+    },
+
+    sortOptions: {
+      "-created_at": isArabic ? "الأحدث أولًا" : "Newest First",
+      created_at: isArabic ? "الأقدم أولًا" : "Oldest First",
+      name: isArabic ? "الاسم تصاعديًا" : "Name A-Z",
+      "-name": isArabic ? "الاسم تنازليًا" : "Name Z-A",
+      price: isArabic ? "السعر الأقل" : "Lowest Price",
+      "-price": isArabic ? "السعر الأعلى" : "Highest Price",
+      offer_start_date: isArabic ? "بداية العرض الأقدم" : "Oldest Offer Start",
+      "-offer_start_date": isArabic ? "بداية العرض الأحدث" : "Newest Offer Start",
+      offer_end_date: isArabic ? "نهاية العرض الأقرب" : "Nearest Offer End",
+      "-offer_end_date": isArabic ? "نهاية العرض الأبعد" : "Latest Offer End",
+    } satisfies Record<SortKey, string>,
 
     table: {
-      id: isArabic ? "المعرف" : "ID",
+      image: isArabic ? "الصورة" : "Image",
       product: isArabic ? "المنتج" : "Product",
-      code: isArabic ? "الكود" : "Code",
+      provider: isArabic ? "مقدم الخدمة" : "Provider",
       type: isArabic ? "النوع" : "Type",
       category: isArabic ? "التصنيف" : "Category",
       price: isArabic ? "السعر" : "Price",
-      salePrice: isArabic ? "سعر الخصم" : "Sale Price",
-      totalWithTax: isArabic ? "الإجمالي مع الضريبة" : "Total With Tax",
-      billing: isArabic ? "الفوترة" : "Billing",
-      fulfillment: isArabic ? "التسليم" : "Fulfillment",
+      offer: isArabic ? "العرض" : "Offer",
+      visibility: isArabic ? "الظهور" : "Visibility",
       readiness: isArabic ? "الجاهزية" : "Readiness",
-      channels: isArabic ? "قنوات البيع" : "Channels",
       status: isArabic ? "الحالة" : "Status",
       updated: isArabic ? "آخر تحديث" : "Updated",
-      actions: isArabic ? "الإجراء" : "Action",
-      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
+      actions: isArabic ? "الإجراءات" : "Actions",
+      code: isArabic ? "الكود" : "Code",
     },
 
-    printTitle: isArabic ? "قائمة المنتجات" : "Products List",
+    columnLabels: {
+      image: isArabic ? "الصورة" : "Image",
+      product: isArabic ? "المنتج" : "Product",
+      provider: isArabic ? "مقدم الخدمة" : "Provider",
+      type: isArabic ? "النوع" : "Type",
+      category: isArabic ? "التصنيف" : "Category",
+      price: isArabic ? "السعر" : "Price",
+      offer: isArabic ? "العرض" : "Offer",
+      visibility: isArabic ? "الظهور" : "Visibility",
+      readiness: isArabic ? "الجاهزية" : "Readiness",
+      status: isArabic ? "الحالة" : "Status",
+      updated: isArabic ? "آخر تحديث" : "Updated",
+      actions: isArabic ? "الإجراءات" : "Actions",
+    } satisfies Record<keyof VisibleColumns, string>,
+
     printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
   };
 }
 
@@ -852,21 +839,21 @@ function dictionary(locale: AppLocale) {
 ============================================================ */
 
 function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
+  const number = Number(value);
 
-  if (!Number.isFinite(numericValue)) return "0";
+  if (!Number.isFinite(number)) return "0";
 
-  return new Intl.NumberFormat("en-US", {
+  return number.toLocaleString("en-US", {
     maximumFractionDigits: 0,
-  }).format(numericValue);
+  });
 }
 
 function formatMoney(value: number | string): string {
-  const numericValue = Number(value);
+  const number = Number(value);
 
-  if (!Number.isFinite(numericValue)) return "0.00";
+  if (!Number.isFinite(number)) return "0.00";
 
-  return numericValue.toLocaleString("en-US", {
+  return number.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -895,117 +882,45 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function statusLabel(status: ProductStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<ProductStatus, string> = {
-    active: t.active,
-    draft: t.draft,
-    inactive: t.inactive,
-    archived: t.archived,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function typeLabel(type: ProductType, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<ProductType, string> = {
-    membership: t.membership,
-    card: t.card,
-    program: t.program,
-    service: t.service,
-    other: t.other,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[type];
-}
-
-function billingLabel(type: BillingType, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<BillingType, string> = {
-    one_time: t.oneTime,
-    recurring: t.recurring,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[type];
-}
-
-function fulfillmentLabel(type: FulfillmentType, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<FulfillmentType, string> = {
-    digital: t.digital,
-    physical: t.physical,
-    both: t.both,
-    service_based: t.serviceBased,
-    none: t.none,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[type];
-}
-
-function statusBadge(status: ProductStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "active") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "draft") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "archived") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "inactive") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
-  );
-}
-
-function productIcon(type: ProductType): LucideIcon {
-  if (type === "card") return CreditCard;
-  if (type === "membership") return BadgeCheck;
+function productTypeIcon(type: ProductType): ComponentType<{ className?: string }> {
+  if (type === "card") return BadgeCheck;
+  if (type === "membership") return Tag;
   if (type === "program") return Boxes;
   if (type === "service") return Stethoscope;
 
   return Package;
 }
 
-function isValidProductId(id: Product["id"]) {
-  const value = String(id || "").trim();
+function statusBadge(status: ProductStatus, t: ReturnType<typeof dictionary>) {
+  if (status === "active") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
+        {t.status.active}
+      </Badge>
+    );
+  }
 
-  return value.length > 0 && value !== "-" && value !== "undefined";
+  if (status === "draft") {
+    return (
+      <Badge className="rounded-full border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50">
+        {t.status.draft}
+      </Badge>
+    );
+  }
+
+  if (status === "archived") {
+    return (
+      <Badge className="rounded-full border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-50">
+        {t.status.archived}
+      </Badge>
+    );
+  }
+
+  if (status === "inactive") {
+    return <Badge variant="outline" className="rounded-full">{t.status.inactive}</Badge>;
+  }
+
+  return <Badge variant="secondary" className="rounded-full">{t.status.UNKNOWN}</Badge>;
 }
 
 function SarAmount({ value }: { value: number | string }) {
@@ -1023,323 +938,38 @@ function SarAmount({ value }: { value: number | string }) {
   );
 }
 
-function getColumnLabels(locale: AppLocale) {
-  const t = dictionary(locale);
+function providerLabel(provider: ProviderSummary | null, locale: AppLocale) {
+  if (!provider) return "";
 
-  return {
-    product: t.table.product,
-    code: t.table.code,
-    type: t.table.type,
-    category: t.table.category,
-    price: t.table.price,
-    billing: t.table.billing,
-    readiness: t.table.readiness,
-    channels: t.table.channels,
-    status: t.table.status,
-    updated: t.table.updated,
-    actions: t.actions,
-  } satisfies Record<keyof VisibleColumns, string>;
+  const primary =
+    locale === "ar"
+      ? provider.name_ar || provider.name || provider.name_en
+      : provider.name_en || provider.name || provider.name_ar;
+
+  const code = provider.code ? ` - ${provider.code}` : "";
+
+  return `${primary || provider.id || ""}${code}`;
 }
 
-/* ============================================================
-   Export / Print
-============================================================ */
+function optionLabel(option: SelectOption, locale: AppLocale) {
+  const primary =
+    locale === "ar"
+      ? option.name_ar || option.name || option.title || option.name_en
+      : option.name_en || option.name || option.title || option.name_ar;
 
-function downloadExcel(options: ExcelSheetOptions) {
-  const dir = options.locale === "ar" ? "rtl" : "ltr";
-  const align = options.locale === "ar" ? "right" : "left";
-  const colspan = Math.max(options.headers.length, 2);
+  const code = option.code ? ` - ${option.code}` : "";
 
-  const summaryHtml = options.summaryRows
-    .map(
-      ([label, value]) => `
-        <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const filterHtml = options.filterRows
-    .map(
-      ([label, value]) => `
-        <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const headerHtml = options.headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
-    .join("");
-
-  const rowsHtml = options.rows
-    .map(
-      (row) => `
-        <tr>
-          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(options.worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${options.locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-        <style>
-          body {
-            direction: ${dir};
-            font-family: Arial, sans-serif;
-          }
-          table {
-            border-collapse: collapse;
-            width: 100%;
-          }
-          th,
-          td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th {
-            background: #d8ecfb;
-            color: #000000;
-            font-weight: 700;
-          }
-          .title {
-            font-size: 20px;
-            font-weight: 700;
-            text-align: center;
-            background: #ffffff;
-          }
-          .section {
-            font-weight: 700;
-            background: #eef6ff;
-          }
-          .summary-label {
-            font-weight: 700;
-            background: #f8fafc;
-            width: 240px;
-          }
-          .summary-value {
-            font-weight: 700;
-          }
-        </style>
-      </head>
-      <body dir="${dir}">
-        <table>
-          <tr>
-            <td class="title" colspan="${colspan}">
-              ${escapeHtml(options.title)}
-            </td>
-          </tr>
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "ملخص القائمة" : "List Summary"}
-          </td></tr>
-          ${summaryHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "الفلاتر المستخدمة" : "Applied Filters"}
-          </td></tr>
-          ${filterHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr>${headerHtml}</tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = options.filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
+  return `${primary || option.id}${code}`;
 }
 
-function buildPrintHtml({
-  locale,
-  title,
-  rows,
-  t,
-}: {
-  locale: AppLocale;
-  title: string;
-  rows: Product[];
-  t: ReturnType<typeof dictionary>;
-}) {
-  const isArabic = locale === "ar";
-  const now = new Date().toLocaleString("en-US");
-
-  const tableRows = rows
-    .map(
-      (product, index) => `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(product.code || "-")}</td>
-          <td>${escapeHtml(product.name || "-")}</td>
-          <td>${escapeHtml(typeLabel(product.productType, locale))}</td>
-          <td>${escapeHtml(product.categoryName || t.noCategory)}</td>
-          <td>${escapeHtml(formatMoney(product.effectivePrice))}</td>
-          <td>${escapeHtml(billingLabel(product.billingType, locale))}</td>
-          <td>${escapeHtml(product.canBeOrdered ? t.orderReady : "-")}</td>
-          <td>${escapeHtml(product.canBeUsedInContracts ? t.contractReady : "-")}</td>
-          <td>${escapeHtml(statusLabel(product.status, locale))}</td>
-        </tr>
-      `,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #ffffff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .print-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 16px;
-            margin-bottom: 18px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-          }
-          h1 {
-            margin: 0;
-            font-size: 22px;
-            font-weight: 800;
-          }
-          .meta {
-            margin-top: 8px;
-            color: #6b7280;
-            font-size: 12px;
-            line-height: 1.8;
-          }
-          .badge {
-            display: inline-block;
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            color: #374151;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-          }
-          th {
-            background: #f3f4f6;
-            color: #111827;
-            font-weight: 700;
-          }
-          th,
-          td {
-            border: 1px solid #e5e7eb;
-            padding: 9px 8px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          tr:nth-child(even) td {
-            background: #fafafa;
-          }
-          @page {
-            size: A4 landscape;
-            margin: 12mm;
-          }
-          @media print {
-            body { padding: 0; }
-          }
-        </style>
-      </head>
-
-      <body>
-        <div class="print-header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
-          </div>
-          <div class="badge">Primey Care</div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>${escapeHtml(t.table.code)}</th>
-              <th>${escapeHtml(t.table.product)}</th>
-              <th>${escapeHtml(t.table.type)}</th>
-              <th>${escapeHtml(t.table.category)}</th>
-              <th>${escapeHtml(t.table.price)}</th>
-              <th>${escapeHtml(t.table.billing)}</th>
-              <th>${escapeHtml(t.orderReady)}</th>
-              <th>${escapeHtml(t.contractReady)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="10" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+function visibilityBadge(active: boolean, label: string) {
+  return (
+    <Badge variant={active ? "secondary" : "outline"} className="rounded-full">
+      {active ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+      {label}
+    </Badge>
+  );
 }
-
-/* ============================================================
-   Skeleton
-============================================================ */
 
 function SkeletonLine({ className = "" }: { className?: string }) {
   return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
@@ -1347,7 +977,7 @@ function SkeletonLine({ className = "" }: { className?: string }) {
 
 function StatCardSkeleton() {
   return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
+    <Card>
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-2">
@@ -1355,10 +985,6 @@ function StatCardSkeleton() {
             <SkeletonLine className="h-4 w-28" />
           </div>
           <SkeletonLine className="h-10 w-10 rounded-xl" />
-        </div>
-        <div className="mt-4 flex items-center gap-2">
-          <SkeletonLine className="h-3 w-8" />
-          <SkeletonLine className="h-2 flex-1" />
         </div>
       </CardContent>
     </Card>
@@ -1387,6 +1013,175 @@ function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
   );
 }
 
+function downloadExcel({
+  filename,
+  worksheetName,
+  title,
+  locale,
+  summaryRows,
+  filterRows,
+  headers,
+  rows,
+}: {
+  filename: string;
+  worksheetName: string;
+  title: string;
+  locale: AppLocale;
+  summaryRows: Array<[string, string | number]>;
+  filterRows: Array<[string, string | number]>;
+  headers: string[];
+  rows: Array<Array<string | number>>;
+}) {
+  const dir = locale === "ar" ? "rtl" : "ltr";
+
+  const html = `
+    <html dir="${dir}">
+      <head>
+        <meta charset="utf-8" />
+        <style>
+          table { border-collapse: collapse; width: 100%; font-family: Arial, Tahoma, sans-serif; }
+          th, td { border: 1px solid #d1d5db; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+          th { background: #f3f4f6; font-weight: 700; }
+          .title { font-size: 18px; font-weight: 800; background: #ede9fe; }
+          .section { background: #f9fafb; font-weight: 700; }
+        </style>
+      </head>
+      <body>
+        <table>
+          <tr><th class="title" colspan="${headers.length}">${escapeHtml(title)}</th></tr>
+          <tr><th class="section" colspan="${headers.length}">${escapeHtml(worksheetName)}</th></tr>
+          ${summaryRows
+            .map(
+              ([key, value]) =>
+                `<tr><td>${escapeHtml(key)}</td><td colspan="${headers.length - 1}">${escapeHtml(value)}</td></tr>`,
+            )
+            .join("")}
+          <tr><th class="section" colspan="${headers.length}">Filters</th></tr>
+          ${filterRows
+            .map(
+              ([key, value]) =>
+                `<tr><td>${escapeHtml(key)}</td><td colspan="${headers.length - 1}">${escapeHtml(value)}</td></tr>`,
+            )
+            .join("")}
+          <tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>
+          ${rows
+            .map(
+              (row) =>
+                `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`,
+            )
+            .join("")}
+        </table>
+      </body>
+    </html>
+  `;
+
+  const blob = new Blob(["\ufeff", html], {
+    type: "application/vnd.ms-excel;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+
+  URL.revokeObjectURL(url);
+}
+
+function buildPrintHtml({
+  locale,
+  title,
+  printedAt,
+  headers,
+  rows,
+  emptyTitle,
+}: {
+  locale: AppLocale;
+  title: string;
+  printedAt: string;
+  headers: string[];
+  rows: Array<Array<string | number>>;
+  emptyTitle: string;
+}) {
+  const isArabic = locale === "ar";
+
+  return `
+    <!doctype html>
+    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            padding: 24px;
+            font-family: Arial, Tahoma, sans-serif;
+            color: #111827;
+            background: #fff;
+            direction: ${isArabic ? "rtl" : "ltr"};
+            text-align: ${isArabic ? "right" : "left"};
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 14px;
+            margin-bottom: 18px;
+          }
+          h1 { margin: 0; font-size: 22px; }
+          .meta { font-size: 12px; color: #6b7280; margin-top: 6px; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 9px 10px;
+            font-size: 12px;
+            vertical-align: top;
+          }
+          th { background: #f9fafb; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1>${escapeHtml(title)}</h1>
+            <div class="meta">${escapeHtml(printedAt)}</div>
+          </div>
+          <div class="meta">Primey Care</div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>
+          </thead>
+          <tbody>
+            ${
+              rows.length > 0
+                ? rows
+                    .map(
+                      (row) =>
+                        `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`,
+                    )
+                    .join("")
+                : `<tr><td colspan="${headers.length}">${escapeHtml(emptyTitle)}</td></tr>`
+            }
+          </tbody>
+        </table>
+
+        <script>
+          window.addEventListener("load", () => {
+            window.focus();
+            window.print();
+          });
+        </script>
+      </body>
+    </html>
+  `;
+}
+
 /* ============================================================
    Page
 ============================================================ */
@@ -1396,28 +1191,42 @@ export default function SystemProductsListPage() {
 
   const [locale, setLocale] = useState<AppLocale>("ar");
   const [products, setProducts] = useState<Product[]>([]);
+  const [pagination, setPagination] = useState<Pagination>({
+    page: 1,
+    page_size: PAGE_SIZE,
+    total_pages: 1,
+    total_items: 0,
+    has_next: false,
+    has_previous: false,
+  });
+
+  const [providers, setProviders] = useState<SelectOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingLookups, setIsLoadingLookups] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
-  const [billingFilter, setBillingFilter] = useState<BillingFilter>("all");
-
-  const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [selectedIds, setSelectedIds] = useState<Array<string | number>>([]);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [providerFilter, setProviderFilter] = useState("all");
+  const [offerFilter, setOfferFilter] = useState<OfferFilter>("all");
+  const [landingFilter, setLandingFilter] = useState<VisibilityFilter>("all");
+  const [mobileFilter, setMobileFilter] = useState<VisibilityFilter>("all");
+  const [offersFilter, setOffersFilter] = useState<VisibilityFilter>("all");
+  const [sortKey, setSortKey] = useState<SortKey>("-created_at");
+  const [pageIndex, setPageIndex] = useState(1);
 
   const [visibleColumns, setVisibleColumns] = useState<VisibleColumns>({
+    image: true,
     product: true,
-    code: true,
+    provider: true,
     type: true,
     category: true,
     price: true,
-    billing: true,
+    offer: true,
+    visibility: true,
     readiness: true,
-    channels: true,
     status: true,
     updated: true,
     actions: true,
@@ -1425,7 +1234,6 @@ export default function SystemProductsListPage() {
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
-
   const authResolving = isAuthResolving(auth);
 
   const canViewProducts = hasSafePermission(
@@ -1466,250 +1274,89 @@ export default function SystemProductsListPage() {
     [canViewProductDetails, visibleColumns],
   );
 
-  const columnLabels = useMemo(() => getColumnLabels(locale), [locale]);
+  const visibleTableColumnsCount =
+    Object.values(safeVisibleColumns).filter(Boolean).length || 1;
 
   const stats = useMemo(() => {
-    const total = products.length;
-    const active = products.filter((item) => item.status === "active").length;
-    const orderReady = products.filter((item) => item.canBeOrdered).length;
-    const contractReady = products.filter(
-      (item) => item.canBeUsedInContracts,
-    ).length;
-
     return {
-      total,
-      active,
-      orderReady,
-      contractReady,
+      total: pagination.total_items,
+      active: products.filter((item) => item.status === "active").length,
+      offers: products.filter((item) => item.isOffer).length,
+      landing: products.filter((item) => item.showOnLanding).length,
+      mobile: products.filter((item) => item.showOnMobile).length,
+      marketingImages: products.filter((item) => item.hasMarketingImage).length,
     };
-  }, [products]);
-
-  const statusOptions = useMemo(
-    () => [
-      { value: "all" as StatusFilter, label: t.allStatuses, count: products.length },
-      {
-        value: "active" as StatusFilter,
-        label: t.active,
-        count: products.filter((item) => item.status === "active").length,
-      },
-      {
-        value: "draft" as StatusFilter,
-        label: t.draft,
-        count: products.filter((item) => item.status === "draft").length,
-      },
-      {
-        value: "inactive" as StatusFilter,
-        label: t.inactive,
-        count: products.filter((item) => item.status === "inactive").length,
-      },
-      {
-        value: "archived" as StatusFilter,
-        label: t.archived,
-        count: products.filter((item) => item.status === "archived").length,
-      },
-    ],
-    [products, t],
-  );
-
-  const typeOptions = useMemo(
-    () => [
-      { value: "all" as TypeFilter, label: t.allTypes, count: products.length },
-      {
-        value: "membership" as TypeFilter,
-        label: t.membership,
-        count: products.filter((item) => item.productType === "membership").length,
-      },
-      {
-        value: "card" as TypeFilter,
-        label: t.card,
-        count: products.filter((item) => item.productType === "card").length,
-      },
-      {
-        value: "program" as TypeFilter,
-        label: t.program,
-        count: products.filter((item) => item.productType === "program").length,
-      },
-      {
-        value: "service" as TypeFilter,
-        label: t.service,
-        count: products.filter((item) => item.productType === "service").length,
-      },
-    ],
-    [products, t],
-  );
-
-  const billingOptions = useMemo(
-    () => [
-      { value: "all" as BillingFilter, label: t.allBilling },
-      { value: "one_time" as BillingFilter, label: t.oneTime },
-      { value: "recurring" as BillingFilter, label: t.recurring },
-    ],
-    [t],
-  );
-
-  const filteredProducts = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
-
-    return products.filter((product) => {
-      const matchesStatus =
-        statusFilter === "all" ? true : product.status === statusFilter;
-
-      const matchesType =
-        typeFilter === "all" ? true : product.productType === typeFilter;
-
-      const matchesBilling =
-        billingFilter === "all" ? true : product.billingType === billingFilter;
-
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            product.name,
-            product.code,
-            product.slug,
-            product.categoryName,
-            product.shortDescription,
-            product.description,
-            product.tags,
-            product.status,
-            product.productType,
-            product.billingType,
-            product.fulfillmentType,
-            typeLabel(product.productType, locale),
-            statusLabel(product.status, locale),
-            billingLabel(product.billingType, locale),
-            fulfillmentLabel(product.fulfillmentType, locale),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
-
-      return matchesStatus && matchesType && matchesBilling && matchesQuery;
-    });
-  }, [billingFilter, locale, products, query, statusFilter, typeFilter]);
-
-  const sortedProducts = useMemo(() => {
-    const rows = [...filteredProducts];
-
-    rows.sort((firstProduct, secondProduct) => {
-      let first: string | number = "";
-      let second: string | number = "";
-
-      if (sortKey === "name") {
-        first = firstProduct.name.toLowerCase();
-        second = secondProduct.name.toLowerCase();
-      }
-
-      if (sortKey === "code") {
-        first = firstProduct.code.toLowerCase();
-        second = secondProduct.code.toLowerCase();
-      }
-
-      if (sortKey === "productType") {
-        first = firstProduct.productType.toLowerCase();
-        second = secondProduct.productType.toLowerCase();
-      }
-
-      if (sortKey === "categoryName") {
-        first = firstProduct.categoryName.toLowerCase();
-        second = secondProduct.categoryName.toLowerCase();
-      }
-
-      if (sortKey === "status") {
-        first = firstProduct.status.toLowerCase();
-        second = secondProduct.status.toLowerCase();
-      }
-
-      if (sortKey === "price") {
-        first = firstProduct.effectivePrice;
-        second = secondProduct.effectivePrice;
-      }
-
-      if (sortKey === "updatedAt") {
-        first = new Date(
-          firstProduct.updatedAt || firstProduct.createdAt || 0,
-        ).getTime();
-        second = new Date(
-          secondProduct.updatedAt || secondProduct.createdAt || 0,
-        ).getTime();
-      }
-
-      if (first < second) return sortDirection === "asc" ? -1 : 1;
-      if (first > second) return sortDirection === "asc" ? 1 : -1;
-
-      return 0;
-    });
-
-    return rows;
-  }, [filteredProducts, sortDirection, sortKey]);
-
-  const exportRows = useMemo(() => {
-    if (selectedIds.length > 0) {
-      return sortedProducts.filter((product) => selectedIds.includes(product.id));
-    }
-
-    return sortedProducts;
-  }, [selectedIds, sortedProducts]);
-
-  const pageCount = Math.max(1, Math.ceil(sortedProducts.length / PAGE_SIZE));
-
-  const pageRows = useMemo(() => {
-    const start = pageIndex * PAGE_SIZE;
-    return sortedProducts.slice(start, start + PAGE_SIZE);
-  }, [pageIndex, sortedProducts]);
-
-  const selectedOnPage = pageRows.filter((row) =>
-    selectedIds.includes(row.id),
-  ).length;
-
-  const allPageSelected =
-    pageRows.length > 0 && selectedOnPage === pageRows.length;
+  }, [pagination.total_items, products]);
 
   const hasSearchOrFilter =
-    query.trim().length > 0 ||
+    debouncedQuery.trim().length > 0 ||
     statusFilter !== "all" ||
     typeFilter !== "all" ||
-    billingFilter !== "all";
+    providerFilter !== "all" ||
+    offerFilter !== "all" ||
+    landingFilter !== "all" ||
+    mobileFilter !== "all" ||
+    offersFilter !== "all";
 
-  const visibleTableColumnsCount =
-    1 + Object.values(safeVisibleColumns).filter(Boolean).length;
+  const queryString = useMemo(() => {
+    const params = new URLSearchParams();
 
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
-      return;
+    params.set("page", String(pageIndex));
+    params.set("page_size", String(PAGE_SIZE));
+    params.set("include_children", "false");
+    params.set("ordering", sortKey);
+
+    if (debouncedQuery.trim()) {
+      params.set("q", debouncedQuery.trim());
     }
 
-    setSortKey(key);
-    setSortDirection("asc");
-  }
-
-  function toggleRow(id: string | number) {
-    setSelectedIds((current) =>
-      current.includes(id)
-        ? current.filter((item) => item !== id)
-        : [...current, id],
-    );
-  }
-
-  function toggleAllPageRows() {
-    const pageIds = pageRows.map((row) => row.id);
-
-    if (allPageSelected) {
-      setSelectedIds((current) =>
-        current.filter((id) => !pageIds.includes(id)),
-      );
-      return;
+    if (statusFilter !== "all") {
+      params.set("status", statusFilter);
     }
 
-    setSelectedIds((current) => Array.from(new Set([...current, ...pageIds])));
-  }
+    if (typeFilter !== "all") {
+      params.set("product_type", typeFilter);
+    }
 
-  function clearFilters() {
-    setQuery("");
-    setStatusFilter("all");
-    setTypeFilter("all");
-    setBillingFilter("all");
-  }
+    if (providerFilter !== "all") {
+      params.set("provider_id", providerFilter);
+    }
+
+    if (offerFilter === "offer") {
+      params.set("is_offer", "true");
+    }
+
+    if (offerFilter === "not_offer") {
+      params.set("is_offer", "false");
+    }
+
+    if (landingFilter !== "all") {
+      params.set("show_on_landing", landingFilter === "yes" ? "true" : "false");
+    }
+
+    if (mobileFilter !== "all") {
+      params.set("show_on_mobile", mobileFilter === "yes" ? "true" : "false");
+    }
+
+    if (offersFilter !== "all") {
+      params.set("show_on_offers", offersFilter === "yes" ? "true" : "false");
+    }
+
+    return params.toString();
+  }, [
+    debouncedQuery,
+    landingFilter,
+    mobileFilter,
+    offerFilter,
+    offersFilter,
+    pageIndex,
+    providerFilter,
+    sortKey,
+    statusFilter,
+    typeFilter,
+  ]);
+
+  const exportRows = products;
 
   const loadProducts = useCallback(
     async (showToast = false) => {
@@ -1723,26 +1370,32 @@ export default function SystemProductsListPage() {
         setIsLoading(true);
         setErrorMessage("");
 
-        const response = await fetch(
-          apiUrl("/api/products/?page_size=200&include_children=true"),
-          {
-            method: "GET",
-            credentials: "include",
-            headers: {
-              Accept: "application/json",
-            },
+        const response = await fetch(apiUrl(`/api/products/?${queryString}`), {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
           },
-        );
+        });
 
-        const payload = (await response.json().catch(() => null)) as
-          | ProductsApiResponse
-          | null;
+        const payload = (await response.json().catch(() => null)) as ProductsApiResponse | null;
 
         if (!response.ok || payload?.ok === false) {
           throw new Error(payload?.message || `HTTP ${response.status}`);
         }
 
-        setProducts(extractProducts(payload).map(normalizeProduct));
+        const nextProducts = extractProducts(payload).map(normalizeProduct);
+        const nextPagination = payload?.pagination || {};
+
+        setProducts(nextProducts);
+        setPagination({
+          page: Number(nextPagination.page || pageIndex),
+          page_size: Number(nextPagination.page_size || PAGE_SIZE),
+          total_pages: Math.max(1, Number(nextPagination.total_pages || 1)),
+          total_items: Number(nextPagination.total_items || nextProducts.length),
+          has_next: Boolean(nextPagination.has_next),
+          has_previous: Boolean(nextPagination.has_previous),
+        });
 
         if (showToast) {
           toast.success(t.refreshSuccess);
@@ -1756,8 +1409,42 @@ export default function SystemProductsListPage() {
         setIsLoading(false);
       }
     },
-    [canViewProducts, t.loadError, t.refreshSuccess],
+    [canViewProducts, pageIndex, queryString, t.loadError, t.refreshSuccess],
   );
+
+  const loadLookups = useCallback(async () => {
+    try {
+      setIsLoadingLookups(true);
+
+      const response = await fetch(apiUrl("/api/providers/?page=1&page_size=100&ordering=name"), {
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      });
+
+      if (response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as ListApiResponse<SelectOption>;
+        setProviders(extractList(payload));
+      }
+    } catch (error) {
+      console.error("Load product list lookups error:", error);
+    } finally {
+      setIsLoadingLookups(false);
+    }
+  }, []);
+
+  function clearFilters() {
+    setQuery("");
+    setDebouncedQuery("");
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setProviderFilter("all");
+    setOfferFilter("all");
+    setLandingFilter("all");
+    setMobileFilter("all");
+    setOffersFilter("all");
+    setSortKey("-created_at");
+    setPageIndex(1);
+  }
 
   function exportExcel() {
     if (!canExportProducts) return;
@@ -1769,102 +1456,78 @@ export default function SystemProductsListPage() {
 
     const generatedAt = new Date();
 
-    const statusLabelText =
-      statusOptions.find((item) => item.value === statusFilter)?.label || t.all;
-
-    const typeLabelText =
-      typeOptions.find((item) => item.value === typeFilter)?.label || t.all;
-
-    const billingLabelText =
-      billingOptions.find((item) => item.value === billingFilter)?.label ||
-      t.all;
-
     downloadExcel({
-      filename: `primey-care-products-list-${generatedAt
-        .toISOString()
-        .slice(0, 10)}.xls`,
+      filename: `primey-care-products-list-${generatedAt.toISOString().slice(0, 10)}.xls`,
       worksheetName: isArabic ? "قائمة المنتجات" : "Products List",
       title: t.title,
       locale,
       summaryRows: [
         [t.generatedAt, generatedAt.toLocaleString("en-US")],
-        [
-          t.reportScope,
-          selectedIds.length > 0 ? t.selectedScope : t.currentFilteredData,
-        ],
-        [
-          t.table.product,
-          `${formatNumber(exportRows.length)} / ${formatNumber(products.length)}`,
-        ],
-        [t.totalProducts, stats.total],
+        [t.reportScope, t.currentPage],
+        [t.totalProducts, pagination.total_items],
+        [t.rows, products.length],
         [t.activeProducts, stats.active],
-        [t.orderReadyProducts, stats.orderReady],
-        [t.contractReadyProducts, stats.contractReady],
+        [t.offersProducts, stats.offers],
+        [t.landingProducts, stats.landing],
+        [t.mobileProducts, stats.mobile],
       ],
       filterRows: [
-        [t.filterSearch, query || t.all],
-        [t.filterStatus, statusLabelText],
-        [t.filterType, typeLabelText],
-        [t.filterBilling, billingLabelText],
+        [t.filterSearch, debouncedQuery || t.all],
+        [t.filterStatus, statusFilter === "all" ? t.status.all : t.status[statusFilter]],
+        [t.filterType, typeFilter === "all" ? t.type.all : t.type[typeFilter]],
+        [
+          t.filterProvider,
+          providerFilter === "all"
+            ? t.all
+            : optionLabel(
+                providers.find((item) => String(item.id) === providerFilter) || {
+                  id: providerFilter,
+                },
+                locale,
+              ),
+        ],
+        [t.filterOffer, t.offerFilter[offerFilter]],
+        [t.filterLanding, t.visibilityFilter[landingFilter]],
+        [t.filterMobile, t.visibilityFilter[mobileFilter]],
+        [t.filterOffers, t.visibilityFilter[offersFilter]],
+        [t.filterSort, t.sortOptions[sortKey]],
       ],
       headers: [
-        t.table.id,
         t.table.code,
         t.table.product,
+        t.table.provider,
         t.table.type,
         t.table.category,
         t.table.price,
-        t.table.salePrice,
-        t.table.totalWithTax,
-        t.table.billing,
-        t.table.fulfillment,
-        t.table.readiness,
-        t.table.channels,
+        t.table.offer,
+        t.table.visibility,
         t.table.status,
-        t.table.createdAt,
         t.table.updated,
       ],
       rows: exportRows.map((product) => [
-        String(product.id || "-"),
-        product.code || "-",
-        product.name || "-",
-        typeLabel(product.productType, locale),
-        product.categoryName || t.noCategory,
+        product.code,
+        product.name,
+        providerLabel(product.provider, locale) || t.noProvider,
+        t.type[product.productType],
+        product.categoryName || "-",
         formatMoney(product.effectivePrice),
-        formatMoney(product.salePrice),
-        formatMoney(product.totalPriceWithTax),
-        billingLabel(product.billingType, locale),
-        fulfillmentLabel(product.fulfillmentType, locale),
+        product.isOffer ? t.yes : t.no,
         [
-          product.canBeOrdered ? t.orderReady : "",
-          product.canBeUsedInContracts ? t.contractReady : "",
-          product.requiresProvider ? t.requiresProvider : "",
-        ]
-          .filter(Boolean)
-          .join(" / ") || "-",
-        [
-          product.isPublic ? t.public : t.private,
-          product.isFeatured ? t.featured : "",
-          product.allowOnlinePurchase ? t.online : "",
-          product.allowAgentSale ? t.agentSale : "",
-          product.allowProviderSale ? t.providerSale : "",
-        ]
-          .filter(Boolean)
-          .join(" / ") || "-",
-        statusLabel(product.status, locale),
-        formatDate(product.createdAt),
-        formatDate(product.updatedAt || product.createdAt),
+          product.showOnLanding ? t.filterLanding : "",
+          product.showOnMobile ? t.filterMobile : "",
+          product.showOnOffers ? t.filterOffers : "",
+        ].filter(Boolean).join(" / ") || "-",
+        t.status[product.status],
+        formatDate(product.updatedAt),
       ]),
     });
-
-    toast.success(t.exportSuccess);
   }
 
   function printList() {
     if (!canPrintProducts) return;
 
-    if (exportRows.length === 0) {
-      toast.error(t.exportEmpty);
+    if (products.length === 0) {
+      toast.error(t.printEmpty);
       return;
     }
 
@@ -1875,849 +1538,621 @@ export default function SystemProductsListPage() {
       return;
     }
 
+    const html = buildPrintHtml({
+      locale,
+      title: t.title,
+      printedAt: `${t.printedAt}: ${new Date().toLocaleString("en-US")}`,
+      emptyTitle: t.emptyTitle,
+      headers: [
+        t.table.code,
+        t.table.product,
+        t.table.provider,
+        t.table.type,
+        t.table.price,
+        t.table.offer,
+        t.table.status,
+      ],
+      rows: products.map((product) => [
+        product.code,
+        product.name,
+        providerLabel(product.provider, locale) || t.noProvider,
+        t.type[product.productType],
+        formatMoney(product.effectivePrice),
+        product.isOffer ? t.yes : t.no,
+        t.status[product.status],
+      ]),
+    });
+
     printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.printTitle,
-        rows: exportRows,
-        t,
-      }),
-    );
+    printWindow.document.write(html);
     printWindow.document.close();
 
     toast.success(t.printReady);
   }
 
   useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
+    const nextLocale = readLocale();
 
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
+    setLocale(nextLocale);
+    applyDocumentLocale(nextLocale);
+    loadLookups();
+  }, [loadLookups]);
 
   useEffect(() => {
-    if (authResolving) return;
-    loadProducts(false);
-  }, [authResolving, loadProducts]);
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(query);
+      setPageIndex(1);
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   useEffect(() => {
-    setPageIndex(0);
-    setSelectedIds([]);
-  }, [query, statusFilter, typeFilter, billingFilter]);
+    loadProducts();
+  }, [loadProducts]);
 
-  if (!authResolving && !canViewProducts) {
+  if (authResolving) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
+      <div className="w-full space-y-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <StatCardSkeleton key={index} />
+          ))}
+        </div>
+        <Card>
+          <CardContent className="p-6">
+            <SkeletonLine className="h-10 w-full rounded-xl" />
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.title}
-          </h1>
+  if (!canViewProducts) {
+    return (
+      <div className="w-full space-y-4">
+        <Card className="border-destructive/20">
+          <CardContent className="flex flex-col items-center justify-center gap-4 p-10 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
+              <ShieldCheck className="h-7 w-7 text-destructive" />
+            </div>
 
-          <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
-            {t.subtitle}
-          </p>
+            <div>
+              <h2 className="text-lg font-semibold">{t.accessDeniedTitle}</h2>
+              <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+
+            <Button asChild variant="outline">
+              <Link href="/system/products">
+                <ArrowLeft className="me-2 h-4 w-4" />
+                {t.back}
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const statCards = [
+    {
+      label: t.totalProducts,
+      value: pagination.total_items,
+      icon: Package,
+    },
+    {
+      label: t.activeProducts,
+      value: stats.active,
+      icon: CheckCircle2,
+    },
+    {
+      label: t.offersProducts,
+      value: stats.offers,
+      icon: Sparkles,
+    },
+    {
+      label: t.landingProducts,
+      value: stats.landing,
+      icon: Globe2,
+    },
+    {
+      label: t.mobileProducts,
+      value: stats.mobile,
+      icon: Smartphone,
+    },
+    {
+      label: t.marketingImages,
+      value: stats.marketingImages,
+      icon: FileImage,
+    },
+  ];
+
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{t.title}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/products">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href="/system/products">
+              <ArrowLeft className="me-2 h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
 
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadProducts(true)}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            <span>{t.refresh}</span>
+          <Button type="button" variant="outline" onClick={() => loadProducts(true)}>
+            <RefreshCcw className="me-2 h-4 w-4" />
+            {t.refresh}
           </Button>
 
           {canExportProducts ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={
-                isLoading || exportRows.length === 0 || Boolean(errorMessage)
-              }
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
+            <Button type="button" variant="outline" onClick={exportExcel}>
+              <FileSpreadsheet className="me-2 h-4 w-4" />
+              {t.exportExcel}
             </Button>
           ) : null}
 
           {canPrintProducts ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printList}
-              disabled={
-                isLoading || exportRows.length === 0 || Boolean(errorMessage)
-              }
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
+            <Button type="button" variant="outline" onClick={printList}>
+              <Printer className="me-2 h-4 w-4" />
+              {t.print}
             </Button>
           ) : null}
 
           {canCreateProducts ? (
-            <Link href="/system/products/create">
-              <Button className="h-10 w-full rounded-xl sm:w-auto">
-                <PlusCircle className="h-4 w-4" />
-                <span>{t.createProduct}</span>
-              </Button>
-            </Link>
+            <Button asChild>
+              <Link href="/system/products/create">
+                <Plus className="me-2 h-4 w-4" />
+                {t.create}
+              </Link>
+            </Button>
           ) : null}
         </div>
       </div>
 
-      {/* Error State */}
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        {statCards.map((card) => {
+          const Icon = card.icon;
 
-              <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
-              </div>
+          return (
+            <Card key={card.label}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-2xl font-bold">{formatNumber(card.value)}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{card.label}</p>
+                  </div>
+
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      <Card>
+        <CardContent className="space-y-4 p-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              placeholder={t.searchPlaceholder}
+              className="ps-10"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="grid flex-1 gap-2 md:grid-cols-2 xl:grid-cols-8">
+              <select
+                value={statusFilter}
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                onChange={(event) => {
+                  setStatusFilter(event.target.value as StatusFilter);
+                  setPageIndex(1);
+                }}
+              >
+                <option value="all">{t.status.all}</option>
+                <option value="active">{t.status.active}</option>
+                <option value="draft">{t.status.draft}</option>
+                <option value="inactive">{t.status.inactive}</option>
+                <option value="archived">{t.status.archived}</option>
+              </select>
+
+              <select
+                value={typeFilter}
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                onChange={(event) => {
+                  setTypeFilter(event.target.value as TypeFilter);
+                  setPageIndex(1);
+                }}
+              >
+                <option value="all">{t.type.all}</option>
+                <option value="membership">{t.type.membership}</option>
+                <option value="card">{t.type.card}</option>
+                <option value="program">{t.type.program}</option>
+                <option value="service">{t.type.service}</option>
+                <option value="other">{t.type.other}</option>
+              </select>
+
+              <select
+                value={providerFilter}
+                disabled={isLoadingLookups}
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                onChange={(event) => {
+                  setProviderFilter(event.target.value);
+                  setPageIndex(1);
+                }}
+              >
+                <option value="all">{t.filterProvider}</option>
+                {providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {optionLabel(provider, locale)}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={offerFilter}
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                onChange={(event) => {
+                  setOfferFilter(event.target.value as OfferFilter);
+                  setPageIndex(1);
+                }}
+              >
+                <option value="all">{t.offerFilter.all}</option>
+                <option value="offer">{t.offerFilter.offer}</option>
+                <option value="not_offer">{t.offerFilter.not_offer}</option>
+              </select>
+
+              <select
+                value={landingFilter}
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                onChange={(event) => {
+                  setLandingFilter(event.target.value as VisibilityFilter);
+                  setPageIndex(1);
+                }}
+              >
+                <option value="all">{t.filterLanding}</option>
+                <option value="yes">{t.visibilityFilter.yes}</option>
+                <option value="no">{t.visibilityFilter.no}</option>
+              </select>
+
+              <select
+                value={mobileFilter}
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                onChange={(event) => {
+                  setMobileFilter(event.target.value as VisibilityFilter);
+                  setPageIndex(1);
+                }}
+              >
+                <option value="all">{t.filterMobile}</option>
+                <option value="yes">{t.visibilityFilter.yes}</option>
+                <option value="no">{t.visibilityFilter.no}</option>
+              </select>
+
+              <select
+                value={offersFilter}
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                onChange={(event) => {
+                  setOffersFilter(event.target.value as VisibilityFilter);
+                  setPageIndex(1);
+                }}
+              >
+                <option value="all">{t.filterOffers}</option>
+                <option value="yes">{t.visibilityFilter.yes}</option>
+                <option value="no">{t.visibilityFilter.no}</option>
+              </select>
+
+              <select
+                value={sortKey}
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                onChange={(event) => {
+                  setSortKey(event.target.value as SortKey);
+                  setPageIndex(1);
+                }}
+              >
+                {Object.entries(t.sortOptions).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadProducts(true)}
-            >
-              <RefreshCcw className="h-4 w-4" />
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={clearFilters}>
+                <XCircle className="me-2 h-4 w-4" />
+                {t.clearFilters}
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-background p-3">
+            <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+              <Columns3 className="h-4 w-4" />
+              {t.columns}
+            </div>
+
+            <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+              {Object.entries(t.columnLabels).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 rounded-xl border p-2 text-sm">
+                  <Checkbox
+                    checked={visibleColumns[key as keyof VisibleColumns]}
+                    onCheckedChange={(value) =>
+                      setVisibleColumns((current) => ({
+                        ...current,
+                        [key]: Boolean(value),
+                      }))
+                    }
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {errorMessage ? (
+        <Card className="border-destructive/20">
+          <CardContent className="flex flex-col items-center justify-center gap-4 p-10 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
+              <AlertTriangle className="h-7 w-7 text-destructive" />
+            </div>
+
+            <div>
+              <h2 className="text-lg font-semibold">{errorMessage}</h2>
+              <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+                {t.loadErrorHint}
+              </p>
+            </div>
+
+            <Button type="button" onClick={() => loadProducts(true)}>
+              <RefreshCcw className="me-2 h-4 w-4" />
               {t.retry}
             </Button>
           </CardContent>
         </Card>
-      ) : null}
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t.title}</CardTitle>
+            <CardDescription>
+              {t.page} {formatNumber(pagination.page)} {t.of}{" "}
+              {formatNumber(pagination.total_pages)} — {formatNumber(pagination.total_items)}{" "}
+              {t.rows}
+            </CardDescription>
+          </CardHeader>
 
-      {!errorMessage ? (
-        <>
-          {/* Stats */}
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {isLoading
-              ? Array.from({ length: 4 }).map((_, index) => (
-                  <StatCardSkeleton key={index} />
-                ))
-              : [
-                  {
-                    title: t.totalProducts,
-                    value: stats.total,
-                    percent: stats.total > 0 ? 100 : 0,
-                    icon: Package,
-                  },
-                  {
-                    title: t.activeProducts,
-                    value: stats.active,
-                    percent: stats.total
-                      ? Math.round((stats.active / stats.total) * 100)
-                      : 0,
-                    icon: BadgeCheck,
-                  },
-                  {
-                    title: t.orderReadyProducts,
-                    value: stats.orderReady,
-                    percent: stats.total
-                      ? Math.round((stats.orderReady / stats.total) * 100)
-                      : 0,
-                    icon: ShieldCheck,
-                  },
-                  {
-                    title: t.contractReadyProducts,
-                    value: stats.contractReady,
-                    percent: stats.total
-                      ? Math.round((stats.contractReady / stats.total) * 100)
-                      : 0,
-                    icon: Layers3,
-                  },
-                ].map((item) => {
-                  const Icon = item.icon;
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {safeVisibleColumns.image ? <TableHead>{t.table.image}</TableHead> : null}
+                    {safeVisibleColumns.product ? <TableHead>{t.table.product}</TableHead> : null}
+                    {safeVisibleColumns.provider ? <TableHead>{t.table.provider}</TableHead> : null}
+                    {safeVisibleColumns.type ? <TableHead>{t.table.type}</TableHead> : null}
+                    {safeVisibleColumns.category ? <TableHead>{t.table.category}</TableHead> : null}
+                    {safeVisibleColumns.price ? <TableHead>{t.table.price}</TableHead> : null}
+                    {safeVisibleColumns.offer ? <TableHead>{t.table.offer}</TableHead> : null}
+                    {safeVisibleColumns.visibility ? <TableHead>{t.table.visibility}</TableHead> : null}
+                    {safeVisibleColumns.readiness ? <TableHead>{t.table.readiness}</TableHead> : null}
+                    {safeVisibleColumns.status ? <TableHead>{t.table.status}</TableHead> : null}
+                    {safeVisibleColumns.updated ? <TableHead>{t.table.updated}</TableHead> : null}
+                    {safeVisibleColumns.actions ? <TableHead>{t.table.actions}</TableHead> : null}
+                  </TableRow>
+                </TableHeader>
 
-                  return (
-                    <Card
-                      key={item.title}
-                      className="rounded-2xl border bg-card shadow-sm"
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between gap-3">
+                <TableBody>
+                  {isLoading ? (
+                    <TableRowsSkeleton columnsCount={visibleTableColumnsCount} />
+                  ) : products.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={visibleTableColumnsCount} className="py-12 text-center">
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                            <Package className="h-6 w-6 text-muted-foreground" />
+                          </div>
                           <div>
-                            <p className="text-2xl font-bold">
-                              {formatNumber(item.value)}
+                            <p className="font-semibold">
+                              {hasSearchOrFilter ? t.emptyTitle : t.emptyDefaultTitle}
                             </p>
                             <p className="mt-1 text-sm text-muted-foreground">
-                              {item.title}
+                              {hasSearchOrFilter ? t.emptyText : t.emptyDefaultText}
                             </p>
                           </div>
-
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                            <Icon className="h-5 w-5" />
-                          </div>
                         </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    products.map((product) => {
+                      const Icon = productTypeIcon(product.productType);
+                      const imageSrc = product.thumbnailImageUrl || product.marketingImageUrl;
 
-                        <div className="mt-3 flex items-center gap-2">
-                          <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                            {formatNumber(item.percent)}%
-                          </span>
-                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full bg-primary transition-all"
-                              style={{ width: `${item.percent}%` }}
-                            />
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-          </div>
-
-          {/* Table */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
-                {t.tableTitle}
-              </CardTitle>
-              <CardDescription>{t.tableSubtitle}</CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <div className="w-full space-y-4">
-                {/* Search Row */}
-                <div className="relative w-full">
-                  <Search
-                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder={t.searchPlaceholder}
-                    className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-
-                {/* Filters Row */}
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                  <div className="grid flex-1 gap-3">
-                    <div className="flex flex-wrap gap-2">
-                      {statusOptions.map((item) => (
-                        <Button
-                          key={item.value}
-                          variant={
-                            statusFilter === item.value ? "default" : "outline"
-                          }
-                          className="h-10 rounded-xl"
-                          onClick={() => setStatusFilter(item.value)}
-                        >
-                          <span>{item.label}</span>
-                          <Badge
-                            variant={
-                              statusFilter === item.value ? "secondary" : "outline"
-                            }
-                            className="ms-1 rounded-full"
-                          >
-                            {formatNumber(item.count)}
-                          </Badge>
-                        </Button>
-                      ))}
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {typeOptions.map((item) => (
-                        <Button
-                          key={item.value}
-                          variant={typeFilter === item.value ? "default" : "outline"}
-                          className="h-10 rounded-xl"
-                          onClick={() => setTypeFilter(item.value)}
-                        >
-                          <span>{item.label}</span>
-                          <Badge
-                            variant={
-                              typeFilter === item.value ? "secondary" : "outline"
-                            }
-                            className="ms-1 rounded-full"
-                          >
-                            {formatNumber(item.count)}
-                          </Badge>
-                        </Button>
-                      ))}
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {billingOptions.map((item) => (
-                        <Button
-                          key={item.value}
-                          variant={
-                            billingFilter === item.value ? "default" : "outline"
-                          }
-                          className="h-10 rounded-xl"
-                          onClick={() => setBillingFilter(item.value)}
-                        >
-                          {item.label}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    {hasSearchOrFilter ? (
-                      <Button
-                        variant="outline"
-                        className="h-10 rounded-xl"
-                        onClick={clearFilters}
-                      >
-                        {t.clearFilters}
-                      </Button>
-                    ) : null}
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" className="h-10 rounded-xl">
-                          <ColumnsIcon className="h-4 w-4" />
-                          <span>{t.columns}</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-
-                      <DropdownMenuContent align={isArabic ? "start" : "end"}>
-                        {Object.entries(visibleColumns).map(([key, value]) => {
-                          if (key === "actions" && !canViewProductDetails) {
-                            return null;
-                          }
-
-                          return (
-                            <DropdownMenuCheckboxItem
-                              key={key}
-                              checked={value}
-                              onCheckedChange={(checked) =>
-                                setVisibleColumns((current) => ({
-                                  ...current,
-                                  [key]: Boolean(checked),
-                                }))
-                              }
-                            >
-                              {columnLabels[key as keyof VisibleColumns]}
-                            </DropdownMenuCheckboxItem>
-                          );
-                        })}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-
-                <div className="overflow-hidden rounded-xl border">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-12">
-                            <Checkbox
-                              checked={allPageSelected}
-                              onCheckedChange={toggleAllPageRows}
-                              aria-label="Select all"
-                            />
-                          </TableHead>
+                      return (
+                        <TableRow key={product.id}>
+                          {safeVisibleColumns.image ? (
+                            <TableCell>
+                              <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border bg-muted">
+                                {imageSrc ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={imageSrc}
+                                    alt={product.name}
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                                )}
+                              </div>
+                            </TableCell>
+                          ) : null}
 
                           {safeVisibleColumns.product ? (
-                            <SortableHead
-                              label={t.table.product}
-                              onClick={() => toggleSort("name")}
-                            />
-                          ) : null}
-
-                          {safeVisibleColumns.code ? (
-                            <SortableHead
-                              label={t.table.code}
-                              onClick={() => toggleSort("code")}
-                            />
-                          ) : null}
-
-                          {safeVisibleColumns.type ? (
-                            <SortableHead
-                              label={t.table.type}
-                              onClick={() => toggleSort("productType")}
-                            />
-                          ) : null}
-
-                          {safeVisibleColumns.category ? (
-                            <SortableHead
-                              label={t.table.category}
-                              onClick={() => toggleSort("categoryName")}
-                            />
-                          ) : null}
-
-                          {safeVisibleColumns.price ? (
-                            <SortableHead
-                              label={t.table.price}
-                              onClick={() => toggleSort("price")}
-                            />
-                          ) : null}
-
-                          {safeVisibleColumns.billing ? (
-                            <TableHead>{t.table.billing}</TableHead>
-                          ) : null}
-
-                          {safeVisibleColumns.readiness ? (
-                            <TableHead>{t.table.readiness}</TableHead>
-                          ) : null}
-
-                          {safeVisibleColumns.channels ? (
-                            <TableHead>{t.table.channels}</TableHead>
-                          ) : null}
-
-                          {safeVisibleColumns.status ? (
-                            <SortableHead
-                              label={t.table.status}
-                              onClick={() => toggleSort("status")}
-                            />
-                          ) : null}
-
-                          {safeVisibleColumns.updated ? (
-                            <SortableHead
-                              label={t.table.updated}
-                              onClick={() => toggleSort("updatedAt")}
-                            />
-                          ) : null}
-
-                          {safeVisibleColumns.actions ? (
-                            <TableHead>{t.table.actions}</TableHead>
-                          ) : null}
-                        </TableRow>
-                      </TableHeader>
-
-                      <TableBody>
-                        {isLoading ? (
-                          <TableRowsSkeleton
-                            columnsCount={visibleTableColumnsCount}
-                          />
-                        ) : pageRows.length > 0 ? (
-                          pageRows.map((product) => {
-                            const Icon = productIcon(product.productType);
-
-                            return (
-                              <TableRow
-                                key={`${product.id}-${product.code}`}
-                                data-state={
-                                  selectedIds.includes(product.id)
-                                    ? "selected"
-                                    : undefined
-                                }
-                              >
-                                <TableCell>
-                                  <Checkbox
-                                    checked={selectedIds.includes(product.id)}
-                                    onCheckedChange={() => toggleRow(product.id)}
-                                    aria-label="Select row"
-                                  />
-                                </TableCell>
-
-                                {safeVisibleColumns.product ? (
-                                  <TableCell>
-                                    <div className="flex min-w-[260px] items-center gap-4">
-                                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border bg-muted">
-                                        <Icon className="h-5 w-5" />
-                                      </div>
-
-                                      <div className="min-w-0">
-                                        <div className="flex items-center gap-2">
-                                          <span className="truncate font-medium">
-                                            {product.name}
-                                          </span>
-
-                                          {product.isFeatured ? (
-                                            <Sparkles className="size-4 fill-orange-400 text-orange-400" />
-                                          ) : null}
-                                        </div>
-
-                                        <div className="mt-1 truncate text-xs text-muted-foreground">
-                                          {product.shortDescription ||
-                                            product.slug ||
-                                            product.code}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.code ? (
-                                  <TableCell className="font-medium">
-                                    {product.code || `#${product.id}`}
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.type ? (
-                                  <TableCell>
-                                    <div className="space-y-1">
-                                      <Badge
-                                        variant="secondary"
-                                        className="rounded-full"
-                                      >
-                                        {typeLabel(product.productType, locale)}
-                                      </Badge>
-                                      <p className="text-xs text-muted-foreground">
-                                        {fulfillmentLabel(
-                                          product.fulfillmentType,
-                                          locale,
-                                        )}
-                                      </p>
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.category ? (
-                                  <TableCell>
-                                    <div className="flex min-w-[120px] items-center gap-2">
-                                      <Tag className="h-3.5 w-3.5 text-muted-foreground" />
-                                      <span>
-                                        {product.categoryName || t.noCategory}
-                                      </span>
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.price ? (
-                                  <TableCell>
-                                    <div className="space-y-1">
-                                      <p className="font-semibold">
-                                        <SarAmount value={product.effectivePrice} />
-                                      </p>
-
-                                      {product.hasDiscount ? (
-                                        <p className="text-xs text-muted-foreground line-through">
-                                          <SarAmount value={product.price} />
-                                        </p>
-                                      ) : null}
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.billing ? (
-                                  <TableCell>
-                                    <Badge variant="outline" className="rounded-full">
-                                      {billingLabel(product.billingType, locale)}
+                            <TableCell>
+                              <div className="min-w-[220px]">
+                                <div className="flex items-center gap-2">
+                                  <Icon className="h-4 w-4 text-muted-foreground" />
+                                  <span className="font-semibold">{product.name}</span>
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  <Badge variant="outline" className="rounded-full">
+                                    {product.code}
+                                  </Badge>
+                                  {product.isFeatured ? (
+                                    <Badge variant="secondary" className="rounded-full">
+                                      {t.table.offer}
                                     </Badge>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.readiness ? (
-                                  <TableCell>
-                                    <div className="flex min-w-[170px] flex-wrap gap-1">
-                                      {product.canBeOrdered ? (
-                                        <Badge
-                                          variant="outline"
-                                          className="rounded-full"
-                                        >
-                                          {t.orderReady}
-                                        </Badge>
-                                      ) : null}
-
-                                      {product.canBeUsedInContracts ? (
-                                        <Badge
-                                          variant="outline"
-                                          className="rounded-full"
-                                        >
-                                          {t.contractReady}
-                                        </Badge>
-                                      ) : null}
-
-                                      {product.requiresProvider ? (
-                                        <Badge
-                                          variant="outline"
-                                          className="rounded-full"
-                                        >
-                                          {t.requiresProvider}
-                                        </Badge>
-                                      ) : null}
-
-                                      {!product.canBeOrdered &&
-                                      !product.canBeUsedInContracts &&
-                                      !product.requiresProvider ? (
-                                        <span className="text-sm text-muted-foreground">
-                                          -
-                                        </span>
-                                      ) : null}
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.channels ? (
-                                  <TableCell>
-                                    <div className="flex min-w-[170px] flex-wrap gap-1">
-                                      <Badge variant="outline" className="rounded-full">
-                                        {product.isPublic ? t.public : t.private}
-                                      </Badge>
-
-                                      {product.allowOnlinePurchase ? (
-                                        <Badge
-                                          variant="outline"
-                                          className="rounded-full"
-                                        >
-                                          {t.online}
-                                        </Badge>
-                                      ) : null}
-
-                                      {product.allowAgentSale ? (
-                                        <Badge
-                                          variant="outline"
-                                          className="rounded-full"
-                                        >
-                                          {t.agentSale}
-                                        </Badge>
-                                      ) : null}
-
-                                      {product.allowProviderSale ? (
-                                        <Badge
-                                          variant="outline"
-                                          className="rounded-full"
-                                        >
-                                          {t.providerSale}
-                                        </Badge>
-                                      ) : null}
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.status ? (
-                                  <TableCell>
-                                    {statusBadge(product.status, locale)}
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.updated ? (
-                                  <TableCell>
-                                    {formatDate(
-                                      product.updatedAt || product.createdAt,
-                                    )}
-                                  </TableCell>
-                                ) : null}
-
-                                {safeVisibleColumns.actions ? (
-                                  <TableCell>
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button
-                                          variant="ghost"
-                                          className="h-8 w-8 p-0"
-                                        >
-                                          <span className="sr-only">
-                                            {t.actions}
-                                          </span>
-                                          <MoreHorizontal className="h-4 w-4" />
-                                        </Button>
-                                      </DropdownMenuTrigger>
-
-                                      <DropdownMenuContent
-                                        align={isArabic ? "start" : "end"}
-                                      >
-                                        <DropdownMenuLabel>
-                                          {t.actions}
-                                        </DropdownMenuLabel>
-                                        <DropdownMenuSeparator />
-
-                                        {isValidProductId(product.id) ? (
-                                          <DropdownMenuItem asChild>
-                                            <Link
-                                              href={`/system/products/${product.id}`}
-                                            >
-                                              <Eye className="h-4 w-4" />
-                                              {t.viewDetails}
-                                            </Link>
-                                          </DropdownMenuItem>
-                                        ) : null}
-
-                                        <DropdownMenuItem
-                                          onClick={() => {
-                                            navigator.clipboard.writeText(
-                                              String(product.code || "-"),
-                                            );
-                                            toast.success(t.copied);
-                                          }}
-                                        >
-                                          {t.copyCode}
-                                        </DropdownMenuItem>
-
-                                        <DropdownMenuItem
-                                          onClick={() => {
-                                            navigator.clipboard.writeText(
-                                              String(product.id || "-"),
-                                            );
-                                            toast.success(t.copied);
-                                          }}
-                                        >
-                                          {t.copyId}
-                                        </DropdownMenuItem>
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </TableCell>
-                                ) : null}
-                              </TableRow>
-                            );
-                          })
-                        ) : (
-                          <TableRow>
-                            <TableCell
-                              colSpan={visibleTableColumnsCount}
-                              className="h-36 text-center"
-                            >
-                              <div className="mx-auto max-w-md space-y-2">
-                                <p className="font-semibold">
-                                  {hasSearchOrFilter
-                                    ? t.noResultsTitle
-                                    : t.emptyTitle}
-                                </p>
-                                <p className="text-sm text-muted-foreground">
-                                  {hasSearchOrFilter ? t.noResultsText : t.emptyText}
-                                </p>
-
-                                {hasSearchOrFilter ? (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="mt-2 rounded-xl"
-                                    onClick={clearFilters}
-                                  >
-                                    {t.clearFilters}
-                                  </Button>
+                                  ) : null}
+                                </div>
+                                {product.shortDescription ? (
+                                  <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
+                                    {product.shortDescription}
+                                  </p>
                                 ) : null}
                               </div>
                             </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
+                          ) : null}
 
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-                  <div className="flex-1 text-sm text-muted-foreground">
-                    {formatNumber(selectedIds.length)} /{" "}
-                    {formatNumber(sortedProducts.length)} {t.selectedRows}
-                  </div>
+                          {safeVisibleColumns.provider ? (
+                            <TableCell>
+                              <span className="text-sm">
+                                {providerLabel(product.provider, locale) || t.noProvider}
+                              </span>
+                            </TableCell>
+                          ) : null}
 
-                  <div className="text-sm text-muted-foreground">
-                    {t.page} {formatNumber(pageIndex + 1)} {t.from}{" "}
-                    {formatNumber(pageCount)}
-                  </div>
+                          {safeVisibleColumns.type ? (
+                            <TableCell>
+                              <Badge variant="secondary" className="rounded-full">
+                                {t.type[product.productType]}
+                              </Badge>
+                            </TableCell>
+                          ) : null}
 
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl"
-                      onClick={() =>
-                        setPageIndex((current) => Math.max(current - 1, 0))
-                      }
-                      disabled={pageIndex === 0}
-                    >
-                      {t.previous}
-                    </Button>
+                          {safeVisibleColumns.category ? (
+                            <TableCell>{product.categoryName || "-"}</TableCell>
+                          ) : null}
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl"
-                      onClick={() =>
-                        setPageIndex((current) =>
-                          Math.min(current + 1, pageCount - 1),
-                        )
-                      }
-                      disabled={pageIndex >= pageCount - 1}
-                    >
-                      {t.next}
-                    </Button>
-                  </div>
-                </div>
+                          {safeVisibleColumns.price ? (
+                            <TableCell>
+                              <div className="space-y-1">
+                                <p className="font-semibold">
+                                  <SarAmount value={product.effectivePrice} />
+                                </p>
+                                {product.salePrice > 0 ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    <SarAmount value={product.price} />
+                                  </p>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                          ) : null}
+
+                          {safeVisibleColumns.offer ? (
+                            <TableCell>
+                              <div className="space-y-1">
+                                {visibilityBadge(product.isOffer, t.table.offer)}
+                                {product.offerTitle ? (
+                                  <p className="line-clamp-1 text-xs text-muted-foreground">
+                                    {product.offerTitle}
+                                  </p>
+                                ) : null}
+                                {(product.offerStartDate || product.offerEndDate) ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    {product.offerStartDate || "-"} / {product.offerEndDate || "-"}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </TableCell>
+                          ) : null}
+
+                          {safeVisibleColumns.visibility ? (
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                {visibilityBadge(product.showOnLanding, t.filterLanding)}
+                                {visibilityBadge(product.showOnMobile, t.filterMobile)}
+                                {visibilityBadge(product.showOnOffers, t.filterOffers)}
+                              </div>
+                            </TableCell>
+                          ) : null}
+
+                          {safeVisibleColumns.readiness ? (
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                {visibilityBadge(product.canBeOrdered, t.table.readiness)}
+                                {visibilityBadge(product.canBeUsedInContracts, t.filterOffer)}
+                              </div>
+                            </TableCell>
+                          ) : null}
+
+                          {safeVisibleColumns.status ? (
+                            <TableCell>{statusBadge(product.status, t)}</TableCell>
+                          ) : null}
+
+                          {safeVisibleColumns.updated ? (
+                            <TableCell>{formatDate(product.updatedAt)}</TableCell>
+                          ) : null}
+
+                          {safeVisibleColumns.actions ? (
+                            <TableCell>
+                              <Button asChild variant="outline" size="sm">
+                                <Link href={`/system/products/${product.id}`}>
+                                  <Eye className="me-2 h-4 w-4" />
+                                  {t.details}
+                                </Link>
+                              </Button>
+                            </TableCell>
+                          ) : null}
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="flex flex-col gap-3 border-t p-4 md:flex-row md:items-center md:justify-between">
+              <p className="text-sm text-muted-foreground">
+                {t.page} {formatNumber(pagination.page)} {t.of}{" "}
+                {formatNumber(pagination.total_pages)}
+              </p>
+
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!pagination.has_previous || isLoading}
+                  onClick={() => setPageIndex((current) => Math.max(1, current - 1))}
+                >
+                  <ChevronRight className="me-2 h-4 w-4" />
+                  {isArabic ? "السابق" : "Previous"}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!pagination.has_next || isLoading}
+                  onClick={() => setPageIndex((current) => current + 1)}
+                >
+                  {isArabic ? "التالي" : "Next"}
+                  <ChevronLeft className="ms-2 h-4 w-4" />
+                </Button>
               </div>
-            </CardContent>
-          </Card>
-        </>
-      ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
-  );
-}
-
-/* ============================================================
-   Small Components
-============================================================ */
-
-function SortableHead({
-  label,
-  onClick,
-}: {
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <TableHead>
-      <Button className="-ms-3" variant="ghost" onClick={onClick}>
-        {label}
-        <ArrowDownUp className="h-3 w-3" />
-      </Button>
-    </TableHead>
   );
 }

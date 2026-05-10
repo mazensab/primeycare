@@ -7,6 +7,8 @@
 # ✅ Validation helpers
 # ✅ Filters / pagination
 # ✅ Nested benefits / pricing tiers / service items sync
+# ✅ Provider-linked medical offers
+# ✅ Landing / Mobile / Offers marketing fields
 # ✅ جاهز للربط مع الطلبات والعقود ومقدمي الخدمة
 # ============================================================
 
@@ -20,6 +22,7 @@ from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Q, QuerySet
+from django.utils import timezone
 
 from products.models import (
     Product,
@@ -28,6 +31,7 @@ from products.models import (
     ProductPricingTier,
     ProductServiceItem,
 )
+from providers.models import Provider
 
 
 # ============================================================
@@ -89,7 +93,12 @@ def normalize_text(value: Any, default: str = "") -> str:
     if value is None:
         return default
 
-    return str(value).strip()
+    value_str = str(value).strip()
+
+    if value_str.lower() in {"none", "null", "nan"}:
+        return default
+
+    return value_str
 
 
 def normalize_choice(value: Any, default: str) -> str:
@@ -138,10 +147,19 @@ def apply_product_filters(
     product_type = normalize_text(params.get("product_type"))
     billing_type = normalize_text(params.get("billing_type"))
     fulfillment_type = normalize_text(params.get("fulfillment_type"))
+
     category_id = parse_int(params.get("category_id"))
+    provider_id = parse_int(params.get("provider_id"))
 
     is_public = parse_bool(params.get("is_public"))
     is_featured = parse_bool(params.get("is_featured"))
+    is_offer = parse_bool(params.get("is_offer"))
+    current_offer = parse_bool(params.get("current_offer"))
+
+    show_on_landing = parse_bool(params.get("show_on_landing"))
+    show_on_mobile = parse_bool(params.get("show_on_mobile"))
+    show_on_offers = parse_bool(params.get("show_on_offers"))
+
     allow_online_purchase = parse_bool(params.get("allow_online_purchase"))
     allow_agent_sale = parse_bool(params.get("allow_agent_sale"))
     allow_provider_sale = parse_bool(params.get("allow_provider_sale"))
@@ -150,8 +168,13 @@ def apply_product_filters(
     requires_provider = parse_bool(params.get("requires_provider"))
     is_taxable = parse_bool(params.get("is_taxable"))
 
+    has_thumbnail_image = parse_bool(params.get("has_thumbnail_image"))
+    has_marketing_image = parse_bool(params.get("has_marketing_image"))
+
     min_price = parse_decimal(params.get("min_price"))
     max_price = parse_decimal(params.get("max_price"))
+
+    today = timezone.localdate()
 
     if q:
         queryset = queryset.filter(
@@ -163,8 +186,16 @@ def apply_product_filters(
             | Q(features__icontains=q)
             | Q(terms_and_conditions__icontains=q)
             | Q(tags__icontains=q)
+            | Q(offer_title__icontains=q)
+            | Q(offer_subtitle__icontains=q)
+            | Q(offer_badge__icontains=q)
+            | Q(offer_terms__icontains=q)
             | Q(category__name__icontains=q)
             | Q(category__code__icontains=q)
+            | Q(provider__name__icontains=q)
+            | Q(provider__name_ar__icontains=q)
+            | Q(provider__name_en__icontains=q)
+            | Q(provider__code__icontains=q)
         )
 
     if status_value:
@@ -182,11 +213,26 @@ def apply_product_filters(
     if category_id:
         queryset = queryset.filter(category_id=category_id)
 
+    if provider_id:
+        queryset = queryset.filter(provider_id=provider_id)
+
     if is_public is not None:
         queryset = queryset.filter(is_public=is_public)
 
     if is_featured is not None:
         queryset = queryset.filter(is_featured=is_featured)
+
+    if is_offer is not None:
+        queryset = queryset.filter(is_offer=is_offer)
+
+    if show_on_landing is not None:
+        queryset = queryset.filter(show_on_landing=show_on_landing)
+
+    if show_on_mobile is not None:
+        queryset = queryset.filter(show_on_mobile=show_on_mobile)
+
+    if show_on_offers is not None:
+        queryset = queryset.filter(show_on_offers=show_on_offers)
 
     if allow_online_purchase is not None:
         queryset = queryset.filter(allow_online_purchase=allow_online_purchase)
@@ -209,13 +255,76 @@ def apply_product_filters(
     if is_taxable is not None:
         queryset = queryset.filter(is_taxable=is_taxable)
 
+    if has_thumbnail_image is True:
+        queryset = queryset.filter(
+            Q(thumbnail_image_url__isnull=False, thumbnail_image_url__gt="")
+            | Q(thumbnail_image_drive_file_id__isnull=False, thumbnail_image_drive_file_id__gt="")
+        )
+
+    if has_thumbnail_image is False:
+        queryset = queryset.exclude(
+            Q(thumbnail_image_url__isnull=False, thumbnail_image_url__gt="")
+            | Q(thumbnail_image_drive_file_id__isnull=False, thumbnail_image_drive_file_id__gt="")
+        )
+
+    if has_marketing_image is True:
+        queryset = queryset.filter(
+            Q(marketing_image_url__isnull=False, marketing_image_url__gt="")
+            | Q(marketing_image_drive_file_id__isnull=False, marketing_image_drive_file_id__gt="")
+        )
+
+    if has_marketing_image is False:
+        queryset = queryset.exclude(
+            Q(marketing_image_url__isnull=False, marketing_image_url__gt="")
+            | Q(marketing_image_drive_file_id__isnull=False, marketing_image_drive_file_id__gt="")
+        )
+
+    if current_offer is True:
+        queryset = queryset.filter(
+            is_offer=True,
+            status=Product.Status.ACTIVE,
+        ).filter(
+            Q(offer_start_date__isnull=True) | Q(offer_start_date__lte=today),
+            Q(offer_end_date__isnull=True) | Q(offer_end_date__gte=today),
+        )
+
+    if current_offer is False:
+        queryset = queryset.exclude(
+            is_offer=True,
+            status=Product.Status.ACTIVE,
+            offer_start_date__lte=today,
+            offer_end_date__gte=today,
+        )
+
     if min_price is not None:
         queryset = queryset.filter(price__gte=min_price)
 
     if max_price is not None:
         queryset = queryset.filter(price__lte=max_price)
 
-    return queryset
+    ordering = normalize_text(params.get("ordering") or params.get("order_by"))
+
+    allowed_ordering = {
+        "name": "name",
+        "-name": "-name",
+        "price": "price",
+        "-price": "-price",
+        "sale_price": "sale_price",
+        "-sale_price": "-sale_price",
+        "created_at": "created_at",
+        "-created_at": "-created_at",
+        "sort_order": "sort_order",
+        "-sort_order": "-sort_order",
+        "offer_start_date": "offer_start_date",
+        "-offer_start_date": "-offer_start_date",
+        "offer_end_date": "offer_end_date",
+        "-offer_end_date": "-offer_end_date",
+    }
+
+    if ordering in allowed_ordering:
+        queryset = queryset.order_by(allowed_ordering[ordering], "-id")
+
+    return queryset.distinct()
 
 
 def apply_category_filters(
@@ -260,6 +369,27 @@ def serialize_category(obj: ProductCategory) -> dict[str, Any]:
         "updated_by_id": obj.updated_by_id,
         "created_at": obj.created_at.isoformat() if obj.created_at else None,
         "updated_at": obj.updated_at.isoformat() if obj.updated_at else None,
+    }
+
+
+def serialize_provider_for_product(provider: Provider | None) -> dict[str, Any] | None:
+    if not provider:
+        return None
+
+    return {
+        "id": provider.id,
+        "code": getattr(provider, "code", ""),
+        "name": getattr(provider, "name", ""),
+        "name_ar": getattr(provider, "name_ar", ""),
+        "name_en": getattr(provider, "name_en", ""),
+        "provider_type": getattr(provider, "provider_type", ""),
+        "status": getattr(provider, "status", ""),
+        "city": getattr(provider, "city", ""),
+        "region": getattr(provider, "region", ""),
+        "logo_url": getattr(provider, "logo_url", ""),
+        "image_url": getattr(provider, "image_url", ""),
+        "drive_folder_id": getattr(provider, "drive_folder_id", ""),
+        "drive_folder_url": getattr(provider, "drive_folder_url", ""),
     }
 
 
@@ -335,14 +465,32 @@ def serialize_product(
         "product_type": obj.product_type,
         "category_id": obj.category_id,
         "category": serialize_category(obj.category) if obj.category else None,
+        "provider_id": obj.provider_id,
+        "provider": serialize_provider_for_product(obj.provider) if getattr(obj, "provider", None) else None,
         "status": obj.status,
         "billing_type": obj.billing_type,
         "fulfillment_type": obj.fulfillment_type,
+
         "short_description": obj.short_description,
         "description": obj.description,
         "terms_and_conditions": obj.terms_and_conditions,
         "features": obj.features,
         "tags": obj.tags,
+
+        "thumbnail_image_url": obj.thumbnail_image_url,
+        "thumbnail_image_drive_file_id": obj.thumbnail_image_drive_file_id,
+        "thumbnail_image_drive_view_url": obj.thumbnail_image_drive_view_url,
+        "thumbnail_image_folder_id": obj.thumbnail_image_folder_id,
+        "thumbnail_image_folder_url": obj.thumbnail_image_folder_url,
+        "thumbnail_image_alt_text": obj.thumbnail_image_alt_text,
+
+        "marketing_image_url": obj.marketing_image_url,
+        "marketing_image_drive_file_id": obj.marketing_image_drive_file_id,
+        "marketing_image_drive_view_url": obj.marketing_image_drive_view_url,
+        "marketing_image_folder_id": obj.marketing_image_folder_id,
+        "marketing_image_folder_url": obj.marketing_image_folder_url,
+        "marketing_image_alt_text": obj.marketing_image_alt_text,
+
         "currency_code": obj.currency_code,
         "price": str(obj.price),
         "sale_price": str(obj.sale_price) if obj.sale_price is not None else None,
@@ -353,8 +501,21 @@ def serialize_product(
         "has_discount": obj.has_discount,
         "is_taxable": obj.is_taxable,
         "tax_rate": str(obj.tax_rate),
+
         "duration_value": obj.duration_value,
         "duration_unit": obj.duration_unit,
+
+        "is_offer": obj.is_offer,
+        "offer_title": obj.offer_title,
+        "offer_subtitle": obj.offer_subtitle,
+        "offer_badge": obj.offer_badge,
+        "offer_terms": obj.offer_terms,
+        "offer_start_date": obj.offer_start_date.isoformat() if obj.offer_start_date else None,
+        "offer_end_date": obj.offer_end_date.isoformat() if obj.offer_end_date else None,
+        "show_on_landing": obj.show_on_landing,
+        "show_on_mobile": obj.show_on_mobile,
+        "show_on_offers": obj.show_on_offers,
+
         "is_public": obj.is_public,
         "is_featured": obj.is_featured,
         "requires_approval": obj.requires_approval,
@@ -364,13 +525,20 @@ def serialize_product(
         "can_be_ordered": obj.can_be_ordered,
         "can_be_used_in_contracts": obj.can_be_used_in_contracts,
         "requires_provider": obj.requires_provider,
+
         "max_discount_rate": str(obj.max_discount_rate),
         "default_agent_commission_rate": str(obj.default_agent_commission_rate),
+
         "is_active_product": obj.is_active_product,
         "is_card": obj.is_card,
         "is_program": obj.is_program,
         "is_service": obj.is_service,
         "is_membership": obj.is_membership,
+        "is_provider_product": obj.is_provider_product,
+        "has_thumbnail_image": obj.has_thumbnail_image,
+        "has_marketing_image": obj.has_marketing_image,
+        "is_current_offer": obj.is_current_offer,
+
         "sort_order": obj.sort_order,
         "created_by_id": obj.created_by_id,
         "updated_by_id": obj.updated_by_id,
@@ -479,6 +647,21 @@ def _resolve_category(payload: dict[str, Any]) -> ProductCategory | None:
         raise ValidationError("Selected category does not exist.")
 
 
+def _resolve_provider(payload: dict[str, Any]) -> Provider | None:
+    if "provider_id" not in payload:
+        return None
+
+    provider_id = payload.get("provider_id")
+
+    if provider_id in (None, "", 0, "0"):
+        return None
+
+    try:
+        return Provider.objects.get(pk=int(provider_id))
+    except (Provider.DoesNotExist, TypeError, ValueError):
+        raise ValidationError("Selected provider does not exist.")
+
+
 def _apply_product_payload(
     *,
     product: Product,
@@ -497,6 +680,9 @@ def _apply_product_payload(
 
     if "category_id" in payload:
         product.category = _resolve_category(payload)
+
+    if "provider_id" in payload:
+        product.provider = _resolve_provider(payload)
 
     if is_create or "status" in payload:
         product.status = normalize_choice(
@@ -522,6 +708,22 @@ def _apply_product_payload(
         "terms_and_conditions",
         "features",
         "tags",
+        "offer_title",
+        "offer_subtitle",
+        "offer_badge",
+        "offer_terms",
+        "thumbnail_image_url",
+        "thumbnail_image_drive_file_id",
+        "thumbnail_image_drive_view_url",
+        "thumbnail_image_folder_id",
+        "thumbnail_image_folder_url",
+        "thumbnail_image_alt_text",
+        "marketing_image_url",
+        "marketing_image_drive_file_id",
+        "marketing_image_drive_view_url",
+        "marketing_image_folder_id",
+        "marketing_image_folder_url",
+        "marketing_image_alt_text",
     )
 
     for field_name in text_fields:
@@ -570,9 +772,19 @@ def _apply_product_payload(
             Product.DurationUnit.NONE,
         )
 
+    if is_create or "offer_start_date" in payload:
+        product.offer_start_date = payload.get("offer_start_date") or None
+
+    if is_create or "offer_end_date" in payload:
+        product.offer_end_date = payload.get("offer_end_date") or None
+
     bool_fields_with_defaults = {
         "is_public": True,
         "is_featured": False,
+        "is_offer": False,
+        "show_on_landing": False,
+        "show_on_mobile": False,
+        "show_on_offers": False,
         "requires_approval": False,
         "allow_online_purchase": True,
         "allow_agent_sale": True,
@@ -585,8 +797,14 @@ def _apply_product_payload(
     for field_name, default_value in bool_fields_with_defaults.items():
         if is_create or field_name in payload:
             current_value = getattr(product, field_name, default_value)
-            parsed_value = parse_bool(payload.get(field_name), current_value if not is_create else default_value)
+            parsed_value = parse_bool(
+                payload.get(field_name),
+                current_value if not is_create else default_value,
+            )
             setattr(product, field_name, default_value if parsed_value is None else parsed_value)
+
+    if product.provider_id:
+        product.requires_provider = True
 
     if is_create or "max_discount_rate" in payload:
         product.max_discount_rate = parse_decimal(
@@ -631,6 +849,7 @@ def create_product(
 ) -> Product:
     product = Product()
     product.category = _resolve_category(payload)
+    product.provider = _resolve_provider(payload)
 
     _apply_product_payload(
         product=product,
@@ -672,6 +891,9 @@ def update_product(
 ) -> Product:
     if "category_id" in payload:
         instance.category = _resolve_category(payload)
+
+    if "provider_id" in payload:
+        instance.provider = _resolve_provider(payload)
 
     _apply_product_payload(
         product=instance,
@@ -977,30 +1199,70 @@ def sync_product_service_items(
 # ============================================================
 
 def get_orderable_products_queryset() -> QuerySet[Product]:
-    return Product.objects.select_related("category").filter(
+    return Product.objects.select_related("category", "provider").filter(
         status=Product.Status.ACTIVE,
         can_be_ordered=True,
     )
 
 
 def get_contract_products_queryset() -> QuerySet[Product]:
-    return Product.objects.select_related("category").filter(
+    return Product.objects.select_related("category", "provider").filter(
         status=Product.Status.ACTIVE,
         can_be_used_in_contracts=True,
     )
 
 
 def get_public_products_queryset() -> QuerySet[Product]:
-    return Product.objects.select_related("category").filter(
+    return Product.objects.select_related("category", "provider").filter(
         status=Product.Status.ACTIVE,
         is_public=True,
     )
 
 
 def get_featured_products_queryset() -> QuerySet[Product]:
-    return Product.objects.select_related("category").filter(
+    return Product.objects.select_related("category", "provider").filter(
         status=Product.Status.ACTIVE,
         is_featured=True,
+    )
+
+
+def get_landing_products_queryset() -> QuerySet[Product]:
+    today = timezone.localdate()
+
+    return Product.objects.select_related("category", "provider").filter(
+        status=Product.Status.ACTIVE,
+        is_public=True,
+        show_on_landing=True,
+    ).filter(
+        Q(offer_start_date__isnull=True) | Q(offer_start_date__lte=today),
+        Q(offer_end_date__isnull=True) | Q(offer_end_date__gte=today),
+    )
+
+
+def get_mobile_products_queryset() -> QuerySet[Product]:
+    today = timezone.localdate()
+
+    return Product.objects.select_related("category", "provider").filter(
+        status=Product.Status.ACTIVE,
+        is_public=True,
+        show_on_mobile=True,
+    ).filter(
+        Q(offer_start_date__isnull=True) | Q(offer_start_date__lte=today),
+        Q(offer_end_date__isnull=True) | Q(offer_end_date__gte=today),
+    )
+
+
+def get_offer_products_queryset() -> QuerySet[Product]:
+    today = timezone.localdate()
+
+    return Product.objects.select_related("category", "provider").filter(
+        status=Product.Status.ACTIVE,
+        is_public=True,
+        is_offer=True,
+        show_on_offers=True,
+    ).filter(
+        Q(offer_start_date__isnull=True) | Q(offer_start_date__lte=today),
+        Q(offer_end_date__isnull=True) | Q(offer_end_date__gte=today),
     )
 
 
@@ -1010,6 +1272,8 @@ def calculate_product_price_snapshot(product: Product) -> dict[str, Any]:
         "product_code": product.code,
         "product_name": product.name,
         "product_type": product.product_type,
+        "provider_id": product.provider_id,
+        "provider_name": getattr(product.provider, "name", "") if getattr(product, "provider", None) else "",
         "currency_code": product.currency_code,
         "price": str(product.price),
         "sale_price": str(product.sale_price) if product.sale_price is not None else None,
@@ -1020,4 +1284,10 @@ def calculate_product_price_snapshot(product: Product) -> dict[str, Any]:
         "total_price_with_tax": str(product.total_price_with_tax),
         "max_discount_rate": str(product.max_discount_rate),
         "default_agent_commission_rate": str(product.default_agent_commission_rate),
+        "is_offer": product.is_offer,
+        "offer_title": product.offer_title,
+        "offer_start_date": product.offer_start_date.isoformat() if product.offer_start_date else None,
+        "offer_end_date": product.offer_end_date.isoformat() if product.offer_end_date else None,
+        "marketing_image_url": product.marketing_image_url,
+        "thumbnail_image_url": product.thumbnail_image_url,
     }

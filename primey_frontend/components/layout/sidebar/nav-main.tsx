@@ -1,5 +1,23 @@
 "use client";
 
+/* =====================================================
+   📂 components/nav-main.tsx
+   🧠 Primey Care — Main Sidebar Navigation
+
+   التعديل الحالي:
+   - اعتماد مقدمي الخدمة Providers كموديول رسمي لشبكة الخدمة.
+   - إزالة المراكز Centers من السايدر لأنها ليست موديول باكند مستقل.
+   - إبقاء aliases القديمة /center و /company لمساحة مقدم الخدمة لتجنب كسر الروابط.
+   - تنظيف السايدر من روابط القائمة والإنشاء داخل الموديولات التشغيلية.
+   - العمليات تعرض فقط لوحات الموديولات الرئيسية.
+   - شبكة الخدمة تعرض فقط: مقدمو الخدمة، العقود، المندوبون.
+   - المالية تعرض فقط: الخزينة، المحاسبة.
+   - الإشعارات والتواصل تعرض فقط: الإشعارات، واتساب.
+   - النظام يعرض فقط: مستخدمو النظام، الإعدادات.
+   - الصفحات الداخلية تكون أزرار داخل صفحة لوحة كل موديول.
+   - عدم إضافة صفحات التفاصيل [id] للسايدر.
+===================================================== */
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -22,37 +40,26 @@ import {
 } from "@/components/ui/sidebar";
 
 import {
+  BarChart3,
+  BellRing,
+  Boxes,
+  Briefcase,
+  Calculator,
   ChevronLeft,
   ChevronRight,
-  Home,
-  Building2,
   CreditCard,
   FileText,
+  Home,
+  MessageCircle,
   Package,
+  ReceiptText,
   Settings,
+  ShieldCheck,
+  ShoppingCart,
+  Stethoscope,
+  UserCog,
   Users,
   Wallet,
-  UserCog,
-  BarChart3,
-  MessageCircle,
-  Send,
-  Boxes,
-  ShoppingCart,
-  Briefcase,
-  ShieldCheck,
-  ReceiptText,
-  Plus,
-  ListChecks,
-  Stethoscope,
-  Calculator,
-  BookOpenCheck,
-  Landmark,
-  PieChart,
-  Layers3,
-  Banknote,
-  ArrowLeftRight,
-  BellRing,
-  Inbox,
   type LucideIcon,
 } from "lucide-react";
 
@@ -123,419 +130,126 @@ type NavMainProps = {
 type SidebarAuthSession = Partial<AuthSession>;
 
 /* =====================================================
-   SYSTEM NAV — PRIMEY CARE
+   SYSTEM NAV
 ===================================================== */
 
 const systemNavItems: NavGroup[] = [
   {
-    title: {
-      ar: "لوحات النظام",
-      en: "System Workspace",
-    },
+    title: { ar: "", en: "" },
     items: [
       {
-        title: { ar: "الرئيسية", en: "Home" },
+        title: { ar: "لوحة التحكم", en: "Dashboard" },
         href: "/system",
         icon: Home,
         permission: PERMISSIONS.SYSTEM_VIEW,
         workspaces: ["system"],
       },
       {
-        title: { ar: "المراكز", en: "Centers" },
-        href: "/system/centers",
-        icon: Building2,
-        permission: PERMISSIONS.PROVIDERS_VIEW,
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة المراكز", en: "Centers Overview" },
-            href: "/system/centers",
-            icon: Building2,
-            permission: PERMISSIONS.PROVIDERS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "قائمة المراكز", en: "Centers List" },
-            href: "/system/centers/list",
-            icon: ListChecks,
-            permission: PERMISSIONS.PROVIDERS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إنشاء مركز", en: "Create Center" },
-            href: "/system/centers/create",
-            icon: Plus,
-            permission: PERMISSIONS.PROVIDERS_CREATE,
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "العملاء", en: "Customers" },
-        href: "/system/customers",
-        icon: Users,
-        permission: PERMISSIONS.CUSTOMERS_VIEW,
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة العملاء", en: "Customers Overview" },
-            href: "/system/customers",
-            icon: Users,
-            permission: PERMISSIONS.CUSTOMERS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "قائمة العملاء", en: "Customers List" },
-            href: "/system/customers/list",
-            icon: ListChecks,
-            permission: PERMISSIONS.CUSTOMERS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إنشاء عميل", en: "Create Customer" },
-            href: "/system/customers/create",
-            icon: Plus,
-            permission: PERMISSIONS.CUSTOMERS_CREATE,
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "المندوبون", en: "Agents" },
-        href: "/system/agents",
-        icon: Briefcase,
-        permission: PERMISSIONS.AGENTS_VIEW,
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة المندوبين", en: "Agents Overview" },
-            href: "/system/agents",
-            icon: Briefcase,
-            permission: PERMISSIONS.AGENTS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "قائمة المندوبين", en: "Agents List" },
-            href: "/system/agents/list",
-            icon: ListChecks,
-            permission: PERMISSIONS.AGENTS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إنشاء مندوب", en: "Create Agent" },
-            href: "/system/agents/create",
-            icon: Plus,
-            permission: PERMISSIONS.AGENTS_CREATE,
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "المنتجات", en: "Products" },
-        href: "/system/products",
-        icon: Boxes,
-        permission: PERMISSIONS.PRODUCTS_VIEW,
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة المنتجات", en: "Products Overview" },
-            href: "/system/products",
-            icon: Boxes,
-            permission: PERMISSIONS.PRODUCTS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "قائمة المنتجات", en: "Products List" },
-            href: "/system/products/list",
-            icon: ListChecks,
-            permission: PERMISSIONS.PRODUCTS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إنشاء منتج", en: "Create Product" },
-            href: "/system/products/create",
-            icon: Plus,
-            permission: PERMISSIONS.PRODUCTS_CREATE,
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "الطلبات", en: "Orders" },
-        href: "/system/orders",
-        icon: ShoppingCart,
-        permission: PERMISSIONS.ORDERS_VIEW,
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة الطلبات", en: "Orders Overview" },
-            href: "/system/orders",
-            icon: ShoppingCart,
-            permission: PERMISSIONS.ORDERS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "قائمة الطلبات", en: "Orders List" },
-            href: "/system/orders/list",
-            icon: ListChecks,
-            permission: PERMISSIONS.ORDERS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إنشاء طلب", en: "Create Order" },
-            href: "/system/orders/create",
-            icon: Plus,
-            permission: PERMISSIONS.ORDERS_CREATE,
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "مقدمو الخدمة", en: "Providers" },
-        href: "/system/providers",
-        icon: Stethoscope,
-        permission: PERMISSIONS.PROVIDERS_VIEW,
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة مقدمي الخدمة", en: "Providers Overview" },
-            href: "/system/providers",
-            icon: Stethoscope,
-            permission: PERMISSIONS.PROVIDERS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "قائمة مقدمي الخدمة", en: "Providers List" },
-            href: "/system/providers/list",
-            icon: ListChecks,
-            permission: PERMISSIONS.PROVIDERS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إنشاء مقدم خدمة", en: "Create Provider" },
-            href: "/system/providers/create",
-            icon: Plus,
-            permission: PERMISSIONS.PROVIDERS_CREATE,
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "العقود", en: "Contracts" },
-        href: "/system/contracts",
-        icon: FileText,
-        permission: PERMISSIONS.CONTRACTS_VIEW,
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة العقود", en: "Contracts Overview" },
-            href: "/system/contracts",
-            icon: FileText,
-            permission: PERMISSIONS.CONTRACTS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "قائمة العقود", en: "Contracts List" },
-            href: "/system/contracts/list",
-            icon: ListChecks,
-            permission: PERMISSIONS.CONTRACTS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إنشاء عقد", en: "Create Contract" },
-            href: "/system/contracts/create",
-            icon: Plus,
-            permission: PERMISSIONS.CONTRACTS_CREATE,
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "الفواتير", en: "Invoices" },
-        href: "/system/invoices",
-        icon: ReceiptText,
-        permission: PERMISSIONS.INVOICES_VIEW,
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة الفواتير", en: "Invoices Overview" },
-            href: "/system/invoices",
-            icon: ReceiptText,
-            permission: PERMISSIONS.INVOICES_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "قائمة الفواتير", en: "Invoices List" },
-            href: "/system/invoices/list",
-            icon: ListChecks,
-            permission: PERMISSIONS.INVOICES_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إنشاء فاتورة", en: "Create Invoice" },
-            href: "/system/invoices/create",
-            icon: Plus,
-            permission: PERMISSIONS.INVOICES_CREATE,
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "المدفوعات", en: "Payments" },
-        href: "/system/payments",
-        icon: CreditCard,
-        permission: PERMISSIONS.PAYMENTS_VIEW,
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة المدفوعات", en: "Payments Overview" },
-            href: "/system/payments",
-            icon: CreditCard,
-            permission: PERMISSIONS.PAYMENTS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "قائمة المدفوعات", en: "Payments List" },
-            href: "/system/payments/list",
-            icon: ListChecks,
-            permission: PERMISSIONS.PAYMENTS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "تسجيل دفعة", en: "Create Payment" },
-            href: "/system/payments/create",
-            icon: Plus,
-            permission: PERMISSIONS.PAYMENTS_CREATE,
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "المحاسبة", en: "Accounting" },
-        href: "/system/accounting",
-        icon: BarChart3,
-        permission: PERMISSIONS.ACCOUNTING_VIEW,
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة المحاسبة", en: "Accounting Overview" },
-            href: "/system/accounting",
-            icon: Calculator,
-            permission: PERMISSIONS.ACCOUNTING_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "دليل الحسابات", en: "Chart of Accounts" },
-            href: "/system/accounting/accounts",
-            icon: Layers3,
-            permission: PERMISSIONS.ACCOUNTING_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "القيود اليومية", en: "Journal Entries" },
-            href: "/system/accounting/journals",
-            icon: ReceiptText,
-            permission: PERMISSIONS.ACCOUNTING_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "دفتر الأستاذ", en: "General Ledger" },
-            href: "/system/accounting/ledger",
-            icon: BookOpenCheck,
-            permission: PERMISSIONS.ACCOUNTING_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "ميزان المراجعة", en: "Trial Balance" },
-            href: "/system/accounting/trial-balance",
-            icon: ListChecks,
-            permission: PERMISSIONS.ACCOUNTING_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "الأرباح والخسائر", en: "Profit & Loss" },
-            href: "/system/accounting/profit-loss",
-            icon: PieChart,
-            permission: PERMISSIONS.ACCOUNTING_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "المركز المالي", en: "Balance Sheet" },
-            href: "/system/accounting/balance-sheet",
-            icon: Landmark,
-            permission: PERMISSIONS.ACCOUNTING_VIEW,
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "الخزينة", en: "Treasury" },
+        title: { ar: "المالية", en: "Finance" },
         href: "/system/treasury",
-        icon: Wallet,
-        permission: PERMISSIONS.TREASURY_VIEW,
+        icon: Calculator,
+        anyPermissions: [
+          PERMISSIONS.ACCOUNTING_VIEW,
+          PERMISSIONS.TREASURY_VIEW,
+        ],
         workspaces: ["system"],
         items: [
           {
-            title: { ar: "لوحة الخزينة", en: "Treasury Overview" },
+            title: { ar: "الخزينة", en: "Treasury" },
             href: "/system/treasury",
             icon: Wallet,
             permission: PERMISSIONS.TREASURY_VIEW,
             workspaces: ["system"],
           },
           {
-            title: { ar: "حسابات الخزينة", en: "Treasury Accounts" },
-            href: "/system/treasury/accounts",
-            icon: Wallet,
-            permission: PERMISSIONS.TREASURY_VIEW,
+            title: { ar: "المحاسبة", en: "Accounting" },
+            href: "/system/accounting",
+            icon: Calculator,
+            permission: PERMISSIONS.ACCOUNTING_VIEW,
+            workspaces: ["system"],
+          },
+        ],
+      },
+      {
+        title: { ar: "شبكة الخدمة", en: "Service Network" },
+        href: "/system/providers",
+        icon: Stethoscope,
+        anyPermissions: [
+          PERMISSIONS.PROVIDERS_VIEW,
+          PERMISSIONS.CONTRACTS_VIEW,
+          PERMISSIONS.AGENTS_VIEW,
+        ],
+        workspaces: ["system"],
+        items: [
+          {
+            title: { ar: "مقدمو الخدمة", en: "Providers" },
+            href: "/system/providers",
+            icon: Stethoscope,
+            permission: PERMISSIONS.PROVIDERS_VIEW,
             workspaces: ["system"],
           },
           {
-            title: { ar: "إنشاء حساب خزينة", en: "Create Treasury Account" },
-            href: "/system/treasury/accounts/create",
-            icon: Plus,
-            permission: PERMISSIONS.TREASURY_CREATE,
+            title: { ar: "العقود", en: "Contracts" },
+            href: "/system/contracts",
+            icon: FileText,
+            permission: PERMISSIONS.CONTRACTS_VIEW,
             workspaces: ["system"],
           },
           {
-            title: { ar: "الصناديق النقدية", en: "Cashboxes" },
-            href: "/system/treasury/cashboxes",
-            icon: Banknote,
-            permission: PERMISSIONS.TREASURY_VIEW,
+            title: { ar: "المندوبون", en: "Agents" },
+            href: "/system/agents",
+            icon: Briefcase,
+            permission: PERMISSIONS.AGENTS_VIEW,
+            workspaces: ["system"],
+          },
+        ],
+      },
+      {
+        title: { ar: "العمليات", en: "Operations" },
+        href: "/system/customers",
+        icon: ShoppingCart,
+        anyPermissions: [
+          PERMISSIONS.CUSTOMERS_VIEW,
+          PERMISSIONS.ORDERS_VIEW,
+          PERMISSIONS.INVOICES_VIEW,
+          PERMISSIONS.PAYMENTS_VIEW,
+          PERMISSIONS.PRODUCTS_VIEW,
+        ],
+        workspaces: ["system"],
+        items: [
+          {
+            title: { ar: "العملاء", en: "Customers" },
+            href: "/system/customers",
+            icon: Users,
+            permission: PERMISSIONS.CUSTOMERS_VIEW,
             workspaces: ["system"],
           },
           {
-            title: { ar: "الحسابات البنكية", en: "Bank Accounts" },
-            href: "/system/treasury/banks",
-            icon: Building2,
-            permission: PERMISSIONS.TREASURY_VIEW,
+            title: { ar: "المنتجات والبرامج", en: "Products & Programs" },
+            href: "/system/products",
+            icon: Boxes,
+            permission: PERMISSIONS.PRODUCTS_VIEW,
             workspaces: ["system"],
           },
           {
-            title: { ar: "الحركات المالية", en: "Transactions" },
-            href: "/system/treasury/transactions",
+            title: { ar: "الطلبات", en: "Orders" },
+            href: "/system/orders",
+            icon: ShoppingCart,
+            permission: PERMISSIONS.ORDERS_VIEW,
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "الفواتير", en: "Invoices" },
+            href: "/system/invoices",
+            icon: ReceiptText,
+            permission: PERMISSIONS.INVOICES_VIEW,
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "المدفوعات", en: "Payments" },
+            href: "/system/payments",
             icon: CreditCard,
-            permission: PERMISSIONS.TREASURY_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إضافة حركة مالية", en: "Create Transaction" },
-            href: "/system/treasury/transactions/create",
-            icon: Plus,
-            permission: PERMISSIONS.TREASURY_CREATE,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "التحويلات", en: "Transfers" },
-            href: "/system/treasury/transfers",
-            icon: ArrowLeftRight,
-            permission: PERMISSIONS.TREASURY_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إعدادات الخزينة", en: "Treasury Settings" },
-            href: "/system/treasury/settings",
-            icon: Settings,
-            permission: PERMISSIONS.TREASURY_EDIT,
+            permission: PERMISSIONS.PAYMENTS_VIEW,
             workspaces: ["system"],
           },
         ],
@@ -565,9 +279,9 @@ const systemNavItems: NavGroup[] = [
             workspaces: ["system"],
           },
           {
-            title: { ar: "تقارير المراكز", en: "Centers Reports" },
+            title: { ar: "تقارير مقدمي الخدمة", en: "Providers Reports" },
             href: "/system/reports/providers",
-            icon: Building2,
+            icon: Stethoscope,
             anyPermissions: [
               PERMISSIONS.REPORTS_VIEW,
               PERMISSIONS.REPORTS_PROVIDERS_VIEW,
@@ -605,6 +319,16 @@ const systemNavItems: NavGroup[] = [
             workspaces: ["system"],
           },
           {
+            title: { ar: "تقارير الخزينة", en: "Treasury Reports" },
+            href: "/system/reports/treasury",
+            icon: Wallet,
+            anyPermissions: [
+              PERMISSIONS.REPORTS_VIEW,
+              PERMISSIONS.TREASURY_VIEW,
+            ],
+            workspaces: ["system"],
+          },
+          {
             title: { ar: "تقارير المحاسبة", en: "Accounting Reports" },
             href: "/system/reports/accounting",
             icon: Calculator,
@@ -618,136 +342,70 @@ const systemNavItems: NavGroup[] = [
         ],
       },
       {
-        title: { ar: "الإشعارات", en: "Notifications" },
+        title: {
+          ar: "الإشعارات والتواصل",
+          en: "Notifications & Communication",
+        },
         href: "/system/notifications",
         icon: BellRing,
         anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
         workspaces: ["system"],
         items: [
           {
-            title: { ar: "لوحة الإشعارات", en: "Notifications Overview" },
+            title: { ar: "الإشعارات", en: "Notifications" },
             href: "/system/notifications",
             icon: BellRing,
             anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
             workspaces: ["system"],
           },
           {
-            title: { ar: "قائمة الإشعارات", en: "Notifications List" },
-            href: "/system/notifications/list",
-            icon: ListChecks,
-            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إعدادات الإشعارات", en: "Notification Settings" },
-            href: "/system/notifications/settings",
-            icon: Settings,
-            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
-            workspaces: ["system"],
-          },
-        ],
-      },
-      {
-        title: { ar: "واتساب", en: "WhatsApp" },
-        href: "/system/whatsapp",
-        icon: MessageCircle,
-        anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
-        workspaces: ["system"],
-        items: [
-          {
-            title: { ar: "لوحة واتساب", en: "WhatsApp Overview" },
+            title: { ar: "واتساب", en: "WhatsApp" },
             href: "/system/whatsapp",
             icon: MessageCircle,
             anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
             workspaces: ["system"],
           },
-          {
-            title: { ar: "صندوق المحادثات", en: "Inbox" },
-            href: "/system/whatsapp/inbox",
-            icon: Inbox,
-            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "السجلات", en: "Logs" },
-            href: "/system/whatsapp/logs",
-            icon: ListChecks,
-            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "القوالب", en: "Templates" },
-            href: "/system/whatsapp/templates",
-            icon: FileText,
-            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "البث الجماعي", en: "Broadcasts" },
-            href: "/system/whatsapp/broadcasts",
-            icon: Send,
-            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إعدادات واتساب", en: "WhatsApp Settings" },
-            href: "/system/whatsapp/settings",
-            icon: Settings,
-            anyPermissions: [PERMISSIONS.SYSTEM_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
-            workspaces: ["system"],
-          },
         ],
       },
       {
-        title: { ar: "مستخدمو النظام", en: "System Users" },
+        title: { ar: "النظام", en: "System" },
         href: "/system/users",
         icon: UserCog,
-        permission: PERMISSIONS.USERS_VIEW,
+        anyPermissions: [
+          PERMISSIONS.USERS_VIEW,
+          PERMISSIONS.SYSTEM_SETTINGS,
+        ],
         workspaces: ["system"],
         items: [
           {
-            title: { ar: "لوحة المستخدمين", en: "Users Overview" },
+            title: { ar: "مستخدمو النظام", en: "System Users" },
             href: "/system/users",
             icon: UserCog,
             permission: PERMISSIONS.USERS_VIEW,
             workspaces: ["system"],
           },
           {
-            title: { ar: "قائمة المستخدمين", en: "Users List" },
-            href: "/system/users",
-            icon: ListChecks,
-            permission: PERMISSIONS.USERS_VIEW,
-            workspaces: ["system"],
-          },
-          {
-            title: { ar: "إضافة مستخدم", en: "Create User" },
-            href: "/system/users/create",
-            icon: Plus,
-            permission: PERMISSIONS.USERS_CREATE,
+            title: { ar: "الإعدادات", en: "Settings" },
+            href: "/system/settings",
+            icon: Settings,
+            permission: PERMISSIONS.SYSTEM_SETTINGS,
             workspaces: ["system"],
           },
         ],
-      },
-      {
-        title: { ar: "الإعدادات", en: "Settings" },
-        href: "/system/settings",
-        icon: Settings,
-        permission: PERMISSIONS.SYSTEM_SETTINGS,
-        workspaces: ["system"],
       },
     ],
   },
 ];
 
 /* =====================================================
-   CENTER / PROVIDER NAV
+   PROVIDER WORKSPACE NAV
 ===================================================== */
 
-const centerNavItems: NavGroup[] = [
+const providerNavItems: NavGroup[] = [
   {
     title: {
-      ar: "لوحة المركز",
-      en: "Center Workspace",
+      ar: "مساحة مقدم الخدمة",
+      en: "Provider Workspace",
     },
     items: [
       {
@@ -803,32 +461,6 @@ const centerNavItems: NavGroup[] = [
         icon: ReceiptText,
         permission: PERMISSIONS.INVOICES_VIEW,
         workspaces: ["provider"],
-        items: [
-          {
-            title: { ar: "لوحة الفواتير", en: "Invoices Overview" },
-            href: "/company/invoices",
-            aliases: ["/center/invoices", "/provider/invoices"],
-            icon: ReceiptText,
-            permission: PERMISSIONS.INVOICES_VIEW,
-            workspaces: ["provider"],
-          },
-          {
-            title: { ar: "قائمة الفواتير", en: "Invoices List" },
-            href: "/company/invoices/list",
-            aliases: ["/center/invoices/list", "/provider/invoices/list"],
-            icon: ListChecks,
-            permission: PERMISSIONS.INVOICES_VIEW,
-            workspaces: ["provider"],
-          },
-          {
-            title: { ar: "إنشاء فاتورة", en: "Create Invoice" },
-            href: "/company/invoices/create",
-            aliases: ["/center/invoices/create", "/provider/invoices/create"],
-            icon: Plus,
-            permission: PERMISSIONS.INVOICES_CREATE,
-            workspaces: ["provider"],
-          },
-        ],
       },
       {
         title: { ar: "المدفوعات", en: "Payments" },
@@ -837,32 +469,6 @@ const centerNavItems: NavGroup[] = [
         icon: CreditCard,
         permission: PERMISSIONS.PAYMENTS_VIEW,
         workspaces: ["provider"],
-        items: [
-          {
-            title: { ar: "لوحة المدفوعات", en: "Payments Overview" },
-            href: "/company/payments",
-            aliases: ["/center/payments", "/provider/payments"],
-            icon: CreditCard,
-            permission: PERMISSIONS.PAYMENTS_VIEW,
-            workspaces: ["provider"],
-          },
-          {
-            title: { ar: "قائمة المدفوعات", en: "Payments List" },
-            href: "/company/payments/list",
-            aliases: ["/center/payments/list", "/provider/payments/list"],
-            icon: ListChecks,
-            permission: PERMISSIONS.PAYMENTS_VIEW,
-            workspaces: ["provider"],
-          },
-          {
-            title: { ar: "تسجيل دفعة", en: "Create Payment" },
-            href: "/company/payments/create",
-            aliases: ["/center/payments/create", "/provider/payments/create"],
-            icon: Plus,
-            permission: PERMISSIONS.PAYMENTS_CREATE,
-            workspaces: ["provider"],
-          },
-        ],
       },
       {
         title: { ar: "المستخدمون", en: "Users" },
@@ -1066,9 +672,7 @@ function matchesHref(pathname: string, href: string): boolean {
 }
 
 function isItemActive(pathname: string, item: NavItem): boolean {
-  if (matchesHref(pathname, item.href)) {
-    return true;
-  }
+  if (matchesHref(pathname, item.href)) return true;
 
   return (item.aliases || []).some((alias) => matchesHref(pathname, alias));
 }
@@ -1104,8 +708,7 @@ function getStoredLocale(): AppLocale {
     if (savedLocale === "en") return "en";
     if (savedLocale === "ar") return "ar";
 
-    const htmlLang = document.documentElement.lang;
-    return htmlLang === "en" ? "en" : "ar";
+    return document.documentElement.lang === "en" ? "en" : "ar";
   } catch (error) {
     console.error("Read locale error:", error);
     return "ar";
@@ -1276,11 +879,26 @@ function inferPermissionInputByHref(item: NavItem): PermissionCheckInput {
   }
 
   if (href.startsWith("/system/treasury")) {
+    if (href.includes("/settings")) {
+      return {
+        permission: PERMISSIONS.TREASURY_EDIT,
+        workspaces: ["system"],
+      };
+    }
+
+    if (
+      href.includes("/create") ||
+      href.includes("/vouchers/receipt") ||
+      href.includes("/vouchers/payment")
+    ) {
+      return {
+        permission: PERMISSIONS.TREASURY_CREATE,
+        workspaces: ["system"],
+      };
+    }
+
     return {
-      permission:
-        href.includes("/create") || href.includes("/settings")
-          ? PERMISSIONS.TREASURY_CREATE
-          : PERMISSIONS.TREASURY_VIEW,
+      permission: PERMISSIONS.TREASURY_VIEW,
       workspaces: ["system"],
     };
   }
@@ -1338,9 +956,7 @@ function canAccessNavItem(
     return true;
   }
 
-  if (canAccess(authSession, input)) {
-    return true;
-  }
+  if (canAccess(authSession, input)) return true;
 
   if (input.permission && hasPermission(authSession, input.permission)) {
     return true;
@@ -1478,146 +1094,150 @@ export function NavMain({ type }: NavMainProps) {
     }
 
     return filterNavGroups(
-      centerNavItems,
+      providerNavItems,
       authSession,
       currentRole,
       enabledApps,
     );
   }, [type, authSession, currentRole, enabledApps]);
 
-  return (
-    <>
-      {navItems.map((nav) => (
-        <SidebarGroup key={nav.title.en}>
-          <SidebarGroupLabel>
-            {isArabic ? nav.title.ar : nav.title.en}
-          </SidebarGroupLabel>
+  const renderNavNode = (item: NavItem, level = 0) => {
+    const Icon = item.icon;
+    const itemTitle = isArabic ? item.title.ar : item.title.en;
+    const active = isItemActive(pathname, item);
+    const activeParent = active || hasActiveChild(pathname, item);
+    const hasChildren = Boolean(item.items?.length);
 
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {nav.items.map((item) => {
-                const Icon = item.icon;
-                const itemTitle = isArabic ? item.title.ar : item.title.en;
-                const activeParent =
-                  isItemActive(pathname, item) || hasActiveChild(pathname, item);
+    const rowClassName = `flex w-full items-center gap-2 ${
+      isArabic ? "flex-row-reverse text-right" : "flex-row text-left"
+    }`;
 
-                if (item.items?.length) {
-                  return (
-                    <SidebarMenuItem key={item.title.en}>
-                      <Collapsible defaultOpen={activeParent}>
-                        <CollapsibleTrigger asChild>
-                          <SidebarMenuButton
-                            tooltip={itemTitle}
-                            isActive={activeParent}
-                          >
-                            <div
-                              className={`flex w-full items-center gap-2 ${
-                                isArabic
-                                  ? "flex-row-reverse text-right"
-                                  : "flex-row text-left"
-                              }`}
-                            >
-                              {Icon ? <Icon className="shrink-0" /> : null}
+    if (hasChildren) {
+      if (level === 0) {
+        return (
+          <SidebarMenuItem key={`${item.href}-${item.title.en}`}>
+            <Collapsible defaultOpen={activeParent}>
+              <CollapsibleTrigger asChild>
+                <SidebarMenuButton tooltip={itemTitle} isActive={activeParent}>
+                  <div className={rowClassName}>
+                    {Icon ? <Icon className="shrink-0" /> : null}
 
-                              <span className="flex-1 truncate">
-                                {itemTitle}
-                              </span>
-
-                              {item.isNew ? (
-                                <SidebarMenuBadge>
-                                  {isArabic ? "جديد" : "New"}
-                                </SidebarMenuBadge>
-                              ) : null}
-
-                              <ChevronIcon className="h-4 w-4 shrink-0" />
-                            </div>
-                          </SidebarMenuButton>
-                        </CollapsibleTrigger>
-
-                        <CollapsibleContent>
-                          <SidebarMenuSub>
-                            {item.items.map((subItem) => {
-                              const SubIcon = subItem.icon;
-                              const subTitle = isArabic
-                                ? subItem.title.ar
-                                : subItem.title.en;
-
-                              return (
-                                <SidebarMenuSubItem key={subItem.title.en}>
-                                  <SidebarMenuSubButton
-                                    asChild
-                                    isActive={isItemActive(pathname, subItem)}
-                                  >
-                                    <Link
-                                      href={subItem.href}
-                                      target={
-                                        subItem.newTab ? "_blank" : undefined
-                                      }
-                                      className={`flex w-full items-center gap-2 ${
-                                        isArabic
-                                          ? "flex-row-reverse text-right"
-                                          : "flex-row text-left"
-                                      }`}
-                                    >
-                                      {SubIcon ? (
-                                        <SubIcon className="h-4 w-4 shrink-0" />
-                                      ) : null}
-
-                                      <span className="flex-1 truncate">
-                                        {subTitle}
-                                      </span>
-
-                                      {subItem.isNew ? (
-                                        <SidebarMenuBadge>
-                                          {isArabic ? "جديد" : "New"}
-                                        </SidebarMenuBadge>
-                                      ) : null}
-                                    </Link>
-                                  </SidebarMenuSubButton>
-                                </SidebarMenuSubItem>
-                              );
-                            })}
-                          </SidebarMenuSub>
-                        </CollapsibleContent>
-                      </Collapsible>
-                    </SidebarMenuItem>
-                  );
-                }
-
-                return (
-                  <SidebarMenuItem key={item.title.en}>
-                    <SidebarMenuButton
-                      tooltip={itemTitle}
-                      isActive={isItemActive(pathname, item)}
-                      asChild
-                    >
-                      <Link
-                        href={item.href}
-                        target={item.newTab ? "_blank" : undefined}
-                        className={`flex w-full items-center gap-2 ${
-                          isArabic
-                            ? "flex-row-reverse text-right"
-                            : "flex-row text-left"
-                        }`}
-                      >
-                        {Icon ? <Icon className="shrink-0" /> : null}
-
-                        <span className="flex-1 truncate">{itemTitle}</span>
-                      </Link>
-                    </SidebarMenuButton>
+                    <span className="flex-1 truncate">{itemTitle}</span>
 
                     {item.isNew ? (
                       <SidebarMenuBadge>
                         {isArabic ? "جديد" : "New"}
                       </SidebarMenuBadge>
                     ) : null}
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      ))}
+
+                    <ChevronIcon className="h-4 w-4 shrink-0" />
+                  </div>
+                </SidebarMenuButton>
+              </CollapsibleTrigger>
+
+              <CollapsibleContent>
+                <SidebarMenuSub>
+                  {item.items?.map((child) => renderNavNode(child, level + 1))}
+                </SidebarMenuSub>
+              </CollapsibleContent>
+            </Collapsible>
+          </SidebarMenuItem>
+        );
+      }
+
+      return (
+        <SidebarMenuSubItem key={`${item.href}-${item.title.en}`}>
+          <Collapsible defaultOpen={activeParent}>
+            <CollapsibleTrigger asChild>
+              <SidebarMenuSubButton isActive={activeParent}>
+                <div className={rowClassName}>
+                  {Icon ? <Icon className="h-4 w-4 shrink-0" /> : null}
+
+                  <span className="flex-1 truncate">{itemTitle}</span>
+
+                  {item.isNew ? (
+                    <SidebarMenuBadge>
+                      {isArabic ? "جديد" : "New"}
+                    </SidebarMenuBadge>
+                  ) : null}
+
+                  <ChevronIcon className="h-4 w-4 shrink-0" />
+                </div>
+              </SidebarMenuSubButton>
+            </CollapsibleTrigger>
+
+            <CollapsibleContent>
+              <SidebarMenuSub className={isArabic ? "mr-3" : "ml-3"}>
+                {item.items?.map((child) => renderNavNode(child, level + 1))}
+              </SidebarMenuSub>
+            </CollapsibleContent>
+          </Collapsible>
+        </SidebarMenuSubItem>
+      );
+    }
+
+    if (level === 0) {
+      return (
+        <SidebarMenuItem key={`${item.href}-${item.title.en}`}>
+          <SidebarMenuButton tooltip={itemTitle} isActive={active} asChild>
+            <Link
+              href={item.href}
+              target={item.newTab ? "_blank" : undefined}
+              className={rowClassName}
+            >
+              {Icon ? <Icon className="shrink-0" /> : null}
+
+              <span className="flex-1 truncate">{itemTitle}</span>
+            </Link>
+          </SidebarMenuButton>
+
+          {item.isNew ? (
+            <SidebarMenuBadge>{isArabic ? "جديد" : "New"}</SidebarMenuBadge>
+          ) : null}
+        </SidebarMenuItem>
+      );
+    }
+
+    return (
+      <SidebarMenuSubItem key={`${item.href}-${item.title.en}`}>
+        <SidebarMenuSubButton asChild isActive={active}>
+          <Link
+            href={item.href}
+            target={item.newTab ? "_blank" : undefined}
+            className={rowClassName}
+          >
+            {Icon ? <Icon className="h-4 w-4 shrink-0" /> : null}
+
+            <span className="flex-1 truncate">{itemTitle}</span>
+
+            {item.isNew ? (
+              <SidebarMenuBadge>{isArabic ? "جديد" : "New"}</SidebarMenuBadge>
+            ) : null}
+          </Link>
+        </SidebarMenuSubButton>
+      </SidebarMenuSubItem>
+    );
+  };
+
+  return (
+    <>
+      {navItems.map((nav) => {
+        const groupTitle = isArabic ? nav.title.ar : nav.title.en;
+
+        return (
+          <SidebarGroup key={nav.title.en || "primey-main-navigation"}>
+            {groupTitle ? (
+              <SidebarGroupLabel>{groupTitle}</SidebarGroupLabel>
+            ) : null}
+
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {nav.items.map((item) => renderNavNode(item))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        );
+      })}
     </>
   );
 }

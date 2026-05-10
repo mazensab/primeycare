@@ -1,25 +1,23 @@
 # ============================================================
 # 📂 api/accounting/detail.py
-# 🧠 Accounting Account Detail API — Primey Care V1.3
+# 🧠 Accounting Account Detail API — Primey Care V2
 # ------------------------------------------------------------
-# ✅ API تفصيلي احترافي للحساب المحاسبي
+# ✅ API تفصيلي للحساب المحاسبي
+# ✅ متوافق مع Accounting Backend الجديد
 # ✅ يرجع:
-#    - بيانات الحساب الأساسية
+#    - بيانات الحساب الأساسية والتشغيلية
 #    - ملخص الحركات
 #    - إجمالي المدين
 #    - إجمالي الدائن
-#    - صافي الرصيد
+#    - صافي الحركة
+#    - الرصيد حسب طبيعة الحساب
 #    - سطور الحركات المرتبطة بالحساب
 # ✅ يدعم:
 #    - date_from
 #    - date_to
 #    - posted_only
-# ✅ Excel Export:
-#    - Account Detail Excel
-# ------------------------------------------------------------
-# ملاحظة:
-# - يعتمد على Account.nature وليس normal_balance
-#   لأن موديل المحاسبة الرسمي يستخدم nature.
+#    - include_metadata
+# ✅ Excel Export
 # ============================================================
 
 from __future__ import annotations
@@ -70,7 +68,15 @@ def _parse_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
 
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    raw = str(value).strip().lower()
+
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+
+    if raw in {"0", "false", "no", "off"}:
+        return False
+
+    return default
 
 
 def _parse_date(value: str | None, field_name: str) -> date | None:
@@ -163,7 +169,7 @@ def _auto_fit_columns(ws) -> None:
             except Exception:
                 continue
 
-        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 40)
+        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 45)
 
 
 def _apply_header_style(cell) -> None:
@@ -172,11 +178,11 @@ def _apply_header_style(cell) -> None:
     cell.alignment = Alignment(horizontal="center", vertical="center")
 
 
-def _add_meta_rows(ws, title: str, meta_rows: list[tuple[str, Any]]) -> int:
+def _add_meta_rows(ws, title: str, meta_rows: list[tuple[str, Any]], *, merge_to_column: int = 8) -> int:
     ws.append([title])
     ws["A1"].font = Font(bold=True, size=14)
     ws["A1"].alignment = Alignment(horizontal="center")
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=merge_to_column)
 
     current_row = 3
 
@@ -206,7 +212,10 @@ def _build_excel_response(workbook: Workbook, filename: str) -> HttpResponse:
     return response
 
 
-def _resolve_account_display_name(account: Account) -> str:
+def _resolve_account_display_name(account: Account | None) -> str | None:
+    if not account:
+        return None
+
     return (
         _safe_attr(account, "name", None)
         or _safe_attr(account, "name_ar", None)
@@ -215,16 +224,14 @@ def _resolve_account_display_name(account: Account) -> str:
     )
 
 
-def _resolve_account_nature(account: Account) -> str:
-    """
-    يرجع طبيعة الحساب الرسمية.
-    موديل Primey Care Accounting يستخدم nature:
-    DEBIT / CREDIT
-    """
+def _resolve_account_nature(account: Account | None) -> str:
     return str(_safe_attr(account, "nature", "") or "").upper()
 
 
-def _resolve_account_nature_label(account: Account) -> str | None:
+def _resolve_account_nature_label(account: Account | None) -> str | None:
+    if not account:
+        return None
+
     if hasattr(account, "get_nature_display"):
         return account.get_nature_display()
 
@@ -237,6 +244,20 @@ def _resolve_account_nature_label(account: Account) -> str | None:
         return "دائن"
 
     return None
+
+
+def _can_post(account: Account) -> bool:
+    return bool(
+        _safe_attr(account, "is_active", True)
+        and not _safe_attr(account, "is_group", False)
+    )
+
+
+def _can_manual_post(account: Account) -> bool:
+    return bool(
+        _can_post(account)
+        and _safe_attr(account, "allow_manual_posting", True)
+    )
 
 
 def _balance_side_from_nature(
@@ -253,10 +274,133 @@ def _balance_side_from_nature(
     return "DEBIT"
 
 
-def _serialize_line(line: JournalEntryLine) -> dict[str, Any]:
-    journal_entry = _safe_attr(line, "journal_entry", None)
+def _signed_balance_by_nature(
+    *,
+    total_debit: Decimal,
+    total_credit: Decimal,
+    account_nature: str,
+) -> Decimal:
+    if account_nature == "CREDIT":
+        return _money(total_credit - total_debit)
+
+    return _money(total_debit - total_credit)
+
+
+def _serialize_parent_account(account: Account | None) -> dict[str, Any] | None:
+    if not account:
+        return None
 
     return {
+        "id": account.id,
+        "code": _safe_attr(account, "code", None),
+        "name": _resolve_account_display_name(account),
+        "name_ar": _safe_attr(account, "name", None),
+        "name_en": _safe_attr(account, "name_en", ""),
+        "account_type": _safe_attr(account, "account_type", None),
+        "nature": _safe_attr(account, "nature", None),
+        "level": int(_safe_attr(account, "level", 1) or 1),
+        "is_group": bool(_safe_attr(account, "is_group", False)),
+        "is_active": bool(_safe_attr(account, "is_active", True)),
+    }
+
+
+def _serialize_account(account: Account, *, include_metadata: bool = False) -> dict[str, Any]:
+    children_count = 0
+
+    try:
+        children_count = account.children.count()
+    except Exception:
+        children_count = 0
+
+    parent = _safe_attr(account, "parent", None)
+
+    payload = {
+        "id": account.id,
+        "code": _safe_attr(account, "code", None),
+        "name": _resolve_account_display_name(account),
+        "name_ar": _safe_attr(account, "name", None),
+        "name_en": _safe_attr(account, "name_en", ""),
+        "description": _safe_attr(account, "description", ""),
+        "account_type": _safe_attr(account, "account_type", None),
+        "account_type_label": (
+            account.get_account_type_display()
+            if hasattr(account, "get_account_type_display")
+            else None
+        ),
+        "nature": _resolve_account_nature(account),
+        "nature_label": _resolve_account_nature_label(account),
+        "parent_id": _safe_attr(account, "parent_id", None),
+        "parent_code": _safe_attr(parent, "code", None),
+        "parent_name": _resolve_account_display_name(parent) if parent else None,
+        "parent": _serialize_parent_account(parent),
+        "level": int(_safe_attr(account, "level", 1) or 1),
+        "is_group": bool(_safe_attr(account, "is_group", False)),
+        "is_active": bool(_safe_attr(account, "is_active", True)),
+        "allow_manual_posting": bool(_safe_attr(account, "allow_manual_posting", True)),
+        "is_system": bool(_safe_attr(account, "is_system", False)),
+        "currency": _safe_attr(account, "currency", "SAR"),
+        "opening_balance": _money(_safe_attr(account, "opening_balance", "0.00")),
+        "can_post": _can_post(account),
+        "can_manual_post": _can_manual_post(account),
+        "children_count": children_count,
+        "has_children": children_count > 0,
+        "created_at": (
+            _safe_attr(account, "created_at", None).isoformat()
+            if _safe_attr(account, "created_at", None)
+            else None
+        ),
+        "updated_at": (
+            _safe_attr(account, "updated_at", None).isoformat()
+            if _safe_attr(account, "updated_at", None)
+            else None
+        ),
+    }
+
+    if include_metadata:
+        payload["metadata"] = _safe_attr(account, "metadata", {}) or {}
+
+    return payload
+
+
+def _serialize_cost_center(line: JournalEntryLine) -> dict[str, Any] | None:
+    cost_center = _safe_attr(line, "cost_center", None)
+
+    if not cost_center:
+        return None
+
+    return {
+        "id": _safe_attr(cost_center, "id", None),
+        "code": _safe_attr(cost_center, "code", None),
+        "name": _safe_attr(cost_center, "name", None),
+        "name_en": _safe_attr(cost_center, "name_en", ""),
+        "level": _safe_attr(cost_center, "level", None),
+        "is_group": bool(_safe_attr(cost_center, "is_group", False)),
+        "status": _safe_attr(cost_center, "status", None),
+    }
+
+
+def _serialize_tax_rate(line: JournalEntryLine) -> dict[str, Any] | None:
+    tax_rate = _safe_attr(line, "tax_rate", None)
+
+    if not tax_rate:
+        return None
+
+    return {
+        "id": _safe_attr(tax_rate, "id", None),
+        "code": _safe_attr(tax_rate, "code", None),
+        "name": _safe_attr(tax_rate, "name", None),
+        "tax_type": _safe_attr(tax_rate, "tax_type", None),
+        "rate": _money(_safe_attr(tax_rate, "rate", "0.00")),
+        "is_active": bool(_safe_attr(tax_rate, "is_active", True)),
+        "is_default": bool(_safe_attr(tax_rate, "is_default", False)),
+    }
+
+
+def _serialize_line(line: JournalEntryLine, *, include_metadata: bool = False) -> dict[str, Any]:
+    journal_entry = _safe_attr(line, "journal_entry", None)
+    period = _safe_attr(journal_entry, "period", None)
+
+    payload = {
         "id": line.id,
         "journal_entry_id": _safe_attr(journal_entry, "id", None),
         "journal_entry_number": _safe_attr(journal_entry, "entry_number", None),
@@ -265,26 +409,64 @@ def _serialize_line(line: JournalEntryLine) -> dict[str, Any]:
             if _safe_attr(journal_entry, "entry_date", None)
             else None
         ),
+        "entry_status": _safe_attr(journal_entry, "status", None),
+        "entry_status_label": (
+            journal_entry.get_status_display()
+            if journal_entry and hasattr(journal_entry, "get_status_display")
+            else None
+        ),
         "posting_source": _safe_attr(journal_entry, "posting_source", None),
+        "posting_source_label": (
+            journal_entry.get_posting_source_display()
+            if journal_entry and hasattr(journal_entry, "get_posting_source_display")
+            else None
+        ),
         "reference": _safe_attr(journal_entry, "reference", None),
         "external_reference": _safe_attr(journal_entry, "external_reference", None),
+        "source_type": _safe_attr(journal_entry, "source_type", ""),
+        "source_id": _safe_attr(journal_entry, "source_id", ""),
+        "source_number": _safe_attr(journal_entry, "source_number", ""),
+        "period": {
+            "id": _safe_attr(period, "id", None),
+            "name": _safe_attr(period, "name", None),
+            "status": _safe_attr(period, "status", None),
+        } if period else None,
         "description": _safe_attr(line, "description", None),
         "entry_description": _safe_attr(journal_entry, "description", None),
         "debit_amount": _money(_safe_attr(line, "debit_amount", "0.00")),
         "credit_amount": _money(_safe_attr(line, "credit_amount", "0.00")),
+        "tax_amount": _money(_safe_attr(line, "tax_amount", "0.00")),
+        "cost_center": _serialize_cost_center(line),
+        "cost_center_id": _safe_attr(line, "cost_center_id", None),
+        "tax_rate": _serialize_tax_rate(line),
+        "tax_rate_id": _safe_attr(line, "tax_rate_id", None),
+        "party_type": _safe_attr(line, "party_type", ""),
+        "party_id": _safe_attr(line, "party_id", ""),
+        "source_line_id": _safe_attr(line, "source_line_id", ""),
         "sort_order": _safe_attr(line, "sort_order", 0),
         "created_at": (
             _safe_attr(line, "created_at", None).isoformat()
             if _safe_attr(line, "created_at", None)
             else None
         ),
+        "updated_at": (
+            _safe_attr(line, "updated_at", None).isoformat()
+            if _safe_attr(line, "updated_at", None)
+            else None
+        ),
     }
+
+    if include_metadata:
+        payload["metadata"] = _safe_attr(line, "metadata", {}) or {}
+
+    return payload
 
 
 def _build_account_detail_payload(account_id: int, request) -> dict[str, Any]:
     date_from = _parse_date(request.GET.get("date_from"), "date_from")
     date_to = _parse_date(request.GET.get("date_to"), "date_to")
     posted_only = _parse_bool(request.GET.get("posted_only"), default=True)
+    include_metadata = _parse_bool(request.GET.get("include_metadata"), default=False)
 
     _validate_date_range(date_from, date_to)
 
@@ -300,13 +482,21 @@ def _build_account_detail_payload(account_id: int, request) -> dict[str, Any]:
     lines_qs = (
         JournalEntryLine.objects.select_related(
             "journal_entry",
+            "journal_entry__period",
             "account",
+            "cost_center",
+            "tax_rate",
         )
         .filter(account_id=account.id)
     )
 
     if posted_only:
-        lines_qs = lines_qs.filter(journal_entry__status=JournalEntryStatus.POSTED)
+        lines_qs = lines_qs.filter(
+            journal_entry__status__in=[
+                JournalEntryStatus.POSTED,
+                JournalEntryStatus.REVERSED,
+            ]
+        )
 
     if date_from:
         lines_qs = lines_qs.filter(journal_entry__entry_date__gte=date_from)
@@ -341,58 +531,68 @@ def _build_account_detail_payload(account_id: int, request) -> dict[str, Any]:
             Decimal("0.00"),
         )
     )
+    total_tax = _money(
+        sum(
+            (
+                _money(_safe_attr(line, "tax_amount", "0.00"))
+                for line in lines
+            ),
+            Decimal("0.00"),
+        )
+    )
 
     account_nature = _resolve_account_nature(account)
     net_movement = _money(total_debit - total_credit)
+    balance_amount = _signed_balance_by_nature(
+        total_debit=total_debit,
+        total_credit=total_credit,
+        account_nature=account_nature,
+    )
 
-    if account_nature == "CREDIT":
-        balance_amount = _money(total_credit - total_debit)
-    else:
-        balance_amount = _money(total_debit - total_credit)
+    transactions = [
+        _serialize_line(line, include_metadata=include_metadata)
+        for line in lines
+    ]
 
     return {
-        "account": {
-            "id": account.id,
-            "code": _safe_attr(account, "code", None),
-            "name": _resolve_account_display_name(account),
-            "name_ar": _safe_attr(account, "name_ar", None),
-            "name_en": _safe_attr(account, "name_en", None),
-            "account_type": _safe_attr(account, "account_type", None),
-            "account_type_label": (
-                account.get_account_type_display()
-                if hasattr(account, "get_account_type_display")
-                else None
-            ),
-            "nature": account_nature,
-            "nature_label": _resolve_account_nature_label(account),
-            "is_group": bool(_safe_attr(account, "is_group", False)),
-            "is_active": bool(_safe_attr(account, "is_active", True)),
-            "parent_id": _safe_attr(account, "parent_id", None),
-            "parent_code": _safe_attr(_safe_attr(account, "parent", None), "code", None),
-            "parent_name": (
-                _resolve_account_display_name(account.parent)
-                if _safe_attr(account, "parent", None)
-                else None
-            ),
-            "level": int(_safe_attr(account, "level", 1) or 1),
-        },
+        "account": _serialize_account(account, include_metadata=include_metadata),
         "filters": {
             "date_from": date_from.isoformat() if date_from else None,
             "date_to": date_to.isoformat() if date_to else None,
             "posted_only": posted_only,
+            "include_metadata": include_metadata,
         },
         "summary": {
             "transaction_count": len(lines),
             "total_debit": total_debit,
             "total_credit": total_credit,
+            "total_tax": total_tax,
             "net_movement": net_movement,
             "balance_amount": balance_amount,
             "balance_side": _balance_side_from_nature(
                 balance_amount=balance_amount,
                 account_nature=account_nature,
             ),
+            "posted_lines": sum(
+                1
+                for line in lines
+                if _safe_attr(_safe_attr(line, "journal_entry", None), "status", None)
+                == JournalEntryStatus.POSTED
+            ),
+            "reversed_lines": sum(
+                1
+                for line in lines
+                if _safe_attr(_safe_attr(line, "journal_entry", None), "status", None)
+                == JournalEntryStatus.REVERSED
+            ),
+            "draft_lines": sum(
+                1
+                for line in lines
+                if _safe_attr(_safe_attr(line, "journal_entry", None), "status", None)
+                == JournalEntryStatus.DRAFT
+            ),
         },
-        "transactions": [_serialize_line(line) for line in lines],
+        "transactions": transactions,
     }
 
 
@@ -412,18 +612,28 @@ def _build_account_detail_excel(payload: dict[str, Any]) -> HttpResponse:
             ("Account ID", account.get("id")),
             ("Account Code", account.get("code")),
             ("Account Name", account.get("name")),
+            ("Account Name EN", account.get("name_en")),
             ("Account Type", account.get("account_type")),
             ("Nature", account.get("nature")),
+            ("Currency", account.get("currency")),
+            ("Opening Balance", account.get("opening_balance")),
+            ("Is Group", account.get("is_group")),
+            ("Is Active", account.get("is_active")),
+            ("Allow Manual Posting", account.get("allow_manual_posting")),
+            ("Is System", account.get("is_system")),
+            ("Can Post", account.get("can_post")),
             ("Date From", filters.get("date_from")),
             ("Date To", filters.get("date_to")),
             ("Posted Only", filters.get("posted_only")),
             ("Transaction Count", summary.get("transaction_count")),
             ("Total Debit", summary.get("total_debit")),
             ("Total Credit", summary.get("total_credit")),
+            ("Total Tax", summary.get("total_tax")),
             ("Net Movement", summary.get("net_movement")),
             ("Balance Amount", summary.get("balance_amount")),
             ("Balance Side", summary.get("balance_side")),
         ],
+        merge_to_column=18,
     )
 
     headers = [
@@ -431,13 +641,24 @@ def _build_account_detail_excel(payload: dict[str, Any]) -> HttpResponse:
         "Journal Entry ID",
         "Journal Entry Number",
         "Entry Date",
+        "Entry Status",
         "Posting Source",
         "Reference",
         "External Reference",
+        "Source Type",
+        "Source ID",
+        "Source Number",
+        "Period",
         "Line Description",
         "Entry Description",
         "Debit Amount",
         "Credit Amount",
+        "Tax Rate",
+        "Tax Amount",
+        "Cost Center",
+        "Party Type",
+        "Party ID",
+        "Source Line ID",
         "Sort Order",
         "Created At",
     ]
@@ -453,15 +674,38 @@ def _build_account_detail_excel(payload: dict[str, Any]) -> HttpResponse:
         ws.cell(row=current_row, column=2, value=row.get("journal_entry_id"))
         ws.cell(row=current_row, column=3, value=row.get("journal_entry_number"))
         ws.cell(row=current_row, column=4, value=row.get("entry_date"))
-        ws.cell(row=current_row, column=5, value=row.get("posting_source"))
-        ws.cell(row=current_row, column=6, value=row.get("reference"))
-        ws.cell(row=current_row, column=7, value=row.get("external_reference"))
-        ws.cell(row=current_row, column=8, value=row.get("description"))
-        ws.cell(row=current_row, column=9, value=row.get("entry_description"))
-        ws.cell(row=current_row, column=10, value=float(row.get("debit_amount", 0) or 0))
-        ws.cell(row=current_row, column=11, value=float(row.get("credit_amount", 0) or 0))
-        ws.cell(row=current_row, column=12, value=row.get("sort_order"))
-        ws.cell(row=current_row, column=13, value=row.get("created_at"))
+        ws.cell(row=current_row, column=5, value=row.get("entry_status"))
+        ws.cell(row=current_row, column=6, value=row.get("posting_source"))
+        ws.cell(row=current_row, column=7, value=row.get("reference"))
+        ws.cell(row=current_row, column=8, value=row.get("external_reference"))
+        ws.cell(row=current_row, column=9, value=row.get("source_type"))
+        ws.cell(row=current_row, column=10, value=row.get("source_id"))
+        ws.cell(row=current_row, column=11, value=row.get("source_number"))
+        ws.cell(
+            row=current_row,
+            column=12,
+            value=(row.get("period") or {}).get("name") if row.get("period") else "",
+        )
+        ws.cell(row=current_row, column=13, value=row.get("description"))
+        ws.cell(row=current_row, column=14, value=row.get("entry_description"))
+        ws.cell(row=current_row, column=15, value=float(row.get("debit_amount", 0) or 0))
+        ws.cell(row=current_row, column=16, value=float(row.get("credit_amount", 0) or 0))
+        ws.cell(
+            row=current_row,
+            column=17,
+            value=(row.get("tax_rate") or {}).get("code") if row.get("tax_rate") else "",
+        )
+        ws.cell(row=current_row, column=18, value=float(row.get("tax_amount", 0) or 0))
+        ws.cell(
+            row=current_row,
+            column=19,
+            value=(row.get("cost_center") or {}).get("name") if row.get("cost_center") else "",
+        )
+        ws.cell(row=current_row, column=20, value=row.get("party_type"))
+        ws.cell(row=current_row, column=21, value=row.get("party_id"))
+        ws.cell(row=current_row, column=22, value=row.get("source_line_id"))
+        ws.cell(row=current_row, column=23, value=row.get("sort_order"))
+        ws.cell(row=current_row, column=24, value=row.get("created_at"))
         current_row += 1
 
     _auto_fit_columns(ws)

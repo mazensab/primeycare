@@ -5,11 +5,17 @@
 # ✅ Categories list/create
 # ✅ Products list/create
 # ✅ Public products list
+# ✅ Featured products list
+# ✅ Landing products list
+# ✅ Mobile products list
+# ✅ Medical offers products list
 # ✅ Supports:
 #    - Cards
 #    - Programs
 #    - Services
 #    - Memberships
+#    - Provider-linked medical offers
+#    - Landing / Mobile / Offers marketing images
 #    - Pricing Tiers
 #    - Benefits
 #    - Service Items
@@ -32,6 +38,9 @@ from products.services import (
     create_product,
     get_contract_products_queryset,
     get_featured_products_queryset,
+    get_landing_products_queryset,
+    get_mobile_products_queryset,
+    get_offer_products_queryset,
     get_orderable_products_queryset,
     get_public_products_queryset,
     paginate_queryset,
@@ -85,6 +94,41 @@ def _validation_errors(exc: ValidationError):
 
 def _include_children(request) -> bool:
     return parse_bool(request.GET.get("include_children"), True) is not False
+
+
+def _paginated_product_response(
+    *,
+    queryset,
+    request,
+    message: str,
+) -> JsonResponse:
+    queryset = apply_product_filters(queryset, request.GET)
+
+    page = parse_int(request.GET.get("page"), 1) or 1
+    page_size = parse_int(request.GET.get("page_size"), 20) or 20
+    include_children = _include_children(request)
+
+    paginated = paginate_queryset(
+        queryset,
+        page=page,
+        page_size=page_size,
+    )
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "message": message,
+            "results": [
+                serialize_product(
+                    item,
+                    include_children=include_children,
+                )
+                for item in paginated["items"]
+            ],
+            "pagination": paginated["pagination"],
+        },
+        status=200,
+    )
 
 
 # ============================================================
@@ -176,7 +220,7 @@ def products_api(request):
     if request.method == "GET":
         queryset = (
             Product.objects
-            .select_related("category")
+            .select_related("category", "provider")
             .prefetch_related(
                 "benefits",
                 "pricing_tiers",
@@ -185,32 +229,10 @@ def products_api(request):
             .all()
         )
 
-        queryset = apply_product_filters(queryset, request.GET)
-
-        page = parse_int(request.GET.get("page"), 1) or 1
-        page_size = parse_int(request.GET.get("page_size"), 20) or 20
-        include_children = _include_children(request)
-
-        paginated = paginate_queryset(
-            queryset,
-            page=page,
-            page_size=page_size,
-        )
-
-        return JsonResponse(
-            {
-                "ok": True,
-                "message": "Products loaded successfully.",
-                "results": [
-                    serialize_product(
-                        item,
-                        include_children=include_children,
-                    )
-                    for item in paginated["items"]
-                ],
-                "pagination": paginated["pagination"],
-            },
-            status=200,
+        return _paginated_product_response(
+            queryset=queryset,
+            request=request,
+            message="Products loaded successfully.",
         )
 
     try:
@@ -223,7 +245,7 @@ def products_api(request):
 
         product = (
             Product.objects
-            .select_related("category")
+            .select_related("category", "provider")
             .prefetch_related(
                 "benefits",
                 "pricing_tiers",
@@ -275,32 +297,82 @@ def product_public_list_api(request):
         )
     )
 
-    queryset = apply_product_filters(queryset, request.GET)
-
-    page = parse_int(request.GET.get("page"), 1) or 1
-    page_size = parse_int(request.GET.get("page_size"), 20) or 20
-    include_children = _include_children(request)
-
-    paginated = paginate_queryset(
-        queryset,
-        page=page,
-        page_size=page_size,
+    return _paginated_product_response(
+        queryset=queryset,
+        request=request,
+        message="Public products loaded successfully.",
     )
 
-    return JsonResponse(
-        {
-            "ok": True,
-            "message": "Public products loaded successfully.",
-            "results": [
-                serialize_product(
-                    item,
-                    include_children=include_children,
-                )
-                for item in paginated["items"]
-            ],
-            "pagination": paginated["pagination"],
-        },
-        status=200,
+
+# ============================================================
+# 🔹 Landing Products API
+# ------------------------------------------------------------
+# تستخدم لاحقًا في صفحة الهبوط والعروض التسويقية العامة.
+# ============================================================
+
+@require_http_methods(["GET"])
+def product_landing_list_api(request):
+    queryset = (
+        get_landing_products_queryset()
+        .prefetch_related(
+            "benefits",
+            "pricing_tiers",
+            "service_items",
+        )
+    )
+
+    return _paginated_product_response(
+        queryset=queryset,
+        request=request,
+        message="Landing products loaded successfully.",
+    )
+
+
+# ============================================================
+# 🔹 Mobile Products API
+# ------------------------------------------------------------
+# تستخدم لاحقًا في تطبيق الموبايل.
+# ============================================================
+
+@require_http_methods(["GET"])
+def product_mobile_list_api(request):
+    queryset = (
+        get_mobile_products_queryset()
+        .prefetch_related(
+            "benefits",
+            "pricing_tiers",
+            "service_items",
+        )
+    )
+
+    return _paginated_product_response(
+        queryset=queryset,
+        request=request,
+        message="Mobile products loaded successfully.",
+    )
+
+
+# ============================================================
+# 🔹 Medical Offers Products API
+# ------------------------------------------------------------
+# تستخدم لاحقًا في صفحة العروض الطبية.
+# ============================================================
+
+@require_http_methods(["GET"])
+def product_offers_list_api(request):
+    queryset = (
+        get_offer_products_queryset()
+        .prefetch_related(
+            "benefits",
+            "pricing_tiers",
+            "service_items",
+        )
+    )
+
+    return _paginated_product_response(
+        queryset=queryset,
+        request=request,
+        message="Offer products loaded successfully.",
     )
 
 
@@ -326,32 +398,10 @@ def product_orderable_list_api(request):
         )
     )
 
-    queryset = apply_product_filters(queryset, request.GET)
-
-    page = parse_int(request.GET.get("page"), 1) or 1
-    page_size = parse_int(request.GET.get("page_size"), 20) or 20
-    include_children = _include_children(request)
-
-    paginated = paginate_queryset(
-        queryset,
-        page=page,
-        page_size=page_size,
-    )
-
-    return JsonResponse(
-        {
-            "ok": True,
-            "message": "Orderable products loaded successfully.",
-            "results": [
-                serialize_product(
-                    item,
-                    include_children=include_children,
-                )
-                for item in paginated["items"]
-            ],
-            "pagination": paginated["pagination"],
-        },
-        status=200,
+    return _paginated_product_response(
+        queryset=queryset,
+        request=request,
+        message="Orderable products loaded successfully.",
     )
 
 
@@ -377,32 +427,10 @@ def product_contract_list_api(request):
         )
     )
 
-    queryset = apply_product_filters(queryset, request.GET)
-
-    page = parse_int(request.GET.get("page"), 1) or 1
-    page_size = parse_int(request.GET.get("page_size"), 20) or 20
-    include_children = _include_children(request)
-
-    paginated = paginate_queryset(
-        queryset,
-        page=page,
-        page_size=page_size,
-    )
-
-    return JsonResponse(
-        {
-            "ok": True,
-            "message": "Contract products loaded successfully.",
-            "results": [
-                serialize_product(
-                    item,
-                    include_children=include_children,
-                )
-                for item in paginated["items"]
-            ],
-            "pagination": paginated["pagination"],
-        },
-        status=200,
+    return _paginated_product_response(
+        queryset=queryset,
+        request=request,
+        message="Contract products loaded successfully.",
     )
 
 
@@ -421,30 +449,8 @@ def product_featured_list_api(request):
         )
     )
 
-    queryset = apply_product_filters(queryset, request.GET)
-
-    page = parse_int(request.GET.get("page"), 1) or 1
-    page_size = parse_int(request.GET.get("page_size"), 20) or 20
-    include_children = _include_children(request)
-
-    paginated = paginate_queryset(
-        queryset,
-        page=page,
-        page_size=page_size,
-    )
-
-    return JsonResponse(
-        {
-            "ok": True,
-            "message": "Featured products loaded successfully.",
-            "results": [
-                serialize_product(
-                    item,
-                    include_children=include_children,
-                )
-                for item in paginated["items"]
-            ],
-            "pagination": paginated["pagination"],
-        },
-        status=200,
+    return _paginated_product_response(
+        queryset=queryset,
+        request=request,
+        message="Featured products loaded successfully.",
     )

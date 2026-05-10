@@ -1,14 +1,22 @@
 # ============================================================
 # 📂 api/treasury/urls.py
-# 🧠 Primey Care | Treasury API URLs
+# 🧠 Primey Care | Treasury API URLs V2
 # ------------------------------------------------------------
-# ✅ Accounts
+# ✅ Treasury Accounts
 # ✅ Cashboxes aliases
 # ✅ Banks aliases
-# ✅ Transactions
+# ✅ Treasury Transactions
 # ✅ Confirm transaction
 # ✅ Cancel transaction
-# ✅ Statement
+# ✅ Account statement
+# ✅ Backward-compatible root alias
+# ------------------------------------------------------------
+# ملاحظات:
+# - هذا الملف يربط فقط مسارات الخزينة.
+# - منطق الإنشاء والتعديل في:
+#   api/treasury/list.py
+#   api/treasury/detail.py
+# - حافظنا على نفس المسارات الحالية حتى لا ينكسر الربط مع الفرونت.
 # ============================================================
 
 from django.urls import path
@@ -30,9 +38,10 @@ from .list import (
 
 app_name = "api_treasury"
 
+
 urlpatterns = [
     # ========================================================
-    # Treasury Accounts
+    # 🏦 Treasury Accounts
     # ========================================================
     path(
         "accounts/",
@@ -51,7 +60,7 @@ urlpatterns = [
     ),
 
     # ========================================================
-    # Cashboxes aliases
+    # 💵 Cashboxes Aliases
     # ========================================================
     path(
         "cashboxes/",
@@ -60,7 +69,7 @@ urlpatterns = [
     ),
 
     # ========================================================
-    # Banks aliases
+    # 🏛️ Banks Aliases
     # ========================================================
     path(
         "banks/",
@@ -69,7 +78,7 @@ urlpatterns = [
     ),
 
     # ========================================================
-    # Treasury Transactions
+    # 🔁 Treasury Transactions
     # ========================================================
     path(
         "transactions/",
@@ -93,10 +102,11 @@ urlpatterns = [
     ),
 
     # ========================================================
-    # Backward-compatible aliases
+    # 🔙 Backward-compatible Root Alias
     # --------------------------------------------------------
-    # حتى لو استدعيت /api/treasury/ مباشرة من الواجهة
-    # يرجع قائمة الحسابات بدل 404
+    # حتى لو استدعت الواجهة:
+    # /api/treasury/
+    # يرجع قائمة حسابات الخزينة بدل 404.
     # ========================================================
     path(
         "",

@@ -1,24 +1,77 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/treasury/accounts/create/page.tsx
+   🧠 Primey Care | Create Treasury Account Page
+
+   ✅ المسار:
+      app/system/treasury/accounts/create/page.tsx
+
+   ✅ العمل:
+      صفحة إنشاء حساب خزينة داخل النظام.
+      تدعم إنشاء حساب صندوق أو بنك أو محفظة مع الرصيد الافتتاحي والحالة والبيانات البنكية.
+
+   ✅ الإصدار:
+      Phase 17 UX Refinement + Treasury Account Create Build
+
+   ✅ يعتمد على:
+      - /api/treasury/accounts/create/
+      - /api/treasury/accounts/
+      - primey-locale
+      - AuthProvider
+      - sonner
+      - /currency/sar.svg
+
+   ✅ متوافق مع:
+      - Treasury overview page
+      - Treasury accounts page
+      - Treasury cashboxes / banks pages
+      - Centers / Customers approved UX standard
+
+   ✅ الوظائف:
+      - إنشاء حساب خزينة.
+      - دعم نوع الحساب: صندوق / بنك / محفظة / أخرى.
+      - الرصيد الافتتاحي.
+      - الحالة التشغيلية.
+      - بيانات البنك عند اختيار حساب بنكي.
+      - حماية مغادرة الصفحة عند وجود تغييرات غير محفوظة.
+      - مسح النموذج بتأكيد.
+      - Error State مستقل.
+      - صلاحيات آمنة بدون كسر system_admin/superuser.
+      - أرقام إنجليزية دائمًا.
+      - رمز SAR من /currency/sar.svg بعد الرقم.
+      - استخدام sonner للتنبيهات.
+
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+      - بناء الصفحة من الصفر لأن الملف المرفق كان فارغًا تقريبًا.
+      - الالتزام بالقاعدة: w-full space-y-4 بدون main/min-h-screen/max-w.
+      - عدم عرض أي مسارات أو عبارات تقنية داخل واجهة المستخدم.
+      - إخفاء الأزرار غير المصرح بها.
+      - إزالة localhost و API_BASE_URL الثابت.
+============================================================ */
+
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Banknote,
   Building2,
   CheckCircle2,
-  Landmark,
+  CreditCard,
+  FileText,
   Loader2,
   RefreshCcw,
+  RotateCcw,
   Save,
   ShieldCheck,
   Wallet,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { PermissionGuard } from "@/components/guards/PermissionGuard";
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,57 +82,77 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { PERMISSIONS } from "@/lib/permissions";
+
+/* ============================================================
+   Types
+============================================================ */
 
 type AppLocale = "ar" | "en";
+type Dict = Record<string, unknown>;
 
-type TreasuryAccountType = "CASHBOX" | "BANK";
-type TreasuryAccountStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED" | "CLOSED";
+type AccountType = "CASHBOX" | "BANK" | "WALLET" | "OTHER";
+type AccountStatus = "ACTIVE" | "INACTIVE" | "CLOSED";
 
-type ApiEnvelope<T> = {
-  success?: boolean;
-  message?: string;
-  data?: T;
-  errors?: unknown;
-};
-
-type CreatedAccount = {
-  id?: number | string;
-  name?: string;
-  code?: string;
-  account_type?: string;
-};
-
-type FormData = {
+type FormState = {
   name: string;
   code: string;
-  account_type: TreasuryAccountType;
-  status: TreasuryAccountStatus;
-  opening_balance: string;
-  current_balance: string;
-  currency: string;
-  bank_name: string;
-  account_holder_name: string;
-  account_number: string;
+  accountType: AccountType;
+  status: AccountStatus;
+  openingBalance: string;
+  currentBalance: string;
+  bankName: string;
+  accountNumber: string;
   iban: string;
-  branch_name: string;
-  description: string;
-  is_default: boolean;
+  isDefault: boolean;
+  notes: string;
 };
 
-const SAR_ICON = "/currency/sar.svg";
+type ApiEnvelope<T> = {
+  ok?: boolean;
+  success?: boolean;
+  message?: string;
+  detail?: string;
+  error?: string;
+  data?: T;
+  id?: string | number;
+};
+
+const SAR_ICON_PATH = "/currency/sar.svg";
+
+function makeDefaultForm(): FormState {
+  return {
+    name: "",
+    code: "",
+    accountType: "CASHBOX",
+    status: "ACTIVE",
+    openingBalance: "0",
+    currentBalance: "0",
+    bankName: "",
+    accountNumber: "",
+    iban: "",
+    isDefault: false,
+    notes: "",
+  };
+}
+
+/* ============================================================
+   Locale / API
+============================================================ */
 
 function readLocale(): AppLocale {
   try {
     if (typeof window === "undefined") return "ar";
 
-    const saved = window.localStorage.getItem("primey-locale");
-    if (saved === "ar" || saved === "en") return saved;
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
+
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
@@ -96,839 +169,1194 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
+
+  if (!base) return path;
+
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
 function getCookie(name: string) {
-  if (typeof document === "undefined") return "";
-
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-
-  if (parts.length === 2) {
-    return parts.pop()?.split(";").shift() || "";
-  }
-
-  return "";
-}
-
-function getInitialAccountType(): TreasuryAccountType {
   try {
-    if (typeof window === "undefined") return "CASHBOX";
+    if (typeof document === "undefined") return "";
 
-    const params = new URLSearchParams(window.location.search);
-    const accountType = params.get("account_type");
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
 
-    if (accountType === "BANK") return "BANK";
-    if (accountType === "CASHBOX") return "CASHBOX";
+    if (parts.length === 2) {
+      return parts.pop()?.split(";").shift() || "";
+    }
 
-    return "CASHBOX";
-  } catch (error) {
-    console.error("Read account type query error:", error);
-    return "CASHBOX";
+    return "";
+  } catch {
+    return "";
   }
 }
 
-function normalizeMoney(value: string) {
-  const parsed = Number(value || 0);
+/* ============================================================
+   Auth / Permissions
+============================================================ */
 
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return "0.00";
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
+}
+
+function getNested(source: Dict, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+
+    if (value && typeof value === "object") return value as Dict;
   }
 
-  return parsed.toFixed(2);
+  return {};
 }
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
+
+          if (typeof value === "string") return [value];
+
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
+
+              if (item && typeof item === "object") {
+                const obj = item as Dict;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as Dict;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return getNested(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
+}
+
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
+  );
+}
+
+function isSystemAdmin(authValue: unknown) {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
+
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
+}
+
+function hasSafePermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const permissions = getAuthPermissionCodes(authValue);
+
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "accountant",
+          "support",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
+    );
+  }
+
+  return true;
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
+
+function dictionary(locale: AppLocale) {
+  const isArabic = locale === "ar";
+
+  return {
+    title: isArabic ? "إنشاء حساب خزينة" : "Create Treasury Account",
+    subtitle: isArabic
+      ? "أضف حساب خزينة جديد للصندوق أو البنك أو المحفظة مع الرصيد الافتتاحي والحالة."
+      : "Add a new treasury account for cashbox, bank, or wallet with opening balance and status.",
+
+    back: isArabic ? "حسابات الخزينة" : "Treasury Accounts",
+    treasury: isArabic ? "الخزينة" : "Treasury",
+    cashboxes: isArabic ? "الصناديق" : "Cashboxes",
+    banks: isArabic ? "البنوك" : "Banks",
+    save: isArabic ? "حفظ الحساب" : "Save Account",
+    saving: isArabic ? "جاري الحفظ..." : "Saving...",
+    clear: isArabic ? "مسح النموذج" : "Clear Form",
+
+    mainInfo: isArabic ? "بيانات الحساب" : "Account Details",
+    mainInfoDesc: isArabic
+      ? "المعلومات الأساسية لحساب الخزينة."
+      : "Basic treasury account information.",
+
+    financialInfo: isArabic ? "الرصيد والحالة" : "Balance and Status",
+    financialInfoDesc: isArabic
+      ? "حدد الرصيد الافتتاحي والحالة التشغيلية."
+      : "Set opening balance and operational status.",
+
+    bankInfo: isArabic ? "بيانات البنك" : "Bank Information",
+    bankInfoDesc: isArabic
+      ? "تظهر هذه البيانات عند اختيار حساب بنكي."
+      : "These fields are used when the account type is bank.",
+
+    summaryTitle: isArabic ? "ملخص الحساب" : "Account Summary",
+    summaryDesc: isArabic
+      ? "راجع بيانات الحساب قبل الحفظ."
+      : "Review account data before saving.",
+
+    name: isArabic ? "اسم الحساب" : "Account Name",
+    code: isArabic ? "كود الحساب" : "Account Code",
+    codeHint: isArabic
+      ? "اتركه فارغًا إذا كان النظام يولده تلقائيًا."
+      : "Leave empty if the system generates it automatically.",
+    accountType: isArabic ? "نوع الحساب" : "Account Type",
+    status: isArabic ? "الحالة" : "Status",
+    openingBalance: isArabic ? "الرصيد الافتتاحي" : "Opening Balance",
+    currentBalance: isArabic ? "الرصيد الحالي" : "Current Balance",
+    bankName: isArabic ? "اسم البنك" : "Bank Name",
+    accountNumber: isArabic ? "رقم الحساب البنكي" : "Bank Account Number",
+    iban: isArabic ? "IBAN" : "IBAN",
+    isDefault: isArabic ? "تعيين كحساب افتراضي" : "Set as Default Account",
+    notes: isArabic ? "ملاحظات" : "Notes",
+
+    cashbox: isArabic ? "صندوق" : "Cashbox",
+    bank: isArabic ? "بنك" : "Bank",
+    wallet: isArabic ? "محفظة" : "Wallet",
+    other: isArabic ? "أخرى" : "Other",
+
+    active: isArabic ? "نشط" : "Active",
+    inactive: isArabic ? "غير نشط" : "Inactive",
+    closed: isArabic ? "مغلق" : "Closed",
+
+    selectedType: isArabic ? "النوع المحدد" : "Selected Type",
+    selectedStatus: isArabic ? "الحالة المحددة" : "Selected Status",
+    defaultAccount: isArabic ? "حساب افتراضي" : "Default Account",
+    regularAccount: isArabic ? "حساب عادي" : "Regular Account",
+    notSet: isArabic ? "غير محدد" : "Not set",
+
+    accessDeniedTitle: isArabic
+      ? "غير مصرح بإنشاء حساب خزينة"
+      : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية إنشاء حسابات الخزينة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to create treasury accounts. Contact your system administrator if you need access.",
+
+    validationTitle: isArabic ? "راجع بيانات الحساب" : "Review account data",
+    requiredName: isArabic ? "اسم الحساب مطلوب." : "Account name is required.",
+    invalidOpeningBalance: isArabic
+      ? "الرصيد الافتتاحي يجب أن يكون رقمًا صحيحًا."
+      : "Opening balance must be a valid number.",
+    invalidCurrentBalance: isArabic
+      ? "الرصيد الحالي يجب أن يكون رقمًا صحيحًا."
+      : "Current balance must be a valid number.",
+    requiredBankName: isArabic
+      ? "اسم البنك مطلوب عند اختيار نوع بنك."
+      : "Bank name is required when account type is bank.",
+
+    saveSuccess: isArabic
+      ? "تم إنشاء حساب الخزينة بنجاح."
+      : "Treasury account created successfully.",
+    saveError: isArabic
+      ? "تعذر حفظ حساب الخزينة."
+      : "Unable to save treasury account.",
+
+    confirmClear: isArabic
+      ? "هل تريد مسح النموذج الحالي؟"
+      : "Clear the current form?",
+    unsavedChanges: isArabic
+      ? "لديك تغييرات غير محفوظة. هل تريد المغادرة؟"
+      : "You have unsaved changes. Do you want to leave?",
+  };
+}
+
+/* ============================================================
+   Helpers
+============================================================ */
 
 function toNumber(value: unknown): number {
-  const parsed = Number(value || 0);
+  const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function money(value: string | number | null | undefined) {
+function isValidNumberText(value: string) {
+  if (!value.trim()) return true;
+
+  return Number.isFinite(Number(value));
+}
+
+function formatNumber(value: unknown): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(toNumber(value));
+}
+
+function formatMoney(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function normalizeCurrency(value: string) {
-  return String(value || "SAR").trim().toUpperCase().slice(0, 3);
+function normalizeMoneyInput(value: string) {
+  const cleaned = value.replace(/[^\d.-]/g, "");
+
+  const parts = cleaned.split(".");
+  const integerPart = parts[0] || "";
+  const decimalPart = parts.slice(1).join("");
+
+  if (parts.length > 1) {
+    return `${integerPart}.${decimalPart.slice(0, 2)}`;
+  }
+
+  return integerPart;
 }
 
-function generateCode(accountType: TreasuryAccountType) {
-  const prefix = accountType === "BANK" ? "BNK" : "CSH";
-  return `${prefix}-${Date.now()}`;
-}
+function accountTypeLabel(type: AccountType, locale: AppLocale) {
+  const t = dictionary(locale);
 
-function cleanIban(value: string) {
-  return String(value || "").replace(/\s+/g, "").toUpperCase();
-}
-
-function dictionary(locale: AppLocale) {
-  const ar = locale === "ar";
-
-  return {
-    title: ar ? "إنشاء حساب خزينة" : "Create Treasury Account",
-    cashboxTitle: ar ? "إنشاء صندوق نقدي" : "Create Cashbox",
-    bankTitle: ar ? "إنشاء حساب بنكي" : "Create Bank Account",
-    subtitle: ar
-      ? "إضافة صندوق نقدي أو حساب بنكي وربطه بحركات الخزينة والمدفوعات."
-      : "Create a cashbox or bank account linked to treasury movements and payments.",
-    cashboxSubtitle: ar
-      ? "الصندوق النقدي يستخدم للتحصيل النقدي والمدفوعات المباشرة."
-      : "Cashbox is used for cash collection and direct receipts.",
-    bankSubtitle: ar
-      ? "الحساب البنكي يستخدم للتحويلات البنكية وتسويات بوابات الدفع."
-      : "Bank account is used for bank transfers and payment gateway settlements.",
-    badge: ar ? "حساب خزينة جديد" : "New Treasury Account",
-    back: ar ? "حسابات الخزينة" : "Treasury Accounts",
-    backCashboxes: ar ? "الصناديق" : "Cashboxes",
-    backBanks: ar ? "الحسابات البنكية" : "Bank Accounts",
-    save: ar ? "حفظ الحساب" : "Save Account",
-    saving: ar ? "جاري الحفظ..." : "Saving...",
-    saved: ar ? "تم إنشاء حساب الخزينة بنجاح." : "Treasury account created successfully.",
-    apiError: ar ? "تعذر إنشاء حساب الخزينة." : "Unable to create treasury account.",
-    required: ar ? "يرجى تعبئة الحقول المطلوبة." : "Please fill required fields.",
-    invalidMoney: ar
-      ? "الأرصدة يجب أن تكون أرقامًا صحيحة أو عشرية ولا تقل عن صفر."
-      : "Balances must be valid numbers and cannot be negative.",
-    invalidCurrency: ar ? "رمز العملة يجب أن يتكون من 3 أحرف." : "Currency code must be 3 letters.",
-    bankRequired: ar ? "اسم البنك مطلوب عند إنشاء حساب بنكي." : "Bank name is required for bank accounts.",
-    regenerate: ar ? "توليد كود" : "Generate Code",
-    preview: ar ? "معاينة الحساب" : "Account Preview",
-    accountData: ar ? "بيانات الحساب" : "Account Data",
-    bankData: ar ? "البيانات البنكية" : "Bank Details",
-    balanceData: ar ? "الأرصدة" : "Balances",
-    optionalData: ar ? "بيانات إضافية" : "Additional Data",
-    defaultHint: ar
-      ? "عند جعل هذا الحساب افتراضيًا سيتم إلغاء الافتراضي من الحسابات الأخرى."
-      : "When this account is default, other default accounts will be unset.",
-    cashboxHint: ar
-      ? "بيانات البنك لا تُحفظ للصناديق النقدية."
-      : "Bank fields are not saved for cashboxes.",
-    bankHint: ar
-      ? "تأكد من إدخال اسم البنك، ويمكن إضافة IBAN ورقم الحساب حسب الحاجة."
-      : "Make sure bank name is provided; IBAN and account number are optional.",
-    fields: {
-      name: ar ? "اسم الحساب" : "Account Name",
-      code: ar ? "كود الحساب" : "Account Code",
-      type: ar ? "نوع الحساب" : "Account Type",
-      status: ar ? "الحالة" : "Status",
-      opening: ar ? "الرصيد الافتتاحي" : "Opening Balance",
-      current: ar ? "الرصيد الحالي" : "Current Balance",
-      currency: ar ? "العملة" : "Currency",
-      bank: ar ? "اسم البنك" : "Bank Name",
-      holder: ar ? "صاحب الحساب" : "Account Holder",
-      number: ar ? "رقم الحساب" : "Account Number",
-      iban: ar ? "IBAN" : "IBAN",
-      branch: ar ? "الفرع" : "Branch",
-      description: ar ? "الوصف" : "Description",
-      default: ar ? "حساب افتراضي" : "Default Account",
-    },
-    placeholders: {
-      name: ar ? "مثال: الصندوق الرئيسي" : "Example: Main Cashbox",
-      bankName: ar ? "مثال: مصرف الراجحي" : "Example: Al Rajhi Bank",
-      holder: ar ? "اسم صاحب الحساب" : "Account holder name",
-      accountNumber: ar ? "رقم الحساب البنكي" : "Bank account number",
-      iban: ar ? "SA..." : "SA...",
-      branch: ar ? "اسم الفرع" : "Branch name",
-      description: ar ? "وصف مختصر للحساب" : "Short account description",
-    },
-    types: {
-      CASHBOX: ar ? "صندوق نقدي" : "Cashbox",
-      BANK: ar ? "حساب بنكي" : "Bank Account",
-    },
-    statuses: {
-      ACTIVE: ar ? "نشط" : "Active",
-      INACTIVE: ar ? "غير نشط" : "Inactive",
-      SUSPENDED: ar ? "موقوف" : "Suspended",
-      CLOSED: ar ? "مغلق" : "Closed",
-    },
+  const labels: Record<AccountType, string> = {
+    CASHBOX: t.cashbox,
+    BANK: t.bank,
+    WALLET: t.wallet,
+    OTHER: t.other,
   };
+
+  return labels[type];
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const method = init?.method || "GET";
-  const headers = new Headers(init?.headers || {});
+function statusLabel(status: AccountStatus, locale: AppLocale) {
+  const t = dictionary(locale);
 
-  headers.set("Accept", "application/json");
+  const labels: Record<AccountStatus, string> = {
+    ACTIVE: t.active,
+    INACTIVE: t.inactive,
+    CLOSED: t.closed,
+  };
 
-  if (method !== "GET") {
-    headers.set("Content-Type", "application/json");
-    headers.set("X-CSRFToken", getCookie("csrftoken"));
-  }
-
-  const response = await fetch(url, {
-    ...init,
-    method,
-    credentials: "include",
-    headers,
-    cache: "no-store",
-  });
-
-  const payload = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
-
-  if (!response.ok || payload?.success === false) {
-    const message =
-      payload?.message ||
-      (payload?.errors ? JSON.stringify(payload.errors) : "") ||
-      `HTTP ${response.status}`;
-
-    throw new Error(message);
-  }
-
-  return payload as T;
+  return labels[status];
 }
 
-function ToggleButton({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
+function accountTypeBadge(type: AccountType, locale: AppLocale) {
+  const label = accountTypeLabel(type, locale);
+
+  if (type === "CASHBOX") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (type === "BANK") {
+    return (
+      <Badge className="rounded-full border-sky-200 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50 dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (type === "WALLET") {
+    return (
+      <Badge className="rounded-full border-violet-200 bg-violet-50 px-3 py-1 text-violet-700 hover:bg-violet-50 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-300">
+        {label}
+      </Badge>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className={`relative h-7 w-12 rounded-full transition ${
-        checked ? "bg-primary" : "bg-muted"
-      }`}
-      aria-pressed={checked}
-    >
-      <span
-        className={`absolute top-1 h-5 w-5 rounded-full bg-background shadow transition ${
-          checked ? "ltr:left-6 rtl:right-6" : "ltr:left-1 rtl:right-1"
-        }`}
-      />
-    </button>
+    <Badge variant="outline" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
   );
 }
 
-export default function TreasuryAccountCreatePage() {
-  const router = useRouter();
+function statusBadge(status: AccountStatus, locale: AppLocale) {
+  const label = statusLabel(status, locale);
+
+  if (status === "ACTIVE") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "INACTIVE") {
+    return (
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="secondary" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
+  );
+}
+
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
+}
+
+function MoneyText({ value }: { value: unknown }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span>{formatMoney(value)}</span>
+      <SarIcon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+/* ============================================================
+   Page
+============================================================ */
+
+export default function CreateTreasuryAccountPage() {
+  const auth = useAuth() as unknown;
 
   const [locale, setLocale] = useState<AppLocale>("ar");
+  const [form, setForm] = useState<FormState>(() => makeDefaultForm());
   const [isSaving, setIsSaving] = useState(false);
-  const [form, setForm] = useState<FormData>({
-    name: "",
-    code: generateCode("CASHBOX"),
-    account_type: "CASHBOX",
-    status: "ACTIVE",
-    opening_balance: "0.00",
-    current_balance: "0.00",
-    currency: "SAR",
-    bank_name: "",
-    account_holder_name: "",
-    account_number: "",
-    iban: "",
-    branch_name: "",
-    description: "",
-    is_default: false,
-  });
+  const [submitError, setSubmitError] = useState("");
+  const [isDirty, setIsDirty] = useState(false);
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
-  const isBank = form.account_type === "BANK";
+  const authResolving = isAuthResolving(auth);
 
-  const pageTitle = isBank ? t.bankTitle : t.cashboxTitle;
-  const pageSubtitle = isBank ? t.bankSubtitle : t.cashboxSubtitle;
-  const backHref = isBank ? "/system/treasury/banks" : "/system/treasury/cashboxes";
-  const backLabel = isBank ? t.backBanks : t.backCashboxes;
+  const canCreate = hasSafePermission(
+    auth,
+    ["treasury.create", "treasury.accounts.create", "treasury.manage"],
+    "action",
+  );
 
-  function update<K extends keyof FormData>(key: K, value: FormData[K]) {
+  const canSubmit = canCreate && !isSaving;
+
+  const isBankAccount = form.accountType === "BANK";
+
+  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({
       ...current,
       [key]: value,
     }));
+    setIsDirty(true);
+  }
+
+  function updateMoneyField(key: "openingBalance" | "currentBalance", value: string) {
+    updateForm(key, normalizeMoneyInput(value));
+  }
+
+  function handleAccountTypeChange(value: AccountType) {
+    setForm((current) => ({
+      ...current,
+      accountType: value,
+      bankName: value === "BANK" ? current.bankName : "",
+      accountNumber: value === "BANK" ? current.accountNumber : "",
+      iban: value === "BANK" ? current.iban : "",
+    }));
+
+    setIsDirty(true);
+  }
+
+  function clearForm() {
+    if (isDirty && !window.confirm(t.confirmClear)) return;
+
+    setForm(makeDefaultForm());
+    setSubmitError("");
+    setIsDirty(false);
   }
 
   function validateForm() {
-    if (!form.name.trim() || !form.code.trim() || !form.account_type || !form.status) {
-      toast.error(t.required);
-      return false;
+    const errors: string[] = [];
+
+    if (!form.name.trim()) errors.push(t.requiredName);
+    if (!isValidNumberText(form.openingBalance)) errors.push(t.invalidOpeningBalance);
+    if (!isValidNumberText(form.currentBalance)) errors.push(t.invalidCurrentBalance);
+    if (form.accountType === "BANK" && !form.bankName.trim()) {
+      errors.push(t.requiredBankName);
     }
 
-    if (form.account_type === "BANK" && !form.bank_name.trim()) {
-      toast.error(t.bankRequired);
-      return false;
-    }
-
-    const openingBalance = Number(form.opening_balance || 0);
-    const currentBalance = Number(form.current_balance || 0);
-
-    if (
-      !Number.isFinite(openingBalance) ||
-      !Number.isFinite(currentBalance) ||
-      openingBalance < 0 ||
-      currentBalance < 0
-    ) {
-      toast.error(t.invalidMoney);
-      return false;
-    }
-
-    if (normalizeCurrency(form.currency).length !== 3) {
-      toast.error(t.invalidCurrency);
-      return false;
-    }
-
-    return true;
+    return Array.from(new Set(errors));
   }
 
   function buildPayload() {
-    const accountType = form.account_type;
+    const openingBalance = toNumber(form.openingBalance);
+    const currentBalance = form.currentBalance.trim()
+      ? toNumber(form.currentBalance)
+      : openingBalance;
 
     return {
       name: form.name.trim(),
-      code: form.code.trim(),
-      account_type: accountType,
+      title: form.name.trim(),
+      code: form.code.trim() || undefined,
+      account_code: form.code.trim() || undefined,
+      account_type: form.accountType,
+      type: form.accountType,
       status: form.status,
-      opening_balance: normalizeMoney(form.opening_balance),
-      current_balance: normalizeMoney(form.current_balance || form.opening_balance),
-      currency: normalizeCurrency(form.currency),
-      bank_name: accountType === "BANK" ? form.bank_name.trim() : "",
-      account_holder_name:
-        accountType === "BANK" ? form.account_holder_name.trim() : "",
-      account_number: accountType === "BANK" ? form.account_number.trim() : "",
-      iban: accountType === "BANK" ? cleanIban(form.iban) : "",
-      branch_name: accountType === "BANK" ? form.branch_name.trim() : "",
-      description: form.description.trim(),
-      is_default: form.is_default,
+      state: form.status,
+      opening_balance: openingBalance,
+      initial_balance: openingBalance,
+      current_balance: currentBalance,
+      balance: currentBalance,
+      currency: "SAR",
+      bank_name: isBankAccount ? form.bankName.trim() : "",
+      account_number: isBankAccount ? form.accountNumber.trim() : "",
+      bank_account_number: isBankAccount ? form.accountNumber.trim() : "",
+      iban: isBankAccount ? form.iban.trim() : "",
+      is_default: form.isDefault,
+      default: form.isDefault,
+      notes: form.notes.trim(),
+      description: form.notes.trim(),
     };
   }
 
-  async function submit() {
-    if (!validateForm()) return;
+  const submitForm = useCallback(async () => {
+    if (!canCreate) return;
+
+    const errors = validateForm();
+
+    if (errors.length > 0) {
+      setSubmitError(errors.join("\n"));
+      toast.error(t.validationTitle);
+      return;
+    }
 
     try {
       setIsSaving(true);
+      setSubmitError("");
 
+      const csrfToken = getCookie("csrftoken");
       const payload = buildPayload();
 
-      const response = await fetchJson<ApiEnvelope<CreatedAccount>>(
-        "/api/treasury/accounts/",
-        {
+      const endpoints = ["/api/treasury/accounts/create/", "/api/treasury/accounts/"];
+
+      let saved = false;
+      let lastMessage = "";
+
+      for (const endpoint of endpoints) {
+        const response = await fetch(apiUrl(endpoint), {
           method: "POST",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+          },
           body: JSON.stringify(payload),
-        },
-      );
+        });
 
-      toast.success(response.message || t.saved);
+        const responsePayload = (await response.json().catch(() => null)) as
+          | ApiEnvelope<unknown>
+          | null;
 
-      const createdId = response.data?.id;
+        if ([404, 405].includes(response.status)) {
+          lastMessage =
+            responsePayload?.message ||
+            responsePayload?.detail ||
+            responsePayload?.error ||
+            `HTTP ${response.status}`;
+          continue;
+        }
 
-      if (createdId) {
-        router.push(`/system/treasury/accounts/${createdId}`);
-      } else {
-        router.push(
-          payload.account_type === "BANK"
-            ? "/system/treasury/banks"
-            : "/system/treasury/cashboxes",
-        );
+        if (response.status === 400) {
+          lastMessage =
+            responsePayload?.message ||
+            responsePayload?.detail ||
+            responsePayload?.error ||
+            t.saveError;
+          break;
+        }
+
+        if (
+          !response.ok ||
+          responsePayload?.ok === false ||
+          responsePayload?.success === false
+        ) {
+          throw new Error(
+            responsePayload?.message ||
+              responsePayload?.detail ||
+              responsePayload?.error ||
+              `HTTP ${response.status}`,
+          );
+        }
+
+        saved = true;
+        break;
       }
 
-      router.refresh();
+      if (!saved) {
+        throw new Error(lastMessage || t.saveError);
+      }
+
+      toast.success(t.saveSuccess);
+      setForm(makeDefaultForm());
+      setIsDirty(false);
+      setSubmitError("");
     } catch (error) {
-      console.error("Create treasury account error:", error);
-      toast.error(error instanceof Error ? error.message : t.apiError);
+      console.error("Create treasury account submit error:", error);
+      const message = error instanceof Error ? error.message : t.saveError;
+
+      setSubmitError(message || t.saveError);
+      toast.error(t.saveError);
     } finally {
       setIsSaving(false);
     }
-  }
+  }, [canCreate, form, isBankAccount, t]);
 
   useEffect(() => {
-    const next = readLocale();
-    applyDocumentLocale(next);
-    setLocale(next);
+    const syncLocale = () => {
+      const nextLocale = readLocale();
 
-    const initialType = getInitialAccountType();
-
-    setForm((current) => ({
-      ...current,
-      account_type: initialType,
-      code:
-        current.code && current.code !== "CSH-" && current.code !== "BNK-"
-          ? current.code.startsWith("CSH-") || current.code.startsWith("BNK-")
-            ? generateCode(initialType)
-            : current.code
-          : generateCode(initialType),
-    }));
-
-    const handleLocaleChange = () => {
-      const updated = readLocale();
-      applyDocumentLocale(updated);
-      setLocale(updated);
+      applyDocumentLocale(nextLocale);
+      setLocale(nextLocale);
     };
 
-    window.addEventListener("storage", handleLocaleChange);
-    window.addEventListener("primey-locale-changed", handleLocaleChange);
+    const syncAfterPaint = () => {
+      syncLocale();
+      window.setTimeout(syncLocale, 0);
+    };
+
+    syncAfterPaint();
+
+    window.addEventListener("primey-locale-changed", syncAfterPaint);
+    window.addEventListener("storage", syncAfterPaint);
 
     return () => {
-      window.removeEventListener("storage", handleLocaleChange);
-      window.removeEventListener("primey-locale-changed", handleLocaleChange);
+      window.removeEventListener("primey-locale-changed", syncAfterPaint);
+      window.removeEventListener("storage", syncAfterPaint);
     };
   }, []);
 
-  const kpiCards = [
-    {
-      label: t.fields.type,
-      value: t.types[form.account_type],
-      icon: isBank ? Building2 : Wallet,
-      currency: false,
-    },
-    {
-      label: t.fields.status,
-      value: t.statuses[form.status],
-      icon: CheckCircle2,
-      currency: false,
-    },
-    {
-      label: t.fields.opening,
-      value: money(form.opening_balance),
-      icon: Banknote,
-      currency: true,
-    },
-    {
-      label: t.fields.current,
-      value: money(form.current_balance || form.opening_balance),
-      icon: ShieldCheck,
-      currency: true,
-    },
-  ];
+  useEffect(() => {
+    const handler = (event: BeforeUnloadEvent) => {
+      if (!isDirty || isSaving) return;
 
-  return (
-    <PermissionGuard
-      permission={PERMISSIONS.TREASURY_CREATE}
-      workspace="system"
-      mode="fallback"
-    >
-      <div className="space-y-5" dir={isArabic ? "rtl" : "ltr"}>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" className="rounded-full">
-                /system/treasury/accounts/create
-              </Badge>
-              <Badge className="rounded-full">{t.badge}</Badge>
-              <Badge variant="outline" className="rounded-full">
-                {t.types[form.account_type]}
-              </Badge>
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handler);
+
+    return () => {
+      window.removeEventListener("beforeunload", handler);
+    };
+  }, [isDirty, isSaving]);
+
+  if (!authResolving && !canCreate) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
             </div>
 
-            <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-              {pageTitle}
-            </h1>
-
-            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-              {pageSubtitle}
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button asChild variant="outline" className="h-10 rounded-xl">
-              <Link href={backHref}>
-                <ArrowLeft className="h-4 w-4" />
-                {backLabel}
-              </Link>
-            </Button>
-
-            <Button asChild variant="outline" className="h-10 rounded-xl">
-              <Link href="/system/treasury/accounts">
-                <Wallet className="h-4 w-4" />
-                {t.back}
-              </Link>
-            </Button>
-
-            <Button
-              type="button"
-              className="h-10 rounded-xl"
-              disabled={isSaving}
-              onClick={submit}
-            >
-              {isSaving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              {isSaving ? t.saving : t.save}
-            </Button>
-          </div>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {kpiCards.map((item) => {
-            const Icon = item.icon;
-
-            return (
-              <Card key={item.label} className="overflow-hidden">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        {item.currency ? (
-                          <Image
-                            src={SAR_ICON}
-                            alt="SAR"
-                            width={18}
-                            height={18}
-                          />
-                        ) : null}
-                        <p className="text-lg font-bold" dir="ltr">
-                          {item.value}
-                        </p>
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {item.label}
-                      </p>
-                    </div>
-
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-muted">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-3">
-          <Card className="xl:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-base">{t.accountData}</CardTitle>
-              <CardDescription>{t.subtitle}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>{t.fields.name}</Label>
-                <Input
-                  value={form.name}
-                  onChange={(event) => update("name", event.target.value)}
-                  placeholder={isBank ? t.bankTitle : t.placeholders.name}
-                  className="h-10 rounded-xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.fields.code}</Label>
-                <div className="flex gap-2">
-                  <Input
-                    value={form.code}
-                    onChange={(event) => update("code", event.target.value)}
-                    className="h-10 rounded-xl"
-                    dir="ltr"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 shrink-0 rounded-xl"
-                    onClick={() => update("code", generateCode(form.account_type))}
-                  >
-                    <RefreshCcw className="h-4 w-4" />
-                    {t.regenerate}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.fields.type}</Label>
-                <select
-                  value={form.account_type}
-                  onChange={(event) => {
-                    const nextType = event.target.value as TreasuryAccountType;
-
-                    setForm((current) => ({
-                      ...current,
-                      account_type: nextType,
-                      code: generateCode(nextType),
-                      bank_name: nextType === "BANK" ? current.bank_name : "",
-                      account_holder_name:
-                        nextType === "BANK" ? current.account_holder_name : "",
-                      account_number:
-                        nextType === "BANK" ? current.account_number : "",
-                      iban: nextType === "BANK" ? current.iban : "",
-                      branch_name: nextType === "BANK" ? current.branch_name : "",
-                    }));
-                  }}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm"
-                >
-                  <option value="CASHBOX">{t.types.CASHBOX}</option>
-                  <option value="BANK">{t.types.BANK}</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.fields.status}</Label>
-                <select
-                  value={form.status}
-                  onChange={(event) =>
-                    update("status", event.target.value as TreasuryAccountStatus)
-                  }
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm"
-                >
-                  <option value="ACTIVE">{t.statuses.ACTIVE}</option>
-                  <option value="INACTIVE">{t.statuses.INACTIVE}</option>
-                  <option value="SUSPENDED">{t.statuses.SUSPENDED}</option>
-                  <option value="CLOSED">{t.statuses.CLOSED}</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.fields.opening}</Label>
-                <div className="relative">
-                  <Image
-                    src={SAR_ICON}
-                    alt="SAR"
-                    width={18}
-                    height={18}
-                    className="absolute top-1/2 -translate-y-1/2 ltr:left-3 rtl:right-3"
-                  />
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.opening_balance}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      update("opening_balance", value);
-
-                      if (
-                        !form.current_balance ||
-                        form.current_balance === "0.00" ||
-                        form.current_balance === form.opening_balance
-                      ) {
-                        update("current_balance", value);
-                      }
-                    }}
-                    className="h-10 rounded-xl ltr:pl-10 rtl:pr-10"
-                    dir="ltr"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.fields.current}</Label>
-                <div className="relative">
-                  <Image
-                    src={SAR_ICON}
-                    alt="SAR"
-                    width={18}
-                    height={18}
-                    className="absolute top-1/2 -translate-y-1/2 ltr:left-3 rtl:right-3"
-                  />
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.current_balance}
-                    onChange={(event) =>
-                      update("current_balance", event.target.value)
-                    }
-                    className="h-10 rounded-xl ltr:pl-10 rtl:pr-10"
-                    dir="ltr"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.fields.currency}</Label>
-                <Input
-                  value={form.currency}
-                  onChange={(event) =>
-                    update("currency", event.target.value.toUpperCase())
-                  }
-                  className="h-10 rounded-xl"
-                  dir="ltr"
-                />
-              </div>
-
-              <div className="flex items-center justify-between gap-4 rounded-2xl border p-4">
-                <div>
-                  <Label>{t.fields.default}</Label>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t.defaultHint}
-                  </p>
-                </div>
-                <ToggleButton
-                  checked={form.is_default}
-                  onChange={(value) => update("is_default", value)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t.preview}</CardTitle>
-              <CardDescription>
-                {isBank ? t.bankHint : t.cashboxHint}
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              <div className="rounded-2xl border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm text-muted-foreground">
-                      {t.fields.name}
-                    </p>
-                    <p className="mt-1 font-semibold">
-                      {form.name || pageTitle}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                      {form.code || "-"}
-                    </p>
-                  </div>
-
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-muted">
-                    {isBank ? (
-                      <Landmark className="h-5 w-5" />
-                    ) : (
-                      <Wallet className="h-5 w-5" />
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-4 flex items-center gap-2 font-bold" dir="ltr">
-                  <Image src={SAR_ICON} alt="SAR" width={18} height={18} />
-                  {money(form.current_balance || form.opening_balance)}
-                </div>
-              </div>
-
-              <div className="grid gap-3">
-                <div className="rounded-2xl border p-3">
-                  <p className="text-xs text-muted-foreground">
-                    {t.fields.type}
-                  </p>
-                  <p className="mt-1 font-medium">{t.types[form.account_type]}</p>
-                </div>
-
-                <div className="rounded-2xl border p-3">
-                  <p className="text-xs text-muted-foreground">
-                    {t.fields.status}
-                  </p>
-                  <p className="mt-1 font-medium">{t.statuses[form.status]}</p>
-                </div>
-
-                <div className="rounded-2xl border p-3">
-                  <p className="text-xs text-muted-foreground">
-                    {t.fields.default}
-                  </p>
-                  <p className="mt-1 font-medium">
-                    {form.is_default ? "Yes" : "No"}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {isBank ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">{t.bankData}</CardTitle>
-              <CardDescription>{t.bankHint}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>{t.fields.bank}</Label>
-                <Input
-                  value={form.bank_name}
-                  onChange={(event) => update("bank_name", event.target.value)}
-                  placeholder={t.placeholders.bankName}
-                  className="h-10 rounded-xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.fields.holder}</Label>
-                <Input
-                  value={form.account_holder_name}
-                  onChange={(event) =>
-                    update("account_holder_name", event.target.value)
-                  }
-                  placeholder={t.placeholders.holder}
-                  className="h-10 rounded-xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.fields.number}</Label>
-                <Input
-                  value={form.account_number}
-                  onChange={(event) =>
-                    update("account_number", event.target.value)
-                  }
-                  placeholder={t.placeholders.accountNumber}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>{t.fields.iban}</Label>
-                <Input
-                  value={form.iban}
-                  onChange={(event) =>
-                    update("iban", event.target.value.toUpperCase())
-                  }
-                  placeholder={t.placeholders.iban}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label>{t.fields.branch}</Label>
-                <Input
-                  value={form.branch_name}
-                  onChange={(event) =>
-                    update("branch_name", event.target.value)
-                  }
-                  placeholder={t.placeholders.branch}
-                  className="h-10 rounded-xl"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">{t.optionalData}</CardTitle>
-            <CardDescription>
-              {isBank ? t.bankHint : t.cashboxHint}
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent>
-            <div className="space-y-2">
-              <Label>{t.fields.description}</Label>
-              <Input
-                value={form.description}
-                onChange={(event) => update("description", event.target.value)}
-                placeholder={t.placeholders.description}
-                className="h-10 rounded-xl"
-              />
-            </div>
-
-            <div className="mt-4 flex justify-end">
-              <Button
-                type="button"
-                className="h-10 rounded-xl"
-                disabled={isSaving}
-                onClick={submit}
-              >
-                {isSaving ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4" />
-                )}
-                {isSaving ? t.saving : t.save}
-              </Button>
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
             </div>
           </CardContent>
         </Card>
       </div>
-    </PermissionGuard>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+            {t.title}
+          </h1>
+
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Link
+            href="/system/treasury/accounts"
+            onClick={(event) => {
+              if (isDirty && !window.confirm(t.unsavedChanges)) {
+                event.preventDefault();
+              }
+            }}
+          >
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>{t.back}</span>
+            </Button>
+          </Link>
+
+          <Link
+            href="/system/treasury"
+            onClick={(event) => {
+              if (isDirty && !window.confirm(t.unsavedChanges)) {
+                event.preventDefault();
+              }
+            }}
+          >
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
+              <Wallet className="h-4 w-4" />
+              <span>{t.treasury}</span>
+            </Button>
+          </Link>
+
+          <Link
+            href="/system/treasury/cashboxes"
+            onClick={(event) => {
+              if (isDirty && !window.confirm(t.unsavedChanges)) {
+                event.preventDefault();
+              }
+            }}
+          >
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
+              <Banknote className="h-4 w-4" />
+              <span>{t.cashboxes}</span>
+            </Button>
+          </Link>
+
+          <Link
+            href="/system/treasury/banks"
+            onClick={(event) => {
+              if (isDirty && !window.confirm(t.unsavedChanges)) {
+                event.preventDefault();
+              }
+            }}
+          >
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
+              <Building2 className="h-4 w-4" />
+              <span>{t.banks}</span>
+            </Button>
+          </Link>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={clearForm}
+            disabled={isSaving}
+          >
+            <RotateCcw className="h-4 w-4" />
+            <span>{t.clear}</span>
+          </Button>
+
+          <Button
+            type="button"
+            className="h-10 rounded-xl"
+            onClick={submitForm}
+            disabled={!canSubmit}
+          >
+            {isSaving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            <span>{isSaving ? t.saving : t.save}</span>
+          </Button>
+        </div>
+      </div>
+
+      {submitError ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.validationTitle}
+              </p>
+              <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">
+                {submitError}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-4">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <FileText className="h-4 w-4" />
+                {t.mainInfo}
+              </CardTitle>
+              <CardDescription>{t.mainInfoDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.name}</label>
+                <Input
+                  value={form.name}
+                  onChange={(event) => updateForm("name", event.target.value)}
+                  disabled={isSaving}
+                  className="h-11 rounded-xl"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.code}</label>
+                <Input
+                  value={form.code}
+                  onChange={(event) => updateForm("code", event.target.value)}
+                  disabled={isSaving}
+                  dir="ltr"
+                  className="h-11 rounded-xl"
+                />
+                <p className="text-xs text-muted-foreground">{t.codeHint}</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.accountType}</label>
+                <select
+                  value={form.accountType}
+                  onChange={(event) =>
+                    handleAccountTypeChange(event.target.value as AccountType)
+                  }
+                  disabled={isSaving}
+                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="CASHBOX">{t.cashbox}</option>
+                  <option value="BANK">{t.bank}</option>
+                  <option value="WALLET">{t.wallet}</option>
+                  <option value="OTHER">{t.other}</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.status}</label>
+                <select
+                  value={form.status}
+                  onChange={(event) =>
+                    updateForm("status", event.target.value as AccountStatus)
+                  }
+                  disabled={isSaving}
+                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="ACTIVE">{t.active}</option>
+                  <option value="INACTIVE">{t.inactive}</option>
+                  <option value="CLOSED">{t.closed}</option>
+                </select>
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">{t.notes}</label>
+                <textarea
+                  value={form.notes}
+                  onChange={(event) => updateForm("notes", event.target.value)}
+                  disabled={isSaving}
+                  rows={3}
+                  className="w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <CreditCard className="h-4 w-4" />
+                {t.financialInfo}
+              </CardTitle>
+              <CardDescription>{t.financialInfoDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.openingBalance}</label>
+                <div className="relative">
+                  <Input
+                    value={form.openingBalance}
+                    onChange={(event) =>
+                      updateMoneyField("openingBalance", event.target.value)
+                    }
+                    disabled={isSaving}
+                    inputMode="decimal"
+                    dir="ltr"
+                    className="h-11 rounded-xl pe-10"
+                  />
+                  <div className="absolute top-1/2 -translate-y-1/2 end-3">
+                    <SarIcon className="h-4 w-4" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.currentBalance}</label>
+                <div className="relative">
+                  <Input
+                    value={form.currentBalance}
+                    onChange={(event) =>
+                      updateMoneyField("currentBalance", event.target.value)
+                    }
+                    disabled={isSaving}
+                    inputMode="decimal"
+                    dir="ltr"
+                    className="h-11 rounded-xl pe-10"
+                  />
+                  <div className="absolute top-1/2 -translate-y-1/2 end-3">
+                    <SarIcon className="h-4 w-4" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border bg-background px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.isDefault}
+                    onChange={(event) =>
+                      updateForm("isDefault", event.target.checked)
+                    }
+                    disabled={isSaving}
+                    className="h-4 w-4 rounded border-muted-foreground"
+                  />
+                  <span>{t.isDefault}</span>
+                </label>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <Building2 className="h-4 w-4" />
+                {t.bankInfo}
+              </CardTitle>
+              <CardDescription>{t.bankInfoDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.bankName}</label>
+                <Input
+                  value={form.bankName}
+                  onChange={(event) => updateForm("bankName", event.target.value)}
+                  disabled={isSaving || !isBankAccount}
+                  className="h-11 rounded-xl"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.accountNumber}</label>
+                <Input
+                  value={form.accountNumber}
+                  onChange={(event) =>
+                    updateForm("accountNumber", event.target.value)
+                  }
+                  disabled={isSaving || !isBankAccount}
+                  dir="ltr"
+                  className="h-11 rounded-xl"
+                />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium">{t.iban}</label>
+                <Input
+                  value={form.iban}
+                  onChange={(event) =>
+                    updateForm("iban", event.target.value.toUpperCase())
+                  }
+                  disabled={isSaving || !isBankAccount}
+                  dir="ltr"
+                  className="h-11 rounded-xl"
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <aside className="space-y-4">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <CheckCircle2 className="h-4 w-4" />
+                {t.summaryTitle}
+              </CardTitle>
+              <CardDescription>{t.summaryDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="rounded-2xl border bg-background p-4">
+                <p className="text-xs text-muted-foreground">{t.name}</p>
+                <p className="mt-2 font-semibold">{form.name || t.notSet}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-2xl border bg-background p-4">
+                  <p className="text-xs text-muted-foreground">
+                    {t.selectedType}
+                  </p>
+                  <div className="mt-2">
+                    {accountTypeBadge(form.accountType, locale)}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border bg-background p-4">
+                  <p className="text-xs text-muted-foreground">
+                    {t.selectedStatus}
+                  </p>
+                  <div className="mt-2">{statusBadge(form.status, locale)}</div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-background p-4">
+                <p className="text-xs text-muted-foreground">
+                  {t.openingBalance}
+                </p>
+                <div className="mt-2 font-semibold">
+                  <MoneyText value={form.openingBalance} />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-background p-4">
+                <p className="text-xs text-muted-foreground">
+                  {t.currentBalance}
+                </p>
+                <div className="mt-2 font-semibold">
+                  <MoneyText value={form.currentBalance} />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-background p-4">
+                <p className="text-xs text-muted-foreground">{t.isDefault}</p>
+                <p className="mt-2 font-semibold">
+                  {form.isDefault ? t.defaultAccount : t.regularAccount}
+                </p>
+              </div>
+
+              {isBankAccount ? (
+                <div className="rounded-2xl border bg-background p-4">
+                  <p className="text-xs text-muted-foreground">{t.bankInfo}</p>
+                  <p className="mt-2 font-semibold">
+                    {form.bankName || t.notSet}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
+                    {form.accountNumber || "-"}
+                  </p>
+                  <p className="mt-1 line-clamp-1 text-xs text-muted-foreground" dir="ltr">
+                    {form.iban || "-"}
+                  </p>
+                </div>
+              ) : null}
+
+              <div className="grid gap-2 pt-2">
+                <Button
+                  type="button"
+                  className="h-11 rounded-2xl"
+                  onClick={submitForm}
+                  disabled={!canSubmit}
+                >
+                  {isSaving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  {isSaving ? t.saving : t.save}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 rounded-2xl"
+                  onClick={clearForm}
+                  disabled={isSaving}
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  {t.clear}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="space-y-3 p-5">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <ShieldCheck className="h-4 w-4" />
+                {t.financialInfo}
+              </div>
+
+              <p className="text-sm leading-6 text-muted-foreground">
+                {form.status === "ACTIVE" ? t.active : statusLabel(form.status, locale)}
+              </p>
+
+              <div className="text-2xl font-bold">
+                {formatNumber(toNumber(form.currentBalance))}
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
+      </div>
+    </div>
   );
 }

@@ -1,34 +1,45 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/payments/[id]/page.tsx
+   🧠 Primey Care | Payment Details
+   ------------------------------------------------------------
+   ✅ تفاصيل الدفعة
+   ✅ تأكيد / إلغاء حسب الصلاحيات والحالة
+   ✅ عرض العميل / الفاتورة / الطلب / الترحيل
+   ✅ Web PDF Print
+   ✅ Skeleton / Error / Not Found
+   ✅ Phase 17 UX + Phase 2 Permissions
+============================================================ */
+
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
-  BadgeCheck,
-  Banknote,
-  BarChart3,
+  Ban,
   CalendarDays,
   CheckCircle2,
-  Clock3,
   Copy,
   CreditCard,
-  Download,
   FileText,
-  Hash,
   Loader2,
   Printer,
   ReceiptText,
   RefreshCcw,
   ShieldCheck,
-  User,
-  Wallet,
+  ShoppingCart,
+  UserRound,
+  WalletCards,
   XCircle,
-  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/components/providers/AuthProvider";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,329 +50,503 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-/* =====================================================
-   TYPES
-===================================================== */
+/* ============================================================
+   Types
+============================================================ */
 
 type AppLocale = "ar" | "en";
+type Dict = Record<string, unknown>;
 
-type RelatedCustomer = {
-  id?: number | null;
-  name?: string | null;
-  phone?: string | null;
-  email?: string | null;
+type PaymentStatus =
+  | "PENDING"
+  | "CONFIRMED"
+  | "CANCELLED"
+  | "FAILED"
+  | "REFUNDED"
+  | "UNKNOWN";
+
+type PaymentMethod =
+  | "CASH"
+  | "BANK_TRANSFER"
+  | "GATEWAY"
+  | "CARD"
+  | "WALLET"
+  | "TAMARA"
+  | "TABBY"
+  | "UNKNOWN";
+
+type PaymentDetails = {
+  id: string;
+  payment_number: string;
+  payment_method: PaymentMethod;
+  status: PaymentStatus;
+  amount: number;
+
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+
+  invoice_id: string;
+  invoice_number: string;
+  invoice_total_amount: number;
+  invoice_remaining_amount: number;
+
+  order_id: string;
+  order_number: string;
+  order_total_amount: number;
+
+  payment_date: string;
+  confirmed_at: string;
+  cancelled_at: string;
+  created_at: string;
+
+  reference: string;
+  gateway_reference: string;
+  transaction_reference: string;
+  notes: string;
+  cancellation_reason: string;
+
+  is_treasury_posted: boolean;
+  is_accounting_posted: boolean;
+  treasury_reference: string;
+  accounting_reference: string;
 };
 
-type RelatedInvoice = {
-  id?: number | null;
-  label?: string | null;
-  status?: string | null;
-  total_amount?: string | number | null;
-};
-
-type RelatedOrder = {
-  id?: number | null;
-  label?: string | null;
-  status?: string | null;
-};
-
-type ApiPayment = {
-  id: number;
-  reference?: string | null;
-  payment_number?: string | null;
-  status?: string | null;
-  payment_method?: string | null;
-  method?: string | null;
-  provider?: string | null;
-  invoice_id?: number | null;
-  order_id?: number | null;
-  customer_id?: number | null;
-  company_id?: number | null;
-  amount?: string | number | null;
-  paid_amount?: string | number | null;
-  refunded_amount?: string | number | null;
-  remaining_amount?: string | number | null;
-  net_collected_amount?: string | number | null;
-  currency?: string | null;
-  external_reference?: string | null;
-  transaction_id?: string | null;
-  gateway_response_code?: string | null;
-  gateway_message?: string | null;
-  failure_reason?: string | null;
-  treasury_movement_reference?: string | null;
-  accounting_entry_reference?: string | null;
-  is_treasury_posted?: boolean | null;
-  is_accounting_posted?: boolean | null;
-  payment_date?: string | null;
-  paid_date?: string | null;
-  date?: string | null;
-  initiated_at?: string | null;
-  paid_at?: string | null;
-  confirmed_at?: string | null;
-  refunded_at?: string | null;
-  cancelled_at?: string | null;
-  notes?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  invoice?: RelatedInvoice | null;
-  order?: RelatedOrder | null;
-  customer?: RelatedCustomer | null;
-};
-
-type PaymentDetailResponse = {
+type ApiEnvelope<T> = {
   ok?: boolean;
-  payment?: ApiPayment;
+  success?: boolean;
   message?: string;
+  detail?: string;
+  error?: string;
+  data?: T;
+  payment?: unknown;
+  item?: unknown;
 };
-
-type ConfirmPaymentResponse = {
-  ok?: boolean;
-  message?: string;
-  payment?: {
-    id?: number;
-    status?: string;
-    status_before?: string;
-    status_after?: string;
-  };
-  status_before?: string;
-  status_after?: string;
-  treasury?: {
-    requested?: boolean;
-    dispatched?: boolean;
-    message?: string;
-  };
-  accounting?: {
-    requested?: boolean;
-    dispatched?: boolean;
-    message?: string;
-  };
-};
-
-type CancelPaymentResponse = {
-  ok?: boolean;
-  message?: string;
-  payment?: {
-    id?: number;
-    payment_number?: string;
-    status_before?: string;
-    status_after?: string;
-    cancelled_at?: string | null;
-  };
-};
-
-type StatusMeta = {
-  labelAr: string;
-  labelEn: string;
-  className: string;
-};
-
-type MethodMeta = {
-  labelAr: string;
-  labelEn: string;
-};
-
-type ProviderMeta = {
-  labelAr: string;
-  labelEn: string;
-};
-
-/* =====================================================
-   CONSTANTS
-===================================================== */
 
 const SAR_ICON_PATH = "/currency/sar.svg";
 
-const STATUS_META: Record<string, StatusMeta> = {
-  PENDING: {
-    labelAr: "قيد الانتظار",
-    labelEn: "Pending",
-    className:
-      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300",
-  },
-  PROCESSING: {
-    labelAr: "قيد المعالجة",
-    labelEn: "Processing",
-    className:
-      "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300",
-  },
-  PAID: {
-    labelAr: "مدفوع",
-    labelEn: "Paid",
-    className:
-      "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300",
-  },
-  PARTIALLY_PAID: {
-    labelAr: "مدفوع جزئيًا",
-    labelEn: "Partially Paid",
-    className:
-      "border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900/60 dark:bg-cyan-950/40 dark:text-cyan-300",
-  },
-  FAILED: {
-    labelAr: "فشل",
-    labelEn: "Failed",
-    className:
-      "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300",
-  },
-  CANCELLED: {
-    labelAr: "ملغي",
-    labelEn: "Cancelled",
-    className:
-      "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300",
-  },
-  REFUNDED: {
-    labelAr: "مسترد",
-    labelEn: "Refunded",
-    className:
-      "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900/60 dark:bg-purple-950/40 dark:text-purple-300",
-  },
-  PARTIALLY_REFUNDED: {
-    labelAr: "مسترد جزئيًا",
-    labelEn: "Partially Refunded",
-    className:
-      "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-900/60 dark:bg-fuchsia-950/40 dark:text-fuchsia-300",
-  },
-};
+/* ============================================================
+   Locale / API
+============================================================ */
 
-const METHOD_META: Record<string, MethodMeta> = {
-  CASH: { labelAr: "نقدي", labelEn: "Cash" },
-  BANK_TRANSFER: { labelAr: "تحويل بنكي", labelEn: "Bank Transfer" },
-  CREDIT_CARD: { labelAr: "بطاقة ائتمانية", labelEn: "Credit Card" },
-  DEBIT_CARD: { labelAr: "مدى / خصم", labelEn: "Debit Card" },
-  WALLET: { labelAr: "محفظة", labelEn: "Wallet" },
-  APPLE_PAY: { labelAr: "Apple Pay", labelEn: "Apple Pay" },
-  STC_PAY: { labelAr: "STC Pay", labelEn: "STC Pay" },
-  TAMARA: { labelAr: "تمارا", labelEn: "Tamara" },
-  TABBY: { labelAr: "تابي", labelEn: "Tabby" },
-  GATEWAY: { labelAr: "بوابة دفع", labelEn: "Gateway" },
-  OTHER: { labelAr: "أخرى", labelEn: "Other" },
-};
+function readLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
 
-const PROVIDER_META: Record<string, ProviderMeta> = {
-  INTERNAL: { labelAr: "داخلي", labelEn: "Internal" },
-  TAP: { labelAr: "Tap", labelEn: "Tap" },
-  TAMARA: { labelAr: "Tamara", labelEn: "Tamara" },
-  TABBY: { labelAr: "Tabby", labelEn: "Tabby" },
-  MANUAL: { labelAr: "يدوي", labelEn: "Manual" },
-  BANK: { labelAr: "بنك", labelEn: "Bank" },
-  OTHER: { labelAr: "أخرى", labelEn: "Other" },
-};
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
 
-/* =====================================================
-   LOCALE HELPERS
-===================================================== */
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
-function getInitialLocale(): AppLocale {
-  if (typeof window === "undefined") return "ar";
-
-  const stored = window.localStorage.getItem("primey-locale");
-  if (stored === "ar" || stored === "en") return stored;
-
-  const htmlLang = document.documentElement.lang;
-  if (htmlLang === "en") return "en";
-
-  return "ar";
+    return document.documentElement.lang === "en" ? "en" : "ar";
+  } catch {
+    return "ar";
+  }
 }
 
-function applyLocaleToDocument(locale: AppLocale) {
-  if (typeof document === "undefined") return;
+function applyDocumentLocale(locale: AppLocale) {
+  try {
+    if (typeof document === "undefined") return;
 
-  document.documentElement.lang = locale;
-  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-  document.body.dir = locale === "ar" ? "rtl" : "ltr";
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch (error) {
+    console.error("Apply locale error:", error);
+  }
 }
 
-/* =====================================================
-   FORMAT HELPERS
-===================================================== */
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
 
-function toNumber(value: string | number | null | undefined): number {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  if (!value) return 0;
+  if (!base) return path;
 
-  const parsed = Number(String(value).replace(/,/g, ""));
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
+function getCookie(name: string) {
+  try {
+    if (typeof document === "undefined") return "";
+
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+
+    if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
+
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/* ============================================================
+   Auth / Permissions
+============================================================ */
+
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
+}
+
+function getNested(source: Dict, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+
+    if (value && typeof value === "object") return value as Dict;
+  }
+
+  return {};
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
+
+          if (typeof value === "string") return [value];
+
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
+
+              if (item && typeof item === "object") {
+                const obj = item as Dict;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as Dict;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return getNested(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
+}
+
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
+  );
+}
+
+function isSystemAdmin(authValue: unknown) {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
+
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
+}
+
+function hasSafePermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const permissions = getAuthPermissionCodes(authValue);
+
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "accountant",
+          "support",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
+    );
+  }
+
+  return true;
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
+
+function dictionary(locale: AppLocale) {
+  const isArabic = locale === "ar";
+
+  return {
+    title: isArabic ? "تفاصيل الدفعة" : "Payment Details",
+    subtitle: isArabic
+      ? "عرض بيانات الدفعة والعميل والفاتورة والطلب والترحيل المالي."
+      : "View payment, customer, invoice, order, treasury, and accounting details.",
+
+    back: isArabic ? "قائمة المدفوعات" : "Payments List",
+    dashboard: isArabic ? "المدفوعات" : "Payments",
+    refresh: isArabic ? "تحديث" : "Refresh",
+    retry: isArabic ? "إعادة المحاولة" : "Retry",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
+    confirm: isArabic ? "تأكيد الدفعة" : "Confirm Payment",
+    cancel: isArabic ? "إلغاء الدفعة" : "Cancel Payment",
+    view: isArabic ? "عرض" : "View",
+    copy: isArabic ? "نسخ" : "Copy",
+    copied: isArabic ? "تم النسخ." : "Copied.",
+
+    profileTitle: isArabic ? "بطاقة الدفعة" : "Payment Card",
+    paymentInfo: isArabic ? "بيانات الدفعة" : "Payment Information",
+    customerInfo: isArabic ? "بيانات العميل" : "Customer Information",
+    invoiceInfo: isArabic ? "بيانات الفاتورة" : "Invoice Information",
+    orderInfo: isArabic ? "بيانات الطلب" : "Order Information",
+    postingInfo: isArabic ? "الترحيل المالي" : "Financial Posting",
+    referencesInfo: isArabic ? "مراجع العملية" : "Transaction References",
+
+    paymentNumber: isArabic ? "رقم الدفعة" : "Payment No.",
+    method: isArabic ? "طريقة الدفع" : "Method",
+    status: isArabic ? "الحالة" : "Status",
+    amount: isArabic ? "المبلغ" : "Amount",
+    paymentDate: isArabic ? "تاريخ الدفع" : "Payment Date",
+    confirmedAt: isArabic ? "تاريخ التأكيد" : "Confirmed At",
+    cancelledAt: isArabic ? "تاريخ الإلغاء" : "Cancelled At",
+    createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
+
+    customer: isArabic ? "العميل" : "Customer",
+    phone: isArabic ? "الجوال" : "Phone",
+    email: isArabic ? "البريد الإلكتروني" : "Email",
+
+    invoice: isArabic ? "الفاتورة" : "Invoice",
+    invoiceTotal: isArabic ? "إجمالي الفاتورة" : "Invoice Total",
+    invoiceRemaining: isArabic ? "متبقي الفاتورة" : "Invoice Remaining",
+
+    order: isArabic ? "الطلب" : "Order",
+    orderTotal: isArabic ? "إجمالي الطلب" : "Order Total",
+
+    reference: isArabic ? "المرجع" : "Reference",
+    gatewayReference: isArabic ? "مرجع البوابة" : "Gateway Reference",
+    transactionReference: isArabic ? "مرجع العملية" : "Transaction Reference",
+    notes: isArabic ? "ملاحظات" : "Notes",
+    cancellationReason: isArabic ? "سبب الإلغاء" : "Cancellation Reason",
+
+    treasury: isArabic ? "الخزينة" : "Treasury",
+    accounting: isArabic ? "المحاسبة" : "Accounting",
+    posted: isArabic ? "مرحل" : "Posted",
+    notPosted: isArabic ? "غير مرحل" : "Not Posted",
+    treasuryReference: isArabic ? "مرجع الخزينة" : "Treasury Reference",
+    accountingReference: isArabic ? "مرجع المحاسبة" : "Accounting Reference",
+
+    pending: isArabic ? "قيد الانتظار" : "Pending",
+    confirmed: isArabic ? "مؤكدة" : "Confirmed",
+    cancelled: isArabic ? "ملغاة" : "Cancelled",
+    failed: isArabic ? "فاشلة" : "Failed",
+    refunded: isArabic ? "مستردة" : "Refunded",
+    unknown: isArabic ? "غير محدد" : "Unknown",
+
+    cash: isArabic ? "نقدًا" : "Cash",
+    bankTransfer: isArabic ? "تحويل بنكي" : "Bank Transfer",
+    gateway: isArabic ? "بوابة دفع" : "Gateway",
+    card: isArabic ? "بطاقة" : "Card",
+    wallet: isArabic ? "محفظة" : "Wallet",
+    tamara: isArabic ? "تمارا" : "Tamara",
+    tabby: isArabic ? "تابي" : "Tabby",
+
+    notAvailable: isArabic ? "غير متوفر" : "Not available",
+
+    accessDeniedTitle: isArabic
+      ? "غير مصرح بعرض الدفعة"
+      : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية عرض تفاصيل المدفوعات."
+      : "You do not have permission to view payment details.",
+
+    notFoundTitle: isArabic ? "الدفعة غير موجودة" : "Payment not found",
+    notFoundText: isArabic
+      ? "لم يتم العثور على الدفعة المطلوبة."
+      : "The requested payment could not be found.",
+
+    loadError: isArabic ? "تعذر تحميل الدفعة." : "Unable to load payment.",
+    loadErrorHint: isArabic
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
+
+    confirmConfirm: isArabic
+      ? "هل تريد تأكيد هذه الدفعة؟"
+      : "Confirm this payment?",
+    cancelConfirm: isArabic
+      ? "هل تريد إلغاء هذه الدفعة؟"
+      : "Cancel this payment?",
+
+    confirmSuccess: isArabic
+      ? "تم تأكيد الدفعة بنجاح."
+      : "Payment confirmed successfully.",
+    cancelSuccess: isArabic
+      ? "تم إلغاء الدفعة بنجاح."
+      : "Payment cancelled successfully.",
+    actionError: isArabic
+      ? "تعذر تنفيذ العملية."
+      : "Unable to complete the action.",
+
+    printSuccess: isArabic
+      ? "تم تجهيز نافذة الطباعة."
+      : "Print window prepared.",
+    printError: isArabic
+      ? "تعذر فتح نافذة الطباعة."
+      : "Unable to open print window.",
+    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
+  };
+}
+
+/* ============================================================
+   Helpers
+============================================================ */
+
+function toNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatMoney(value: number): string {
+function formatMoney(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value || 0);
+  }).format(toNumber(value));
 }
 
-function formatDateTime(value: string | null | undefined, locale: AppLocale): string {
+function formatDate(value: string, locale: AppLocale): string {
   if (!value) return locale === "ar" ? "غير محدد" : "Not set";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return locale === "ar" ? "غير محدد" : "Not set";
+  if (Number.isNaN(date.getTime())) return value;
 
-  return new Intl.DateTimeFormat("en-GB", {
+  return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
-    month: "2-digit",
+    month: "short",
     day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
   }).format(date);
 }
 
-function getPaymentReference(payment: ApiPayment | null): string {
-  if (!payment) return "PAY";
-  return payment.payment_number || payment.reference || `PAY-${payment.id}`;
-}
-
-function getPaymentMethod(payment: ApiPayment | null): string {
-  if (!payment) return "OTHER";
-  return String(payment.payment_method || payment.method || "OTHER").toUpperCase();
-}
-
-function getPaymentStatus(payment: ApiPayment | null): string {
-  if (!payment) return "PENDING";
-  return String(payment.status || "PENDING").toUpperCase();
-}
-
-function getStatusLabel(status: string | null | undefined, locale: AppLocale): string {
-  const key = String(status || "PENDING").toUpperCase();
-  const meta = STATUS_META[key];
-
-  if (!meta) return status || (locale === "ar" ? "غير محدد" : "Unknown");
-
-  return locale === "ar" ? meta.labelAr : meta.labelEn;
-}
-
-function getStatusClassName(status: string | null | undefined): string {
-  const key = String(status || "PENDING").toUpperCase();
-  return STATUS_META[key]?.className || STATUS_META.PENDING.className;
-}
-
-function getMethodLabel(method: string | null | undefined, locale: AppLocale): string {
-  const key = String(method || "OTHER").toUpperCase();
-  const meta = METHOD_META[key];
-
-  if (!meta) return method || (locale === "ar" ? "غير محدد" : "Unknown");
-
-  return locale === "ar" ? meta.labelAr : meta.labelEn;
-}
-
-function getProviderLabel(provider: string | null | undefined, locale: AppLocale): string {
-  const key = String(provider || "INTERNAL").toUpperCase();
-  const meta = PROVIDER_META[key];
-
-  if (!meta) return provider || (locale === "ar" ? "غير محدد" : "Unknown");
-
-  return locale === "ar" ? meta.labelAr : meta.labelEn;
-}
-
-function getCookie(name: string): string {
-  if (typeof document === "undefined") return "";
-
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
-
-  return "";
-}
-
-function escapeHtml(value: unknown): string {
+function escapeHtml(value: string | number) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -370,1306 +555,1288 @@ function escapeHtml(value: unknown): string {
     .replaceAll("'", "&#039;");
 }
 
-function resolveCustomerName(payment: ApiPayment | null, fallback: string): string {
-  if (!payment) return fallback;
+function getNestedValue(obj: Dict, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = obj[key];
 
-  return (
-    payment.customer?.name ||
-    (payment.customer_id ? `#${payment.customer_id}` : fallback)
-  );
-}
-
-function resolveInvoiceLabel(payment: ApiPayment | null, fallback: string): string {
-  if (!payment) return fallback;
-
-  return (
-    payment.invoice?.label ||
-    (payment.invoice_id ? `#${payment.invoice_id}` : fallback)
-  );
-}
-
-function resolveOrderLabel(payment: ApiPayment | null, fallback: string): string {
-  if (!payment) return fallback;
-
-  return (
-    payment.order?.label ||
-    (payment.order_id ? `#${payment.order_id}` : fallback)
-  );
-}
-
-function isConfirmableStatus(status: string): boolean {
-  return status === "PENDING" || status === "PROCESSING";
-}
-
-function isCancelableStatus(status: string): boolean {
-  return status === "PENDING" || status === "PROCESSING" || status === "FAILED";
-}
-
-/* =====================================================
-   API HELPERS
-===================================================== */
-
-async function fetchPaymentDetail(paymentId: string): Promise<ApiPayment> {
-  const response = await fetch(`/api/payments/${paymentId}/`, {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-
-  const data = (await response.json().catch(() => null)) as PaymentDetailResponse | null;
-
-  if (!response.ok || !data?.ok || !data.payment) {
-    throw new Error(data?.message || "Failed to load payment detail.");
+    if (value !== undefined && value !== null && value !== "") return value;
   }
 
-  return data.payment;
-}
+  for (const container of [
+    "customer",
+    "client",
+    "invoice",
+    "order",
+    "payment",
+    "data",
+  ]) {
+    const nested = obj[container];
 
-async function confirmPayment(paymentId: number): Promise<ConfirmPaymentResponse> {
-  const csrfToken = getCookie("csrftoken");
+    if (nested && typeof nested === "object") {
+      const value = getNestedValue(nested as Dict, keys);
 
-  const response = await fetch(`/api/payments/${paymentId}/confirm/`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-    },
-    body: JSON.stringify({
-      auto_create_treasury_movement: true,
-      auto_post_accounting: true,
-    }),
-  });
-
-  const data = (await response.json().catch(() => null)) as ConfirmPaymentResponse | null;
-
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.message || "Failed to confirm payment.");
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
   }
 
-  return data;
+  return undefined;
 }
 
-async function cancelPayment(paymentId: number, reason: string): Promise<CancelPaymentResponse> {
-  const csrfToken = getCookie("csrftoken");
+function normalizePaymentStatus(value: unknown): PaymentStatus {
+  const clean = String(value || "").toUpperCase();
 
-  const response = await fetch(`/api/payments/${paymentId}/cancel/`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-    },
-    body: JSON.stringify({
-      reason,
-    }),
-  });
-
-  const data = (await response.json().catch(() => null)) as CancelPaymentResponse | null;
-
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.message || "Failed to cancel payment.");
+  if (["PENDING", "DRAFT", "UNCONFIRMED"].includes(clean)) return "PENDING";
+  if (["CONFIRMED", "PAID", "SUCCESS", "COMPLETED"].includes(clean)) {
+    return "CONFIRMED";
   }
+  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
+  if (["FAILED", "ERROR", "DECLINED"].includes(clean)) return "FAILED";
+  if (["REFUNDED"].includes(clean)) return "REFUNDED";
 
-  return data;
+  return "UNKNOWN";
 }
 
-/* =====================================================
-   PAGE
-===================================================== */
+function normalizePaymentMethod(value: unknown): PaymentMethod {
+  const clean = String(value || "").toUpperCase();
 
-export default function SystemPaymentDetailPage() {
-  const params = useParams<{ id: string }>();
-  const paymentId = useMemo(() => String(params?.id || ""), [params?.id]);
+  if (["CASH"].includes(clean)) return "CASH";
+  if (["BANK_TRANSFER", "TRANSFER", "BANK"].includes(clean)) {
+    return "BANK_TRANSFER";
+  }
+  if (["GATEWAY", "ONLINE", "ONLINE_PAYMENT"].includes(clean)) return "GATEWAY";
+  if (["CARD", "MADA", "VISA", "MASTER_CARD", "MASTERCARD"].includes(clean)) {
+    return "CARD";
+  }
+  if (["WALLET", "APPLE_PAY", "STC_PAY"].includes(clean)) return "WALLET";
+  if (["TAMARA"].includes(clean)) return "TAMARA";
+  if (["TABBY"].includes(clean)) return "TABBY";
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [payment, setPayment] = useState<ApiPayment | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
+  return "UNKNOWN";
+}
 
-  const isAr = locale === "ar";
-
-  const t = useMemo(
-    () => ({
-      badge: isAr ? "تفاصيل الدفعة" : "Payment Detail",
-      title: isAr ? "تفاصيل الدفعة" : "Payment Detail",
-      subtitle: isAr
-        ? "عرض كامل لبيانات الدفعة، الحالة، طريقة الدفع، الربط بالفاتورة والعميل، ومراجع الخزينة والمحاسبة."
-        : "Full view of payment data, status, method, invoice/customer links, treasury and accounting references.",
-      list: isAr ? "قائمة المدفوعات" : "Payments List",
-      dashboard: isAr ? "لوحة المدفوعات" : "Payments Dashboard",
-      reports: isAr ? "التقارير" : "Reports",
-      refresh: isAr ? "تحديث" : "Refresh",
-      confirm: isAr ? "تأكيد الدفعة" : "Confirm Payment",
-      confirming: isAr ? "جاري التأكيد..." : "Confirming...",
-      cancel: isAr ? "إلغاء الدفعة" : "Cancel Payment",
-      cancelling: isAr ? "جاري الإلغاء..." : "Cancelling...",
-      print: isAr ? "طباعة الإيصال" : "Print Receipt",
-      exportExcel: isAr ? "تصدير Excel" : "Export Excel",
-      copy: isAr ? "نسخ" : "Copy",
-      copied: isAr ? "تم النسخ" : "Copied",
-      paymentInfo: isAr ? "بيانات الدفعة" : "Payment Information",
-      paymentInfoDesc: isAr
-        ? "البيانات الأساسية والتشغيلية للدفعة."
-        : "Core and operational data for this payment.",
-      financialSummary: isAr ? "الملخص المالي" : "Financial Summary",
-      financialSummaryDesc: isAr
-        ? "المبلغ، المدفوع، المسترد، المتبقي، وصافي التحصيل."
-        : "Amount, paid, refunded, remaining, and net collection.",
-      linkedRecords: isAr ? "الارتباطات" : "Linked Records",
-      linkedRecordsDesc: isAr
-        ? "الطلب والفاتورة والعميل المرتبطين بالدفعة."
-        : "Order, invoice, and customer linked to this payment.",
-      postingInfo: isAr ? "الخزينة والمحاسبة" : "Treasury & Accounting",
-      postingInfoDesc: isAr
-        ? "حالة ترحيل الدفعة إلى الخزينة والمحاسبة."
-        : "Payment posting status to treasury and accounting.",
-      gatewayInfo: isAr ? "مراجع البنك / البوابة" : "Bank / Gateway References",
-      gatewayInfoDesc: isAr
-        ? "مراجع البنك أو بوابة الدفع والرسائل التشغيلية."
-        : "Bank or payment gateway references and operational messages.",
-      timeline: isAr ? "التتبع الزمني" : "Timeline",
-      timelineDesc: isAr
-        ? "تواريخ إنشاء وتحديث وتأكيد وإلغاء واسترداد الدفعة."
-        : "Creation, update, confirmation, cancellation, and refund timestamps.",
-      notes: isAr ? "الملاحظات" : "Notes",
-      notesDesc: isAr ? "ملاحظات داخلية مرتبطة بالدفعة." : "Internal notes linked to this payment.",
-      paymentReference: isAr ? "رقم الدفعة" : "Payment Reference",
-      status: isAr ? "الحالة" : "Status",
-      method: isAr ? "طريقة الدفع" : "Payment Method",
-      provider: isAr ? "مزود الدفع" : "Provider",
-      amount: isAr ? "المبلغ" : "Amount",
-      paidAmount: isAr ? "المبلغ المدفوع" : "Paid Amount",
-      refundedAmount: isAr ? "المبلغ المسترد" : "Refunded Amount",
-      remainingAmount: isAr ? "المتبقي" : "Remaining",
-      netAmount: isAr ? "الصافي" : "Net Amount",
-      customer: isAr ? "العميل" : "Customer",
-      invoice: isAr ? "الفاتورة" : "Invoice",
-      order: isAr ? "الطلب" : "Order",
-      company: isAr ? "الشركة" : "Company",
-      externalReference: isAr ? "المرجع الخارجي" : "External Reference",
-      transactionId: isAr ? "رقم العملية" : "Transaction ID",
-      gatewayCode: isAr ? "كود البوابة" : "Gateway Code",
-      gatewayMessage: isAr ? "رسالة البوابة" : "Gateway Message",
-      failureReason: isAr ? "سبب الفشل" : "Failure Reason",
-      treasuryPosted: isAr ? "تم ترحيل الخزينة" : "Treasury Posted",
-      accountingPosted: isAr ? "تم الترحيل المحاسبي" : "Accounting Posted",
-      treasuryReference: isAr ? "مرجع حركة الخزينة" : "Treasury Movement Reference",
-      accountingReference: isAr ? "مرجع القيد المحاسبي" : "Accounting Entry Reference",
-      posted: isAr ? "مرحل" : "Posted",
-      notPosted: isAr ? "غير مرحل" : "Not Posted",
-      initiatedAt: isAr ? "وقت البدء" : "Initiated At",
-      paidAt: isAr ? "وقت السداد" : "Paid At",
-      confirmedAt: isAr ? "وقت التأكيد" : "Confirmed At",
-      refundedAt: isAr ? "وقت الاسترداد" : "Refunded At",
-      cancelledAt: isAr ? "وقت الإلغاء" : "Cancelled At",
-      createdAt: isAr ? "تاريخ الإنشاء" : "Created At",
-      updatedAt: isAr ? "آخر تحديث" : "Updated At",
-      notAvailable: isAr ? "غير متاح" : "N/A",
-      loading: isAr ? "جاري تحميل تفاصيل الدفعة..." : "Loading payment detail...",
-      loadError: isAr ? "تعذر تحميل تفاصيل الدفعة" : "Failed to load payment detail",
-      refreshSuccess: isAr ? "تم تحديث تفاصيل الدفعة بنجاح" : "Payment detail refreshed successfully",
-      confirmSuccess: isAr ? "تم تأكيد الدفعة بنجاح" : "Payment confirmed successfully",
-      confirmError: isAr ? "تعذر تأكيد الدفعة" : "Failed to confirm payment",
-      cancelSuccess: isAr ? "تم إلغاء الدفعة بنجاح" : "Payment cancelled successfully",
-      cancelError: isAr ? "تعذر إلغاء الدفعة" : "Failed to cancel payment",
-      cancelConfirm: isAr
-        ? "هل تريد إلغاء هذه الدفعة؟ لا يتم حذف السجل، فقط تغيير الحالة إلى ملغي."
-        : "Cancel this payment? The record will not be deleted, only marked as cancelled.",
-      exportSuccess: isAr ? "تم تصدير بيانات الدفعة بنجاح" : "Payment data exported successfully",
-      printTitle: isAr ? "إيصال دفعة" : "Payment Receipt",
-      noNotes: isAr ? "لا توجد ملاحظات مسجلة." : "No notes recorded.",
-      sar: isAr ? "ريال" : "SAR",
-    }),
-    [isAr]
+function normalizePayment(payload: unknown): PaymentDetails {
+  const root = asDict(payload);
+  const data = asDict(root.data);
+  const paymentObj = asDict(
+    root.payment || data.payment || data.item || root.item || root.data || root,
   );
 
-  const status = useMemo(() => getPaymentStatus(payment), [payment]);
-  const method = useMemo(() => getPaymentMethod(payment), [payment]);
-  const reference = useMemo(() => getPaymentReference(payment), [payment]);
+  const customerObj = asDict(paymentObj.customer || paymentObj.client);
+  const invoiceObj = asDict(paymentObj.invoice);
+  const orderObj = asDict(paymentObj.order);
 
-  const canConfirm = useMemo(() => isConfirmableStatus(status), [status]);
-  const canCancel = useMemo(() => isCancelableStatus(status), [status]);
+  return {
+    id: String(getNestedValue(paymentObj, ["id", "uuid", "pk"]) || ""),
+    payment_number: String(
+      getNestedValue(paymentObj, [
+        "payment_number",
+        "number",
+        "code",
+        "reference",
+      ]) || "-",
+    ),
+    payment_method: normalizePaymentMethod(
+      getNestedValue(paymentObj, ["payment_method", "method", "type"]),
+    ),
+    status: normalizePaymentStatus(
+      getNestedValue(paymentObj, ["status", "payment_status", "state"]),
+    ),
+    amount: toNumber(getNestedValue(paymentObj, ["amount", "paid_amount", "total"])),
 
-  const money = useMemo(() => {
-    const amount = toNumber(payment?.amount);
-    const paidAmount = toNumber(payment?.paid_amount);
-    const refundedAmount = toNumber(payment?.refunded_amount);
-    const remainingAmount = payment?.remaining_amount
-      ? toNumber(payment.remaining_amount)
-      : Math.max(amount - paidAmount, 0);
-    const netAmount = payment?.net_collected_amount
-      ? toNumber(payment.net_collected_amount)
-      : Math.max(paidAmount - refundedAmount, 0);
+    customer_id: String(
+      customerObj.id ||
+        getNestedValue(paymentObj, ["customer_id", "client_id"]) ||
+        "",
+    ),
+    customer_name: String(
+      customerObj.name ||
+        customerObj.full_name ||
+        getNestedValue(paymentObj, [
+          "customer_name",
+          "client_name",
+          "beneficiary_name",
+          "name",
+        ]) ||
+        "-",
+    ),
+    customer_phone: String(
+      customerObj.phone ||
+        customerObj.mobile ||
+        getNestedValue(paymentObj, ["customer_phone", "phone", "mobile"]) ||
+        "",
+    ),
+    customer_email: String(
+      customerObj.email ||
+        getNestedValue(paymentObj, ["customer_email", "email"]) ||
+        "",
+    ),
 
-    return {
-      amount,
-      paidAmount,
-      refundedAmount,
-      remainingAmount,
-      netAmount,
-    };
-  }, [payment]);
+    invoice_id: String(invoiceObj.id || getNestedValue(paymentObj, ["invoice_id"]) || ""),
+    invoice_number: String(
+      invoiceObj.invoice_number ||
+        invoiceObj.number ||
+        getNestedValue(paymentObj, ["invoice_number", "invoice_reference"]) ||
+        "-",
+    ),
+    invoice_total_amount: toNumber(
+      invoiceObj.total_amount ||
+        getNestedValue(paymentObj, ["invoice_total_amount", "invoice_total"]),
+    ),
+    invoice_remaining_amount: toNumber(
+      invoiceObj.remaining_amount ||
+        getNestedValue(paymentObj, [
+          "invoice_remaining_amount",
+          "invoice_remaining",
+          "remaining_amount",
+        ]),
+    ),
 
-  const loadPayment = async (mode: "initial" | "refresh" = "initial") => {
-    if (!paymentId) return;
+    order_id: String(orderObj.id || getNestedValue(paymentObj, ["order_id"]) || ""),
+    order_number: String(
+      orderObj.order_number ||
+        orderObj.number ||
+        getNestedValue(paymentObj, ["order_number", "order_reference"]) ||
+        "-",
+    ),
+    order_total_amount: toNumber(
+      orderObj.total_amount ||
+        getNestedValue(paymentObj, ["order_total_amount", "order_total"]),
+    ),
 
-    try {
-      if (mode === "initial") setLoading(true);
-      if (mode === "refresh") setRefreshing(true);
+    payment_date: String(
+      getNestedValue(paymentObj, [
+        "payment_date",
+        "paid_at",
+        "date",
+        "created_at",
+      ]) || "",
+    ),
+    confirmed_at: String(getNestedValue(paymentObj, ["confirmed_at"]) || ""),
+    cancelled_at: String(getNestedValue(paymentObj, ["cancelled_at", "canceled_at"]) || ""),
+    created_at: String(getNestedValue(paymentObj, ["created_at", "created"]) || ""),
 
-      const data = await fetchPaymentDetail(paymentId);
-      setPayment(data);
+    reference: String(
+      getNestedValue(paymentObj, [
+        "source_reference",
+        "external_reference",
+        "reference",
+        "ref",
+      ]) || "",
+    ),
+    gateway_reference: String(
+      getNestedValue(paymentObj, [
+        "gateway_reference",
+        "gateway_ref",
+        "gateway_transaction_id",
+      ]) || "",
+    ),
+    transaction_reference: String(
+      getNestedValue(paymentObj, [
+        "transaction_reference",
+        "transaction_id",
+        "payment_reference",
+      ]) || "",
+    ),
+    notes: String(getNestedValue(paymentObj, ["notes", "description", "memo"]) || ""),
+    cancellation_reason: String(
+      getNestedValue(paymentObj, ["cancellation_reason", "cancel_reason"]) || "",
+    ),
 
-      if (mode === "refresh") {
-        toast.success(t.refreshSuccess);
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error(t.loadError);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    is_treasury_posted: Boolean(
+      getNestedValue(paymentObj, ["is_treasury_posted", "treasury_posted"]),
+    ),
+    is_accounting_posted: Boolean(
+      getNestedValue(paymentObj, ["is_accounting_posted", "accounting_posted"]),
+    ),
+    treasury_reference: String(
+      getNestedValue(paymentObj, ["treasury_reference", "treasury_ref"]) || "",
+    ),
+    accounting_reference: String(
+      getNestedValue(paymentObj, ["accounting_reference", "accounting_ref"]) || "",
+    ),
+  };
+}
+
+function paymentStatusLabel(status: PaymentStatus, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<PaymentStatus, string> = {
+    PENDING: t.pending,
+    CONFIRMED: t.confirmed,
+    CANCELLED: t.cancelled,
+    FAILED: t.failed,
+    REFUNDED: t.refunded,
+    UNKNOWN: t.unknown,
   };
 
-  useEffect(() => {
-    const currentLocale = getInitialLocale();
-    setLocale(currentLocale);
-    applyLocaleToDocument(currentLocale);
+  return labels[status];
+}
 
-    const syncLocale = () => {
-      const nextLocale = getInitialLocale();
-      setLocale(nextLocale);
-      applyLocaleToDocument(nextLocale);
-    };
+function paymentMethodLabel(method: PaymentMethod, locale: AppLocale) {
+  const t = dictionary(locale);
 
-    window.addEventListener("primey-locale-changed", syncLocale);
-    window.addEventListener("storage", syncLocale);
-
-    const timeout = window.setTimeout(syncLocale, 50);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncLocale);
-      window.removeEventListener("storage", syncLocale);
-      window.clearTimeout(timeout);
-    };
-  }, []);
-
-  useEffect(() => {
-    loadPayment("initial");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paymentId]);
-
-  const handleConfirm = async () => {
-    if (!payment?.id) return;
-
-    try {
-      setConfirming(true);
-
-      const result = await confirmPayment(payment.id);
-
-      toast.success(result.message || t.confirmSuccess);
-
-      await loadPayment("refresh");
-    } catch (error) {
-      console.error(error);
-      toast.error(t.confirmError);
-    } finally {
-      setConfirming(false);
-    }
+  const labels: Record<PaymentMethod, string> = {
+    CASH: t.cash,
+    BANK_TRANSFER: t.bankTransfer,
+    GATEWAY: t.gateway,
+    CARD: t.card,
+    WALLET: t.wallet,
+    TAMARA: t.tamara,
+    TABBY: t.tabby,
+    UNKNOWN: t.unknown,
   };
 
-  const handleCancel = async () => {
-    if (!payment?.id) return;
+  return labels[method];
+}
 
-    const confirmed = window.confirm(t.cancelConfirm);
-    if (!confirmed) return;
+function paymentStatusBadge(status: PaymentStatus, locale: AppLocale) {
+  const label = paymentStatusLabel(status, locale);
 
-    try {
-      setCancelling(true);
-
-      const result = await cancelPayment(
-        payment.id,
-        isAr ? "تم الإلغاء من صفحة تفاصيل الدفعة." : "Cancelled from payment detail page."
-      );
-
-      toast.success(result.message || t.cancelSuccess);
-
-      await loadPayment("refresh");
-    } catch (error) {
-      console.error(error);
-      toast.error(t.cancelError);
-    } finally {
-      setCancelling(false);
-    }
-  };
-
-  const copyValue = async (value: string | number | null | undefined) => {
-    const text = String(value || "");
-    if (!text) return;
-
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success(t.copied);
-    } catch {
-      toast.error(isAr ? "تعذر النسخ" : "Failed to copy");
-    }
-  };
-
-  const buildExportHtmlRows = () => {
-    if (!payment) return "";
-
-    const rows = [
-      [t.paymentReference, reference],
-      [t.status, getStatusLabel(status, locale)],
-      [t.method, getMethodLabel(method, locale)],
-      [t.provider, getProviderLabel(payment.provider, locale)],
-      [t.amount, formatMoney(money.amount)],
-      [t.paidAmount, formatMoney(money.paidAmount)],
-      [t.refundedAmount, formatMoney(money.refundedAmount)],
-      [t.remainingAmount, formatMoney(money.remainingAmount)],
-      [t.netAmount, formatMoney(money.netAmount)],
-      [t.customer, resolveCustomerName(payment, t.notAvailable)],
-      [t.invoice, resolveInvoiceLabel(payment, t.notAvailable)],
-      [t.order, resolveOrderLabel(payment, t.notAvailable)],
-      [t.treasuryPosted, payment.is_treasury_posted ? t.posted : t.notPosted],
-      [t.accountingPosted, payment.is_accounting_posted ? t.posted : t.notPosted],
-      [t.treasuryReference, payment.treasury_movement_reference || t.notAvailable],
-      [t.accountingReference, payment.accounting_entry_reference || t.notAvailable],
-      [t.externalReference, payment.external_reference || t.notAvailable],
-      [t.transactionId, payment.transaction_id || t.notAvailable],
-      [t.gatewayCode, payment.gateway_response_code || t.notAvailable],
-      [t.gatewayMessage, payment.gateway_message || t.notAvailable],
-      [t.failureReason, payment.failure_reason || t.notAvailable],
-      [t.initiatedAt, formatDateTime(payment.initiated_at, locale)],
-      [t.paidAt, formatDateTime(payment.paid_at || payment.payment_date || payment.paid_date || payment.date, locale)],
-      [t.confirmedAt, formatDateTime(payment.confirmed_at, locale)],
-      [t.refundedAt, formatDateTime(payment.refunded_at, locale)],
-      [t.cancelledAt, formatDateTime(payment.cancelled_at, locale)],
-      [t.createdAt, formatDateTime(payment.created_at, locale)],
-      [t.updatedAt, formatDateTime(payment.updated_at, locale)],
-      [t.notes, payment.notes || t.noNotes],
-    ];
-
-    return rows
-      .map(
-        ([label, value]) =>
-          `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`
-      )
-      .join("");
-  };
-
-  const exportExcel = () => {
-    if (!payment) return;
-
-    const generatedAt = new Intl.DateTimeFormat("en-GB", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date());
-
-    const html = `
-      <html dir="${isAr ? "rtl" : "ltr"}" lang="${locale}">
-        <head>
-          <meta charset="UTF-8" />
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              direction: ${isAr ? "rtl" : "ltr"};
-            }
-            table {
-              border-collapse: collapse;
-              width: 100%;
-              margin-bottom: 24px;
-            }
-            th {
-              background: #f1f5f9;
-              color: #0f172a;
-              font-weight: 700;
-              border: 1px solid #cbd5e1;
-              padding: 10px;
-              text-align: ${isAr ? "right" : "left"};
-              width: 35%;
-            }
-            td {
-              border: 1px solid #cbd5e1;
-              padding: 10px;
-              text-align: ${isAr ? "right" : "left"};
-            }
-            .title {
-              font-size: 20px;
-              font-weight: 700;
-              margin-bottom: 6px;
-            }
-            .meta {
-              color: #475569;
-              margin-bottom: 18px;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="title">${escapeHtml(t.printTitle)} - ${escapeHtml(reference)}</div>
-          <div class="meta">${escapeHtml(generatedAt)}</div>
-
-          <table>
-            <tbody>
-              ${buildExportHtmlRows()}
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `;
-
-    const blob = new Blob(["\ufeff", html], {
-      type: "application/vnd.ms-excel;charset=utf-8;",
-    });
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const dateStamp = new Date().toISOString().slice(0, 10);
-
-    link.href = url;
-    link.download = `primey-care-payment-${payment.id}-${dateStamp}.xls`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    toast.success(t.exportSuccess);
-  };
-
-  const printReceipt = () => {
-    if (!payment) return;
-
-    const printWindow = window.open("", "_blank", "width=1000,height=800");
-
-    if (!printWindow) {
-      toast.error(isAr ? "تعذر فتح نافذة الطباعة" : "Unable to open print window");
-      return;
-    }
-
-    const generatedAt = new Intl.DateTimeFormat("en-GB", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date());
-
-    const html = `
-      <!doctype html>
-      <html lang="${locale}" dir="${isAr ? "rtl" : "ltr"}">
-        <head>
-          <meta charset="utf-8" />
-          <title>${escapeHtml(t.printTitle)} - ${escapeHtml(reference)}</title>
-          <style>
-            * {
-              box-sizing: border-box;
-            }
-            body {
-              margin: 0;
-              padding: 32px;
-              font-family: Arial, sans-serif;
-              direction: ${isAr ? "rtl" : "ltr"};
-              color: #0f172a;
-              background: #ffffff;
-            }
-            .receipt {
-              max-width: 900px;
-              margin: 0 auto;
-              border: 1px solid #e2e8f0;
-              border-radius: 24px;
-              overflow: hidden;
-            }
-            .header {
-              padding: 28px;
-              background: #f8fafc;
-              border-bottom: 1px solid #e2e8f0;
-              display: flex;
-              justify-content: space-between;
-              gap: 20px;
-            }
-            .title {
-              font-size: 26px;
-              font-weight: 800;
-              margin: 0 0 8px;
-            }
-            .subtitle {
-              margin: 0;
-              color: #475569;
-              font-size: 13px;
-            }
-            .status {
-              display: inline-block;
-              padding: 8px 14px;
-              border-radius: 999px;
-              background: #ecfdf5;
-              color: #047857;
-              font-weight: 700;
-              font-size: 13px;
-            }
-            .content {
-              padding: 28px;
-            }
-            .amount {
-              padding: 20px;
-              border-radius: 18px;
-              background: #f1f5f9;
-              margin-bottom: 22px;
-            }
-            .amount-label {
-              color: #64748b;
-              font-size: 13px;
-              margin-bottom: 6px;
-            }
-            .amount-value {
-              font-size: 34px;
-              font-weight: 900;
-            }
-            .grid {
-              display: grid;
-              grid-template-columns: repeat(2, minmax(0, 1fr));
-              gap: 12px;
-              margin-bottom: 22px;
-            }
-            .item {
-              border: 1px solid #e2e8f0;
-              border-radius: 14px;
-              padding: 12px;
-            }
-            .label {
-              color: #64748b;
-              font-size: 12px;
-              margin-bottom: 6px;
-            }
-            .value {
-              font-weight: 700;
-              word-break: break-word;
-            }
-            .notes {
-              border: 1px solid #e2e8f0;
-              border-radius: 14px;
-              padding: 14px;
-              background: #ffffff;
-            }
-            .footer {
-              padding: 18px 28px;
-              border-top: 1px solid #e2e8f0;
-              color: #64748b;
-              font-size: 12px;
-              display: flex;
-              justify-content: space-between;
-              gap: 16px;
-            }
-            .no-print {
-              margin-bottom: 20px;
-            }
-            @media print {
-              body {
-                padding: 16px;
-              }
-              .no-print {
-                display: none;
-              }
-              .receipt {
-                border-radius: 0;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <button class="no-print" onclick="window.print()">${escapeHtml(t.print)}</button>
-
-          <div class="receipt">
-            <div class="header">
-              <div>
-                <h1 class="title">${escapeHtml(t.printTitle)}</h1>
-                <p class="subtitle">${escapeHtml(reference)}</p>
-              </div>
-              <div class="status">${escapeHtml(getStatusLabel(status, locale))}</div>
-            </div>
-
-            <div class="content">
-              <div class="amount">
-                <div class="amount-label">${escapeHtml(t.netAmount)}</div>
-                <div class="amount-value">${escapeHtml(formatMoney(money.netAmount))} ${escapeHtml(t.sar)}</div>
-              </div>
-
-              <div class="grid">
-                <div class="item">
-                  <div class="label">${escapeHtml(t.paymentReference)}</div>
-                  <div class="value">${escapeHtml(reference)}</div>
-                </div>
-                <div class="item">
-                  <div class="label">${escapeHtml(t.method)}</div>
-                  <div class="value">${escapeHtml(getMethodLabel(method, locale))}</div>
-                </div>
-                <div class="item">
-                  <div class="label">${escapeHtml(t.provider)}</div>
-                  <div class="value">${escapeHtml(getProviderLabel(payment.provider, locale))}</div>
-                </div>
-                <div class="item">
-                  <div class="label">${escapeHtml(t.customer)}</div>
-                  <div class="value">${escapeHtml(resolveCustomerName(payment, t.notAvailable))}</div>
-                </div>
-                <div class="item">
-                  <div class="label">${escapeHtml(t.invoice)}</div>
-                  <div class="value">${escapeHtml(resolveInvoiceLabel(payment, t.notAvailable))}</div>
-                </div>
-                <div class="item">
-                  <div class="label">${escapeHtml(t.order)}</div>
-                  <div class="value">${escapeHtml(resolveOrderLabel(payment, t.notAvailable))}</div>
-                </div>
-                <div class="item">
-                  <div class="label">${escapeHtml(t.treasuryPosted)}</div>
-                  <div class="value">${escapeHtml(payment.is_treasury_posted ? t.posted : t.notPosted)}</div>
-                </div>
-                <div class="item">
-                  <div class="label">${escapeHtml(t.accountingPosted)}</div>
-                  <div class="value">${escapeHtml(payment.is_accounting_posted ? t.posted : t.notPosted)}</div>
-                </div>
-                <div class="item">
-                  <div class="label">${escapeHtml(t.transactionId)}</div>
-                  <div class="value">${escapeHtml(payment.transaction_id || t.notAvailable)}</div>
-                </div>
-                <div class="item">
-                  <div class="label">${escapeHtml(t.paidAt)}</div>
-                  <div class="value">${escapeHtml(formatDateTime(payment.paid_at || payment.confirmed_at || payment.payment_date, locale))}</div>
-                </div>
-              </div>
-
-              <div class="notes">
-                <div class="label">${escapeHtml(t.notes)}</div>
-                <div class="value">${escapeHtml(payment.notes || t.noNotes)}</div>
-              </div>
-            </div>
-
-            <div class="footer">
-              <span>Primey Care</span>
-              <span>${escapeHtml(generatedAt)}</span>
-            </div>
-          </div>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.focus();
-  };
-
-  if (loading) {
+  if (status === "CONFIRMED") {
     return (
-      <main className="min-h-screen bg-background">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-          <Card className="rounded-[1.5rem]">
-            <CardContent className="flex min-h-96 flex-col items-center justify-center gap-3 text-muted-foreground">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-sm">{t.loading}</p>
-            </CardContent>
-          </Card>
-        </div>
-      </main>
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
     );
   }
 
-  if (!payment) {
+  if (status === "PENDING") {
     return (
-      <main className="min-h-screen bg-background">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-          <Card className="rounded-[1.5rem]">
-            <CardContent className="flex min-h-96 flex-col items-center justify-center gap-3 text-center">
-              <XCircle className="h-12 w-12 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">{t.loadError}</p>
-              <Button asChild variant="outline" className="rounded-2xl">
-                <Link href="/system/payments/list">{t.list}</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </main>
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+        {label}
+      </Badge>
     );
   }
 
-  const statCards = [
-    {
-      title: t.amount,
-      value: formatMoney(money.amount),
-      icon: Wallet,
-      money: true,
-      description: t.sar,
-    },
-    {
-      title: t.paidAmount,
-      value: formatMoney(money.paidAmount),
-      icon: CheckCircle2,
-      money: true,
-      description: t.sar,
-    },
-    {
-      title: t.remainingAmount,
-      value: formatMoney(money.remainingAmount),
-      icon: Clock3,
-      money: true,
-      description: t.sar,
-    },
-    {
-      title: t.netAmount,
-      value: formatMoney(money.netAmount),
-      icon: Banknote,
-      money: true,
-      description: t.sar,
-    },
-  ];
+  if (status === "CANCELLED" || status === "FAILED") {
+    return (
+      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "REFUNDED") {
+    return (
+      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+        {label}
+      </Badge>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-background">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm">
-          <div className="pointer-events-none absolute -top-24 end-12 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
-
-          <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-4">
-              <Badge
-                variant="outline"
-                className="w-fit rounded-full border-primary/20 bg-primary/5 px-3 py-1 text-primary"
-              >
-                <CreditCard className="me-2 h-3.5 w-3.5" />
-                {t.badge}
-              </Badge>
-
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
-                    {reference}
-                  </h1>
-
-                  <Badge
-                    variant="outline"
-                    className={`rounded-full ${getStatusClassName(status)}`}
-                  >
-                    {getStatusLabel(status, locale)}
-                  </Badge>
-                </div>
-
-                <p className="max-w-3xl text-sm leading-7 text-muted-foreground md:text-base">
-                  {t.subtitle}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button asChild variant="outline" className="rounded-2xl">
-                <Link href="/system/payments/list">
-                  {isAr ? (
-                    <ArrowLeft className="me-2 h-4 w-4" />
-                  ) : (
-                    <ArrowLeft className="me-2 h-4 w-4 rotate-180" />
-                  )}
-                  {t.list}
-                </Link>
-              </Button>
-
-              <Button asChild variant="secondary" className="rounded-2xl">
-                <Link href="/system/payments">
-                  <CreditCard className="me-2 h-4 w-4" />
-                  {t.dashboard}
-                </Link>
-              </Button>
-
-              <Button asChild variant="ghost" className="rounded-2xl">
-                <Link href="/system/payments/reports">
-                  <BarChart3 className="me-2 h-4 w-4" />
-                  {t.reports}
-                </Link>
-              </Button>
-            </div>
-          </div>
-        </section>
-
-        <Card className="rounded-[1.5rem]">
-          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" className="rounded-full">
-                ID: {payment.id}
-              </Badge>
-
-              <Badge variant="outline" className="rounded-full">
-                {getMethodLabel(method, locale)}
-              </Badge>
-
-              <Badge variant="outline" className="rounded-full">
-                {getProviderLabel(payment.provider, locale)}
-              </Badge>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {canConfirm ? (
-                <Button
-                  type="button"
-                  className="rounded-2xl"
-                  onClick={handleConfirm}
-                  disabled={confirming || cancelling}
-                >
-                  {confirming ? (
-                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <BadgeCheck className="me-2 h-4 w-4" />
-                  )}
-                  {confirming ? t.confirming : t.confirm}
-                </Button>
-              ) : null}
-
-              {canCancel ? (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  className="rounded-2xl"
-                  onClick={handleCancel}
-                  disabled={confirming || cancelling}
-                >
-                  {cancelling ? (
-                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <XCircle className="me-2 h-4 w-4" />
-                  )}
-                  {cancelling ? t.cancelling : t.cancel}
-                </Button>
-              ) : null}
-
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl"
-                onClick={() => loadPayment("refresh")}
-                disabled={refreshing}
-              >
-                {refreshing ? (
-                  <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="me-2 h-4 w-4" />
-                )}
-                {t.refresh}
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl"
-                onClick={exportExcel}
-              >
-                <Download className="me-2 h-4 w-4" />
-                {t.exportExcel}
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl"
-                onClick={printReceipt}
-              >
-                <Printer className="me-2 h-4 w-4" />
-                {t.print}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {statCards.map((card) => (
-            <StatCard key={card.title} {...card} />
-          ))}
-        </section>
-
-        <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <div className="space-y-6">
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ReceiptText className="h-5 w-5 text-primary" />
-                  {t.paymentInfo}
-                </CardTitle>
-                <CardDescription>{t.paymentInfoDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-3 md:grid-cols-2">
-                <InfoItem
-                  label={t.paymentReference}
-                  value={reference}
-                  icon={Hash}
-                  onCopy={() => copyValue(reference)}
-                  copyLabel={t.copy}
-                />
-                <InfoItem
-                  label={t.status}
-                  value={getStatusLabel(status, locale)}
-                  icon={ShieldCheck}
-                />
-                <InfoItem
-                  label={t.method}
-                  value={getMethodLabel(method, locale)}
-                  icon={CreditCard}
-                />
-                <InfoItem
-                  label={t.provider}
-                  value={getProviderLabel(payment.provider, locale)}
-                  icon={Banknote}
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Wallet className="h-5 w-5 text-primary" />
-                  {t.financialSummary}
-                </CardTitle>
-                <CardDescription>{t.financialSummaryDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <MoneyLine label={t.amount} value={money.amount} />
-                <MoneyLine label={t.paidAmount} value={money.paidAmount} />
-                <MoneyLine label={t.refundedAmount} value={money.refundedAmount} />
-                <MoneyLine label={t.remainingAmount} value={money.remainingAmount} />
-                <MoneyLine label={t.netAmount} value={money.netAmount} strong />
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
-                  {t.postingInfo}
-                </CardTitle>
-                <CardDescription>{t.postingInfoDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-3 md:grid-cols-2">
-                <PostingItem
-                  label={t.treasuryPosted}
-                  value={payment.is_treasury_posted ? t.posted : t.notPosted}
-                  isPosted={Boolean(payment.is_treasury_posted)}
-                  icon={Wallet}
-                />
-                <PostingItem
-                  label={t.accountingPosted}
-                  value={payment.is_accounting_posted ? t.posted : t.notPosted}
-                  isPosted={Boolean(payment.is_accounting_posted)}
-                  icon={Banknote}
-                />
-                <InfoItem
-                  label={t.treasuryReference}
-                  value={payment.treasury_movement_reference || t.notAvailable}
-                  icon={Hash}
-                  onCopy={
-                    payment.treasury_movement_reference
-                      ? () => copyValue(payment.treasury_movement_reference)
-                      : undefined
-                  }
-                  copyLabel={t.copy}
-                />
-                <InfoItem
-                  label={t.accountingReference}
-                  value={payment.accounting_entry_reference || t.notAvailable}
-                  icon={Hash}
-                  onCopy={
-                    payment.accounting_entry_reference
-                      ? () => copyValue(payment.accounting_entry_reference)
-                      : undefined
-                  }
-                  copyLabel={t.copy}
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
-                  {t.gatewayInfo}
-                </CardTitle>
-                <CardDescription>{t.gatewayInfoDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-3 md:grid-cols-2">
-                <InfoItem
-                  label={t.externalReference}
-                  value={payment.external_reference || t.notAvailable}
-                  icon={Hash}
-                  onCopy={
-                    payment.external_reference
-                      ? () => copyValue(payment.external_reference)
-                      : undefined
-                  }
-                  copyLabel={t.copy}
-                />
-                <InfoItem
-                  label={t.transactionId}
-                  value={payment.transaction_id || t.notAvailable}
-                  icon={Hash}
-                  onCopy={
-                    payment.transaction_id
-                      ? () => copyValue(payment.transaction_id)
-                      : undefined
-                  }
-                  copyLabel={t.copy}
-                />
-                <InfoItem
-                  label={t.gatewayCode}
-                  value={payment.gateway_response_code || t.notAvailable}
-                  icon={FileText}
-                />
-                <InfoItem
-                  label={t.failureReason}
-                  value={payment.failure_reason || t.notAvailable}
-                  icon={XCircle}
-                />
-
-                <div className="md:col-span-2">
-                  <InfoItem
-                    label={t.gatewayMessage}
-                    value={payment.gateway_message || t.notAvailable}
-                    icon={ReceiptText}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-primary" />
-                  {t.notes}
-                </CardTitle>
-                <CardDescription>{t.notesDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                <div className="rounded-3xl border bg-muted/20 p-4 text-sm leading-7 text-muted-foreground">
-                  {payment.notes || t.noNotes}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <aside className="space-y-6">
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <User className="h-5 w-5 text-primary" />
-                  {t.linkedRecords}
-                </CardTitle>
-                <CardDescription>{t.linkedRecordsDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <LinkedRecord
-                  label={t.customer}
-                  value={resolveCustomerName(payment, t.notAvailable)}
-                  href={
-                    payment.customer_id
-                      ? `/system/customers/${payment.customer_id}`
-                      : undefined
-                  }
-                  icon={User}
-                />
-                <LinkedRecord
-                  label={t.invoice}
-                  value={resolveInvoiceLabel(payment, t.notAvailable)}
-                  href={
-                    payment.invoice_id
-                      ? `/system/invoices/${payment.invoice_id}`
-                      : undefined
-                  }
-                  icon={ReceiptText}
-                />
-                <LinkedRecord
-                  label={t.order}
-                  value={resolveOrderLabel(payment, t.notAvailable)}
-                  href={
-                    payment.order_id
-                      ? `/system/orders/${payment.order_id}`
-                      : undefined
-                  }
-                  icon={FileText}
-                />
-                <LinkedRecord
-                  label={t.company}
-                  value={payment.company_id ? `#${payment.company_id}` : t.notAvailable}
-                  icon={ShieldCheck}
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Clock3 className="h-5 w-5 text-primary" />
-                  {t.timeline}
-                </CardTitle>
-                <CardDescription>{t.timelineDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <TimelineItem
-                  label={t.initiatedAt}
-                  value={formatDateTime(payment.initiated_at, locale)}
-                  icon={Clock3}
-                />
-                <TimelineItem
-                  label={t.paidAt}
-                  value={formatDateTime(
-                    payment.paid_at || payment.payment_date || payment.paid_date || payment.date,
-                    locale
-                  )}
-                  icon={CheckCircle2}
-                />
-                <TimelineItem
-                  label={t.confirmedAt}
-                  value={formatDateTime(payment.confirmed_at, locale)}
-                  icon={BadgeCheck}
-                />
-                <TimelineItem
-                  label={t.refundedAt}
-                  value={formatDateTime(payment.refunded_at, locale)}
-                  icon={RefreshCcw}
-                />
-                <TimelineItem
-                  label={t.cancelledAt}
-                  value={formatDateTime(payment.cancelled_at, locale)}
-                  icon={XCircle}
-                />
-                <TimelineItem
-                  label={t.createdAt}
-                  value={formatDateTime(payment.created_at, locale)}
-                  icon={CalendarDays}
-                />
-                <TimelineItem
-                  label={t.updatedAt}
-                  value={formatDateTime(payment.updated_at, locale)}
-                  icon={CalendarDays}
-                />
-              </CardContent>
-            </Card>
-          </aside>
-        </section>
-      </div>
-    </main>
+    <Badge variant="outline" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
   );
 }
 
-/* =====================================================
-   SMALL COMPONENTS
-===================================================== */
-
-function StatCard({
-  title,
-  value,
-  description,
-  icon: Icon,
-  money = false,
-}: {
-  title: string;
-  value: string;
-  description: string;
-  icon: LucideIcon;
-  money?: boolean;
-}) {
+function methodBadge(method: PaymentMethod, locale: AppLocale) {
   return (
-    <Card className="rounded-[1.5rem]">
-      <CardContent className="flex items-center justify-between gap-4 p-5">
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <div className="flex items-center gap-2">
-            {money ? (
-              <Image src={SAR_ICON_PATH} alt="SAR" width={18} height={18} />
-            ) : null}
-            <p className="text-2xl font-bold tracking-tight">{value}</p>
-          </div>
-          <p className="text-xs text-muted-foreground">{description}</p>
-        </div>
-
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-          <Icon className="h-5 w-5" />
-        </div>
-      </CardContent>
-    </Card>
+    <Badge variant="secondary" className="rounded-full px-3 py-1">
+      {paymentMethodLabel(method, locale)}
+    </Badge>
   );
 }
 
-function MoneyLine({
-  label,
-  value,
-  strong = false,
-}: {
-  label: string;
-  value: number;
-  strong?: boolean;
-}) {
+function isValidId(value: unknown) {
+  const id = String(value || "").trim();
+
+  return id && id !== "-" && id !== "undefined" && id !== "null";
+}
+
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
-    <div
-      className={`flex items-center justify-between gap-3 rounded-3xl border p-4 ${
-        strong ? "border-primary/20 bg-primary/5" : "bg-card"
-      }`}
-    >
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <div className={`flex items-center gap-1.5 ${strong ? "text-lg font-bold" : "font-semibold"}`}>
-        <Image
-          src={SAR_ICON_PATH}
-          alt="SAR"
-          width={strong ? 17 : 14}
-          height={strong ? 17 : 14}
-        />
-        {formatMoney(value)}
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
+}
+
+function MoneyText({ value }: { value: unknown }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span>{formatMoney(value)}</span>
+      <SarIcon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+}
+
+function PageSkeleton() {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="space-y-4 p-5">
+          <SkeletonLine className="h-12 w-12 rounded-2xl" />
+          <SkeletonLine className="h-7 w-44 rounded-xl" />
+          <SkeletonLine className="h-4 w-32 rounded-xl" />
+          <div className="space-y-3 pt-4">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <SkeletonLine key={index} className="h-10 w-full rounded-xl" />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="space-y-3 p-5">
+              <SkeletonLine className="h-6 w-48 rounded-xl" />
+              <SkeletonLine className="h-20 w-full rounded-xl" />
+            </CardContent>
+          </Card>
+        ))}
       </div>
     </div>
   );
 }
 
+/* ============================================================
+   Print
+============================================================ */
+
+function buildPrintHtml({
+  locale,
+  payment,
+}: {
+  locale: AppLocale;
+  payment: PaymentDetails;
+}) {
+  const isArabic = locale === "ar";
+  const t = dictionary(locale);
+  const now = new Date().toLocaleString("en-US");
+
+  const row = (label: string, value: string) => `
+    <div class="row">
+      <span class="label">${escapeHtml(label)}</span>
+      <span class="value">${escapeHtml(value || "-")}</span>
+    </div>
+  `;
+
+  return `
+    <!doctype html>
+    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(payment.payment_number)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            padding: 24px;
+            font-family: Arial, Tahoma, sans-serif;
+            color: #111827;
+            background: #fff;
+            direction: ${isArabic ? "rtl" : "ltr"};
+            text-align: ${isArabic ? "right" : "left"};
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 14px;
+            margin-bottom: 18px;
+          }
+          h1 { margin: 0; font-size: 24px; font-weight: 800; }
+          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
+          .badge {
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            padding: 5px 12px;
+            font-size: 12px;
+            height: fit-content;
+          }
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 18px;
+          }
+          .box {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 12px;
+          }
+          .box h2 { margin: 0 0 10px; font-size: 14px; }
+          .row { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; font-size: 12px; }
+          .label { color: #6b7280; }
+          .value { font-weight: 700; }
+          @page { size: A4; margin: 12mm; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1>${escapeHtml(t.title)}</h1>
+            <div class="meta">
+              <div>${escapeHtml(t.paymentNumber)}: ${escapeHtml(payment.payment_number)}</div>
+              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
+            </div>
+          </div>
+          <div class="badge">Primey Care</div>
+        </div>
+
+        <div class="grid">
+          <div class="box">
+            <h2>${escapeHtml(t.paymentInfo)}</h2>
+            ${row(t.status, paymentStatusLabel(payment.status, locale))}
+            ${row(t.method, paymentMethodLabel(payment.payment_method, locale))}
+            ${row(t.amount, formatMoney(payment.amount))}
+            ${row(t.paymentDate, formatDate(payment.payment_date, locale))}
+            ${row(t.confirmedAt, formatDate(payment.confirmed_at, locale))}
+            ${row(t.cancelledAt, formatDate(payment.cancelled_at, locale))}
+          </div>
+
+          <div class="box">
+            <h2>${escapeHtml(t.customerInfo)}</h2>
+            ${row(t.customer, payment.customer_name)}
+            ${row(t.phone, payment.customer_phone || "-")}
+            ${row(t.email, payment.customer_email || "-")}
+          </div>
+
+          <div class="box">
+            <h2>${escapeHtml(t.invoiceInfo)}</h2>
+            ${row(t.invoice, payment.invoice_number || "-")}
+            ${row(t.invoiceTotal, formatMoney(payment.invoice_total_amount))}
+            ${row(t.invoiceRemaining, formatMoney(payment.invoice_remaining_amount))}
+          </div>
+
+          <div class="box">
+            <h2>${escapeHtml(t.postingInfo)}</h2>
+            ${row(t.treasury, payment.is_treasury_posted ? t.posted : t.notPosted)}
+            ${row(t.accounting, payment.is_accounting_posted ? t.posted : t.notPosted)}
+            ${row(t.treasuryReference, payment.treasury_reference || "-")}
+            ${row(t.accountingReference, payment.accounting_reference || "-")}
+          </div>
+        </div>
+
+        <script>
+          window.addEventListener("load", () => {
+            window.focus();
+            window.print();
+          });
+        </script>
+      </body>
+    </html>
+  `;
+}
+
+/* ============================================================
+   Page
+============================================================ */
+
+export default function SystemPaymentDetailsPage() {
+  const params = useParams<{ id?: string | string[] }>();
+  const auth = useAuth() as unknown;
+
+  const paymentId = Array.isArray(params?.id) ? params.id[0] : params?.id || "";
+
+  const [locale, setLocale] = useState<AppLocale>("ar");
+  const [payment, setPayment] = useState<PaymentDetails | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isActionLoading, setIsActionLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [notFound, setNotFound] = useState(false);
+
+  const t = useMemo(() => dictionary(locale), [locale]);
+  const isArabic = locale === "ar";
+  const authResolving = isAuthResolving(auth);
+
+  const canView = hasSafePermission(
+    auth,
+    ["payments.view", "billing.payments.view"],
+    "view",
+  );
+
+  const canConfirm = hasSafePermission(
+    auth,
+    ["payments.confirm", "payments.update", "billing.payments.confirm"],
+    "action",
+  );
+
+  const canCancel = hasSafePermission(
+    auth,
+    ["payments.cancel", "payments.update", "billing.payments.cancel"],
+    "action",
+  );
+
+  const canPrint = hasSafePermission(
+    auth,
+    ["payments.print", "reports.print"],
+    "action",
+  );
+
+  const canViewInvoice = hasSafePermission(auth, ["invoices.view"], "view");
+  const canViewOrder = hasSafePermission(auth, ["orders.view"], "view");
+  const canViewCustomer = hasSafePermission(auth, ["customers.view"], "view");
+
+  const currentPaymentStatus: PaymentStatus = payment?.status ?? "UNKNOWN";
+  const currentPaymentId = payment?.id ?? "";
+
+  const canConfirmCurrent =
+    payment !== null &&
+    canConfirm &&
+    currentPaymentStatus === "PENDING" &&
+    Boolean(currentPaymentId);
+
+  const canCancelCurrent =
+    payment !== null &&
+    canCancel &&
+    currentPaymentStatus === "PENDING" &&
+    Boolean(currentPaymentId);
+
+  const loadPayment = useCallback(
+    async (showToast = false) => {
+      if (!canView || !paymentId) {
+        setPayment(null);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setErrorMessage("");
+        setNotFound(false);
+
+        const endpoints = [
+          `/api/payments/${paymentId}/`,
+          `/api/payments/detail/${paymentId}/`,
+          `/api/payments/detail/?id=${paymentId}`,
+        ];
+
+        let payload: ApiEnvelope<unknown> | null = null;
+        let lastStatus = 0;
+        let lastError = "";
+
+        for (const endpoint of endpoints) {
+          const response = await fetch(apiUrl(endpoint), {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+          });
+
+          lastStatus = response.status;
+
+          const responsePayload = (await response.json().catch(() => null)) as
+            | ApiEnvelope<unknown>
+            | null;
+
+          if (
+            response.ok &&
+            responsePayload?.ok !== false &&
+            responsePayload?.success !== false
+          ) {
+            payload = responsePayload;
+            break;
+          }
+
+          lastError =
+            responsePayload?.message ||
+            responsePayload?.detail ||
+            responsePayload?.error ||
+            `HTTP ${response.status}`;
+        }
+
+        if (!payload) {
+          if (lastStatus === 404) {
+            setNotFound(true);
+            setPayment(null);
+            return;
+          }
+
+          throw new Error(lastError || t.loadError);
+        }
+
+        setPayment(normalizePayment(payload));
+
+        if (showToast) {
+          toast.success(t.refresh);
+        }
+      } catch (error) {
+        console.error("Load payment details error:", error);
+        setPayment(null);
+        setErrorMessage(t.loadError);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [canView, paymentId, t.loadError, t.refresh],
+  );
+
+  async function runPaymentAction(action: "confirm" | "cancel") {
+    if (!payment || !payment.id) return;
+
+    const confirmed = window.confirm(
+      action === "confirm" ? t.confirmConfirm : t.cancelConfirm,
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setIsActionLoading(true);
+
+      const csrfToken = getCookie("csrftoken");
+
+      const endpoints =
+        action === "confirm"
+          ? ["/api/payments/confirm/", `/api/payments/${payment.id}/confirm/`]
+          : ["/api/payments/cancel/", `/api/payments/${payment.id}/cancel/`];
+
+      let success = false;
+      let lastError = "";
+
+      for (const endpoint of endpoints) {
+        const response = await fetch(apiUrl(endpoint), {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+          },
+          body: JSON.stringify({
+            payment_id: payment.id,
+            id: payment.id,
+          }),
+        });
+
+        const payload = (await response.json().catch(() => null)) as
+          | ApiEnvelope<unknown>
+          | null;
+
+        if (
+          response.ok &&
+          payload?.ok !== false &&
+          payload?.success !== false
+        ) {
+          success = true;
+          break;
+        }
+
+        lastError =
+          payload?.message ||
+          payload?.detail ||
+          payload?.error ||
+          `HTTP ${response.status}`;
+      }
+
+      if (!success) {
+        throw new Error(lastError || t.actionError);
+      }
+
+      toast.success(action === "confirm" ? t.confirmSuccess : t.cancelSuccess);
+      await loadPayment(false);
+    } catch (error) {
+      console.error("Payment action error:", error);
+      toast.error(t.actionError);
+    } finally {
+      setIsActionLoading(false);
+    }
+  }
+
+  function printPage() {
+    if (!payment) return;
+
+    const printWindow = window.open("", "_blank", "width=980,height=720");
+
+    if (!printWindow) {
+      toast.error(t.printError);
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(
+      buildPrintHtml({
+        locale,
+        payment,
+      }),
+    );
+    printWindow.document.close();
+
+    toast.success(t.printSuccess);
+  }
+
+  function copyValue(value: string) {
+    if (!value) return;
+
+    navigator.clipboard.writeText(value);
+    toast.success(t.copied);
+  }
+
+  useEffect(() => {
+    const nextLocale = readLocale();
+
+    setLocale(nextLocale);
+    applyDocumentLocale(nextLocale);
+  }, []);
+
+  useEffect(() => {
+    loadPayment();
+  }, [loadPayment]);
+
+  if (authResolving) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <PageSkeleton />
+      </div>
+    );
+  }
+
+  if (!canView) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="rounded-full">
+              <CreditCard className="h-3.5 w-3.5" />
+              {t.dashboard}
+            </Badge>
+
+            {payment ? paymentStatusBadge(payment.status, locale) : null}
+            {payment ? methodBadge(payment.payment_method, locale) : null}
+          </div>
+
+          <h1 className="mt-3 text-xl font-bold tracking-tight lg:text-2xl">
+            {payment?.payment_number || t.title}
+          </h1>
+
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center xl:justify-end">
+          <Link href="/system/payments/list">
+            <Button variant="outline" className="h-10 w-full rounded-xl sm:w-auto">
+              <ArrowLeft className="h-4 w-4" />
+              <span>{t.back}</span>
+            </Button>
+          </Link>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={() => loadPayment(true)}
+            disabled={isLoading || isActionLoading}
+          >
+            <RefreshCcw className="h-4 w-4" />
+            <span>{t.refresh}</span>
+          </Button>
+
+          {canPrint ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl"
+              onClick={printPage}
+              disabled={isLoading || isActionLoading || !payment}
+            >
+              <Printer className="h-4 w-4" />
+              <span>{t.print}</span>
+            </Button>
+          ) : null}
+
+          {canConfirmCurrent ? (
+            <Button
+              className="h-10 rounded-xl"
+              onClick={() => runPaymentAction("confirm")}
+              disabled={isActionLoading}
+            >
+              {isActionLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              <span>{t.confirm}</span>
+            </Button>
+          ) : null}
+
+          {canCancelCurrent ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl text-destructive hover:text-destructive"
+              onClick={() => runPaymentAction("cancel")}
+              disabled={isActionLoading}
+            >
+              {isActionLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Ban className="h-4 w-4" />
+              )}
+              <span>{t.cancel}</span>
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {!isLoading && errorMessage ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="font-semibold text-destructive">{errorMessage}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t.loadErrorHint}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => loadPayment(true)}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              {t.retry}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!isLoading && notFound ? (
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+            <FileText className="h-12 w-12 text-muted-foreground/40" />
+            <p className="text-lg font-semibold">{t.notFoundTitle}</p>
+            <p className="max-w-md text-sm text-muted-foreground">
+              {t.notFoundText}
+            </p>
+            <Link href="/system/payments/list">
+              <Button className="mt-2 rounded-xl">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {isLoading ? <PageSkeleton /> : null}
+
+      {!isLoading && payment ? (
+        <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+          <div className="space-y-4">
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ReceiptText className="h-5 w-5" />
+                  {t.profileTitle}
+                </CardTitle>
+                <CardDescription>{payment.payment_number}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="space-y-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted">
+                  <CreditCard className="h-7 w-7 text-muted-foreground" />
+                </div>
+
+                <div>
+                  <p className="text-lg font-bold">{payment.payment_number}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {paymentStatusBadge(payment.status, locale)}
+                    {methodBadge(payment.payment_method, locale)}
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  <InfoItem
+                    label={t.customer}
+                    value={payment.customer_name}
+                    icon={<UserRound className="h-4 w-4" />}
+                  />
+                  <InfoItem
+                    label={t.invoice}
+                    value={payment.invoice_number}
+                    icon={<FileText className="h-4 w-4" />}
+                  />
+                  <InfoItem
+                    label={t.paymentDate}
+                    value={formatDate(payment.payment_date, locale)}
+                    icon={<CalendarDays className="h-4 w-4" />}
+                  />
+                  <InfoItem
+                    label={t.amount}
+                    value={formatMoney(payment.amount)}
+                    icon={<WalletCards className="h-4 w-4" />}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle>{t.amount}</CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                <div className="rounded-2xl border bg-background p-5">
+                  <p className="text-sm text-muted-foreground">{t.amount}</p>
+                  <p className="mt-2 text-2xl font-bold">
+                    <MoneyText value={payment.amount} />
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              <KpiCard
+                title={t.amount}
+                value={<MoneyText value={payment.amount} />}
+                icon={<WalletCards className="h-5 w-5" />}
+              />
+              <KpiCard
+                title={t.treasury}
+                value={payment.is_treasury_posted ? t.posted : t.notPosted}
+                icon={<ReceiptText className="h-5 w-5" />}
+              />
+              <KpiCard
+                title={t.accounting}
+                value={payment.is_accounting_posted ? t.posted : t.notPosted}
+                icon={<FileText className="h-5 w-5" />}
+              />
+            </div>
+
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base font-bold">
+                  {t.paymentInfo}
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent className="grid gap-3 md:grid-cols-2">
+                <DetailBox
+                  label={t.paymentNumber}
+                  value={payment.payment_number}
+                  onCopy={() => copyValue(payment.payment_number)}
+                  copyLabel={t.copy}
+                />
+                <DetailBox
+                  label={t.status}
+                  value={paymentStatusLabel(payment.status, locale)}
+                />
+                <DetailBox
+                  label={t.method}
+                  value={paymentMethodLabel(payment.payment_method, locale)}
+                />
+                <DetailBox
+                  label={t.amount}
+                  value={formatMoney(payment.amount)}
+                />
+                <DetailBox
+                  label={t.paymentDate}
+                  value={formatDate(payment.payment_date, locale)}
+                />
+                <DetailBox
+                  label={t.confirmedAt}
+                  value={formatDate(payment.confirmed_at, locale)}
+                />
+                <DetailBox
+                  label={t.cancelledAt}
+                  value={formatDate(payment.cancelled_at, locale)}
+                />
+                <DetailBox
+                  label={t.createdAt}
+                  value={formatDate(payment.created_at, locale)}
+                />
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-base font-bold">
+                    {t.customerInfo}
+                  </CardTitle>
+                </CardHeader>
+
+                <CardContent className="space-y-3">
+                  <DetailBox label={t.customer} value={payment.customer_name} />
+                  <DetailBox
+                    label={t.phone}
+                    value={payment.customer_phone || t.notAvailable}
+                  />
+                  <DetailBox
+                    label={t.email}
+                    value={payment.customer_email || t.notAvailable}
+                  />
+
+                  {canViewCustomer && isValidId(payment.customer_id) ? (
+                    <Link href={`/system/customers/${payment.customer_id}`}>
+                      <Button variant="outline" className="w-full rounded-xl">
+                        <UserRound className="h-4 w-4" />
+                        {t.view}
+                      </Button>
+                    </Link>
+                  ) : null}
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-base font-bold">
+                    {t.invoiceInfo}
+                  </CardTitle>
+                </CardHeader>
+
+                <CardContent>
+                  <div className="flex items-start gap-3 rounded-2xl border p-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <FileText className="h-5 w-5" />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold" dir="ltr">
+                        {payment.invoice_number || t.notAvailable}
+                      </p>
+
+                      <div className="mt-3 grid gap-2 text-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">
+                            {t.invoiceTotal}
+                          </span>
+                          <MoneyText value={payment.invoice_total_amount} />
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">
+                            {t.invoiceRemaining}
+                          </span>
+                          <MoneyText value={payment.invoice_remaining_amount} />
+                        </div>
+                      </div>
+
+                      {canViewInvoice && isValidId(payment.invoice_id) ? (
+                        <Link href={`/system/invoices/${payment.invoice_id}`}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-3 rounded-xl"
+                          >
+                            {t.view}
+                          </Button>
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base font-bold">
+                  {t.orderInfo}
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                <div className="flex items-start gap-3 rounded-2xl border p-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <ShoppingCart className="h-5 w-5" />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold" dir="ltr">
+                      {payment.order_number || t.notAvailable}
+                    </p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {t.orderTotal}:{" "}
+                      <span className="font-medium text-foreground">
+                        <MoneyText value={payment.order_total_amount} />
+                      </span>
+                    </p>
+
+                    {canViewOrder && isValidId(payment.order_id) ? (
+                      <Link href={`/system/orders/${payment.order_id}`}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-3 rounded-xl"
+                        >
+                          {t.view}
+                        </Button>
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base font-bold">
+                  {t.postingInfo}
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <PostingBox
+                    title={t.treasury}
+                    isPosted={payment.is_treasury_posted}
+                    reference={payment.treasury_reference}
+                    postedLabel={t.posted}
+                    notPostedLabel={t.notPosted}
+                    referenceLabel={t.treasuryReference}
+                  />
+
+                  <PostingBox
+                    title={t.accounting}
+                    isPosted={payment.is_accounting_posted}
+                    reference={payment.accounting_reference}
+                    postedLabel={t.posted}
+                    notPostedLabel={t.notPosted}
+                    referenceLabel={t.accountingReference}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base font-bold">
+                  {t.referencesInfo}
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent className="grid gap-3 md:grid-cols-3">
+                <ReferenceBox
+                  label={t.reference}
+                  value={payment.reference}
+                  onCopy={() => copyValue(payment.reference)}
+                  copyLabel={t.copy}
+                />
+                <ReferenceBox
+                  label={t.gatewayReference}
+                  value={payment.gateway_reference}
+                  onCopy={() => copyValue(payment.gateway_reference)}
+                  copyLabel={t.copy}
+                />
+                <ReferenceBox
+                  label={t.transactionReference}
+                  value={payment.transaction_reference}
+                  onCopy={() => copyValue(payment.transaction_reference)}
+                  copyLabel={t.copy}
+                />
+              </CardContent>
+            </Card>
+
+            {payment.notes || payment.cancellation_reason ? (
+              <Alert className="rounded-2xl">
+                <FileText className="h-4 w-4" />
+                <AlertTitle>
+                  {payment.cancellation_reason ? t.cancellationReason : t.notes}
+                </AlertTitle>
+                <AlertDescription>
+                  {payment.cancellation_reason || payment.notes}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {payment.status === "CANCELLED" && payment.cancelled_at ? (
+              <Alert className="rounded-2xl border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
+                <Ban className="h-4 w-4" />
+                <AlertTitle>{t.cancelled}</AlertTitle>
+                <AlertDescription>
+                  {t.cancelledAt}: {formatDate(payment.cancelled_at, locale)}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* ============================================================
+   Small Components
+============================================================ */
+
 function InfoItem({
   label,
   value,
-  icon: Icon,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon: ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border bg-background p-3">
+      <div className="mt-0.5 text-muted-foreground">{icon}</div>
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="mt-1 truncate text-sm font-semibold">{value || "-"}</p>
+      </div>
+    </div>
+  );
+}
+
+function DetailBox({
+  label,
+  value,
   onCopy,
   copyLabel,
 }: {
   label: string;
   value: string;
-  icon: LucideIcon;
   onCopy?: () => void;
   copyLabel?: string;
 }) {
   return (
-    <div className="rounded-3xl border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Icon className="h-4 w-4" />
-          </div>
-
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="mt-1 break-words text-sm font-semibold">{value}</p>
-          </div>
-        </div>
-
+    <div className="rounded-xl border bg-background p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <p className="min-w-0 break-words text-sm font-semibold">{value || "-"}</p>
         {onCopy ? (
           <Button
-            type="button"
             variant="ghost"
-            size="sm"
-            className="h-8 rounded-xl px-2"
+            size="icon"
+            className="h-8 w-8 shrink-0 rounded-lg"
             onClick={onCopy}
+            title={copyLabel}
           >
-            <Copy className="me-1 h-3.5 w-3.5" />
-            {copyLabel}
+            <Copy className="h-4 w-4" />
           </Button>
         ) : null}
       </div>
@@ -1677,96 +1844,96 @@ function InfoItem({
   );
 }
 
-function PostingItem({
-  label,
+function KpiCard({
+  title,
   value,
+  icon,
+}: {
+  title: string;
+  value: ReactNode;
+  icon: ReactNode;
+}) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-2xl font-bold">{value}</div>
+            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
+          </div>
+
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            {icon}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PostingBox({
+  title,
   isPosted,
-  icon: Icon,
+  reference,
+  postedLabel,
+  notPostedLabel,
+  referenceLabel,
 }: {
-  label: string;
-  value: string;
+  title: string;
   isPosted: boolean;
-  icon: LucideIcon;
+  reference: string;
+  postedLabel: string;
+  notPostedLabel: string;
+  referenceLabel: string;
 }) {
   return (
-    <div
-      className={`rounded-3xl border p-4 ${
-        isPosted
-          ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/60 dark:bg-emerald-950/20"
-          : "border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20"
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
-            isPosted
-              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
-              : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
-          }`}
-        >
-          <Icon className="h-4 w-4" />
-        </div>
-
-        <div>
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-1 text-sm font-semibold">{value}</p>
-        </div>
+    <div className="rounded-2xl border p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="font-semibold">{title}</p>
+        <Badge variant="outline" className="rounded-full">
+          {isPosted ? postedLabel : notPostedLabel}
+        </Badge>
       </div>
+
+      <p className="mt-3 text-sm text-muted-foreground">{referenceLabel}</p>
+      <p className="mt-1 font-medium" dir="ltr">
+        {reference || "-"}
+      </p>
     </div>
   );
 }
 
-function LinkedRecord({
+function ReferenceBox({
   label,
   value,
-  href,
-  icon: Icon,
+  onCopy,
+  copyLabel,
 }: {
   label: string;
   value: string;
-  href?: string;
-  icon: LucideIcon;
-}) {
-  const content = (
-    <div className="group flex items-center justify-between gap-3 rounded-3xl border bg-card p-4 transition hover:bg-muted/30">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-          <Icon className="h-4 w-4" />
-        </div>
-
-        <div>
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-1 text-sm font-semibold">{value}</p>
-        </div>
-      </div>
-
-      {href ? <ArrowLeft className="h-4 w-4 text-muted-foreground group-hover:text-primary" /> : null}
-    </div>
-  );
-
-  if (!href) return content;
-
-  return <Link href={href}>{content}</Link>;
-}
-
-function TimelineItem({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string;
-  value: string;
-  icon: LucideIcon;
+  onCopy: () => void;
+  copyLabel: string;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-3xl border bg-card p-4">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-        <Icon className="h-4 w-4" />
-      </div>
+    <div className="rounded-2xl border p-4">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <p className="truncate font-medium" dir="ltr">
+          {value || "-"}
+        </p>
 
-      <div>
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="mt-1 text-sm font-semibold">{value}</p>
+        {value ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 rounded-lg"
+            onClick={onCopy}
+            title={copyLabel}
+          >
+            <Copy className="h-4 w-4" />
+          </Button>
+        ) : null}
       </div>
     </div>
   );

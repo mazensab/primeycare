@@ -1,19 +1,24 @@
 # ============================================================
 # 📂 api/accounting/accounts.py
-# 🧠 Accounting Accounts List API — Primey Care V1
+# 🧠 Accounting Accounts API — Primey Care V2
 # ------------------------------------------------------------
 # ✅ قائمة دليل الحسابات
 # ✅ شجرة الحسابات
 # ✅ ملخص الحسابات
 # ✅ Excel Export
+# ✅ متوافق مع Accounting Backend الجديد
 # ✅ يدعم:
 #    - search
 #    - account_type
 #    - nature
 #    - is_group
 #    - is_active
+#    - allow_manual_posting
+#    - is_system
+#    - can_post
 #    - parent_id
 #    - level
+#    - currency
 #    - tree
 #    - page / page_size
 #    - ordering
@@ -52,14 +57,22 @@ ALLOWED_ORDERING = {
     "-code": "-code",
     "name": "name",
     "-name": "-name",
+    "name_en": "name_en",
+    "-name_en": "-name_en",
     "level": "level",
     "-level": "-level",
     "account_type": "account_type",
     "-account_type": "-account_type",
     "nature": "nature",
     "-nature": "-nature",
+    "currency": "currency",
+    "-currency": "-currency",
+    "opening_balance": "opening_balance",
+    "-opening_balance": "-opening_balance",
     "created_at": "created_at",
     "-created_at": "-created_at",
+    "updated_at": "updated_at",
+    "-updated_at": "-updated_at",
 }
 
 
@@ -153,7 +166,11 @@ def _parse_ordering(value: str | None, default: str = "code") -> str:
     return ALLOWED_ORDERING[raw]
 
 
-def _error_response(message: str, status: int = 400, extra: dict | None = None) -> JsonResponse:
+def _error_response(
+    message: str,
+    status: int = 400,
+    extra: dict | None = None,
+) -> JsonResponse:
     payload = {
         "ok": False,
         "message": message,
@@ -220,7 +237,7 @@ def _auto_fit_columns(ws) -> None:
             except Exception:
                 continue
 
-        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 40)
+        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 45)
 
 
 def _apply_header_style(cell) -> None:
@@ -242,7 +259,10 @@ def _build_excel_response(workbook: Workbook, filename: str) -> HttpResponse:
     return response
 
 
-def _account_display_name(account: Account) -> str:
+def _account_display_name(account: Account | None) -> str | None:
+    if not account:
+        return None
+
     return (
         _safe_attr(account, "name", None)
         or _safe_attr(account, "name_ar", None)
@@ -251,7 +271,26 @@ def _account_display_name(account: Account) -> str:
     )
 
 
-def _serialize_account(account: Account, *, include_children_count: bool = True) -> dict[str, Any]:
+def _can_post(account: Account) -> bool:
+    return bool(
+        _safe_attr(account, "is_active", True)
+        and not _safe_attr(account, "is_group", False)
+    )
+
+
+def _can_manual_post(account: Account) -> bool:
+    return bool(
+        _can_post(account)
+        and _safe_attr(account, "allow_manual_posting", True)
+    )
+
+
+def _serialize_account(
+    account: Account,
+    *,
+    include_children_count: bool = True,
+    include_metadata: bool = False,
+) -> dict[str, Any]:
     children_count = 0
 
     if include_children_count:
@@ -260,23 +299,41 @@ def _serialize_account(account: Account, *, include_children_count: bool = True)
         except Exception:
             children_count = 0
 
-    return {
+    parent = _safe_attr(account, "parent", None)
+
+    payload = {
         "id": account.id,
         "code": _safe_attr(account, "code", None),
         "name": _account_display_name(account),
+        "name_ar": _safe_attr(account, "name", None),
+        "name_en": _safe_attr(account, "name_en", ""),
         "description": _safe_attr(account, "description", ""),
         "account_type": _safe_attr(account, "account_type", None),
-        "account_type_label": account.get_account_type_display() if hasattr(account, "get_account_type_display") else None,
+        "account_type_label": (
+            account.get_account_type_display()
+            if hasattr(account, "get_account_type_display")
+            else None
+        ),
         "nature": _safe_attr(account, "nature", None),
-        "nature_label": account.get_nature_display() if hasattr(account, "get_nature_display") else None,
+        "nature_label": (
+            account.get_nature_display()
+            if hasattr(account, "get_nature_display")
+            else None
+        ),
         "parent_id": _safe_attr(account, "parent_id", None),
-        "parent_code": _safe_attr(_safe_attr(account, "parent", None), "code", None),
-        "parent_name": _account_display_name(account.parent) if _safe_attr(account, "parent", None) else None,
+        "parent_code": _safe_attr(parent, "code", None),
+        "parent_name": _account_display_name(parent) if parent else None,
         "level": int(_safe_attr(account, "level", 1) or 1),
         "is_group": bool(_safe_attr(account, "is_group", False)),
         "is_active": bool(_safe_attr(account, "is_active", True)),
-        "can_post": bool(_safe_attr(account, "is_active", True) and not _safe_attr(account, "is_group", False)),
+        "allow_manual_posting": bool(_safe_attr(account, "allow_manual_posting", True)),
+        "is_system": bool(_safe_attr(account, "is_system", False)),
+        "currency": _safe_attr(account, "currency", "SAR"),
+        "opening_balance": _money(_safe_attr(account, "opening_balance", "0.00")),
+        "can_post": _can_post(account),
+        "can_manual_post": _can_manual_post(account),
         "children_count": children_count,
+        "has_children": children_count > 0,
         "created_at": (
             _safe_attr(account, "created_at", None).isoformat()
             if _safe_attr(account, "created_at", None)
@@ -289,13 +346,24 @@ def _serialize_account(account: Account, *, include_children_count: bool = True)
         ),
     }
 
+    if include_metadata:
+        payload["metadata"] = _safe_attr(account, "metadata", {}) or {}
+
+    return payload
+
 
 def _build_accounts_queryset(request):
     search = (request.GET.get("search") or "").strip()
     account_type = (request.GET.get("account_type") or "").strip()
     nature = (request.GET.get("nature") or "").strip()
+    currency = (request.GET.get("currency") or "").strip().upper()
+
     is_group = _parse_bool(request.GET.get("is_group"), default=None)
     is_active = _parse_bool(request.GET.get("is_active"), default=None)
+    allow_manual_posting = _parse_bool(request.GET.get("allow_manual_posting"), default=None)
+    is_system = _parse_bool(request.GET.get("is_system"), default=None)
+    can_post = _parse_bool(request.GET.get("can_post"), default=None)
+
     parent_id = _parse_int(request.GET.get("parent_id"), "parent_id")
     level = _parse_int(request.GET.get("level"), "level")
 
@@ -305,9 +373,12 @@ def _build_accounts_queryset(request):
         qs = qs.filter(
             Q(code__icontains=search)
             | Q(name__icontains=search)
+            | Q(name_en__icontains=search)
             | Q(description__icontains=search)
+            | Q(currency__icontains=search)
             | Q(parent__code__icontains=search)
             | Q(parent__name__icontains=search)
+            | Q(parent__name_en__icontains=search)
         )
 
     if account_type:
@@ -322,11 +393,26 @@ def _build_accounts_queryset(request):
             raise ValueError("طبيعة الحساب غير صحيحة.")
         qs = qs.filter(nature=nature)
 
+    if currency:
+        qs = qs.filter(currency__iexact=currency)
+
     if is_group is not None:
         qs = qs.filter(is_group=is_group)
 
     if is_active is not None:
         qs = qs.filter(is_active=is_active)
+
+    if allow_manual_posting is not None:
+        qs = qs.filter(allow_manual_posting=allow_manual_posting)
+
+    if is_system is not None:
+        qs = qs.filter(is_system=is_system)
+
+    if can_post is True:
+        qs = qs.filter(is_active=True, is_group=False)
+
+    if can_post is False:
+        qs = qs.exclude(is_active=True, is_group=False)
 
     if parent_id:
         qs = qs.filter(parent_id=parent_id)
@@ -340,8 +426,12 @@ def _build_accounts_queryset(request):
             "search": search or None,
             "account_type": account_type or None,
             "nature": nature or None,
+            "currency": currency or None,
             "is_group": is_group,
             "is_active": is_active,
+            "allow_manual_posting": allow_manual_posting,
+            "is_system": is_system,
+            "can_post": can_post,
             "parent_id": parent_id,
             "level": level,
         },
@@ -353,7 +443,11 @@ def _build_accounts_tree(accounts: list[Account]) -> list[dict[str, Any]]:
     roots: list[dict[str, Any]] = []
 
     for account in accounts:
-        item = _serialize_account(account, include_children_count=False)
+        item = _serialize_account(
+            account,
+            include_children_count=False,
+            include_metadata=False,
+        )
         item["children"] = []
         account_map[account.id] = item
 
@@ -369,7 +463,95 @@ def _build_accounts_tree(accounts: list[Account]) -> list[dict[str, Any]]:
     return roots
 
 
-def _build_accounts_excel(accounts: list[Account], filters: dict[str, Any], summary: dict[str, Any]) -> HttpResponse:
+def _build_accounts_summary(accounts: list[Account]) -> dict[str, Any]:
+    total_accounts = len(accounts)
+    active_accounts = sum(1 for item in accounts if item.is_active)
+    group_accounts = sum(1 for item in accounts if item.is_group)
+    posting_accounts = sum(1 for item in accounts if item.is_active and not item.is_group)
+    manual_posting_accounts = sum(
+        1
+        for item in accounts
+        if item.is_active and not item.is_group and item.allow_manual_posting
+    )
+    system_accounts = sum(1 for item in accounts if item.is_system)
+
+    summary_by_type: dict[str, dict[str, Any]] = {}
+    summary_by_nature: dict[str, dict[str, Any]] = {}
+
+    for account in accounts:
+        account_type = str(account.account_type or "")
+        nature = str(account.nature or "")
+
+        if account_type not in summary_by_type:
+            summary_by_type[account_type] = {
+                "account_type": account_type,
+                "account_type_label": account.get_account_type_display()
+                if hasattr(account, "get_account_type_display")
+                else account_type,
+                "total": 0,
+                "posting_accounts": 0,
+                "group_accounts": 0,
+                "active_accounts": 0,
+            }
+
+        summary_by_type[account_type]["total"] += 1
+        summary_by_type[account_type]["posting_accounts"] += 1 if _can_post(account) else 0
+        summary_by_type[account_type]["group_accounts"] += 1 if account.is_group else 0
+        summary_by_type[account_type]["active_accounts"] += 1 if account.is_active else 0
+
+        if nature not in summary_by_nature:
+            summary_by_nature[nature] = {
+                "nature": nature,
+                "nature_label": account.get_nature_display()
+                if hasattr(account, "get_nature_display")
+                else nature,
+                "total": 0,
+            }
+
+        summary_by_nature[nature]["total"] += 1
+
+    return {
+        "total_accounts": total_accounts,
+        "active_accounts": active_accounts,
+        "inactive_accounts": total_accounts - active_accounts,
+        "group_accounts": group_accounts,
+        "posting_accounts": posting_accounts,
+        "manual_posting_accounts": manual_posting_accounts,
+        "system_accounts": system_accounts,
+        "non_system_accounts": total_accounts - system_accounts,
+        "total_opening_balance": _money(
+            sum(
+                (_money(_safe_attr(item, "opening_balance", "0.00")) for item in accounts),
+                Decimal("0.00"),
+            )
+        ),
+        "by_type": list(summary_by_type.values()),
+        "by_nature": list(summary_by_nature.values()),
+    }
+
+
+def _choices_payload() -> dict[str, Any]:
+    return {
+        "account_types": [
+            {"value": value, "label": label}
+            for value, label in AccountType.choices
+        ],
+        "natures": [
+            {"value": value, "label": label}
+            for value, label in AccountNature.choices
+        ],
+        "orderings": [
+            {"value": value, "label": value}
+            for value in ALLOWED_ORDERING.keys()
+        ],
+    }
+
+
+def _build_accounts_excel(
+    accounts: list[Account],
+    filters: dict[str, Any],
+    summary: dict[str, Any],
+) -> HttpResponse:
     workbook = Workbook()
     ws = workbook.active
     ws.title = _safe_sheet_title("Accounts")
@@ -377,19 +559,26 @@ def _build_accounts_excel(accounts: list[Account], filters: dict[str, Any], summ
     ws.append(["Chart of Accounts"])
     ws["A1"].font = Font(bold=True, size=14)
     ws["A1"].alignment = Alignment(horizontal="center")
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=19)
 
     meta_rows = [
         ("Search", filters.get("search")),
         ("Account Type", filters.get("account_type")),
         ("Nature", filters.get("nature")),
+        ("Currency", filters.get("currency")),
         ("Is Group", filters.get("is_group")),
         ("Is Active", filters.get("is_active")),
+        ("Allow Manual Posting", filters.get("allow_manual_posting")),
+        ("Is System", filters.get("is_system")),
+        ("Can Post", filters.get("can_post")),
         ("Parent ID", filters.get("parent_id")),
         ("Level", filters.get("level")),
         ("Total Accounts", summary.get("total_accounts")),
         ("Posting Accounts", summary.get("posting_accounts")),
+        ("Manual Posting Accounts", summary.get("manual_posting_accounts")),
         ("Group Accounts", summary.get("group_accounts")),
+        ("System Accounts", summary.get("system_accounts")),
+        ("Total Opening Balance", summary.get("total_opening_balance")),
     ]
 
     current_row = 3
@@ -404,17 +593,29 @@ def _build_accounts_excel(accounts: list[Account], filters: dict[str, Any], summ
     headers = [
         "ID",
         "Code",
-        "Name",
+        "Name AR",
+        "Name EN",
+        "Display Name",
         "Type",
+        "Type Label",
         "Nature",
+        "Nature Label",
         "Parent ID",
         "Parent Code",
+        "Parent Name",
         "Level",
+        "Currency",
+        "Opening Balance",
         "Is Group",
         "Is Active",
+        "Allow Manual Posting",
+        "Is System",
         "Can Post",
+        "Can Manual Post",
         "Children Count",
         "Description",
+        "Created At",
+        "Updated At",
     ]
 
     for col_index, header in enumerate(headers, start=1):
@@ -427,17 +628,29 @@ def _build_accounts_excel(accounts: list[Account], filters: dict[str, Any], summ
 
         ws.cell(row=current_row, column=1, value=row.get("id"))
         ws.cell(row=current_row, column=2, value=row.get("code"))
-        ws.cell(row=current_row, column=3, value=row.get("name"))
-        ws.cell(row=current_row, column=4, value=row.get("account_type"))
-        ws.cell(row=current_row, column=5, value=row.get("nature"))
-        ws.cell(row=current_row, column=6, value=row.get("parent_id"))
-        ws.cell(row=current_row, column=7, value=row.get("parent_code"))
-        ws.cell(row=current_row, column=8, value=row.get("level"))
-        ws.cell(row=current_row, column=9, value=str(row.get("is_group")))
-        ws.cell(row=current_row, column=10, value=str(row.get("is_active")))
-        ws.cell(row=current_row, column=11, value=str(row.get("can_post")))
-        ws.cell(row=current_row, column=12, value=row.get("children_count"))
-        ws.cell(row=current_row, column=13, value=row.get("description"))
+        ws.cell(row=current_row, column=3, value=row.get("name_ar"))
+        ws.cell(row=current_row, column=4, value=row.get("name_en"))
+        ws.cell(row=current_row, column=5, value=row.get("name"))
+        ws.cell(row=current_row, column=6, value=row.get("account_type"))
+        ws.cell(row=current_row, column=7, value=row.get("account_type_label"))
+        ws.cell(row=current_row, column=8, value=row.get("nature"))
+        ws.cell(row=current_row, column=9, value=row.get("nature_label"))
+        ws.cell(row=current_row, column=10, value=row.get("parent_id"))
+        ws.cell(row=current_row, column=11, value=row.get("parent_code"))
+        ws.cell(row=current_row, column=12, value=row.get("parent_name"))
+        ws.cell(row=current_row, column=13, value=row.get("level"))
+        ws.cell(row=current_row, column=14, value=row.get("currency"))
+        ws.cell(row=current_row, column=15, value=float(row.get("opening_balance", 0) or 0))
+        ws.cell(row=current_row, column=16, value=str(row.get("is_group")))
+        ws.cell(row=current_row, column=17, value=str(row.get("is_active")))
+        ws.cell(row=current_row, column=18, value=str(row.get("allow_manual_posting")))
+        ws.cell(row=current_row, column=19, value=str(row.get("is_system")))
+        ws.cell(row=current_row, column=20, value=str(row.get("can_post")))
+        ws.cell(row=current_row, column=21, value=str(row.get("can_manual_post")))
+        ws.cell(row=current_row, column=22, value=row.get("children_count"))
+        ws.cell(row=current_row, column=23, value=row.get("description"))
+        ws.cell(row=current_row, column=24, value=row.get("created_at"))
+        ws.cell(row=current_row, column=25, value=row.get("updated_at"))
         current_row += 1
 
     _auto_fit_columns(ws)
@@ -472,22 +685,15 @@ def accounting_accounts_api(request):
         )
         ordering = _parse_ordering(request.GET.get("ordering"), default="code")
         as_tree = _parse_bool(request.GET.get("tree"), default=False)
+        include_metadata = _parse_bool(request.GET.get("include_metadata"), default=False)
 
-        qs = qs.order_by(ordering, "code")
+        if ordering.lstrip("-") == "code":
+            qs = qs.order_by(ordering)
+        else:
+            qs = qs.order_by(ordering, "code")
+
         accounts_all = list(qs)
-
-        total_accounts = len(accounts_all)
-        group_accounts = sum(1 for item in accounts_all if item.is_group)
-        active_accounts = sum(1 for item in accounts_all if item.is_active)
-        posting_accounts = sum(1 for item in accounts_all if item.is_active and not item.is_group)
-
-        summary = {
-            "total_accounts": total_accounts,
-            "active_accounts": active_accounts,
-            "inactive_accounts": total_accounts - active_accounts,
-            "group_accounts": group_accounts,
-            "posting_accounts": posting_accounts,
-        }
+        summary = _build_accounts_summary(accounts_all)
 
         if as_tree:
             payload = {
@@ -495,8 +701,10 @@ def accounting_accounts_api(request):
                     **query_data["filters"],
                     "ordering": ordering,
                     "tree": True,
+                    "include_metadata": False,
                 },
                 "summary": summary,
+                "choices": _choices_payload(),
                 "results": _build_accounts_tree(accounts_all),
             }
             return _success_response(payload)
@@ -513,8 +721,10 @@ def accounting_accounts_api(request):
                 **query_data["filters"],
                 "ordering": ordering,
                 "tree": False,
+                "include_metadata": include_metadata,
             },
             "summary": summary,
+            "choices": _choices_payload(),
             "pagination": {
                 "page": page_obj.number,
                 "page_size": page_size,
@@ -525,7 +735,10 @@ def accounting_accounts_api(request):
                 "next_page": page_obj.next_page_number() if page_obj.has_next() else None,
                 "previous_page": page_obj.previous_page_number() if page_obj.has_previous() else None,
             },
-            "results": [_serialize_account(account) for account in page_obj.object_list],
+            "results": [
+                _serialize_account(account, include_metadata=include_metadata)
+                for account in page_obj.object_list
+            ],
         }
 
         return _success_response(payload)
@@ -550,23 +763,19 @@ def accounting_accounts_excel_api(request):
         query_data = _build_accounts_queryset(request)
         ordering = _parse_ordering(request.GET.get("ordering"), default="code")
 
-        qs = query_data["qs"].order_by(ordering, "code")
+        if ordering.lstrip("-") == "code":
+            qs = query_data["qs"].order_by(ordering)
+        else:
+            qs = query_data["qs"].order_by(ordering, "code")
+
         accounts_all = list(qs)
+        summary = _build_accounts_summary(accounts_all)
 
-        total_accounts = len(accounts_all)
-        group_accounts = sum(1 for item in accounts_all if item.is_group)
-        active_accounts = sum(1 for item in accounts_all if item.is_active)
-        posting_accounts = sum(1 for item in accounts_all if item.is_active and not item.is_group)
-
-        summary = {
-            "total_accounts": total_accounts,
-            "active_accounts": active_accounts,
-            "inactive_accounts": total_accounts - active_accounts,
-            "group_accounts": group_accounts,
-            "posting_accounts": posting_accounts,
-        }
-
-        return _build_accounts_excel(accounts_all, query_data["filters"], summary)
+        return _build_accounts_excel(
+            accounts_all,
+            query_data["filters"],
+            summary,
+        )
 
     except ValueError as exc:
         return _error_response(str(exc), status=400)

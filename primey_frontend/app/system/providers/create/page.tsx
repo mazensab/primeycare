@@ -5,11 +5,14 @@
    🧠 Primey Care | Create Provider
    ------------------------------------------------------------
    ✅ المرحلة 17 + المرحلة 2
-   ✅ مبني بنفس نمط إنشاء المراكز/العملاء المعتمد
+   ✅ Providers هو الموديول الرسمي
    ✅ Full Width Layout
    ✅ Main Form + Sidebar Summary
+   ✅ دعم الاسم العربي والإنجليزي بشكل مستقل
+   ✅ دعم السجل التجاري والرقم الضريبي
+   ✅ دعم حقول الشبكة الطبية والاستيراد
    ✅ حماية زر الإنشاء وطلبات الحفظ حسب الصلاحيات
-   ✅ fallback آمن لـ system_admin / superadmin
+   ✅ fallback آمن لـ system_admin / superuser
    ✅ Error Alert داخلي
    ✅ Field-level validation
    ✅ beforeunload protection
@@ -18,6 +21,7 @@
    ✅ تنظيف البيانات قبل الإرسال
    ✅ استخدام toast من sonner
    ✅ دعم عربي / إنجليزي عبر primey-locale
+   ✅ استخدام رمز العملة /currency/sar.svg في أي قيمة مالية مستقبلية
    ✅ بدون localhost hardcoded
    ✅ لا توجد روابط تقارير داخل الوحدة
    ✅ لا توجد نصوص تقنية ظاهرة في الواجهة
@@ -30,7 +34,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
-  BadgeCheck,
   Building2,
   CheckCircle2,
   ClipboardList,
@@ -42,7 +45,6 @@ import {
   Mail,
   MapPin,
   Phone,
-  RefreshCcw,
   Save,
   ShieldCheck,
   Sparkles,
@@ -87,9 +89,14 @@ type ProviderType =
 
 type ProviderFormData = {
   name: string;
+  name_ar: string;
+  name_en: string;
   code: string;
   provider_type: ProviderType;
   status: ProviderStatus;
+
+  commercial_registration: string;
+  tax_number: string;
 
   contact_person: string;
   phone: string;
@@ -97,14 +104,16 @@ type ProviderFormData = {
   email: string;
   website: string;
 
+  region: string;
   city: string;
   area: string;
+  street: string;
   address: string;
   google_maps_link: string;
 
-  license_number: string;
-  tax_number: string;
-  commercial_registration: string;
+  source_category: string;
+  import_source: string;
+  external_reference: string;
 
   notes: string;
   is_featured: boolean;
@@ -115,12 +124,11 @@ type ProviderFormErrors = Partial<Record<keyof ProviderFormData, string>>;
 type CreateProviderApiResponse = {
   ok?: boolean;
   message?: string;
-  errors?: Record<string, string[] | string>;
+  detail?: string;
+  error?: string;
+  errors?: Record<string, string[] | string> | string[] | string;
   id?: number | string;
   provider?: {
-    id?: number | string;
-  };
-  center?: {
     id?: number | string;
   };
   data?: {
@@ -128,13 +136,10 @@ type CreateProviderApiResponse = {
     provider?: {
       id?: number | string;
     };
-    center?: {
-      id?: number | string;
-    };
   };
 };
 
-const DRAFT_STORAGE_KEY = "primey-care-provider-create-draft";
+const DRAFT_STORAGE_KEY = "primey-care-provider-create-draft-v2";
 
 /* ============================================================
    Locale Helpers
@@ -425,9 +430,14 @@ function hasSafePermission(
 
 const initialFormData: ProviderFormData = {
   name: "",
+  name_ar: "",
+  name_en: "",
   code: "",
   provider_type: "MEDICAL_CENTER",
   status: "ACTIVE",
+
+  commercial_registration: "",
+  tax_number: "",
 
   contact_person: "",
   phone: "",
@@ -435,14 +445,16 @@ const initialFormData: ProviderFormData = {
   email: "",
   website: "",
 
+  region: "",
   city: "",
   area: "",
+  street: "",
   address: "",
   google_maps_link: "",
 
-  license_number: "",
-  tax_number: "",
-  commercial_registration: "",
+  source_category: "",
+  import_source: "",
+  external_reference: "",
 
   notes: "",
   is_featured: false,
@@ -458,11 +470,12 @@ function dictionary(locale: AppLocale) {
   return {
     title: isArabic ? "إنشاء مقدم خدمة جديد" : "Create New Provider",
     subtitle: isArabic
-      ? "إضافة مقدم خدمة أو مركز جديد وربطه لاحقًا بالعقود والخدمات والطلبات."
-      : "Create a new provider or center and later connect it with contracts, services, and orders.",
+      ? "إضافة جهة مقدمة للخدمة مع الاسم العربي والإنجليزي والبيانات النظامية قبل ربطها بالعقود والخدمات والطلبات."
+      : "Create a provider with Arabic/English names and legal data before linking contracts, services, and orders.",
 
     back: isArabic ? "العودة لمقدمي الخدمة" : "Back to Providers",
     providersList: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
+    importProviders: isArabic ? "استيراد الشبكة الطبية" : "Import Medical Network",
     create: isArabic ? "إنشاء مقدم الخدمة" : "Create Provider",
     saving: isArabic ? "جاري الحفظ..." : "Saving...",
     saveDraft: isArabic ? "حفظ كمسودة محلية" : "Save Local Draft",
@@ -471,8 +484,13 @@ function dictionary(locale: AppLocale) {
 
     basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
     basicDesc: isArabic
-      ? "اسم مقدم الخدمة، الكود، التصنيف، وحالة التشغيل."
-      : "Provider name, code, type, and operational status.",
+      ? "الاسم العربي والإنجليزي، الكود، التصنيف، وحالة التشغيل."
+      : "Arabic and English names, code, type, and operational status.",
+
+    legalInfo: isArabic ? "البيانات النظامية والضريبية" : "Legal & Tax Data",
+    legalDesc: isArabic
+      ? "السجل التجاري والرقم الضريبي لمقدم الخدمة."
+      : "Commercial registration and tax number for the provider.",
 
     contactInfo: isArabic ? "بيانات التواصل" : "Contact Information",
     contactDesc: isArabic
@@ -481,13 +499,13 @@ function dictionary(locale: AppLocale) {
 
     locationInfo: isArabic ? "بيانات الموقع" : "Location Information",
     locationDesc: isArabic
-      ? "المدينة، الحي أو المنطقة، العنوان، ورابط الخريطة."
-      : "City, area, address, and map link.",
+      ? "المنطقة، المدينة، الحي، الشارع، العنوان، ورابط الخريطة."
+      : "Region, city, area, street, address, and map link.",
 
-    legalInfo: isArabic ? "البيانات النظامية" : "Legal Information",
-    legalDesc: isArabic
-      ? "رقم الترخيص، الرقم الضريبي، والسجل التجاري إن وجدت."
-      : "License number, tax number, and commercial registration when available.",
+    networkInfo: isArabic ? "بيانات الشبكة الطبية" : "Medical Network Data",
+    networkDesc: isArabic
+      ? "حقول اختيارية تساعد في تتبع المصدر أو المرجع الخارجي."
+      : "Optional fields used for source tracking or external references.",
 
     operationalInfo: isArabic ? "بيانات تشغيلية" : "Operational Information",
     operationalDesc: isArabic
@@ -514,47 +532,63 @@ function dictionary(locale: AppLocale) {
       : "You do not have permission to create providers. Contact your system administrator if you need access.",
 
     labels: {
-      name: isArabic ? "اسم مقدم الخدمة" : "Provider Name",
+      name: isArabic ? "الاسم العام / التوافقي" : "General / Legacy Name",
+      nameAr: isArabic ? "اسم مقدم الخدمة بالعربي" : "Arabic Provider Name",
+      nameEn: isArabic ? "اسم مقدم الخدمة بالإنجليزي" : "English Provider Name",
       code: isArabic ? "كود مقدم الخدمة" : "Provider Code",
       providerType: isArabic ? "التصنيف" : "Provider Type",
       status: isArabic ? "الحالة" : "Status",
+      commercialRegistration: isArabic ? "السجل التجاري" : "Commercial Registration",
+      taxNumber: isArabic ? "الرقم الضريبي" : "Tax Number",
       contactPerson: isArabic ? "مسؤول التواصل" : "Contact Person",
       phone: isArabic ? "رقم الهاتف" : "Phone",
       mobile: isArabic ? "رقم الجوال" : "Mobile",
       email: isArabic ? "البريد الإلكتروني" : "Email",
       website: isArabic ? "الموقع الإلكتروني" : "Website",
+      region: isArabic ? "المنطقة" : "Region",
       city: isArabic ? "المدينة" : "City",
       area: isArabic ? "الحي / المنطقة" : "Area",
+      street: isArabic ? "الشارع" : "Street",
       address: isArabic ? "العنوان" : "Address",
       googleMaps: isArabic ? "رابط الخريطة" : "Map Link",
-      licenseNumber: isArabic ? "رقم الترخيص" : "License Number",
-      taxNumber: isArabic ? "الرقم الضريبي" : "Tax Number",
-      commercialRegistration: isArabic
-        ? "السجل التجاري"
-        : "Commercial Registration",
+      sourceCategory: isArabic ? "تصنيف المصدر" : "Source Category",
+      importSource: isArabic ? "مصدر الاستيراد" : "Import Source",
+      externalReference: isArabic ? "المرجع الخارجي" : "External Reference",
       notes: isArabic ? "ملاحظات" : "Notes",
       featured: isArabic ? "مقدم خدمة مميز" : "Featured Provider",
     },
 
     placeholders: {
       name: isArabic
-        ? "مثال: مركز برايمي كير جدة"
-        : "Example: Primey Care Jeddah Center",
-      code: isArabic ? "مثال: PRV-001" : "Example: PRV-001",
+        ? "يُملأ تلقائيًا من الاسم العربي أو الإنجليزي عند الحفظ"
+        : "Auto-filled from Arabic or English name on save",
+      nameAr: isArabic
+        ? "مثال: مستشفى برايمي الطبي"
+        : "Example: مستشفى برايمي الطبي",
+      nameEn: isArabic
+        ? "مثال: Primey Medical Hospital"
+        : "Example: Primey Medical Hospital",
+      code: isArabic
+        ? "اتركه فارغًا للتوليد التلقائي"
+        : "Leave blank for auto generation",
+      commercialRegistration: isArabic ? "مثال: 1010123456" : "Example: 1010123456",
+      taxNumber: isArabic ? "مثال: 300123456700003" : "Example: 300123456700003",
       contactPerson: isArabic ? "مثال: محمد أحمد" : "Example: Mohammed Ahmed",
       phone: isArabic ? "011xxxxxxx" : "011xxxxxxx",
       mobile: isArabic ? "05xxxxxxxx" : "05xxxxxxxx",
       email: isArabic ? "provider@example.com" : "provider@example.com",
       website: isArabic ? "https://example.com" : "https://example.com",
+      region: isArabic ? "مثال: منطقة مكة المكرمة" : "Example: Makkah Region",
       city: isArabic ? "مثال: جدة" : "Example: Jeddah",
       area: isArabic ? "مثال: الروضة" : "Example: Al Rawdah",
+      street: isArabic ? "مثال: شارع التحلية" : "Example: Tahlia Street",
       address: isArabic ? "اكتب العنوان التفصيلي" : "Enter full address",
       googleMaps: isArabic
         ? "https://maps.google.com/..."
         : "https://maps.google.com/...",
-      licenseNumber: isArabic ? "رقم الترخيص" : "License number",
-      taxNumber: isArabic ? "الرقم الضريبي" : "Tax number",
-      commercialRegistration: isArabic ? "رقم السجل التجاري" : "CR number",
+      sourceCategory: isArabic ? "مثال: مجمع طبي" : "Example: Medical Complex",
+      importSource: isArabic ? "مثال: medical_network_excel" : "Example: medical_network_excel",
+      externalReference: isArabic ? "مثال: 125" : "Example: 125",
       notes: isArabic
         ? "أي ملاحظات تشغيلية عن مقدم الخدمة..."
         : "Any operational notes about the provider...",
@@ -578,10 +612,18 @@ function dictionary(locale: AppLocale) {
     } satisfies Record<ProviderStatus, string>,
 
     validation: {
-      name: isArabic ? "اسم مقدم الخدمة مطلوب." : "Provider name is required.",
+      name: isArabic
+        ? "يجب إدخال الاسم العربي أو الإنجليزي لمقدم الخدمة."
+        : "Arabic or English provider name is required.",
       codeLength: isArabic
         ? "الكود يجب ألا يتجاوز 50 حرفًا."
         : "Code must not exceed 50 characters.",
+      commercialRegistrationLength: isArabic
+        ? "السجل التجاري يجب ألا يتجاوز 100 حرف."
+        : "Commercial registration must not exceed 100 characters.",
+      taxNumberLength: isArabic
+        ? "الرقم الضريبي يجب ألا يتجاوز 100 حرف."
+        : "Tax number must not exceed 100 characters.",
       email: isArabic
         ? "صيغة البريد الإلكتروني غير صحيحة."
         : "Email format is invalid.",
@@ -623,19 +665,27 @@ function dictionary(locale: AppLocale) {
     yes: isArabic ? "نعم" : "Yes",
     no: isArabic ? "لا" : "No",
 
+    featuredDescription: isArabic
+      ? "استخدم هذا الخيار لإبراز مقدم الخدمة في الواجهات والعروض."
+      : "Use this option to highlight the provider in pages and offers.",
+
+    afterCreateHint: isArabic
+      ? "بعد إنشاء مقدم الخدمة سيتم فتح صفحة التفاصيل، ومنها يمكنك رفع الشعار والصورة ومرفقات Google Drive."
+      : "After creation, the detail page opens so you can upload the logo, image, and Google Drive files.",
+
     quickNotes: [
       isArabic
-        ? "اسم مقدم الخدمة هو الحقل الأساسي المطلوب للحفظ."
-        : "Provider name is the main required field for saving.",
+        ? "الاسم العربي أو الإنجليزي مطلوب، وسيتم حفظ الاسم العام تلقائيًا للتوافق مع الصفحات القديمة."
+        : "Arabic or English name is required. The general name is saved automatically for backward compatibility.",
       isArabic
-        ? "يمكن ترك الكود فارغًا إذا كان الباك إند يولده تلقائيًا."
-        : "You can leave the code empty if the backend generates it automatically.",
+        ? "يمكن ترك الكود فارغًا ليتم توليده من الباكند تلقائيًا."
+        : "Code can be left blank and generated automatically by the backend.",
       isArabic
-        ? "أضف بيانات التواصل والموقع لتسهيل العمليات والربط لاحقًا."
-        : "Add contact and location data to simplify operations and future linking.",
+        ? "السجل التجاري والرقم الضريبي مهمان لتقرير مقدم الخدمة والطباعة."
+        : "Commercial registration and tax number are important for provider reports and printing.",
       isArabic
-        ? "لا يتم إنشاء عقود أو خدمات من هذه الصفحة؛ الربط يتم لاحقًا من الوحدات المختصة."
-        : "Contracts and services are not created here; they are linked later from their modules.",
+        ? "الشعار والصورة والمرفقات يتم رفعها بعد الإنشاء من صفحة تفاصيل مقدم الخدمة."
+        : "Logo, image, and documents are uploaded after creation from the provider detail page.",
     ],
   };
 }
@@ -652,12 +702,12 @@ function normalizeCode(value: string) {
   return value.trim().replace(/\s+/g, "-").toUpperCase();
 }
 
+function normalizeIdentifier(value: string) {
+  return value.trim().replace(/\s+/g, "");
+}
+
 function normalizeUrl(value: string) {
-  const clean = value.trim();
-
-  if (!clean) return "";
-
-  return clean;
+  return value.trim();
 }
 
 function isValidUrl(value: string) {
@@ -682,15 +732,25 @@ function hasFormChanges(formData: ProviderFormData) {
   return JSON.stringify(formData) !== JSON.stringify(initialFormData);
 }
 
+function resolveGeneralName(formData: ProviderFormData) {
+  return formData.name.trim() || formData.name_ar.trim() || formData.name_en.trim();
+}
+
 function normalizePayload(formData: ProviderFormData) {
-  const code = normalizeCode(formData.code);
+  const generalName = resolveGeneralName(formData);
+  const nameAr = formData.name_ar.trim();
+  const nameEn = formData.name_en.trim();
 
   return {
-    name: formData.name.trim(),
-    code: code || undefined,
+    name: generalName,
+    name_ar: nameAr || generalName,
+    name_en: nameEn,
+    code: normalizeCode(formData.code),
     provider_type: formData.provider_type,
-    type: formData.provider_type,
     status: formData.status,
+
+    commercial_registration: normalizeIdentifier(formData.commercial_registration),
+    tax_number: normalizeIdentifier(formData.tax_number),
 
     contact_person: formData.contact_person.trim(),
     phone: normalizePhone(formData.phone),
@@ -698,14 +758,16 @@ function normalizePayload(formData: ProviderFormData) {
     email: formData.email.trim().toLowerCase(),
     website: normalizeUrl(formData.website),
 
+    region: formData.region.trim(),
     city: formData.city.trim(),
     area: formData.area.trim(),
+    street: formData.street.trim(),
     address: formData.address.trim(),
     google_maps_link: normalizeUrl(formData.google_maps_link),
 
-    license_number: formData.license_number.trim(),
-    tax_number: formData.tax_number.trim(),
-    commercial_registration: formData.commercial_registration.trim(),
+    source_category: formData.source_category.trim(),
+    import_source: formData.import_source.trim(),
+    external_reference: formData.external_reference.trim(),
 
     notes: formData.notes.trim(),
     is_featured: formData.is_featured,
@@ -715,13 +777,28 @@ function normalizePayload(formData: ProviderFormData) {
 function resolveCreatedId(result: CreateProviderApiResponse) {
   return (
     result.provider?.id ||
-    result.center?.id ||
     result.data?.provider?.id ||
-    result.data?.center?.id ||
     result.data?.id ||
     result.id ||
     null
   );
+}
+
+function normalizeApiErrors(errors: CreateProviderApiResponse["errors"]) {
+  if (!errors) return "";
+
+  if (typeof errors === "string") return errors;
+
+  if (Array.isArray(errors)) {
+    return errors.filter(Boolean).join("، ");
+  }
+
+  return Object.entries(errors)
+    .map(([key, value]) => {
+      const message = Array.isArray(value) ? value.join("، ") : value;
+      return `${key}: ${message}`;
+    })
+    .join("، ");
 }
 
 function mapApiFieldErrors(
@@ -729,7 +806,9 @@ function mapApiFieldErrors(
 ): ProviderFormErrors {
   const nextErrors: ProviderFormErrors = {};
 
-  if (!errors) return nextErrors;
+  if (!errors || typeof errors === "string" || Array.isArray(errors)) {
+    return nextErrors;
+  }
 
   Object.entries(errors).forEach(([key, value]) => {
     const message = Array.isArray(value) ? value[0] : value;
@@ -758,7 +837,9 @@ function formatNumber(value: number | string): string {
   }).format(numericValue);
 }
 
-function providerTypeIcon(type: ProviderType): ComponentType<{ className?: string }> {
+function providerTypeIcon(
+  type: ProviderType,
+): ComponentType<{ className?: string }> {
   if (type === "HOSPITAL") return Hospital;
   if (type === "MEDICAL_CENTER") return Stethoscope;
   if (type === "PHARMACY") return ShieldCheck;
@@ -812,7 +893,9 @@ function SummaryItem({
 
       <div className="min-w-0">
         <p className="text-xs text-muted-foreground">{label}</p>
-        <div className="mt-1 truncate text-sm font-semibold">{value || "-"}</div>
+        <div className="mt-1 truncate text-sm font-semibold">
+          {value || "-"}
+        </div>
       </div>
     </div>
   );
@@ -869,13 +952,19 @@ export default function SystemCreateProviderPage() {
 
   const canCreateProviders = hasSafePermission(
     auth,
-    ["providers.create", "centers.create"],
+    ["providers.create"],
+    "action",
+  );
+
+  const canImportProviders = hasSafePermission(
+    auth,
+    ["providers.import", "providers.create"],
     "action",
   );
 
   const canViewProviders = hasSafePermission(
     auth,
-    ["providers.view", "providers.list", "centers.view", "centers.list"],
+    ["providers.view", "providers.list"],
     "view",
   );
 
@@ -885,24 +974,39 @@ export default function SystemCreateProviderPage() {
 
   const completedFields = useMemo(() => {
     const keys: Array<keyof ProviderFormData> = [
-      "name",
+      "name_ar",
+      "name_en",
+      "code",
       "provider_type",
       "status",
+      "commercial_registration",
+      "tax_number",
       "phone",
       "mobile",
       "email",
+      "region",
       "city",
       "area",
+      "street",
       "address",
       "contact_person",
+      "source_category",
+      "external_reference",
     ];
 
     return keys.filter((key) => String(formData[key] || "").trim().length > 0)
       .length;
   }, [formData]);
 
-  const progressPercent = Math.round((completedFields / 10) * 100);
-  const isReadyToSave = formData.name.trim().length > 0;
+  const progressPercent = Math.min(
+    100,
+    Math.round((completedFields / 18) * 100),
+  );
+
+  const isReadyToSave =
+    formData.name_ar.trim().length > 0 ||
+    formData.name_en.trim().length > 0 ||
+    formData.name.trim().length > 0;
 
   function updateField<K extends keyof ProviderFormData>(
     key: K,
@@ -926,12 +1030,21 @@ export default function SystemCreateProviderPage() {
   function validateForm() {
     const nextErrors: ProviderFormErrors = {};
 
-    if (!formData.name.trim()) {
-      nextErrors.name = t.validation.name;
+    if (!isReadyToSave) {
+      nextErrors.name_ar = t.validation.name;
     }
 
     if (formData.code.trim().length > 50) {
       nextErrors.code = t.validation.codeLength;
+    }
+
+    if (formData.commercial_registration.trim().length > 100) {
+      nextErrors.commercial_registration =
+        t.validation.commercialRegistrationLength;
+    }
+
+    if (formData.tax_number.trim().length > 100) {
+      nextErrors.tax_number = t.validation.taxNumberLength;
     }
 
     if (!isValidEmail(formData.email)) {
@@ -989,7 +1102,12 @@ export default function SystemCreateProviderPage() {
 
       if (!response.ok || result?.ok === false) {
         const apiErrors = mapApiFieldErrors(result?.errors);
-        const message = result?.message || t.apiError;
+        const message =
+          normalizeApiErrors(result?.errors) ||
+          result?.message ||
+          result?.detail ||
+          result?.error ||
+          t.apiError;
 
         setErrors((current) => ({
           ...current,
@@ -997,7 +1115,9 @@ export default function SystemCreateProviderPage() {
         }));
 
         setSubmitError(message);
-        toast.error(message);
+        toast.error(t.apiError, {
+          description: message,
+        });
         return;
       }
 
@@ -1040,7 +1160,7 @@ export default function SystemCreateProviderPage() {
         return;
       }
 
-      const parsed = JSON.parse(rawDraft) as ProviderFormData;
+      const parsed = JSON.parse(rawDraft) as Partial<ProviderFormData>;
 
       setFormData({
         ...initialFormData,
@@ -1142,7 +1262,6 @@ export default function SystemCreateProviderPage() {
 
   return (
     <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
@@ -1179,65 +1298,75 @@ export default function SystemCreateProviderPage() {
             </Button>
           ) : null}
 
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={saveDraft}
-          >
-            <Save className="h-4 w-4" />
-            <span>{t.saveDraft}</span>
-          </Button>
-
-          <Button
-            type="button"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={submitForm}
-          >
-            {isSubmitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            <span>{isSubmitting ? t.saving : t.create}</span>
-          </Button>
+          {canImportProviders ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+              disabled={isSubmitting}
+              onClick={() => confirmNavigate("/system/providers/import")}
+            >
+              <FileText className="h-4 w-4" />
+              <span>{t.importProviders}</span>
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      {/* Error */}
       {submitError ? (
         <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5 text-destructive">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <CardContent className="flex items-start gap-3 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
             <div>
-              <p className="font-semibold">{t.formErrorTitle}</p>
-              <p className="mt-1 text-sm">{submitError}</p>
+              <p className="font-semibold text-destructive">
+                {t.formErrorTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {submitError}
+              </p>
             </div>
           </CardContent>
         </Card>
       ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        {/* Main Form */}
         <div className="space-y-4">
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Building2 className="h-4 w-4" />
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5" />
                 {t.basicInfo}
               </CardTitle>
               <CardDescription>{t.basicDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock label={t.labels.name} error={errors.name} required>
+              <FieldBlock label={t.labels.nameAr} error={errors.name_ar} required>
+                <Input
+                  value={formData.name_ar}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.nameAr}
+                  className="rounded-xl"
+                  onChange={(event) => updateField("name_ar", event.target.value)}
+                />
+              </FieldBlock>
+
+              <FieldBlock label={t.labels.nameEn} error={errors.name_en}>
+                <Input
+                  value={formData.name_en}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.nameEn}
+                  className="rounded-xl"
+                  onChange={(event) => updateField("name_en", event.target.value)}
+                />
+              </FieldBlock>
+
+              <FieldBlock label={t.labels.name} error={errors.name}>
                 <Input
                   value={formData.name}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.name}
-                  className="h-10 rounded-xl"
+                  className="rounded-xl"
                   onChange={(event) => updateField("name", event.target.value)}
                 />
               </FieldBlock>
@@ -1247,26 +1376,18 @@ export default function SystemCreateProviderPage() {
                   value={formData.code}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.code}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
+                  className="rounded-xl"
                   onChange={(event) => updateField("code", event.target.value)}
-                  onBlur={() => updateField("code", normalizeCode(formData.code))}
                 />
               </FieldBlock>
 
-              <FieldBlock
-                label={t.labels.providerType}
-                error={errors.provider_type}
-              >
+              <FieldBlock label={t.labels.providerType} error={errors.provider_type}>
                 <select
                   value={formData.provider_type}
                   disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                   onChange={(event) =>
-                    updateField(
-                      "provider_type",
-                      event.target.value as ProviderType,
-                    )
+                    updateField("provider_type", event.target.value as ProviderType)
                   }
                 >
                   {Object.entries(t.providerTypes).map(([value, label]) => (
@@ -1281,7 +1402,7 @@ export default function SystemCreateProviderPage() {
                 <select
                   value={formData.status}
                   disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
                   onChange={(event) =>
                     updateField("status", event.target.value as ProviderStatus)
                   }
@@ -1297,9 +1418,46 @@ export default function SystemCreateProviderPage() {
           </Card>
 
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Phone className="h-4 w-4" />
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5" />
+                {t.legalInfo}
+              </CardTitle>
+              <CardDescription>{t.legalDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <FieldBlock
+                label={t.labels.commercialRegistration}
+                error={errors.commercial_registration}
+              >
+                <Input
+                  value={formData.commercial_registration}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.commercialRegistration}
+                  className="rounded-xl"
+                  onChange={(event) =>
+                    updateField("commercial_registration", event.target.value)
+                  }
+                />
+              </FieldBlock>
+
+              <FieldBlock label={t.labels.taxNumber} error={errors.tax_number}>
+                <Input
+                  value={formData.tax_number}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.taxNumber}
+                  className="rounded-xl"
+                  onChange={(event) => updateField("tax_number", event.target.value)}
+                />
+              </FieldBlock>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Phone className="h-5 w-5" />
                 {t.contactInfo}
               </CardTitle>
               <CardDescription>{t.contactDesc}</CardDescription>
@@ -1314,7 +1472,7 @@ export default function SystemCreateProviderPage() {
                   value={formData.contact_person}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.contactPerson}
-                  className="h-10 rounded-xl"
+                  className="rounded-xl"
                   onChange={(event) =>
                     updateField("contact_person", event.target.value)
                   }
@@ -1326,10 +1484,8 @@ export default function SystemCreateProviderPage() {
                   value={formData.phone}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.phone}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
+                  className="rounded-xl"
                   onChange={(event) => updateField("phone", event.target.value)}
-                  onBlur={() => updateField("phone", normalizePhone(formData.phone))}
                 />
               </FieldBlock>
 
@@ -1338,12 +1494,8 @@ export default function SystemCreateProviderPage() {
                   value={formData.mobile}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.mobile}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
+                  className="rounded-xl"
                   onChange={(event) => updateField("mobile", event.target.value)}
-                  onBlur={() =>
-                    updateField("mobile", normalizePhone(formData.mobile))
-                  }
                 />
               </FieldBlock>
 
@@ -1352,12 +1504,8 @@ export default function SystemCreateProviderPage() {
                   value={formData.email}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.email}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
+                  className="rounded-xl"
                   onChange={(event) => updateField("email", event.target.value)}
-                  onBlur={() =>
-                    updateField("email", formData.email.trim().toLowerCase())
-                  }
                 />
               </FieldBlock>
 
@@ -1366,8 +1514,7 @@ export default function SystemCreateProviderPage() {
                   value={formData.website}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.website}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
+                  className="rounded-xl"
                   onChange={(event) => updateField("website", event.target.value)}
                 />
               </FieldBlock>
@@ -1375,21 +1522,31 @@ export default function SystemCreateProviderPage() {
           </Card>
 
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <MapPin className="h-4 w-4" />
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MapPin className="h-5 w-5" />
                 {t.locationInfo}
               </CardTitle>
               <CardDescription>{t.locationDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="grid gap-4 md:grid-cols-2">
+              <FieldBlock label={t.labels.region} error={errors.region}>
+                <Input
+                  value={formData.region}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.region}
+                  className="rounded-xl"
+                  onChange={(event) => updateField("region", event.target.value)}
+                />
+              </FieldBlock>
+
               <FieldBlock label={t.labels.city} error={errors.city}>
                 <Input
                   value={formData.city}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.city}
-                  className="h-10 rounded-xl"
+                  className="rounded-xl"
                   onChange={(event) => updateField("city", event.target.value)}
                 />
               </FieldBlock>
@@ -1399,31 +1556,37 @@ export default function SystemCreateProviderPage() {
                   value={formData.area}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.area}
-                  className="h-10 rounded-xl"
+                  className="rounded-xl"
                   onChange={(event) => updateField("area", event.target.value)}
                 />
               </FieldBlock>
 
+              <FieldBlock label={t.labels.street} error={errors.street}>
+                <Input
+                  value={formData.street}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.street}
+                  className="rounded-xl"
+                  onChange={(event) => updateField("street", event.target.value)}
+                />
+              </FieldBlock>
+
               <FieldBlock label={t.labels.address} error={errors.address}>
-                <Textarea
+                <Input
                   value={formData.address}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.address}
-                  className="min-h-24 rounded-xl"
+                  className="rounded-xl"
                   onChange={(event) => updateField("address", event.target.value)}
                 />
               </FieldBlock>
 
-              <FieldBlock
-                label={t.labels.googleMaps}
-                error={errors.google_maps_link}
-              >
-                <Textarea
+              <FieldBlock label={t.labels.googleMaps} error={errors.google_maps_link}>
+                <Input
                   value={formData.google_maps_link}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.googleMaps}
-                  className="min-h-24 rounded-xl"
-                  dir="ltr"
+                  className="rounded-xl"
                   onChange={(event) =>
                     updateField("google_maps_link", event.target.value)
                   }
@@ -1433,53 +1596,53 @@ export default function SystemCreateProviderPage() {
           </Card>
 
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <ShieldCheck className="h-4 w-4" />
-                {t.legalInfo}
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Globe2 className="h-5 w-5" />
+                {t.networkInfo}
               </CardTitle>
-              <CardDescription>{t.legalDesc}</CardDescription>
+              <CardDescription>{t.networkDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-3">
+            <CardContent className="grid gap-4 md:grid-cols-2">
               <FieldBlock
-                label={t.labels.licenseNumber}
-                error={errors.license_number}
+                label={t.labels.sourceCategory}
+                error={errors.source_category}
               >
                 <Input
-                  value={formData.license_number}
+                  value={formData.source_category}
                   disabled={isSubmitting}
-                  placeholder={t.placeholders.licenseNumber}
-                  className="h-10 rounded-xl"
+                  placeholder={t.placeholders.sourceCategory}
+                  className="rounded-xl"
                   onChange={(event) =>
-                    updateField("license_number", event.target.value)
+                    updateField("source_category", event.target.value)
                   }
                 />
               </FieldBlock>
 
-              <FieldBlock label={t.labels.taxNumber} error={errors.tax_number}>
+              <FieldBlock label={t.labels.importSource} error={errors.import_source}>
                 <Input
-                  value={formData.tax_number}
+                  value={formData.import_source}
                   disabled={isSubmitting}
-                  placeholder={t.placeholders.taxNumber}
-                  className="h-10 rounded-xl"
+                  placeholder={t.placeholders.importSource}
+                  className="rounded-xl"
                   onChange={(event) =>
-                    updateField("tax_number", event.target.value)
+                    updateField("import_source", event.target.value)
                   }
                 />
               </FieldBlock>
 
               <FieldBlock
-                label={t.labels.commercialRegistration}
-                error={errors.commercial_registration}
+                label={t.labels.externalReference}
+                error={errors.external_reference}
               >
                 <Input
-                  value={formData.commercial_registration}
+                  value={formData.external_reference}
                   disabled={isSubmitting}
-                  placeholder={t.placeholders.commercialRegistration}
-                  className="h-10 rounded-xl"
+                  placeholder={t.placeholders.externalReference}
+                  className="rounded-xl"
                   onChange={(event) =>
-                    updateField("commercial_registration", event.target.value)
+                    updateField("external_reference", event.target.value)
                   }
                 />
               </FieldBlock>
@@ -1487,9 +1650,9 @@ export default function SystemCreateProviderPage() {
           </Card>
 
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Sparkles className="h-4 w-4" />
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5" />
                 {t.operationalInfo}
               </CardTitle>
               <CardDescription>{t.operationalDesc}</CardDescription>
@@ -1500,7 +1663,7 @@ export default function SystemCreateProviderPage() {
                 checked={formData.is_featured}
                 disabled={isSubmitting}
                 title={t.labels.featured}
-                description={t.labels.featured}
+                description={t.featuredDescription}
                 onChange={(value) => updateField("is_featured", value)}
               />
 
@@ -1517,31 +1680,75 @@ export default function SystemCreateProviderPage() {
           </Card>
         </div>
 
-        {/* Sidebar Summary */}
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
+        <div className="space-y-4">
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ProviderIcon className="h-5 w-5" />
                 {t.summaryTitle}
               </CardTitle>
               <CardDescription>{t.summaryDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3">
+              <SummaryItem
+                icon={Building2}
+                label={t.labels.nameAr}
+                value={formData.name_ar || "-"}
+              />
+
+              <SummaryItem
+                icon={Globe2}
+                label={t.labels.nameEn}
+                value={formData.name_en || "-"}
+              />
+
+              <SummaryItem
+                icon={ClipboardList}
+                label={t.labels.code}
+                value={formData.code || t.placeholders.code}
+              />
+
+              <SummaryItem
+                icon={ProviderIcon}
+                label={t.labels.providerType}
+                value={t.providerTypes[formData.provider_type]}
+              />
+
+              <SummaryItem
+                icon={ShieldCheck}
+                label={t.labels.commercialRegistration}
+                value={formData.commercial_registration || "-"}
+              />
+
+              <SummaryItem
+                icon={FileText}
+                label={t.labels.taxNumber}
+                value={formData.tax_number || "-"}
+              />
+
+              <SummaryItem
+                icon={MapPin}
+                label={t.labels.city}
+                value={
+                  [formData.region, formData.city, formData.area]
+                    .filter(Boolean)
+                    .join(" / ") || "-"
+                }
+              />
+
+              <SummaryItem
+                icon={Mail}
+                label={t.labels.email}
+                value={formData.email || "-"}
+              />
+
               <div className="rounded-xl border bg-background p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground">
-                      {t.completion}
-                    </p>
-                    <p className="mt-1 text-2xl font-bold">
-                      {formatNumber(progressPercent)}%
-                    </p>
-                  </div>
-
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
-                    <BadgeCheck className="h-5 w-5" />
-                  </div>
+                  <p className="text-sm font-semibold">{t.completion}</p>
+                  <Badge variant={isReadyToSave ? "secondary" : "outline"}>
+                    {isReadyToSave ? t.ready : t.missingData}
+                  </Badge>
                 </div>
 
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
@@ -1551,137 +1758,88 @@ export default function SystemCreateProviderPage() {
                   />
                 </div>
 
-                <div className="mt-3">
-                  {isReadyToSave ? (
-                    <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      {t.ready}
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="rounded-full">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      {t.missingData}
-                    </Badge>
-                  )}
-                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {formatNumber(progressPercent)}%
+                </p>
               </div>
 
-              <SummaryItem
-                icon={ProviderIcon}
-                label={t.labels.name}
-                value={formData.name || "-"}
-              />
-
-              <SummaryItem
-                icon={FileText}
-                label={t.labels.code}
-                value={formData.code || "-"}
-              />
-
-              <SummaryItem
-                icon={Layers3}
-                label={t.labels.providerType}
-                value={t.providerTypes[formData.provider_type]}
-              />
-
-              <SummaryItem
-                icon={ShieldCheck}
-                label={t.labels.status}
-                value={t.statuses[formData.status]}
-              />
-
-              <SummaryItem
-                icon={Phone}
-                label={t.labels.phone}
-                value={formData.phone || formData.mobile || "-"}
-              />
-
-              <SummaryItem
-                icon={Mail}
-                label={t.labels.email}
-                value={formData.email || "-"}
-              />
-
-              <SummaryItem
-                icon={MapPin}
-                label={t.labels.city}
-                value={formData.city || "-"}
-              />
-
-              <SummaryItem
-                icon={Globe2}
-                label={t.labels.website}
-                value={formData.website || "-"}
-              />
-
-              <div className="grid gap-2">
-                <Button
-                  type="button"
-                  className="h-10 rounded-xl"
-                  disabled={isSubmitting}
-                  onClick={submitForm}
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  {isSubmitting ? t.saving : t.create}
-                </Button>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 rounded-xl"
-                    disabled={isSubmitting}
-                    onClick={restoreDraft}
-                  >
-                    <RefreshCcw className="h-4 w-4" />
-                    {t.restoreDraft}
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 rounded-xl"
-                    disabled={isSubmitting}
-                    onClick={clearForm}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {t.clearForm}
-                  </Button>
-                </div>
-              </div>
+              <p className="rounded-xl border bg-muted/40 p-3 text-xs leading-6 text-muted-foreground">
+                {t.afterCreateHint}
+              </p>
             </CardContent>
           </Card>
 
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
-                {t.stepsTitle}
-              </CardTitle>
+            <CardHeader>
+              <CardTitle>{t.stepsTitle}</CardTitle>
               <CardDescription>{t.stepsDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-3">
-              {t.quickNotes.map((item, index) => (
-                <div
-                  key={item}
-                  className="flex items-start gap-3 rounded-xl border bg-background p-3"
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                    {index + 1}
+              {t.quickNotes.map((note) => (
+                <div key={note} className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
                   </div>
-
                   <p className="text-sm leading-6 text-muted-foreground">
-                    {item}
+                    {note}
                   </p>
                 </div>
               ))}
             </CardContent>
           </Card>
-        </aside>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="space-y-2 p-4">
+              <Button
+                type="button"
+                className="h-11 w-full rounded-xl"
+                disabled={isSubmitting}
+                onClick={submitForm}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                <span>{isSubmitting ? t.saving : t.create}</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full rounded-xl"
+                disabled={isSubmitting}
+                onClick={saveDraft}
+              >
+                <FileText className="h-4 w-4" />
+                <span>{t.saveDraft}</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full rounded-xl"
+                disabled={isSubmitting}
+                onClick={restoreDraft}
+              >
+                <ClipboardList className="h-4 w-4" />
+                <span>{t.restoreDraft}</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full rounded-xl text-destructive hover:text-destructive"
+                disabled={isSubmitting}
+                onClick={clearForm}
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>{t.clearForm}</span>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

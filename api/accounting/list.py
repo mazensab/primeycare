@@ -1,20 +1,27 @@
 # ============================================================
 # 📂 api/accounting/list.py
-# 🧠 Accounting Reports API — Primey Care V1.3
+# 🧠 Accounting Reports API — Primey Care V2
 # ------------------------------------------------------------
 # ✅ طبقة API للتقارير المحاسبية
+# ✅ متوافقة مع Accounting Backend الجديد
 # ✅ تدعم:
 #    - Trial Balance
 #    - Profit & Loss
 #    - Balance Sheet
-# ✅ Export Hooks:
+# ✅ Export:
 #    - Trial Balance Excel
 #    - Profit & Loss Excel
 #    - Balance Sheet Excel
 # ✅ مبنية فوق accounting/services.py
-# ✅ مع معالجة أخطاء واضحة وآمنة
-# ✅ تدعم فلاتر التاريخ
-# ------------------------------------------------------------
+# ✅ تدعم:
+#    - date_from
+#    - date_to
+#    - as_of_date
+#    - cost_center_id
+#    - include_zero_accounts
+#    - posted_only
+#    - include_current_year_earnings
+# ============================================================
 
 from __future__ import annotations
 
@@ -29,11 +36,13 @@ from django.views.decorators.http import require_GET
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
+from accounting.models import CostCenter
 from accounting.services import (
     build_balance_sheet_payload,
     build_profit_and_loss_payload,
     build_trial_balance_payload,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +71,18 @@ def _decimal_to_string(value: Any) -> Any:
 
 
 def _parse_bool(value: str | None, default: bool = False) -> bool:
-    if value is None:
+    if value in {None, ""}:
         return default
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    raw = str(value).strip().lower()
+
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+
+    if raw in {"0", "false", "no", "off"}:
+        return False
+
+    return default
 
 
 def _parse_date(value: str | None, field_name: str) -> date | None:
@@ -75,6 +93,7 @@ def _parse_date(value: str | None, field_name: str) -> date | None:
         return None
 
     raw_value = str(value).strip()
+
     try:
         return date.fromisoformat(raw_value)
     except ValueError as exc:
@@ -83,13 +102,42 @@ def _parse_date(value: str | None, field_name: str) -> date | None:
         ) from exc
 
 
-def _error_response(message: str, status: int = 400, extra: dict | None = None) -> JsonResponse:
+def _parse_int(value: str | None, field_name: str) -> int | None:
+    if value in {None, ""}:
+        return None
+
+    try:
+        parsed = int(str(value).strip())
+    except ValueError as exc:
+        raise ValueError(f"قيمة {field_name} يجب أن تكون رقمًا صحيحًا.") from exc
+
+    if parsed <= 0:
+        raise ValueError(f"قيمة {field_name} يجب أن تكون أكبر من صفر.")
+
+    return parsed
+
+
+def _validate_date_range(date_from: date | None, date_to: date | None) -> None:
+    """
+    التحقق من منطقية نطاق التاريخ.
+    """
+    if date_from and date_to and date_from > date_to:
+        raise ValueError("لا يمكن أن يكون date_from أكبر من date_to.")
+
+
+def _error_response(
+    message: str,
+    status: int = 400,
+    extra: dict | None = None,
+) -> JsonResponse:
     payload = {
         "ok": False,
         "message": message,
     }
+
     if extra:
         payload.update(extra)
+
     return JsonResponse(
         payload,
         status=status,
@@ -97,7 +145,7 @@ def _error_response(message: str, status: int = 400, extra: dict | None = None) 
     )
 
 
-def _success_response(report_code: str, data: dict) -> JsonResponse:
+def _success_response(report_code: str, data: dict[str, Any]) -> JsonResponse:
     return JsonResponse(
         {
             "ok": True,
@@ -109,19 +157,13 @@ def _success_response(report_code: str, data: dict) -> JsonResponse:
     )
 
 
-def _validate_date_range(date_from: date | None, date_to: date | None) -> None:
-    """
-    التحقق من منطقية نطاق التاريخ.
-    """
-    if date_from and date_to and date_from > date_to:
-        raise ValueError("لا يمكن أن يكون date_from أكبر من date_to.")
-
-
 def _safe_sheet_title(title: str) -> str:
-    invalid_chars = ['\\', '/', '*', '[', ']', ':', '?']
+    invalid_chars = ["\\", "/", "*", "[", "]", ":", "?"]
     clean = title
+
     for char in invalid_chars:
         clean = clean.replace(char, "-")
+
     return clean[:31]
 
 
@@ -148,7 +190,8 @@ def _auto_fit_columns(ws) -> None:
             except Exception:
                 continue
 
-        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 40)
+        ws.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 45)
+
 
 def _apply_header_style(cell) -> None:
     cell.font = Font(bold=True)
@@ -156,16 +199,27 @@ def _apply_header_style(cell) -> None:
     cell.alignment = Alignment(horizontal="center", vertical="center")
 
 
-def _add_meta_rows(ws, title: str, meta_rows: list[tuple[str, Any]]) -> int:
+def _add_meta_rows(
+    ws,
+    title: str,
+    meta_rows: list[tuple[str, Any]],
+    *,
+    merge_to_column: int = 10,
+) -> int:
     ws.append([title])
     ws["A1"].font = Font(bold=True, size=14)
     ws["A1"].alignment = Alignment(horizontal="center")
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=merge_to_column)
 
     current_row = 3
+
     for label, value in meta_rows:
         ws.cell(row=current_row, column=1, value=label)
-        ws.cell(row=current_row, column=2, value=str(value) if value is not None else "")
+        ws.cell(
+            row=current_row,
+            column=2,
+            value=str(value) if value is not None else "",
+        )
         ws.cell(row=current_row, column=1).font = Font(bold=True)
         current_row += 1
 
@@ -179,31 +233,100 @@ def _build_excel_response(workbook: Workbook, filename: str) -> HttpResponse:
 
     response = HttpResponse(
         output.read(),
-        content_type=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
 
+
+def _resolve_cost_center(cost_center_id: int | None) -> CostCenter | None:
+    if not cost_center_id:
+        return None
+
+    cost_center = CostCenter.objects.filter(id=cost_center_id).first()
+
+    if not cost_center:
+        raise ValueError("مركز التكلفة المطلوب غير موجود.")
+
+    return cost_center
+
+
+def _serialize_cost_center(cost_center: CostCenter | None) -> dict[str, Any] | None:
+    if not cost_center:
+        return None
+
+    return {
+        "id": cost_center.id,
+        "code": cost_center.code,
+        "name": cost_center.name,
+        "name_en": cost_center.name_en,
+        "level": cost_center.level,
+        "is_group": cost_center.is_group,
+        "status": cost_center.status,
+        "status_label": (
+            cost_center.get_status_display()
+            if hasattr(cost_center, "get_status_display")
+            else cost_center.status
+        ),
+    }
+
+
+def _common_period_filters(request) -> tuple[date | None, date | None, CostCenter | None, dict[str, Any]]:
+    date_from = _parse_date(request.GET.get("date_from"), "date_from")
+    date_to = _parse_date(request.GET.get("date_to"), "date_to")
+    _validate_date_range(date_from, date_to)
+
+    cost_center_id = _parse_int(request.GET.get("cost_center_id"), "cost_center_id")
+    cost_center = _resolve_cost_center(cost_center_id)
+
+    include_zero_accounts = _parse_bool(
+        request.GET.get("include_zero_accounts"),
+        default=False,
+    )
+    posted_only = _parse_bool(
+        request.GET.get("posted_only"),
+        default=True,
+    )
+
+    filters_payload = {
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
+        "cost_center_id": cost_center_id,
+        "cost_center": _serialize_cost_center(cost_center),
+        "include_zero_accounts": include_zero_accounts,
+        "posted_only": posted_only,
+    }
+
+    return date_from, date_to, cost_center, filters_payload
+
+
+# ============================================================
+# 📊 Excel Builders
+# ============================================================
 
 def _build_trial_balance_excel(payload: dict[str, Any]) -> HttpResponse:
     workbook = Workbook()
     ws = workbook.active
     ws.title = _safe_sheet_title("Trial Balance")
 
-    data = payload
+    filters = payload.get("filters", {})
     start_row = _add_meta_rows(
         ws,
         "Trial Balance",
         [
-            ("Currency", data.get("currency")),
-            ("Date From", data.get("date_from")),
-            ("Date To", data.get("date_to")),
-            ("Total Accounts", data.get("total_accounts")),
-            ("Total Debit", data.get("total_debit")),
-            ("Total Credit", data.get("total_credit")),
+            ("Currency", payload.get("currency")),
+            ("Date From", payload.get("date_from")),
+            ("Date To", payload.get("date_to")),
+            ("Cost Center ID", filters.get("cost_center_id")),
+            ("Cost Center", (filters.get("cost_center") or {}).get("name") if filters.get("cost_center") else None),
+            ("Posted Only", filters.get("posted_only")),
+            ("Include Zero Accounts", filters.get("include_zero_accounts")),
+            ("Total Accounts", payload.get("total_accounts")),
+            ("Total Debit", payload.get("total_debit")),
+            ("Total Credit", payload.get("total_credit")),
+            ("Is Balanced", payload.get("is_balanced")),
         ],
+        merge_to_column=12,
     )
 
     headers = [
@@ -217,12 +340,14 @@ def _build_trial_balance_excel(payload: dict[str, Any]) -> HttpResponse:
         "Net Debit",
         "Net Credit",
     ]
+
     for col_index, header in enumerate(headers, start=1):
         cell = ws.cell(row=start_row, column=col_index, value=header)
         _apply_header_style(cell)
 
     current_row = start_row + 1
-    for row in data.get("rows", []):
+
+    for row in payload.get("rows", []):
         ws.cell(row=current_row, column=1, value=row.get("account_id"))
         ws.cell(row=current_row, column=2, value=row.get("account_code"))
         ws.cell(row=current_row, column=3, value=row.get("account_name"))
@@ -243,18 +368,23 @@ def _build_profit_loss_excel(payload: dict[str, Any]) -> HttpResponse:
     ws = workbook.active
     ws.title = _safe_sheet_title("Profit Loss")
 
-    data = payload
+    filters = payload.get("filters", {})
     start_row = _add_meta_rows(
         ws,
         "Profit & Loss",
         [
-            ("Currency", data.get("currency")),
-            ("Date From", data.get("date_from")),
-            ("Date To", data.get("date_to")),
-            ("Revenue Total", data.get("revenue", {}).get("total_amount")),
-            ("Expenses Total", data.get("expenses", {}).get("total_amount")),
-            ("Net Profit", data.get("net_profit")),
+            ("Currency", payload.get("currency")),
+            ("Date From", payload.get("date_from")),
+            ("Date To", payload.get("date_to")),
+            ("Cost Center ID", filters.get("cost_center_id")),
+            ("Cost Center", (filters.get("cost_center") or {}).get("name") if filters.get("cost_center") else None),
+            ("Posted Only", filters.get("posted_only")),
+            ("Include Zero Accounts", filters.get("include_zero_accounts")),
+            ("Revenue Total", payload.get("revenue", {}).get("total_amount")),
+            ("Expenses Total", payload.get("expenses", {}).get("total_amount")),
+            ("Net Profit", payload.get("net_profit")),
         ],
+        merge_to_column=10,
     )
 
     headers = [
@@ -265,13 +395,14 @@ def _build_profit_loss_excel(payload: dict[str, Any]) -> HttpResponse:
         "Type",
         "Amount",
     ]
+
     for col_index, header in enumerate(headers, start=1):
         cell = ws.cell(row=start_row, column=col_index, value=header)
         _apply_header_style(cell)
 
     current_row = start_row + 1
 
-    for row in data.get("revenue", {}).get("rows", []):
+    for row in payload.get("revenue", {}).get("rows", []):
         ws.cell(row=current_row, column=1, value="Revenue")
         ws.cell(row=current_row, column=2, value=row.get("account_id"))
         ws.cell(row=current_row, column=3, value=row.get("account_code"))
@@ -280,7 +411,7 @@ def _build_profit_loss_excel(payload: dict[str, Any]) -> HttpResponse:
         ws.cell(row=current_row, column=6, value=float(row.get("amount", 0) or 0))
         current_row += 1
 
-    for row in data.get("expenses", {}).get("rows", []):
+    for row in payload.get("expenses", {}).get("rows", []):
         ws.cell(row=current_row, column=1, value="Expense")
         ws.cell(row=current_row, column=2, value=row.get("account_id"))
         ws.cell(row=current_row, column=3, value=row.get("account_code"))
@@ -298,19 +429,23 @@ def _build_balance_sheet_excel(payload: dict[str, Any]) -> HttpResponse:
     ws = workbook.active
     ws.title = _safe_sheet_title("Balance Sheet")
 
-    data = payload
+    filters = payload.get("filters", {})
     start_row = _add_meta_rows(
         ws,
         "Balance Sheet",
         [
-            ("Currency", data.get("currency")),
-            ("As Of Date", data.get("as_of_date")),
-            ("Assets Total", data.get("assets", {}).get("total_amount")),
-            ("Liabilities Total", data.get("liabilities", {}).get("total_amount")),
-            ("Equity Total", data.get("equity", {}).get("total_amount")),
-            ("Total Liabilities and Equity", data.get("total_liabilities_and_equity")),
-            ("Is Balanced", data.get("is_balanced")),
+            ("Currency", payload.get("currency")),
+            ("As Of Date", payload.get("as_of_date")),
+            ("Posted Only", filters.get("posted_only")),
+            ("Include Zero Accounts", filters.get("include_zero_accounts")),
+            ("Include Current Year Earnings", filters.get("include_current_year_earnings")),
+            ("Assets Total", payload.get("assets", {}).get("total_amount")),
+            ("Liabilities Total", payload.get("liabilities", {}).get("total_amount")),
+            ("Equity Total", payload.get("equity", {}).get("total_amount")),
+            ("Total Liabilities and Equity", payload.get("total_liabilities_and_equity")),
+            ("Is Balanced", payload.get("is_balanced")),
         ],
+        merge_to_column=10,
     )
 
     headers = [
@@ -321,6 +456,7 @@ def _build_balance_sheet_excel(payload: dict[str, Any]) -> HttpResponse:
         "Type",
         "Amount",
     ]
+
     for col_index, header in enumerate(headers, start=1):
         cell = ws.cell(row=start_row, column=col_index, value=header)
         _apply_header_style(cell)
@@ -332,7 +468,7 @@ def _build_balance_sheet_excel(payload: dict[str, Any]) -> HttpResponse:
         ("Liabilities", "liabilities"),
         ("Equity", "equity"),
     ]:
-        for row in data.get(key, {}).get("rows", []):
+        for row in payload.get(key, {}).get("rows", []):
             ws.cell(row=current_row, column=1, value=section_name)
             ws.cell(row=current_row, column=2, value=row.get("account_id"))
             ws.cell(row=current_row, column=3, value=row.get("account_code"))
@@ -353,36 +489,24 @@ def _build_balance_sheet_excel(payload: dict[str, Any]) -> HttpResponse:
 def accounting_trial_balance_api(request):
     """
     إرجاع ميزان المراجعة.
-    يدعم:
-    - include_zero_accounts
-    - posted_only
-    - date_from
-    - date_to
     """
     try:
-        include_zero_accounts = _parse_bool(
-            request.GET.get("include_zero_accounts"),
-            default=False,
-        )
-        posted_only = _parse_bool(
-            request.GET.get("posted_only"),
-            default=True,
-        )
-
-        date_from = _parse_date(request.GET.get("date_from"), "date_from")
-        date_to = _parse_date(request.GET.get("date_to"), "date_to")
-        _validate_date_range(date_from, date_to)
+        date_from, date_to, cost_center, filters_payload = _common_period_filters(request)
 
         payload = build_trial_balance_payload(
             date_from=date_from,
             date_to=date_to,
-            include_zero_accounts=include_zero_accounts,
-            posted_only=posted_only,
+            include_zero_accounts=filters_payload["include_zero_accounts"],
+            posted_only=filters_payload["posted_only"],
+            cost_center=cost_center,
         )
+        payload["filters"] = filters_payload
+
         return _success_response("trial_balance", payload)
 
     except ValueError as exc:
-        return _error_response(str(exc), status=400)
+        status = 404 if str(exc) == "مركز التكلفة المطلوب غير موجود." else 400
+        return _error_response(str(exc), status=status)
 
     except Exception as exc:
         logger.exception("Failed to build trial balance payload: %s", exc)
@@ -398,29 +522,22 @@ def accounting_trial_balance_excel_api(request):
     تصدير ميزان المراجعة إلى Excel.
     """
     try:
-        include_zero_accounts = _parse_bool(
-            request.GET.get("include_zero_accounts"),
-            default=False,
-        )
-        posted_only = _parse_bool(
-            request.GET.get("posted_only"),
-            default=True,
-        )
-
-        date_from = _parse_date(request.GET.get("date_from"), "date_from")
-        date_to = _parse_date(request.GET.get("date_to"), "date_to")
-        _validate_date_range(date_from, date_to)
+        date_from, date_to, cost_center, filters_payload = _common_period_filters(request)
 
         payload = build_trial_balance_payload(
             date_from=date_from,
             date_to=date_to,
-            include_zero_accounts=include_zero_accounts,
-            posted_only=posted_only,
+            include_zero_accounts=filters_payload["include_zero_accounts"],
+            posted_only=filters_payload["posted_only"],
+            cost_center=cost_center,
         )
+        payload["filters"] = filters_payload
+
         return _build_trial_balance_excel(payload)
 
     except ValueError as exc:
-        return _error_response(str(exc), status=400)
+        status = 404 if str(exc) == "مركز التكلفة المطلوب غير موجود." else 400
+        return _error_response(str(exc), status=status)
 
     except Exception as exc:
         logger.exception("Failed to export trial balance excel: %s", exc)
@@ -438,36 +555,24 @@ def accounting_trial_balance_excel_api(request):
 def accounting_profit_loss_api(request):
     """
     إرجاع تقرير الأرباح والخسائر.
-    يدعم:
-    - include_zero_accounts
-    - posted_only
-    - date_from
-    - date_to
     """
     try:
-        include_zero_accounts = _parse_bool(
-            request.GET.get("include_zero_accounts"),
-            default=False,
-        )
-        posted_only = _parse_bool(
-            request.GET.get("posted_only"),
-            default=True,
-        )
-
-        date_from = _parse_date(request.GET.get("date_from"), "date_from")
-        date_to = _parse_date(request.GET.get("date_to"), "date_to")
-        _validate_date_range(date_from, date_to)
+        date_from, date_to, cost_center, filters_payload = _common_period_filters(request)
 
         payload = build_profit_and_loss_payload(
             date_from=date_from,
             date_to=date_to,
-            include_zero_accounts=include_zero_accounts,
-            posted_only=posted_only,
+            include_zero_accounts=filters_payload["include_zero_accounts"],
+            posted_only=filters_payload["posted_only"],
+            cost_center=cost_center,
         )
+        payload["filters"] = filters_payload
+
         return _success_response("profit_loss", payload)
 
     except ValueError as exc:
-        return _error_response(str(exc), status=400)
+        status = 404 if str(exc) == "مركز التكلفة المطلوب غير موجود." else 400
+        return _error_response(str(exc), status=status)
 
     except Exception as exc:
         logger.exception("Failed to build profit & loss payload: %s", exc)
@@ -483,29 +588,22 @@ def accounting_profit_loss_excel_api(request):
     تصدير الأرباح والخسائر إلى Excel.
     """
     try:
-        include_zero_accounts = _parse_bool(
-            request.GET.get("include_zero_accounts"),
-            default=False,
-        )
-        posted_only = _parse_bool(
-            request.GET.get("posted_only"),
-            default=True,
-        )
-
-        date_from = _parse_date(request.GET.get("date_from"), "date_from")
-        date_to = _parse_date(request.GET.get("date_to"), "date_to")
-        _validate_date_range(date_from, date_to)
+        date_from, date_to, cost_center, filters_payload = _common_period_filters(request)
 
         payload = build_profit_and_loss_payload(
             date_from=date_from,
             date_to=date_to,
-            include_zero_accounts=include_zero_accounts,
-            posted_only=posted_only,
+            include_zero_accounts=filters_payload["include_zero_accounts"],
+            posted_only=filters_payload["posted_only"],
+            cost_center=cost_center,
         )
+        payload["filters"] = filters_payload
+
         return _build_profit_loss_excel(payload)
 
     except ValueError as exc:
-        return _error_response(str(exc), status=400)
+        status = 404 if str(exc) == "مركز التكلفة المطلوب غير موجود." else 400
+        return _error_response(str(exc), status=status)
 
     except Exception as exc:
         logger.exception("Failed to export profit & loss excel: %s", exc)
@@ -523,11 +621,6 @@ def accounting_profit_loss_excel_api(request):
 def accounting_balance_sheet_api(request):
     """
     إرجاع المركز المالي.
-    يدعم:
-    - include_zero_accounts
-    - posted_only
-    - include_current_year_earnings
-    - as_of_date
     """
     try:
         include_zero_accounts = _parse_bool(
@@ -542,7 +635,6 @@ def accounting_balance_sheet_api(request):
             request.GET.get("include_current_year_earnings"),
             default=True,
         )
-
         as_of_date = _parse_date(request.GET.get("as_of_date"), "as_of_date")
 
         payload = build_balance_sheet_payload(
@@ -551,6 +643,13 @@ def accounting_balance_sheet_api(request):
             posted_only=posted_only,
             include_current_year_earnings=include_current_year_earnings,
         )
+        payload["filters"] = {
+            "as_of_date": as_of_date.isoformat() if as_of_date else None,
+            "include_zero_accounts": include_zero_accounts,
+            "posted_only": posted_only,
+            "include_current_year_earnings": include_current_year_earnings,
+        }
+
         return _success_response("balance_sheet", payload)
 
     except ValueError as exc:
@@ -582,7 +681,6 @@ def accounting_balance_sheet_excel_api(request):
             request.GET.get("include_current_year_earnings"),
             default=True,
         )
-
         as_of_date = _parse_date(request.GET.get("as_of_date"), "as_of_date")
 
         payload = build_balance_sheet_payload(
@@ -591,6 +689,13 @@ def accounting_balance_sheet_excel_api(request):
             posted_only=posted_only,
             include_current_year_earnings=include_current_year_earnings,
         )
+        payload["filters"] = {
+            "as_of_date": as_of_date.isoformat() if as_of_date else None,
+            "include_zero_accounts": include_zero_accounts,
+            "posted_only": posted_only,
+            "include_current_year_earnings": include_current_year_earnings,
+        }
+
         return _build_balance_sheet_excel(payload)
 
     except ValueError as exc:

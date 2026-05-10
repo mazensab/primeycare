@@ -1,19 +1,24 @@
 # ============================================================
 # 📂 payment_gateways/services.py
-# 🧠 Primey Care - Payment Gateways Services
+# 🧠 Primey Care - Payment Gateways Services V3
 # ------------------------------------------------------------
 # ✅ طبقة خدمات موحدة لبوابات الدفع
 # ✅ تبني Clients من الإعدادات المخزنة محليًا
 # ✅ تنشئ checkout / charge
 # ✅ تحفظ PaymentGatewayTransaction محليًا
 # ✅ تحفظ Webhook Logs
-# ✅ جاهزة للربط لاحقًا مع invoices / orders / payments
+# ✅ تربط نجاح البوابة مع payments.services.confirm_payment
+# ✅ تمرر الدفع إلى Accounting + Treasury عبر خدمات payments الرسمية
+# ✅ تمنع التكرار قدر الإمكان
+# ✅ لا تحتوي منطق محاسبي مباشر
 # ------------------------------------------------------------
-# ملاحظات:
-# - هذه الطبقة عامة ولا تفترض موديل Invoice محدد
-# - الربط يتم عبر:
-#   local_reference_type / local_reference_id / local_reference
-# - الـ APIs القادمة ستعتمد عليها مباشرة
+# المسار المالي المعتمد:
+# Gateway Checkout
+# → PaymentGatewayTransaction
+# → Webhook / Status Lookup
+# → Payment create/confirm
+# → Accounting JournalEntry بعد commit
+# → TreasuryTransaction بعد commit
 # ============================================================
 
 from __future__ import annotations
@@ -22,9 +27,10 @@ import hashlib
 import hmac
 import json
 import logging
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
+from django.apps import apps
 from django.db import transaction
 from django.utils import timezone
 
@@ -51,6 +57,7 @@ from payment_gateways.tap.client import (
     TapRequestError,
 )
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,6 +77,10 @@ class PaymentGatewayValidationError(PaymentGatewayServiceError):
     """Raised when provided local payload is invalid."""
 
 
+class PaymentGatewayConfirmationError(PaymentGatewayServiceError):
+    """Raised when gateway success cannot be reflected to local payment."""
+
+
 # ============================================================
 # 🔧 Helpers
 # ============================================================
@@ -77,12 +88,17 @@ class PaymentGatewayValidationError(PaymentGatewayServiceError):
 def _clean_str(value: Any, default: str = "") -> str:
     if value is None:
         return default
-    return str(value).strip()
+
+    cleaned = str(value).strip()
+    return cleaned if cleaned else default
 
 
 def _decimal_amount(value: Any) -> Decimal:
     try:
-        return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+        return Decimal(str(value or 0)).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0.00")
 
@@ -91,21 +107,77 @@ def _json_safe(value: Any) -> Any:
     """
     تحويل آمن للقيم قبل تخزينها داخل JSONField.
     """
+    if isinstance(value, Decimal):
+        return str(value)
+
+    if isinstance(value, dict):
+        return {str(key): _json_safe(val) for key, val in value.items()}
+
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+
     try:
         json.dumps(value)
         return value
     except Exception:
-        if isinstance(value, Decimal):
-            return str(value)
-        if isinstance(value, dict):
-            return {str(k): _json_safe(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [_json_safe(v) for v in value]
         return str(value)
 
 
 def _normalize_provider(provider: str) -> str:
     return _clean_str(provider).upper()
+
+
+def _normalize_status(value: Any, default: str = PaymentGatewayTransactionStatus.PENDING) -> str:
+    status = _clean_str(value, default).upper()
+
+    aliases = {
+        "PAID": PaymentGatewayTransactionStatus.SUCCESS,
+        "CAPTURED": PaymentGatewayTransactionStatus.SUCCESS,
+        "AUTHORIZED": PaymentGatewayTransactionStatus.SUCCESS,
+        "APPROVED": PaymentGatewayTransactionStatus.SUCCESS,
+        "FULLY_CAPTURED": PaymentGatewayTransactionStatus.SUCCESS,
+        "SUCCESSFUL": PaymentGatewayTransactionStatus.SUCCESS,
+        "SUCCEEDED": PaymentGatewayTransactionStatus.SUCCESS,
+
+        "DECLINED": PaymentGatewayTransactionStatus.FAILED,
+        "ERROR": PaymentGatewayTransactionStatus.FAILED,
+        "ABANDONED": PaymentGatewayTransactionStatus.FAILED,
+        "VOID": PaymentGatewayTransactionStatus.FAILED,
+
+        "CANCELED": PaymentGatewayTransactionStatus.CANCELLED,
+
+        "INIT": PaymentGatewayTransactionStatus.INITIATED,
+        "CREATED": PaymentGatewayTransactionStatus.INITIATED,
+        "PENDING_PAYMENT": PaymentGatewayTransactionStatus.PROCESSING,
+        "IN_PROGRESS": PaymentGatewayTransactionStatus.PROCESSING,
+    }
+
+    status = aliases.get(status, status)
+
+    if status not in PaymentGatewayTransactionStatus.values:
+        return default
+
+    return status
+
+
+def _normalize_reference_type(value: Any) -> str:
+    normalized = _clean_str(value).upper()
+
+    aliases = {
+        "INV": "INVOICE",
+        "INVOICE": "INVOICE",
+        "BILL": "INVOICE",
+        "ORDER": "ORDER",
+        "ORD": "ORDER",
+        "PAYMENT": "PAYMENT",
+        "PAY": "PAYMENT",
+        "MANUAL": "MANUAL",
+    }
+
+    return aliases.get(normalized, normalized)
 
 
 def _normalize_phone(raw_phone: str) -> dict[str, str]:
@@ -132,14 +204,80 @@ def _normalize_phone(raw_phone: str) -> dict[str, str]:
 
 def _split_name(full_name: str, fallback_first: str = "Customer") -> tuple[str, str]:
     name = _clean_str(full_name)
+
     if not name:
         return fallback_first, "Customer"
 
     parts = name.split()
+
     if len(parts) == 1:
         return parts[0], "Customer"
 
     return parts[0], " ".join(parts[1:])
+
+
+def _safe_getattr(obj: Any, attr_name: str, default: Any = None) -> Any:
+    try:
+        return getattr(obj, attr_name, default)
+    except Exception:
+        return default
+
+
+def _first_non_empty(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, "", [], {}, ()):
+            return value
+    return None
+
+
+def _model_or_none(app_label: str, model_name: str):
+    try:
+        return apps.get_model(app_label, model_name)
+    except LookupError:
+        return None
+
+
+def _object_or_none(model, pk: Any):
+    if not model or pk in (None, "", 0, "0"):
+        return None
+
+    try:
+        return model.objects.filter(pk=pk).first()
+    except Exception:
+        return None
+
+
+def _append_note(existing: str, new_note: str) -> str:
+    existing = _clean_str(existing)
+    new_note = _clean_str(new_note)
+
+    if not new_note:
+        return existing
+
+    if not existing:
+        return new_note
+
+    if new_note in existing:
+        return existing
+
+    return f"{existing}\n{new_note}".strip()
+
+
+def _safe_json_dump(value: Any) -> str:
+    try:
+        return json.dumps(_json_safe(value), ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+
+def _field_names(model) -> set[str]:
+    if not model:
+        return set()
+
+    try:
+        return {field.name for field in model._meta.fields}
+    except Exception:
+        return set()
 
 
 # ============================================================
@@ -167,6 +305,12 @@ def get_active_gateway_config(provider: str) -> PaymentGatewayConfig:
 def build_tamara_client(config: PaymentGatewayConfig | None = None) -> TamaraClient:
     config = config or get_active_gateway_config(PaymentGatewayProvider.TAMARA)
 
+    extra_config = config.extra_config if isinstance(config.extra_config, dict) else {}
+    extra_headers = extra_config.get("extra_headers", {})
+
+    if not isinstance(extra_headers, dict):
+        extra_headers = {}
+
     client_config = TamaraConfig(
         api_token=_clean_str(config.api_token),
         environment=_clean_str(config.environment) or "sandbox",
@@ -175,7 +319,7 @@ def build_tamara_client(config: PaymentGatewayConfig | None = None) -> TamaraCli
         notification_token=_clean_str(config.notification_token) or None,
         public_key=_clean_str(config.public_key) or None,
         merchant_callback_url=_clean_str(config.merchant_callback_url) or None,
-        extra_headers=_json_safe(config.extra_config.get("extra_headers", {})) if isinstance(config.extra_config, dict) else {},
+        extra_headers=_json_safe(extra_headers),
     )
     return TamaraClient(client_config)
 
@@ -183,12 +327,18 @@ def build_tamara_client(config: PaymentGatewayConfig | None = None) -> TamaraCli
 def build_tap_client(config: PaymentGatewayConfig | None = None) -> TapClient:
     config = config or get_active_gateway_config(PaymentGatewayProvider.TAP)
 
+    extra_config = config.extra_config if isinstance(config.extra_config, dict) else {}
+    extra_headers = extra_config.get("extra_headers", {})
+
+    if not isinstance(extra_headers, dict):
+        extra_headers = {}
+
     client_config = TapConfig(
         secret_key=_clean_str(config.secret_key),
         public_key=_clean_str(config.public_key) or None,
         timeout=int(config.timeout_seconds or 30),
         base_url=_clean_str(config.base_url) or "https://api.tap.company/v2",
-        extra_headers=_json_safe(config.extra_config.get("extra_headers", {})) if isinstance(config.extra_config, dict) else {},
+        extra_headers=_json_safe(extra_headers),
     )
     return TapClient(client_config)
 
@@ -222,16 +372,21 @@ def create_gateway_transaction(
     notes: str = "",
     error_message: str = "",
 ) -> PaymentGatewayTransaction:
+    amount_value = _decimal_amount(amount)
+
+    if amount_value <= Decimal("0.00"):
+        raise PaymentGatewayValidationError("Gateway transaction amount must be greater than zero.")
+
     return PaymentGatewayTransaction.objects.create(
         provider=_normalize_provider(provider),
-        amount=_decimal_amount(amount),
+        amount=amount_value,
         currency=_clean_str(currency, "SAR").upper(),
-        payment_method=_clean_str(payment_method),
-        local_reference_type=_clean_str(local_reference_type).upper(),
+        payment_method=_clean_str(payment_method).upper(),
+        local_reference_type=_normalize_reference_type(local_reference_type),
         local_reference_id=_clean_str(local_reference_id),
         local_reference=_clean_str(local_reference),
         customer_name=_clean_str(customer_name),
-        customer_email=_clean_str(customer_email),
+        customer_email=_clean_str(customer_email).lower(),
         customer_phone=_clean_str(customer_phone),
         request_payload=_json_safe(request_payload or {}),
         response_payload=_json_safe(response_payload or {}),
@@ -242,7 +397,7 @@ def create_gateway_transaction(
         remote_checkout_id=_clean_str(remote_checkout_id),
         gateway_reference=_clean_str(gateway_reference),
         gateway_status=_clean_str(gateway_status),
-        status=status,
+        status=_normalize_status(status),
         notes=_clean_str(notes),
         error_message=_clean_str(error_message),
     )
@@ -275,8 +430,48 @@ def find_transaction_by_remote_reference(
             .order_by("-id")
             .first()
         )
+
         if instance:
             return instance
+
+    return None
+
+
+def find_transaction_by_local_reference(
+    *,
+    provider: str,
+    local_reference: str = "",
+    local_reference_type: str = "",
+    local_reference_id: str = "",
+) -> PaymentGatewayTransaction | None:
+    provider = _normalize_provider(provider)
+    queryset = PaymentGatewayTransaction.objects.filter(provider=provider)
+
+    local_reference = _clean_str(local_reference)
+    local_reference_type = _normalize_reference_type(local_reference_type)
+    local_reference_id = _clean_str(local_reference_id)
+
+    if local_reference:
+        found = queryset.filter(local_reference=local_reference).order_by("-id").first()
+        if found:
+            return found
+
+        found = queryset.filter(gateway_reference=local_reference).order_by("-id").first()
+        if found:
+            return found
+
+    if local_reference_type and local_reference_id:
+        found = (
+            queryset
+            .filter(
+                local_reference_type=local_reference_type,
+                local_reference_id=local_reference_id,
+            )
+            .order_by("-id")
+            .first()
+        )
+        if found:
+            return found
 
     return None
 
@@ -296,6 +491,9 @@ def update_transaction_from_gateway_response(
     notes: str = "",
     error_message: str = "",
 ) -> PaymentGatewayTransaction:
+    if not tx:
+        raise PaymentGatewayValidationError("PaymentGatewayTransaction is required.")
+
     tx.payment_url = _clean_str(payment_url) or tx.payment_url
     tx.redirect_url = _clean_str(redirect_url) or tx.redirect_url
     tx.remote_transaction_id = _clean_str(remote_transaction_id) or tx.remote_transaction_id
@@ -304,11 +502,11 @@ def update_transaction_from_gateway_response(
     tx.gateway_reference = _clean_str(gateway_reference) or tx.gateway_reference
     tx.gateway_status = _clean_str(gateway_status) or tx.gateway_status
     tx.response_payload = _json_safe(response_payload or tx.response_payload or {})
-    tx.notes = _clean_str(notes) or tx.notes
+    tx.notes = _append_note(tx.notes, notes)
     tx.error_message = _clean_str(error_message) or tx.error_message
 
     if status:
-        tx.status = status
+        tx.status = _normalize_status(status)
 
     tx.save(
         update_fields=[
@@ -352,9 +550,9 @@ def create_webhook_log(
     return PaymentGatewayWebhookLog.objects.create(
         provider=_normalize_provider(provider),
         event_type=_clean_str(event_type),
-        status=status,
+        status=_clean_str(status, PaymentGatewayWebhookStatus.RECEIVED).upper(),
         transaction=transaction_obj,
-        signature_valid=signature_valid,
+        signature_valid=bool(signature_valid),
         remote_transaction_id=_clean_str(remote_transaction_id),
         remote_order_id=_clean_str(remote_order_id),
         remote_checkout_id=_clean_str(remote_checkout_id),
@@ -364,6 +562,412 @@ def create_webhook_log(
         error_message=_clean_str(error_message),
         notes=_clean_str(notes),
     )
+
+
+# ============================================================
+# 🔗 Local Payment Binding
+# ============================================================
+
+def _resolve_payment_provider(provider: str) -> str:
+    try:
+        from payments.models import PaymentProvider
+    except Exception:
+        return _normalize_provider(provider)
+
+    normalized = _normalize_provider(provider)
+
+    if normalized == PaymentGatewayProvider.TAP:
+        return getattr(PaymentProvider, "TAP", normalized)
+
+    if normalized == PaymentGatewayProvider.TAMARA:
+        return getattr(PaymentProvider, "TAMARA", normalized)
+
+    return normalized
+
+
+def _resolve_payment_method(provider: str, fallback: str = "") -> str:
+    try:
+        from payments.models import PaymentMethod
+    except Exception:
+        return _clean_str(fallback) or _normalize_provider(provider)
+
+    normalized_provider = _normalize_provider(provider)
+    normalized_fallback = _clean_str(fallback).upper()
+
+    if normalized_provider == PaymentGatewayProvider.TAMARA:
+        return getattr(PaymentMethod, "TAMARA", normalized_fallback or "TAMARA")
+
+    if normalized_provider == PaymentGatewayProvider.TAP:
+        if normalized_fallback in {"MADA", "DEBIT_CARD"}:
+            return getattr(PaymentMethod, "DEBIT_CARD", normalized_fallback)
+        if normalized_fallback == "APPLE_PAY":
+            return getattr(PaymentMethod, "APPLE_PAY", normalized_fallback)
+        if normalized_fallback == "STC_PAY":
+            return getattr(PaymentMethod, "STC_PAY", normalized_fallback)
+        return getattr(PaymentMethod, "CREDIT_CARD", normalized_fallback or "CREDIT_CARD")
+
+    return normalized_fallback or normalized_provider
+
+
+def _resolve_local_objects_for_transaction(tx: PaymentGatewayTransaction) -> dict[str, Any]:
+    reference_type = _normalize_reference_type(tx.local_reference_type)
+    reference_id = _clean_str(tx.local_reference_id)
+
+    Invoice = _model_or_none("invoices", "Invoice")
+    Order = _model_or_none("orders", "Order")
+    Payment = _model_or_none("payments", "Payment")
+
+    invoice = None
+    order = None
+    payment = None
+    customer = None
+
+    if reference_type == "PAYMENT":
+        payment = _object_or_none(Payment, reference_id)
+        invoice = _safe_getattr(payment, "invoice", None)
+        order = _safe_getattr(payment, "order", None)
+        customer = _safe_getattr(payment, "customer", None)
+
+    elif reference_type == "INVOICE":
+        invoice = _object_or_none(Invoice, reference_id)
+        order = _safe_getattr(invoice, "order", None)
+        customer = _safe_getattr(invoice, "customer", None)
+
+    elif reference_type == "ORDER":
+        order = _object_or_none(Order, reference_id)
+        customer = _safe_getattr(order, "customer", None)
+
+        try:
+            invoice = _safe_getattr(order, "invoice", None)
+            if hasattr(invoice, "all"):
+                invoice = invoice.all().first()
+        except Exception:
+            invoice = None
+
+        if not invoice and Invoice:
+            try:
+                invoice = Invoice.objects.filter(order=order).order_by("-id").first()
+            except Exception:
+                invoice = None
+
+    if not customer and invoice:
+        customer = _safe_getattr(invoice, "customer", None)
+
+    if not customer and order:
+        customer = _safe_getattr(order, "customer", None)
+
+    if not order and invoice:
+        order = _safe_getattr(invoice, "order", None)
+
+    if not invoice and payment:
+        invoice = _safe_getattr(payment, "invoice", None)
+
+    if not order and payment:
+        order = _safe_getattr(payment, "order", None)
+
+    if not customer and payment:
+        customer = _safe_getattr(payment, "customer", None)
+
+    return {
+        "invoice": invoice,
+        "order": order,
+        "payment": payment,
+        "customer": customer,
+    }
+
+
+def _payment_already_confirmed(payment: Any) -> bool:
+    if not payment:
+        return False
+
+    status = _clean_str(_safe_getattr(payment, "status")).upper()
+
+    if status in {"PAID", "CONFIRMED", "COMPLETED", "SUCCESS"}:
+        return True
+
+    if bool(_safe_getattr(payment, "is_accounting_posted", False)):
+        return True
+
+    if bool(_safe_getattr(payment, "is_treasury_posted", False)):
+        return True
+
+    return False
+
+
+def _find_existing_payment_for_transaction(
+    tx: PaymentGatewayTransaction,
+    *,
+    invoice: Any = None,
+    order: Any = None,
+) -> Any:
+    Payment = _model_or_none("payments", "Payment")
+
+    if not Payment:
+        return None
+
+    references = [
+        _clean_str(tx.remote_transaction_id),
+        _clean_str(tx.remote_order_id),
+        _clean_str(tx.remote_checkout_id),
+        _clean_str(tx.gateway_reference),
+        _clean_str(tx.local_reference),
+    ]
+
+    queryset = Payment.objects.all()
+
+    for reference in references:
+        if not reference:
+            continue
+
+        found = queryset.filter(external_reference=reference).order_by("-id").first()
+        if found:
+            return found
+
+        found = queryset.filter(transaction_id=reference).order_by("-id").first()
+        if found:
+            return found
+
+    provider = _resolve_payment_provider(tx.provider)
+
+    if invoice:
+        found = queryset.filter(invoice=invoice, provider=provider).order_by("-id").first()
+        if found:
+            return found
+
+    if order:
+        found = queryset.filter(order=order, provider=provider).order_by("-id").first()
+        if found:
+            return found
+
+    return None
+
+
+def _create_local_payment_for_transaction(
+    tx: PaymentGatewayTransaction,
+    *,
+    invoice: Any,
+    order: Any,
+    customer: Any,
+) -> Any:
+    try:
+        from payments.services import create_payment
+    except Exception as exc:
+        raise PaymentGatewayConfirmationError("payments.services.create_payment is not available.") from exc
+
+    if not order:
+        raise PaymentGatewayConfirmationError("Cannot create local payment without order.")
+
+    if not customer:
+        raise PaymentGatewayConfirmationError("Cannot create local payment without customer.")
+
+    result = create_payment(
+        order=order,
+        customer=customer,
+        invoice=invoice,
+        amount=tx.amount,
+        payment_method=_resolve_payment_method(tx.provider, tx.payment_method),
+        provider=_resolve_payment_provider(tx.provider),
+        currency=tx.currency,
+        external_reference=_first_non_empty(
+            tx.remote_transaction_id,
+            tx.remote_order_id,
+            tx.remote_checkout_id,
+            tx.gateway_reference,
+            tx.local_reference,
+        ),
+        transaction_id=_first_non_empty(
+            tx.remote_transaction_id,
+            tx.remote_checkout_id,
+            tx.remote_order_id,
+            tx.gateway_reference,
+        ),
+        notes=f"Created from {tx.provider} gateway transaction #{tx.pk}",
+    )
+
+    return _safe_getattr(result, "payment", result)
+
+
+def _confirm_local_payment_for_transaction(
+    tx: PaymentGatewayTransaction,
+    *,
+    gateway_status: str = "",
+    gateway_message: str = "",
+    auto_create_treasury_movement: bool = True,
+    auto_post_accounting: bool = True,
+) -> dict[str, Any]:
+    """
+    يعكس نجاح بوابة الدفع على Payment المحلي.
+
+    Gateway Success
+    → payments.services.confirm_payment
+    → Accounting + Treasury
+    """
+    try:
+        from payments.services import confirm_payment
+    except Exception as exc:
+        raise PaymentGatewayConfirmationError("payments.services.confirm_payment is not available.") from exc
+
+    local = _resolve_local_objects_for_transaction(tx)
+
+    invoice = local["invoice"]
+    order = local["order"]
+    customer = local["customer"]
+    payment = local["payment"]
+
+    if not payment:
+        payment = _find_existing_payment_for_transaction(
+            tx,
+            invoice=invoice,
+            order=order,
+        )
+
+    created_payment = False
+
+    if not payment:
+        payment = _create_local_payment_for_transaction(
+            tx,
+            invoice=invoice,
+            order=order,
+            customer=customer,
+        )
+        created_payment = True
+
+    if _payment_already_confirmed(payment):
+        return {
+            "success": True,
+            "payment_created": created_payment,
+            "payment_confirmed": False,
+            "message": "Local payment is already confirmed/posted.",
+            "payment_id": _safe_getattr(payment, "pk", None),
+            "payment_number": _safe_getattr(payment, "payment_number", ""),
+        }
+
+    result = confirm_payment(
+        payment=payment,
+        actor=None,
+        paid_amount=tx.amount,
+        external_reference=_first_non_empty(
+            tx.remote_transaction_id,
+            tx.remote_order_id,
+            tx.remote_checkout_id,
+            tx.gateway_reference,
+            tx.local_reference,
+        ),
+        transaction_id=_first_non_empty(
+            tx.remote_transaction_id,
+            tx.remote_checkout_id,
+            tx.remote_order_id,
+            tx.gateway_reference,
+        ),
+        gateway_response_code=_clean_str(gateway_status or tx.gateway_status or "SUCCESS"),
+        gateway_message=_clean_str(gateway_message or f"{tx.provider} payment confirmed."),
+        auto_create_treasury_movement=auto_create_treasury_movement,
+        auto_post_accounting=auto_post_accounting,
+    )
+
+    confirmed_payment = _safe_getattr(result, "payment", payment)
+
+    return {
+        "success": True,
+        "payment_created": created_payment,
+        "payment_confirmed": True,
+        "message": "Local payment confirmed successfully.",
+        "payment_id": _safe_getattr(confirmed_payment, "pk", None),
+        "payment_number": _safe_getattr(confirmed_payment, "payment_number", ""),
+        "status_before": _safe_getattr(result, "status_before", ""),
+        "status_after": _safe_getattr(result, "status_after", ""),
+        "accounting": {
+            "requested": bool(_safe_getattr(result, "accounting_post_requested", False)),
+            "dispatched": bool(_safe_getattr(result, "accounting_post_dispatched", False)),
+            "message": _safe_getattr(result, "accounting_post_message", ""),
+        },
+        "treasury": {
+            "requested": bool(_safe_getattr(result, "treasury_requested", False)),
+            "dispatched": bool(_safe_getattr(result, "treasury_dispatched", False)),
+            "message": _safe_getattr(result, "treasury_message", ""),
+        },
+    }
+
+
+def finalize_successful_gateway_transaction(
+    tx: PaymentGatewayTransaction,
+    *,
+    gateway_status: str = "",
+    gateway_message: str = "",
+    response_payload: dict | None = None,
+    webhook_payload: dict | None = None,
+    auto_create_treasury_movement: bool = True,
+    auto_post_accounting: bool = True,
+) -> dict[str, Any]:
+    """
+    تثبيت نجاح عملية البوابة ثم تأكيد الدفع المحلي بعد commit.
+    """
+    if not tx:
+        raise PaymentGatewayValidationError("PaymentGatewayTransaction is required.")
+
+    with transaction.atomic():
+        tx.status = PaymentGatewayTransactionStatus.SUCCESS
+        tx.gateway_status = _clean_str(gateway_status) or tx.gateway_status or "SUCCESS"
+        tx.response_payload = _json_safe(response_payload or tx.response_payload or {})
+        tx.latest_webhook_payload = _json_safe(webhook_payload or tx.latest_webhook_payload or {})
+        tx.paid_at = tx.paid_at or timezone.now()
+        tx.error_message = ""
+        tx.notes = _append_note(tx.notes, "Gateway transaction marked as successful.")
+
+        tx.save(
+            update_fields=[
+                "status",
+                "gateway_status",
+                "response_payload",
+                "latest_webhook_payload",
+                "paid_at",
+                "error_message",
+                "notes",
+                "updated_at",
+            ]
+        )
+
+        tx_id = tx.pk
+
+        def _confirm_after_commit() -> None:
+            fresh_tx = PaymentGatewayTransaction.objects.get(pk=tx_id)
+
+            try:
+                result = _confirm_local_payment_for_transaction(
+                    fresh_tx,
+                    gateway_status=gateway_status,
+                    gateway_message=gateway_message,
+                    auto_create_treasury_movement=auto_create_treasury_movement,
+                    auto_post_accounting=auto_post_accounting,
+                )
+
+                fresh_tx.notes = _append_note(
+                    fresh_tx.notes,
+                    f"Local payment sync: {_safe_json_dump(result)}",
+                )
+                fresh_tx.save(update_fields=["notes", "updated_at"])
+
+            except Exception as exc:
+                logger.exception(
+                    "Failed to confirm local payment from gateway transaction %s: %s",
+                    tx_id,
+                    exc,
+                )
+                fresh_tx.error_message = _append_note(
+                    fresh_tx.error_message,
+                    f"Local payment sync failed: {exc}",
+                )
+                fresh_tx.save(update_fields=["error_message", "updated_at"])
+
+        transaction.on_commit(_confirm_after_commit)
+
+    return {
+        "success": True,
+        "message": "Gateway transaction finalized. Local payment confirmation scheduled.",
+        "transaction_id": tx.pk,
+        "status": tx.status,
+        "gateway_status": tx.gateway_status,
+    }
 
 
 # ============================================================
@@ -387,17 +991,23 @@ def build_tamara_checkout_payload(
     country_code: str = "SA",
     city: str = "Jeddah",
 ) -> dict[str, Any]:
-    amount_str = format(_decimal_amount(amount), "f")
+    amount_value = _decimal_amount(amount)
+
+    if amount_value <= Decimal("0.00"):
+        raise PaymentGatewayValidationError("Tamara amount must be greater than zero.")
+
+    amount_str = format(amount_value, "f")
+    currency_code = _clean_str(currency, "SAR").upper()
     first_name, last_name = _split_name(customer_name, fallback_first="Customer")
 
     payload = {
         "order_reference_id": _clean_str(local_reference),
         "description": _clean_str(description) or _clean_str(item_name),
         "country_code": _clean_str(country_code, "SA").upper(),
-        "currency": _clean_str(currency, "SAR").upper(),
+        "currency": currency_code,
         "total_amount": {
             "amount": amount_str,
-            "currency": _clean_str(currency, "SAR").upper(),
+            "currency": currency_code,
         },
         "consumer": {
             "first_name": first_name,
@@ -414,11 +1024,11 @@ def build_tamara_checkout_payload(
                 "quantity": 1,
                 "unit_price": {
                     "amount": amount_str,
-                    "currency": _clean_str(currency, "SAR").upper(),
+                    "currency": currency_code,
                 },
                 "total_amount": {
                     "amount": amount_str,
-                    "currency": _clean_str(currency, "SAR").upper(),
+                    "currency": currency_code,
                 },
             }
         ],
@@ -510,6 +1120,7 @@ def create_tamara_checkout_transaction(
         customer_email=customer_email,
         customer_phone=customer_phone,
         request_payload=payload,
+        gateway_reference=local_reference,
         status=PaymentGatewayTransactionStatus.INITIATED,
     )
 
@@ -519,10 +1130,11 @@ def create_tamara_checkout_transaction(
         checkout_url = _clean_str(
             response.get("checkout_url")
             or response.get("url")
+            or response.get("redirect_url")
         )
-        remote_order_id = _clean_str(response.get("order_id"))
+        remote_order_id = _clean_str(response.get("order_id") or response.get("id"))
         remote_checkout_id = _clean_str(response.get("checkout_id"))
-        gateway_status = _clean_str(response.get("status"), "CREATED")
+        gateway_status = _clean_str(response.get("status"), "CREATED").upper()
 
         update_transaction_from_gateway_response(
             tx,
@@ -530,6 +1142,7 @@ def create_tamara_checkout_transaction(
             redirect_url=success_url,
             remote_order_id=remote_order_id,
             remote_checkout_id=remote_checkout_id,
+            gateway_reference=local_reference,
             gateway_status=gateway_status,
             response_payload=response,
             status=PaymentGatewayTransactionStatus.REQUIRES_ACTION,
@@ -539,9 +1152,12 @@ def create_tamara_checkout_transaction(
 
     except (TamaraConfigurationError, TamaraRequestError, TamaraAPIError) as exc:
         logger.exception("Tamara checkout creation failed. local_reference=%s", local_reference)
-        tx.status = PaymentGatewayTransactionStatus.FAILED
-        tx.error_message = str(exc)
-        tx.save(update_fields=["status", "error_message", "updated_at"])
+        update_transaction_from_gateway_response(
+            tx,
+            status=PaymentGatewayTransactionStatus.FAILED,
+            error_message=str(exc),
+            notes="Tamara checkout creation failed.",
+        )
         raise PaymentGatewayServiceError(str(exc)) from exc
 
 
@@ -564,11 +1180,17 @@ def build_tap_charge_payload(
     merchant_id: str = "",
     metadata: dict | None = None,
 ) -> dict[str, Any]:
+    amount_value = _decimal_amount(amount)
+
+    if amount_value <= Decimal("0.00"):
+        raise PaymentGatewayValidationError("Tap amount must be greater than zero.")
+
     first_name, last_name = _split_name(customer_name, fallback_first="Customer")
+    currency_code = _clean_str(currency, "SAR").upper()
 
     payload = {
-        "amount": float(_decimal_amount(amount)),
-        "currency": _clean_str(currency, "SAR").upper(),
+        "amount": float(amount_value),
+        "currency": currency_code,
         "threeDSecure": True,
         "save_card": False,
         "description": _clean_str(description),
@@ -645,7 +1267,7 @@ def create_tap_checkout_transaction(
         source_id=config.source_id or "src_all",
         merchant_id=config.merchant_id,
         metadata={
-            "local_reference_type": _clean_str(local_reference_type).upper(),
+            "local_reference_type": _normalize_reference_type(local_reference_type),
             "local_reference_id": _clean_str(local_reference_id),
             "local_reference": _clean_str(local_reference),
             "module": "primey_care",
@@ -665,6 +1287,7 @@ def create_tap_checkout_transaction(
         customer_phone=customer_phone,
         request_payload=payload,
         redirect_url=success_url,
+        gateway_reference=local_reference,
         status=PaymentGatewayTransactionStatus.INITIATED,
     )
 
@@ -677,12 +1300,13 @@ def create_tap_checkout_transaction(
             or response.get("url")
         )
         remote_transaction_id = _clean_str(response.get("id"))
-        gateway_status = _clean_str(response.get("status"), "INITIATED")
+        gateway_status = _clean_str(response.get("status"), "INITIATED").upper()
 
         update_transaction_from_gateway_response(
             tx,
             payment_url=checkout_url,
             remote_transaction_id=remote_transaction_id,
+            gateway_reference=local_reference,
             gateway_status=gateway_status,
             response_payload=response,
             status=PaymentGatewayTransactionStatus.REQUIRES_ACTION,
@@ -692,9 +1316,12 @@ def create_tap_checkout_transaction(
 
     except (TapConfigurationError, TapRequestError, TapAPIError) as exc:
         logger.exception("Tap checkout creation failed. local_reference=%s", local_reference)
-        tx.status = PaymentGatewayTransactionStatus.FAILED
-        tx.error_message = str(exc)
-        tx.save(update_fields=["status", "error_message", "updated_at"])
+        update_transaction_from_gateway_response(
+            tx,
+            status=PaymentGatewayTransactionStatus.FAILED,
+            error_message=str(exc),
+            notes="Tap checkout creation failed.",
+        )
         raise PaymentGatewayServiceError(str(exc)) from exc
 
 
@@ -703,6 +1330,9 @@ def create_tap_checkout_transaction(
 # ============================================================
 
 def refresh_tap_transaction_status(tx: PaymentGatewayTransaction) -> PaymentGatewayTransaction:
+    if not tx:
+        raise PaymentGatewayValidationError("PaymentGatewayTransaction is required.")
+
     if tx.provider != PaymentGatewayProvider.TAP:
         raise PaymentGatewayValidationError("refresh_tap_transaction_status expects a TAP transaction.")
 
@@ -713,13 +1343,7 @@ def refresh_tap_transaction_status(tx: PaymentGatewayTransaction) -> PaymentGate
     response = client.retrieve_charge(tx.remote_transaction_id)
     gateway_status = _clean_str(response.get("status")).upper()
 
-    mapped_status = PaymentGatewayTransactionStatus.PROCESSING
-    if gateway_status in {"CAPTURED", "AUTHORIZED", "APPROVED"}:
-        mapped_status = PaymentGatewayTransactionStatus.SUCCESS
-    elif gateway_status in {"FAILED", "DECLINED", "ABANDONED", "VOID", "CANCELLED"}:
-        mapped_status = PaymentGatewayTransactionStatus.FAILED
-    elif gateway_status in {"INITIATED", "PENDING"}:
-        mapped_status = PaymentGatewayTransactionStatus.PROCESSING
+    mapped_status = _normalize_status(gateway_status, PaymentGatewayTransactionStatus.PROCESSING)
 
     update_transaction_from_gateway_response(
         tx,
@@ -728,9 +1352,54 @@ def refresh_tap_transaction_status(tx: PaymentGatewayTransaction) -> PaymentGate
         status=mapped_status,
     )
 
-    if mapped_status == PaymentGatewayTransactionStatus.SUCCESS and not tx.paid_at:
-        tx.paid_at = timezone.now()
-        tx.save(update_fields=["paid_at", "updated_at"])
+    if mapped_status == PaymentGatewayTransactionStatus.SUCCESS:
+        finalize_successful_gateway_transaction(
+            tx,
+            gateway_status=gateway_status,
+            gateway_message="Tap charge status confirmed as successful.",
+            response_payload=response,
+        )
+
+    return tx
+
+
+def refresh_tamara_transaction_status(tx: PaymentGatewayTransaction) -> PaymentGatewayTransaction:
+    if not tx:
+        raise PaymentGatewayValidationError("PaymentGatewayTransaction is required.")
+
+    if tx.provider != PaymentGatewayProvider.TAMARA:
+        raise PaymentGatewayValidationError("refresh_tamara_transaction_status expects a TAMARA transaction.")
+
+    order_id = _clean_str(tx.remote_order_id)
+
+    if not order_id:
+        raise PaymentGatewayValidationError("Tamara transaction missing remote_order_id.")
+
+    client = build_tamara_client()
+    response = client.get_order(order_id)
+
+    gateway_status = _clean_str(
+        response.get("status")
+        or response.get("order_status")
+        or (response.get("order") or {}).get("status")
+    ).upper()
+
+    mapped_status = _normalize_status(gateway_status, PaymentGatewayTransactionStatus.PROCESSING)
+
+    update_transaction_from_gateway_response(
+        tx,
+        gateway_status=gateway_status,
+        response_payload=response,
+        status=mapped_status,
+    )
+
+    if mapped_status == PaymentGatewayTransactionStatus.SUCCESS:
+        finalize_successful_gateway_transaction(
+            tx,
+            gateway_status=gateway_status,
+            gateway_message="Tamara order status confirmed as successful.",
+            response_payload=response,
+        )
 
     return tx
 
@@ -819,6 +1488,9 @@ def handle_tamara_webhook(
     request_body: bytes = b"",
     incoming_token: str = "",
 ) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        raise PaymentGatewayValidationError("Tamara webhook payload must be a non-empty dict.")
+
     config = get_active_gateway_config(PaymentGatewayProvider.TAMARA)
 
     order_data = payload.get("order") if isinstance(payload.get("order"), dict) else {}
@@ -870,6 +1542,12 @@ def handle_tamara_webhook(
         gateway_reference=order_reference_id,
     )
 
+    if not tx:
+        tx = find_transaction_by_local_reference(
+            provider=PaymentGatewayProvider.TAMARA,
+            local_reference=order_reference_id,
+        )
+
     log = create_webhook_log(
         provider=PaymentGatewayProvider.TAMARA,
         event_type=event_type,
@@ -888,23 +1566,27 @@ def handle_tamara_webhook(
             "message": "Invalid Tamara webhook token.",
             "event_type": event_type,
             "order_id": order_id,
+            "checkout_id": checkout_id,
         }
         log.mark_failed("Invalid Tamara webhook token.", result)
         return result
 
+    payment_sync_result = None
+
     if tx:
+        mapped_status = _normalize_status(gateway_status, PaymentGatewayTransactionStatus.PROCESSING)
+
         tx.latest_webhook_payload = _json_safe(payload)
         tx.last_webhook_at = timezone.now()
         tx.is_webhook_verified = True
         tx.gateway_status = gateway_status or tx.gateway_status
+        tx.remote_order_id = order_id or tx.remote_order_id
+        tx.remote_checkout_id = checkout_id or tx.remote_checkout_id
+        tx.gateway_reference = order_reference_id or tx.gateway_reference
+        tx.status = mapped_status
 
-        if gateway_status in {"CAPTURED", "PAID", "SUCCESS", "FULLY_CAPTURED"}:
-            tx.status = PaymentGatewayTransactionStatus.SUCCESS
+        if mapped_status == PaymentGatewayTransactionStatus.SUCCESS:
             tx.paid_at = tx.paid_at or timezone.now()
-        elif gateway_status in {"DECLINED", "FAILED", "CANCELLED", "CANCELED", "EXPIRED"}:
-            tx.status = PaymentGatewayTransactionStatus.FAILED
-        else:
-            tx.status = PaymentGatewayTransactionStatus.PROCESSING
 
         tx.save(
             update_fields=[
@@ -912,11 +1594,23 @@ def handle_tamara_webhook(
                 "last_webhook_at",
                 "is_webhook_verified",
                 "gateway_status",
+                "remote_order_id",
+                "remote_checkout_id",
+                "gateway_reference",
                 "status",
                 "paid_at",
                 "updated_at",
             ]
         )
+
+        if tx.status == PaymentGatewayTransactionStatus.SUCCESS:
+            payment_sync_result = finalize_successful_gateway_transaction(
+                tx,
+                gateway_status=gateway_status,
+                gateway_message="Tamara webhook confirmed payment success.",
+                response_payload=payload,
+                webhook_payload=payload,
+            )
 
     result = {
         "success": True,
@@ -928,7 +1622,9 @@ def handle_tamara_webhook(
         "order_id": order_id,
         "checkout_id": checkout_id,
         "order_reference_id": order_reference_id,
+        "payment_sync": payment_sync_result,
     }
+
     log.mark_processed(result)
     return result
 
@@ -939,16 +1635,19 @@ def handle_tap_webhook(
     headers: dict[str, Any] | None = None,
     header_hash: str = "",
 ) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        raise PaymentGatewayValidationError("Tap webhook payload must be a non-empty dict.")
+
     config = get_active_gateway_config(PaymentGatewayProvider.TAP)
 
-    event_type = _clean_str(payload.get("object"), "charge")
+    event_type = _clean_str(payload.get("object") or payload.get("type"), "charge")
     charge_id = _clean_str(payload.get("id"))
     gateway_status = _clean_str(payload.get("status")).upper()
 
     reference = payload.get("reference") if isinstance(payload.get("reference"), dict) else {}
     gateway_reference = _clean_str(reference.get("gateway"))
     payment_reference = _clean_str(reference.get("payment"))
-    order_reference = _clean_str(reference.get("order"))
+    order_reference = _clean_str(reference.get("order") or reference.get("transaction"))
 
     signature_valid = verify_tap_hashstring(
         config=config,
@@ -961,6 +1660,12 @@ def handle_tap_webhook(
         remote_transaction_id=charge_id,
         gateway_reference=order_reference or payment_reference or gateway_reference,
     )
+
+    if not tx:
+        tx = find_transaction_by_local_reference(
+            provider=PaymentGatewayProvider.TAP,
+            local_reference=order_reference or payment_reference or gateway_reference,
+        )
 
     log = create_webhook_log(
         provider=PaymentGatewayProvider.TAP,
@@ -982,20 +1687,21 @@ def handle_tap_webhook(
         log.mark_failed("Invalid Tap webhook signature.", result)
         return result
 
+    payment_sync_result = None
+
     if tx:
+        mapped_status = _normalize_status(gateway_status, PaymentGatewayTransactionStatus.PROCESSING)
+
         tx.latest_webhook_payload = _json_safe(payload)
         tx.last_webhook_at = timezone.now()
         tx.is_webhook_verified = True
         tx.gateway_status = gateway_status or tx.gateway_status
+        tx.remote_transaction_id = charge_id or tx.remote_transaction_id
         tx.gateway_reference = order_reference or payment_reference or gateway_reference or tx.gateway_reference
+        tx.status = mapped_status
 
-        if gateway_status in {"CAPTURED", "AUTHORIZED", "APPROVED"}:
-            tx.status = PaymentGatewayTransactionStatus.SUCCESS
+        if mapped_status == PaymentGatewayTransactionStatus.SUCCESS:
             tx.paid_at = tx.paid_at or timezone.now()
-        elif gateway_status in {"FAILED", "DECLINED", "CANCELLED", "ABANDONED", "VOID"}:
-            tx.status = PaymentGatewayTransactionStatus.FAILED
-        else:
-            tx.status = PaymentGatewayTransactionStatus.PROCESSING
 
         tx.save(
             update_fields=[
@@ -1003,12 +1709,22 @@ def handle_tap_webhook(
                 "last_webhook_at",
                 "is_webhook_verified",
                 "gateway_status",
+                "remote_transaction_id",
                 "gateway_reference",
                 "status",
                 "paid_at",
                 "updated_at",
             ]
         )
+
+        if tx.status == PaymentGatewayTransactionStatus.SUCCESS:
+            payment_sync_result = finalize_successful_gateway_transaction(
+                tx,
+                gateway_status=gateway_status,
+                gateway_message="Tap webhook confirmed payment success.",
+                response_payload=payload,
+                webhook_payload=payload,
+            )
 
     result = {
         "success": True,
@@ -1021,6 +1737,8 @@ def handle_tap_webhook(
         "order_reference": order_reference,
         "payment_reference": payment_reference,
         "gateway_reference": gateway_reference,
+        "payment_sync": payment_sync_result,
     }
+
     log.mark_processed(result)
     return result

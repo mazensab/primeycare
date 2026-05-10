@@ -5,7 +5,8 @@
    🧠 Primey Care | Contracts Dashboard
    ------------------------------------------------------------
    ✅ المرحلة 17 + المرحلة 2
-   ✅ مبني بنفس نمط المراكز/العملاء المعتمد
+   ✅ العقود مرتبطة بمقدمي الخدمة Providers فقط
+   ✅ لا يوجد اعتماد على Centers
    ✅ لا تظهر مسارات تقنية أو أسماء API داخل الواجهة
    ✅ لا توجد روابط تقارير داخل الوحدة
    ✅ Error State مستقل
@@ -13,10 +14,11 @@
    ✅ Skeleton Loading
    ✅ البحث في صف مستقل
    ✅ الفلاتر في صف مستقل تحت البحث
+   ✅ فلتر التاريخ من / إلى على createdAt
    ✅ Excel export بصيغة .xls HTML Workbook
    ✅ Web PDF Print
    ✅ حماية الأزرار والطلبات حسب الصلاحيات
-   ✅ fallback آمن لـ system_admin / superadmin
+   ✅ fallback آمن لـ system_admin / superuser
    ✅ دعم عربي / إنجليزي عبر primey-locale
    ✅ استخدام toast من sonner
    ✅ استخدام رمز SAR الرسمي /currency/sar.svg
@@ -31,12 +33,11 @@ import {
   BadgeCheck,
   Building2,
   CalendarClock,
+  CalendarDays,
   ClipboardList,
-  Columns3,
   Download,
   Eye,
   FileText,
-  Handshake,
   Layers3,
   ListChecks,
   Loader2,
@@ -119,6 +120,8 @@ type Contract = {
 type ContractsApiResponse = {
   ok?: boolean;
   message?: string;
+  detail?: string;
+  error?: string;
   count?: number;
   results?: unknown[];
   contracts?: unknown[];
@@ -464,15 +467,7 @@ function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
     return direct;
   }
 
-  const containers = [
-    "contract",
-    "provider",
-    "center",
-    "item",
-    "data",
-    "summary",
-    "totals",
-  ];
+  const containers = ["contract", "provider", "item", "data", "summary", "totals"];
 
   for (const container of containers) {
     const nested = obj[container];
@@ -513,11 +508,7 @@ function extractContracts(payload: unknown): unknown[] {
 
 function normalizeContract(item: unknown): Contract {
   const obj = (item || {}) as Record<string, unknown>;
-
-  const provider = (obj.provider || obj.center) as
-    | Record<string, unknown>
-    | undefined;
-
+  const provider = obj.provider as Record<string, unknown> | undefined;
   const id = getObjectValue(obj, "id") ?? "";
 
   const contractNumber =
@@ -537,16 +528,10 @@ function normalizeContract(item: unknown): Contract {
     contractNumber: String(contractNumber || "-"),
     title: String(title || "-"),
     providerId: String(
-      getObjectValue(obj, "provider_id") ??
-        getObjectValue(obj, "center_id") ??
-        provider?.id ??
-        "",
+      getObjectValue(obj, "provider_id") ?? provider?.id ?? "",
     ),
     providerName: String(
-      getObjectValue(obj, "provider_name") ??
-        getObjectValue(obj, "center_name") ??
-        provider?.name ??
-        "-",
+      getObjectValue(obj, "provider_name") ?? provider?.name ?? "-",
     ),
     status: normalizeStatus(getObjectValue(obj, "status")),
     pricingModel: normalizePricingModel(
@@ -612,6 +597,9 @@ function dictionary(locale: AppLocale) {
     all: isArabic ? "الكل" : "All",
     allStatuses: isArabic ? "كل الحالات" : "All Statuses",
     allPricing: isArabic ? "كل نماذج التسعير" : "All Pricing Models",
+    fromDate: isArabic ? "من تاريخ" : "From Date",
+    toDate: isArabic ? "إلى تاريخ" : "To Date",
+    notSelected: isArabic ? "غير محدد" : "Not selected",
 
     totalContracts: isArabic ? "إجمالي العقود" : "Total Contracts",
     activeContracts: isArabic ? "العقود النشطة" : "Active Contracts",
@@ -675,8 +663,8 @@ function dictionary(locale: AppLocale) {
       : "New contracts will appear here once they are created.",
     noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
     noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو فلاتر الحالة والتسعير."
-      : "Try changing search keywords, status filters, or pricing filters.",
+      ? "جرّب تغيير كلمات البحث أو فلاتر الحالة أو التسعير أو التاريخ."
+      : "Try changing search keywords, status, pricing, or date filters.",
 
     accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
     accessDeniedText: isArabic
@@ -716,6 +704,8 @@ function dictionary(locale: AppLocale) {
     filterSearch: isArabic ? "البحث" : "Search",
     filterStatus: isArabic ? "فلتر الحالة" : "Status Filter",
     filterPricing: isArabic ? "فلتر التسعير" : "Pricing Filter",
+    filterDateFrom: isArabic ? "تاريخ الإنشاء من" : "Created From",
+    filterDateTo: isArabic ? "تاريخ الإنشاء إلى" : "Created To",
     printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
     rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
     printTitle: isArabic ? "قائمة العقود" : "Contracts List",
@@ -769,6 +759,29 @@ function formatDate(value: string): string {
     month: "short",
     day: "2-digit",
   }).format(date);
+}
+
+function toDateOnly(value: string): string {
+  if (!value) return "";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  return date.toISOString().slice(0, 10);
+}
+
+function isDateInsideRange(value: string, dateFrom: string, dateTo: string) {
+  if (!dateFrom && !dateTo) return true;
+
+  const dateOnly = toDateOnly(value);
+
+  if (!dateOnly) return false;
+
+  if (dateFrom && dateOnly < dateFrom) return false;
+  if (dateTo && dateOnly > dateTo) return false;
+
+  return true;
 }
 
 function escapeHtml(value: string | number) {
@@ -1119,6 +1132,7 @@ function buildPrintHtml({
           <td>${escapeHtml(statusLabel(contract.status, locale))}</td>
           <td>${escapeHtml(formatDate(contract.startDate))}</td>
           <td>${escapeHtml(formatDate(contract.endDate))}</td>
+          <td>${escapeHtml(formatDate(contract.createdAt))}</td>
         </tr>
       `,
     )
@@ -1225,12 +1239,13 @@ function buildPrintHtml({
               <th>${escapeHtml(t.table.status)}</th>
               <th>${escapeHtml(isArabic ? "البداية" : "Start")}</th>
               <th>${escapeHtml(isArabic ? "النهاية" : "End")}</th>
+              <th>${escapeHtml(t.table.createdAt)}</th>
             </tr>
           </thead>
           <tbody>
             ${
               tableRows ||
-              `<tr><td colspan="11" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
+              `<tr><td colspan="12" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
             }
           </tbody>
         </table>
@@ -1259,6 +1274,8 @@ export default function SystemContractsPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [pricingFilter, setPricingFilter] = useState<PricingFilter>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   const t = useMemo(() => dictionary(locale), [locale]);
@@ -1344,6 +1361,12 @@ export default function SystemContractsPage() {
           ? true
           : contract.pricingModel === pricingFilter;
 
+      const matchesDate = isDateInsideRange(
+        contract.createdAt,
+        dateFrom,
+        dateTo,
+      );
+
       const matchesQuery = !cleanQuery
         ? true
         : [
@@ -1354,14 +1377,16 @@ export default function SystemContractsPage() {
             contract.pricingModel,
             statusLabel(contract.status, locale),
             pricingLabel(contract.pricingModel, locale),
+            formatDate(contract.createdAt),
+            toDateOnly(contract.createdAt),
           ]
             .join(" ")
             .toLowerCase()
             .includes(cleanQuery);
 
-      return matchesStatus && matchesPricing && matchesQuery;
+      return matchesStatus && matchesPricing && matchesDate && matchesQuery;
     });
-  }, [contracts, locale, pricingFilter, query, statusFilter]);
+  }, [contracts, dateFrom, dateTo, locale, pricingFilter, query, statusFilter]);
 
   const latestContracts = useMemo(
     () =>
@@ -1379,7 +1404,9 @@ export default function SystemContractsPage() {
   const hasSearchOrFilter =
     query.trim().length > 0 ||
     statusFilter !== "all" ||
-    pricingFilter !== "all";
+    pricingFilter !== "all" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
 
   const statusFilters = useMemo(
     () => [
@@ -1581,7 +1608,12 @@ export default function SystemContractsPage() {
           | null;
 
         if (!response.ok || payload?.ok === false) {
-          throw new Error(payload?.message || `HTTP ${response.status}`);
+          throw new Error(
+            payload?.message ||
+              payload?.detail ||
+              payload?.error ||
+              `HTTP ${response.status}`,
+          );
         }
 
         setContracts(extractContracts(payload).map(normalizeContract));
@@ -1605,6 +1637,8 @@ export default function SystemContractsPage() {
     setQuery("");
     setStatusFilter("all");
     setPricingFilter("all");
+    setDateFrom("");
+    setDateTo("");
   }
 
   function exportContracts() {
@@ -1649,6 +1683,8 @@ export default function SystemContractsPage() {
         [t.filterSearch, query || t.all],
         [t.filterStatus, statusFilterLabel],
         [t.filterPricing, pricingFilterLabel],
+        [t.filterDateFrom, dateFrom || t.notSelected],
+        [t.filterDateTo, dateTo || t.notSelected],
       ],
       headers: [
         t.table.contract,
@@ -2059,47 +2095,68 @@ export default function SystemContractsPage() {
                   })}
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap gap-2">
-                    {pricingFilters.map((item) => {
-                      const isSelected = pricingFilter === item.value;
+                <div className="flex flex-wrap gap-2">
+                  {pricingFilters.map((item) => {
+                    const isSelected = pricingFilter === item.value;
 
-                      return (
-                        <Button
-                          key={item.value}
-                          type="button"
-                          variant={isSelected ? "default" : "outline"}
-                          className="h-10 rounded-xl"
-                          onClick={() => setPricingFilter(item.value)}
-                        >
-                          <span>{item.label}</span>
-                          <Badge
-                            variant={isSelected ? "secondary" : "outline"}
-                            className="ms-1 rounded-full"
-                          >
-                            {formatNumber(item.count)}
-                          </Badge>
-                        </Button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" className="h-10 rounded-xl">
-                      <Columns3 className="h-4 w-4" />
-                      {isArabic ? "الأعمدة" : "Columns"}
-                    </Button>
-
-                    {hasSearchOrFilter ? (
+                    return (
                       <Button
-                        variant="outline"
+                        key={item.value}
+                        type="button"
+                        variant={isSelected ? "default" : "outline"}
                         className="h-10 rounded-xl"
-                        onClick={clearFilters}
+                        onClick={() => setPricingFilter(item.value)}
                       >
-                        {t.clearFilters}
+                        <span>{item.label}</span>
+                        <Badge
+                          variant={isSelected ? "secondary" : "outline"}
+                          className="ms-1 rounded-full"
+                        >
+                          {formatNumber(item.count)}
+                        </Badge>
                       </Button>
-                    ) : null}
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                  <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:max-w-xl">
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                        <span>{t.fromDate}</span>
+                      </label>
+                      <Input
+                        type="date"
+                        value={dateFrom}
+                        onChange={(event) => setDateFrom(event.target.value)}
+                        className="h-10 rounded-xl"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                        <span>{t.toDate}</span>
+                      </label>
+                      <Input
+                        type="date"
+                        value={dateTo}
+                        onChange={(event) => setDateTo(event.target.value)}
+                        className="h-10 rounded-xl"
+                      />
+                    </div>
                   </div>
+
+                  {hasSearchOrFilter ? (
+                    <Button
+                      variant="outline"
+                      className="h-10 rounded-xl"
+                      onClick={clearFilters}
+                    >
+                      {t.clearFilters}
+                    </Button>
+                  ) : null}
                 </div>
               </div>
 

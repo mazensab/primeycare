@@ -1,17 +1,21 @@
 # ============================================================
-# Tap API Client
-# Mham Cloud
-# Path: payment_gateways/tap/client.py
+# 📂 payment_gateways/tap/client.py
+# 🧠 Primey Care | Tap API Client V2
 # ------------------------------------------------------------
-# HTTP Client Layer only
-# - No billing logic here
-# - No subscription activation here
-# - No invoice state machine here
+# ✅ HTTP Client Layer only
+# ✅ No billing logic here
+# ✅ No subscription activation here
+# ✅ No invoice/payment/accounting/treasury state machine here
+# ✅ Secure HTTPS validation by default
+# ✅ Retry policy for transient failures
+# ✅ Clear request/API/configuration errors
 # ------------------------------------------------------------
 # Supported operations:
 # - Create Charge
 # - Retrieve Charge
-# - Void / Refund can be added later
+# - Refund Charge
+# - Void Charge
+# - Ping Charge
 # ============================================================
 
 from __future__ import annotations
@@ -19,16 +23,20 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 import requests
 from requests import Response, Session
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+
 logger = logging.getLogger(__name__)
+
 
 TAP_BASE_URL = "https://api.tap.company/v2"
 DEFAULT_TIMEOUT = 30
+DEFAULT_USER_AGENT = "PrimeyCare-TapClient/2.0"
 
 
 # ============================================================
@@ -56,10 +64,12 @@ class TapAPIError(TapError):
         *,
         status_code: Optional[int] = None,
         response_data: Optional[Dict[str, Any]] = None,
+        response_text: str = "",
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.response_data = response_data or {}
+        self.response_text = response_text
 
 
 # ============================================================
@@ -73,9 +83,10 @@ class TapConfig:
     timeout: int = DEFAULT_TIMEOUT
     base_url: str = TAP_BASE_URL
     extra_headers: Dict[str, str] = field(default_factory=dict)
+    verify_ssl: bool = True
 
     def validate(self) -> None:
-        if not self.secret_key or not self.secret_key.strip():
+        if not self.secret_key or not str(self.secret_key).strip():
             raise TapConfigurationError("Tap secret_key is required.")
 
         if not isinstance(self.timeout, int) or self.timeout <= 0:
@@ -84,6 +95,20 @@ class TapConfig:
         if not self.base_url or not str(self.base_url).strip():
             raise TapConfigurationError("Tap base_url is required.")
 
+        parsed_url = urlparse(str(self.base_url).strip())
+
+        if parsed_url.scheme != "https":
+            raise TapConfigurationError("Tap base_url must use HTTPS.")
+
+        if not parsed_url.netloc:
+            raise TapConfigurationError("Tap base_url host is invalid.")
+
+        if self.extra_headers is not None and not isinstance(self.extra_headers, dict):
+            raise TapConfigurationError("Tap extra_headers must be a dictionary.")
+
+        if not isinstance(self.verify_ssl, bool):
+            raise TapConfigurationError("Tap verify_ssl must be a boolean.")
+
 
 # ============================================================
 # Client
@@ -91,13 +116,19 @@ class TapConfig:
 
 class TapClient:
     """
-    عميل HTTP احترافي للتعامل مع Tap API.
+    عميل HTTP للتعامل مع Tap API.
 
     مسؤول فقط عن:
     - المصادقة
     - إرسال الطلبات
     - إرجاع JSON
     - رفع أخطاء واضحة
+
+    لا يحتوي على:
+    - منطق إنشاء Payment داخلي
+    - ترحيل محاسبي
+    - ترحيل خزينة
+    - تفعيل اشتراكات أو طلبات
     """
 
     def __init__(
@@ -108,7 +139,7 @@ class TapClient:
     ) -> None:
         config.validate()
         self.config = config
-        self.base_url = config.base_url.rstrip("/")
+        self.base_url = str(config.base_url).strip().rstrip("/")
         self.session = session or self._build_session()
 
     # --------------------------------------------------------
@@ -129,22 +160,29 @@ class TapClient:
         )
 
         adapter = HTTPAdapter(max_retries=retries)
-        session.mount("https://", adapter)
-        session.mount("http://", adapter)
 
+        session.mount("https://", adapter)
+
+        # لا نستخدم http:// مع Tap. وجود mount للـ https فقط مقصود.
         session.headers.update(self._default_headers())
+
         return session
 
     def _default_headers(self) -> Dict[str, str]:
-        headers = {
-            "Authorization": f"Bearer {self.config.secret_key}",
+        headers: Dict[str, str] = {
+            "Authorization": f"Bearer {str(self.config.secret_key).strip()}",
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "PrimeyHRCloud-TapClient/1.0",
+            "User-Agent": DEFAULT_USER_AGENT,
         }
 
         if self.config.extra_headers:
-            headers.update(self.config.extra_headers)
+            for key, value in self.config.extra_headers.items():
+                clean_key = str(key).strip()
+                clean_value = str(value).strip()
+
+                if clean_key and clean_value:
+                    headers[clean_key] = clean_value
 
         return headers
 
@@ -161,36 +199,43 @@ class TapClient:
         params: Optional[Dict[str, Any]] = None,
         timeout: Optional[int] = None,
     ) -> Dict[str, Any]:
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        if not endpoint or not str(endpoint).strip():
+            raise TapConfigurationError("Tap endpoint is required.")
+
+        method = str(method or "").strip().upper()
+
+        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+            raise TapConfigurationError(f"Unsupported Tap HTTP method: {method}")
+
+        url = f"{self.base_url}/{str(endpoint).lstrip('/')}"
         used_timeout = timeout or self.config.timeout
 
-        logger.info("Tap request started: %s %s", method.upper(), url)
+        logger.info("Tap request started: %s %s", method, url)
 
         try:
             response = self.session.request(
-                method=method.upper(),
+                method=method,
                 url=url,
                 json=payload,
                 params=params,
                 timeout=used_timeout,
+                verify=self.config.verify_ssl,
             )
         except requests.Timeout as exc:
-            logger.exception("Tap request timeout: %s %s", method.upper(), url)
-            raise TapRequestError(f"Tap request timed out after {used_timeout} seconds.") from exc
+            logger.exception("Tap request timeout: %s %s", method, url)
+            raise TapRequestError(
+                f"Tap request timed out after {used_timeout} seconds."
+            ) from exc
         except requests.RequestException as exc:
-            logger.exception("Tap request failed: %s %s", method.upper(), url)
+            logger.exception("Tap request failed: %s %s", method, url)
             raise TapRequestError(f"Tap request failed: {exc}") from exc
 
         return self._handle_response(response)
 
     def _handle_response(self, response: Response) -> Dict[str, Any]:
         status_code = response.status_code
-        content_type = response.headers.get("Content-Type", "")
-
-        try:
-            data = response.json() if "application/json" in content_type else {}
-        except ValueError:
-            data = {}
+        data = self._safe_json(response)
+        response_text = (response.text or "").strip()
 
         if 200 <= status_code < 300:
             logger.info("Tap response success: %s", status_code)
@@ -202,47 +247,137 @@ class TapClient:
             "Tap API error. status=%s message=%s response=%s",
             status_code,
             message,
-            data if data else response.text[:1000],
+            data if data else response_text[:1000],
         )
+
         raise TapAPIError(
             message,
             status_code=status_code,
             response_data=data,
+            response_text=response_text[:2000],
         )
+
+    @staticmethod
+    def _safe_json(response: Response) -> Dict[str, Any]:
+        try:
+            parsed = response.json()
+        except ValueError:
+            return {}
+
+        if isinstance(parsed, dict):
+            return parsed
+
+        return {"response": parsed}
 
     @staticmethod
     def _extract_error_message(data: Dict[str, Any], response: Response) -> str:
         if isinstance(data, dict):
-            for key in ("message", "error", "description", "errors"):
+            for key in ("message", "error", "description"):
                 value = data.get(key)
+
                 if isinstance(value, str) and value.strip():
                     return value.strip()
-                if isinstance(value, list) and value:
-                    return str(value[0])
+
+                if isinstance(value, dict):
+                    nested_message = (
+                        value.get("message")
+                        or value.get("description")
+                        or value.get("error")
+                    )
+                    if nested_message:
+                        return str(nested_message).strip()
+
+            errors = data.get("errors")
+
+            if isinstance(errors, list) and errors:
+                first_error = errors[0]
+
+                if isinstance(first_error, dict):
+                    return str(
+                        first_error.get("message")
+                        or first_error.get("description")
+                        or first_error
+                    )
+
+                return str(first_error)
+
+            if isinstance(errors, dict) and errors:
+                return str(errors)
 
         text = (response.text or "").strip()
+
         if text:
             return text[:500]
 
         return f"Tap API returned HTTP {response.status_code}."
 
     # --------------------------------------------------------
+    # Validation Helpers
+    # --------------------------------------------------------
+
+    @staticmethod
+    def _require_payload(payload: Dict[str, Any], action: str) -> None:
+        if not isinstance(payload, dict) or not payload:
+            raise TapConfigurationError(f"Tap {action} payload must be a non-empty dict.")
+
+    @staticmethod
+    def _require_id(value: str, field_name: str) -> str:
+        cleaned = str(value or "").strip()
+
+        if not cleaned:
+            raise TapConfigurationError(f"Tap {field_name} is required.")
+
+        return cleaned
+
+    # --------------------------------------------------------
     # Public API
     # --------------------------------------------------------
 
     def create_charge(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        if not isinstance(payload, dict) or not payload:
-            raise TapConfigurationError("Tap create_charge payload must be a non-empty dict.")
+        """
+        إنشاء Charge في Tap.
 
+        ملاحظة:
+        هذه الدالة لا تنشئ Payment محلي ولا تؤكد الدفع.
+        التأكيد يتم لاحقًا من webhook/status lookup في services.
+        """
+        self._require_payload(payload, "create_charge")
         return self._request("POST", "/charges", payload=payload)
 
     def retrieve_charge(self, charge_id: str) -> Dict[str, Any]:
-        if not charge_id or not str(charge_id).strip():
-            raise TapConfigurationError("Tap charge_id is required.")
-
+        """
+        جلب حالة Charge من Tap.
+        """
+        charge_id = self._require_id(charge_id, "charge_id")
         return self._request("GET", f"/charges/{charge_id}")
 
+    def refund_charge(self, charge_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        تنفيذ Refund على Charge.
+
+        ملاحظة:
+        لا تعكس هذه العملية محليًا داخل payments/accounting/treasury.
+        أي انعكاس مالي يجب أن يتم في طبقة services.
+        """
+        charge_id = self._require_id(charge_id, "charge_id")
+        self._require_payload(payload, "refund_charge")
+        return self._request("POST", f"/charges/{charge_id}/refund", payload=payload)
+
+    def void_charge(self, charge_id: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        تنفيذ Void على Charge.
+
+        ملاحظة:
+        لا تعكس هذه العملية محليًا داخل payments/accounting/treasury.
+        أي انعكاس مالي يجب أن يتم في طبقة services.
+        """
+        charge_id = self._require_id(charge_id, "charge_id")
+        return self._request("POST", f"/charges/{charge_id}/void", payload=payload or {})
+
     def ping_charge(self, charge_id: str) -> bool:
+        """
+        اختبار سريع للتحقق أن Charge قابل للجلب من Tap.
+        """
         try:
             self.retrieve_charge(charge_id)
             return True

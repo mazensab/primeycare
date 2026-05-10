@@ -2,67 +2,50 @@
 
 /* ============================================================
    📂 app/system/reports/page.tsx
-   🧠 Primey Care | Reports Dashboard Page
-   ------------------------------------------------------------
-   ✅ المسار:
-      /system/reports
+   🧠 Primey Care | Central Reports Overview
 
-   ✅ العمل:
-      صفحة لوحة التقارير الشاملة داخل مساحة النظام.
-
-   ✅ الإصدار:
-      v1.0.0 - Reports Module Dashboard Integration
-
-   ✅ يعتمد على:
-      GET /api/reports/overview/
-
-   ✅ متوافق مع صفحات:
-      - /system/reports
-      - /system/reports/customers
-      - /system/reports/providers
-      - /system/reports/orders
-      - /system/reports/invoices
-      - /system/reports/payments
-      - /system/reports/accounting
-
-   ✅ الوظائف:
-      - عرض إحصائيات التقارير من API فعلي
-      - عرض وحدات التقارير المركزية
-      - روابط مباشرة للتقارير التفصيلية
-      - تصدير Excel لملخص التقارير
-      - طباعة Web PDF
-      - دعم عربي / إنجليزي عبر primey-locale
-      - استخدام toast من sonner للتنبيهات
-      - عدم استخدام localhost hardcoded
-      - استخدام UI الداخلي فقط
-      - استخدام رمز العملة /currency/sar.svg
-      - الأرقام تبقى بالإنجليزية
-      - روابط داخلية آمنة بدون Dynamic href غير مدعوم
+   ✅ المرحلة 17 + المرحلة 2
+   ✅ نفس النمط المعتمد
+   ✅ w-full space-y-4
+   ✅ بدون main / min-h-screen / max-w
+   ✅ أزرار انتقال لكل صفحات التقارير المركزية الحالية
+   ✅ تمت إضافة تقرير الخزينة
+   ✅ Skeleton Loading
+   ✅ Error State مستقل
+   ✅ Empty State ذكي
+   ✅ Excel .xls HTML Workbook
+   ✅ Web PDF Print
+   ✅ sonner
+   ✅ SAR icon من /currency/sar.svg
+   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
 ============================================================ */
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   BarChart3,
-  Building2,
   Calculator,
   CreditCard,
   Download,
+  FileBarChart,
   FileText,
+  Landmark,
   Loader2,
   Printer,
   ReceiptText,
   RefreshCcw,
-  ShieldCheck,
+  Search,
   ShoppingCart,
+  Stethoscope,
   Users,
-  type LucideIcon,
+  WalletCards,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { API_PATHS, apiGet } from "@/lib/api";
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -72,172 +55,108 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 
 /* ============================================================
    Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
+type Dict = Record<string, unknown>;
+
+type ReportKey =
+  | "accounting"
+  | "customers"
+  | "invoices"
+  | "orders"
+  | "payments"
+  | "providers"
+  | "treasury";
 
 type ReportsSummary = {
-  customers_count?: number;
-  providers_count?: number;
-  orders_count?: number;
-  invoices_count?: number;
-  payments_count?: number;
-  orders_total?: number;
-  invoices_total?: number;
-  payments_total?: number;
-  [key: string]: unknown;
+  total_customers: number;
+  total_providers: number;
+  total_orders: number;
+  total_invoices: number;
+  total_payments: number;
+  total_revenue: number;
+  total_paid: number;
+  total_outstanding: number;
+  accounting_entries: number;
+  posted_entries: number;
+  pending_invoices: number;
+  confirmed_payments: number;
+  treasury_accounts: number;
+  treasury_transactions: number;
+  treasury_balance: number;
+  treasury_cash_balance: number;
+  treasury_bank_balance: number;
 };
 
-type ReportsModule = {
-  key: string;
-  title_ar: string;
-  title_en: string;
+type ReportCard = {
+  key: ReportKey;
   href: string;
-  api: string;
+  icon: ReactNode;
+  permissionCodes: string[];
+  titleAr: string;
+  titleEn: string;
+  descriptionAr: string;
+  descriptionEn: string;
+  metricKey: keyof ReportsSummary;
 };
 
-type ReportsOverviewData = {
-  meta?: {
-    key?: string;
-    title_ar?: string;
-    title_en?: string;
-    generated_at?: string;
-    currency?: string;
-  };
-  summary?: ReportsSummary;
-  modules?: ReportsModule[];
-};
-
-type ReportsOverviewResponse = {
+type ApiEnvelope<T> = {
+  ok?: boolean;
   success?: boolean;
   message?: string;
-  data?: ReportsOverviewData;
+  detail?: string;
+  error?: string;
+  data?: T;
+  summary?: Partial<ReportsSummary>;
+  stats?: Partial<ReportsSummary>;
+  totals?: Partial<ReportsSummary>;
 };
 
-type SummaryCard = {
-  key: string;
-  titleAr: string;
-  titleEn: string;
-  descriptionAr: string;
-  descriptionEn: string;
-  value: number | string;
-  icon: LucideIcon;
-  isMoney?: boolean;
-};
+const SAR_ICON_PATH = "/currency/sar.svg";
 
-type ReportModuleCard = {
-  key: string;
-  titleAr: string;
-  titleEn: string;
-  descriptionAr: string;
-  descriptionEn: string;
-  href: string;
-  icon: LucideIcon;
-  metricKey: keyof ReportsSummary;
-  amountKey?: keyof ReportsSummary;
+const DEFAULT_SUMMARY: ReportsSummary = {
+  total_customers: 0,
+  total_providers: 0,
+  total_orders: 0,
+  total_invoices: 0,
+  total_payments: 0,
+  total_revenue: 0,
+  total_paid: 0,
+  total_outstanding: 0,
+  accounting_entries: 0,
+  posted_entries: 0,
+  pending_invoices: 0,
+  confirmed_payments: 0,
+  treasury_accounts: 0,
+  treasury_transactions: 0,
+  treasury_balance: 0,
+  treasury_cash_balance: 0,
+  treasury_bank_balance: 0,
 };
 
 /* ============================================================
-   Constants
-============================================================ */
-
-const REPORT_MODULES: ReportModuleCard[] = [
-  {
-    key: "customers",
-    titleAr: "تقارير العملاء",
-    titleEn: "Customers Reports",
-    descriptionAr:
-      "تحليل العملاء، الحالات، مصادر التسجيل، وحركة النشاط المرتبطة بهم.",
-    descriptionEn:
-      "Analyze customers, statuses, acquisition sources, and related activity.",
-    href: "/system/reports/customers",
-    icon: Users,
-    metricKey: "customers_count",
-  },
-  {
-    key: "providers",
-    titleAr: "تقارير المراكز",
-    titleEn: "Providers Reports",
-    descriptionAr:
-      "تحليل المراكز ومقدمي الخدمة حسب الحالة والنوع والمدينة والأداء.",
-    descriptionEn:
-      "Analyze providers by status, type, city, and operational performance.",
-    href: "/system/reports/providers",
-    icon: Building2,
-    metricKey: "providers_count",
-  },
-  {
-    key: "orders",
-    titleAr: "تقارير الطلبات",
-    titleEn: "Orders Reports",
-    descriptionAr:
-      "متابعة الطلبات حسب الحالة والفترة والقيمة التشغيلية والربط بالفواتير.",
-    descriptionEn:
-      "Track orders by status, period, operational value, and invoice linkage.",
-    href: "/system/reports/orders",
-    icon: ShoppingCart,
-    metricKey: "orders_count",
-    amountKey: "orders_total",
-  },
-  {
-    key: "invoices",
-    titleAr: "تقارير الفواتير",
-    titleEn: "Invoices Reports",
-    descriptionAr:
-      "قراءة الفواتير الصادرة والمدفوعة والملغاة والضريبة والمتبقي للتحصيل.",
-    descriptionEn:
-      "Review issued, paid, canceled invoices, tax, and remaining collections.",
-    href: "/system/reports/invoices",
-    icon: ReceiptText,
-    metricKey: "invoices_count",
-    amountKey: "invoices_total",
-  },
-  {
-    key: "payments",
-    titleAr: "تقارير المدفوعات",
-    titleEn: "Payments Reports",
-    descriptionAr:
-      "تحليل المدفوعات حسب الطريقة والحالة والربط مع الفواتير والخزينة.",
-    descriptionEn:
-      "Analyze payments by method, status, invoice linkage, and treasury impact.",
-    href: "/system/reports/payments",
-    icon: CreditCard,
-    metricKey: "payments_count",
-    amountKey: "payments_total",
-  },
-  {
-    key: "accounting",
-    titleAr: "تقارير المحاسبة",
-    titleEn: "Accounting Reports",
-    descriptionAr:
-      "ملخص القيود والأرصدة المحاسبية والتقارير المالية المرتبطة بالنظام.",
-    descriptionEn:
-      "Accounting entries, balances, and financial reporting insights.",
-    href: "/system/reports/accounting",
-    icon: Calculator,
-    metricKey: "invoices_count",
-  },
-];
-
-/* ============================================================
-   Locale Helpers
+   Locale / API
 ============================================================ */
 
 function readLocale(): AppLocale {
   try {
     if (typeof window === "undefined") return "ar";
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
@@ -254,384 +173,927 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
-function getDictionary(locale: AppLocale) {
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
+
+  if (!base) return path;
+
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
+/* ============================================================
+   Auth / Permissions
+============================================================ */
+
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
+}
+
+function getNested(source: Dict, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+
+    if (value && typeof value === "object") return value as Dict;
+  }
+
+  return {};
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
+
+          if (typeof value === "string") return [value];
+
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
+
+              if (item && typeof item === "object") {
+                const obj = item as Dict;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as Dict;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return getNested(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
+}
+
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
+  );
+}
+
+function isSystemAdmin(authValue: unknown) {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
+
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
+}
+
+function hasAnyPermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const permissions = getAuthPermissionCodes(authValue);
+
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "accountant",
+          "support",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
+    );
+  }
+
+  return true;
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
+
+function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    pageTitle: isArabic ? "نظام التقارير الشامل" : "Comprehensive Reports",
-    pageSubtitle: isArabic
-      ? "مركز موحد لتقارير العملاء، المراكز، الطلبات، الفواتير، المدفوعات، والمحاسبة."
-      : "A unified hub for customer, provider, order, invoice, payment, and accounting reports.",
+    title: isArabic ? "التقارير المركزية" : "Central Reports",
+    subtitle: isArabic
+      ? "مركز موحد للوصول إلى تقارير العملاء وشبكة الخدمة والطلبات والفواتير والمدفوعات والخزينة والمحاسبة."
+      : "A unified hub for customer, service network, orders, invoices, payments, treasury, and accounting reports.",
 
     refresh: isArabic ? "تحديث" : "Refresh",
+    retry: isArabic ? "إعادة المحاولة" : "Retry",
     exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    printPdf: isArabic ? "طباعة PDF" : "Print PDF",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
 
-    overviewTitle: isArabic ? "ملخص التقارير" : "Reports Summary",
-    overviewDescription: isArabic
-      ? "قراءة مختصرة لأهم مؤشرات النظام من API التقارير المركزي."
-      : "A quick reading of the main system indicators from the central reports API.",
+    totalRevenue: isArabic ? "إجمالي الإيراد" : "Total Revenue",
+    totalPaid: isArabic ? "إجمالي المدفوع" : "Total Paid",
+    totalOutstanding: isArabic ? "المبالغ المستحقة" : "Outstanding",
+    totalOrders: isArabic ? "إجمالي الطلبات" : "Total Orders",
 
-    modulesTitle: isArabic ? "التقارير المتاحة" : "Available Reports",
-    modulesDescription: isArabic
-      ? "كل تقرير مستقل يعتمد على مصدر مركزي وفلاتر قابلة للتوسع."
-      : "Each report uses a central source and expandable filters.",
+    totalCustomers: isArabic ? "العملاء" : "Customers",
+    totalProviders: isArabic ? "مقدمو الخدمة" : "Providers",
+    totalInvoices: isArabic ? "الفواتير" : "Invoices",
+    totalPayments: isArabic ? "المدفوعات" : "Payments",
+    accountingEntries: isArabic ? "القيود المحاسبية" : "Accounting Entries",
+    postedEntries: isArabic ? "قيود مرحلة" : "Posted Entries",
+    pendingInvoices: isArabic ? "فواتير معلقة" : "Pending Invoices",
+    confirmedPayments: isArabic ? "مدفوعات مؤكدة" : "Confirmed Payments",
+    treasuryAccounts: isArabic ? "حسابات الخزينة" : "Treasury Accounts",
+    treasuryTransactions: isArabic ? "حركات الخزينة" : "Treasury Transactions",
+    treasuryBalance: isArabic ? "رصيد الخزينة" : "Treasury Balance",
+    cashBalance: isArabic ? "رصيد الصناديق" : "Cash Balance",
+    bankBalance: isArabic ? "رصيد البنوك" : "Bank Balance",
 
-    quickLinksTitle: isArabic ? "روابط مالية مختصرة" : "Financial Quick Links",
-    quickLinksDescription: isArabic
-      ? "وصول سريع للتقارير المالية الأساسية داخل المحاسبة."
-      : "Quick access to core financial reports inside accounting.",
+    reportsTitle: isArabic ? "تقارير النظام" : "System Reports",
+    reportsDesc: isArabic
+      ? "اختر التقرير المطلوب لفتح صفحة التقرير التفصيلية."
+      : "Choose a report to open its detailed page.",
+
+    searchPlaceholder: isArabic
+      ? "ابحث باسم التقرير..."
+      : "Search reports by name...",
 
     openReport: isArabic ? "فتح التقرير" : "Open Report",
-    generatedAt: isArabic ? "تاريخ التوليد" : "Generated At",
-    currency: isArabic ? "العملة" : "Currency",
 
-    totalCustomers: isArabic ? "إجمالي العملاء" : "Total Customers",
-    totalProviders: isArabic ? "إجمالي المراكز" : "Total Providers",
-    totalOrders: isArabic ? "إجمالي الطلبات" : "Total Orders",
-    totalInvoices: isArabic ? "إجمالي الفواتير" : "Total Invoices",
-    totalPayments: isArabic ? "إجمالي المدفوعات" : "Total Payments",
-    ordersValue: isArabic ? "قيمة الطلبات" : "Orders Value",
-    invoicesValue: isArabic ? "قيمة الفواتير" : "Invoices Value",
-    paymentsValue: isArabic ? "قيمة المدفوعات" : "Payments Value",
+    noReportsTitle: isArabic ? "لا توجد تقارير مطابقة" : "No matching reports",
+    noReportsText: isArabic
+      ? "جرّب تغيير كلمات البحث أو راجع الصلاحيات."
+      : "Try changing your search terms or review permissions.",
 
-    totalCustomersDesc: isArabic
-      ? "عدد العملاء المسجلين في النظام."
-      : "Registered customers in the system.",
-    totalProvidersDesc: isArabic
-      ? "عدد المراكز ومقدمي الخدمة."
-      : "Centers and providers in the system.",
-    totalOrdersDesc: isArabic
-      ? "إجمالي الطلبات التشغيلية."
-      : "Total operational orders.",
-    totalInvoicesDesc: isArabic
-      ? "عدد الفواتير المسجلة."
-      : "Total registered invoices.",
-    totalPaymentsDesc: isArabic
-      ? "عدد عمليات الدفع المسجلة."
-      : "Total registered payments.",
-    ordersValueDesc: isArabic
-      ? "إجمالي قيمة الطلبات."
-      : "Total value of orders.",
-    invoicesValueDesc: isArabic
-      ? "إجمالي قيمة الفواتير."
-      : "Total value of invoices.",
-    paymentsValueDesc: isArabic
-      ? "إجمالي قيمة المدفوعات."
-      : "Total value of payments.",
-
-    trialBalance: isArabic ? "ميزان المراجعة" : "Trial Balance",
-    profitLoss: isArabic ? "الأرباح والخسائر" : "Profit & Loss",
-    balanceSheet: isArabic ? "المركز المالي" : "Balance Sheet",
-    ledger: isArabic ? "دفتر الأستاذ" : "General Ledger",
-
-    loading: isArabic ? "جاري تحميل التقارير..." : "Loading reports...",
-    emptyTitle: isArabic ? "لا توجد بيانات بعد" : "No data yet",
-    emptyText: isArabic
-      ? "تأكد من تشغيل API التقارير أو وجود بيانات في الوحدات المرتبطة."
-      : "Make sure the reports API is running and related modules contain data.",
+    accessDeniedTitle: isArabic ? "غير مصرح بعرض التقارير" : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية عرض التقارير المركزية. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to view central reports. Contact your system administrator if you need access.",
 
     loadError: isArabic
-      ? "تعذر تحميل لوحة التقارير"
-      : "Unable to load reports dashboard",
-    refreshSuccess: isArabic
-      ? "تم تحديث لوحة التقارير بنجاح"
-      : "Reports dashboard refreshed successfully",
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel"
-      : "Excel file has been prepared",
-    printReady: isArabic ? "تم تجهيز الطباعة" : "Print is ready",
+      ? "تعذر تحميل ملخص التقارير."
+      : "Unable to load reports summary.",
+    loadErrorHint: isArabic
+      ? "يمكنك الاستمرار بفتح صفحات التقارير المتاحة، أو إعادة المحاولة لتحديث الملخص."
+      : "You can still open available report pages, or retry to refresh the summary.",
+    loadSuccess: isArabic
+      ? "تم تحديث ملخص التقارير."
+      : "Reports summary refreshed.",
+
+    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
+    exportEmpty: isArabic
+      ? "لا توجد بيانات قابلة للتصدير."
+      : "No data available to export.",
+    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
+    printError: isArabic
+      ? "تعذر فتح نافذة الطباعة."
+      : "Unable to open print window.",
+
+    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
+    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
+    available: isArabic ? "متاح" : "Available",
   };
 }
 
 /* ============================================================
-   Format Helpers
+   Helpers
 ============================================================ */
 
-function formatNumber(value: unknown) {
-  const number = Number(value || 0);
+function toNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
-  if (!Number.isFinite(number)) return "0";
-
+function formatNumber(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(toNumber(value));
+}
+
+function formatMoney(value: unknown): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(number);
+  }).format(toNumber(value));
 }
 
-function formatDate(value: unknown) {
-  if (!value) return "-";
-
-  const date = new Date(String(value));
-
-  if (Number.isNaN(date.getTime())) return String(value);
-
-  return date.toLocaleDateString("en-GB");
-}
-
-function escapeHtml(value: unknown) {
+function escapeHtml(value: string | number) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function getSummaryValue(summary: ReportsSummary, key: keyof ReportsSummary) {
-  return summary[key] ?? 0;
+function extractSummary(payload: ApiEnvelope<unknown> | null): Partial<ReportsSummary> {
+  if (!payload) return {};
+
+  const data = asDict(payload.data);
+
+  return {
+    ...asDict(payload.summary),
+    ...asDict(payload.stats),
+    ...asDict(payload.totals),
+    ...asDict(data.summary),
+    ...asDict(data.stats),
+    ...asDict(data.totals),
+    ...asDict(data),
+  } as Partial<ReportsSummary>;
 }
 
-function getAmountValue(summary: ReportsSummary, key?: keyof ReportsSummary) {
-  if (!key) return 0;
+function buildSummary(apiSummary?: Partial<ReportsSummary>): ReportsSummary {
+  const api = asDict(apiSummary);
 
-  return summary[key] ?? 0;
+  return {
+    total_customers:
+      toNumber(api.total_customers) || toNumber(api.customers_count),
+    total_providers:
+      toNumber(api.total_providers) ||
+      toNumber(api.providers_count) ||
+      toNumber(api.centers_count),
+    total_orders: toNumber(api.total_orders) || toNumber(api.orders_count),
+    total_invoices:
+      toNumber(api.total_invoices) || toNumber(api.invoices_count),
+    total_payments:
+      toNumber(api.total_payments) || toNumber(api.payments_count),
+    total_revenue:
+      toNumber(api.total_revenue) ||
+      toNumber(api.revenue_total) ||
+      toNumber(api.total_amount),
+    total_paid:
+      toNumber(api.total_paid) ||
+      toNumber(api.paid_amount) ||
+      toNumber(api.total_paid_amount),
+    total_outstanding:
+      toNumber(api.total_outstanding) ||
+      toNumber(api.outstanding_amount) ||
+      toNumber(api.remaining_amount),
+    accounting_entries:
+      toNumber(api.accounting_entries) || toNumber(api.journal_entries_count),
+    posted_entries:
+      toNumber(api.posted_entries) || toNumber(api.posted_entries_count),
+    pending_invoices:
+      toNumber(api.pending_invoices) || toNumber(api.pending_invoices_count),
+    confirmed_payments:
+      toNumber(api.confirmed_payments) ||
+      toNumber(api.confirmed_payments_count),
+    treasury_accounts:
+      toNumber(api.treasury_accounts) ||
+      toNumber(api.treasury_accounts_count) ||
+      toNumber(api.cashboxes_count) + toNumber(api.banks_count),
+    treasury_transactions:
+      toNumber(api.treasury_transactions) ||
+      toNumber(api.treasury_transactions_count) ||
+      toNumber(api.transactions_count),
+    treasury_balance:
+      toNumber(api.treasury_balance) ||
+      toNumber(api.total_treasury_balance) ||
+      toNumber(api.total_balance),
+    treasury_cash_balance:
+      toNumber(api.treasury_cash_balance) ||
+      toNumber(api.cash_balance) ||
+      toNumber(api.total_cash_balance),
+    treasury_bank_balance:
+      toNumber(api.treasury_bank_balance) ||
+      toNumber(api.bank_balance) ||
+      toNumber(api.total_bank_balance),
+  };
 }
 
-function normalizeOverviewPayload(payload: unknown): ReportsOverviewData | null {
-  if (!payload || typeof payload !== "object") return null;
-
-  const response = payload as ReportsOverviewResponse;
-
-  if (response.data && typeof response.data === "object") {
-    return response.data;
-  }
-
-  return payload as ReportsOverviewData;
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
 }
 
-function buildSummaryCards(
-  summary: ReportsSummary,
-  locale: AppLocale,
-): SummaryCard[] {
-  const t = getDictionary(locale);
-
-  return [
-    {
-      key: "customers_count",
-      titleAr: "إجمالي العملاء",
-      titleEn: "Total Customers",
-      descriptionAr: t.totalCustomersDesc,
-      descriptionEn: t.totalCustomersDesc,
-      value: summary.customers_count || 0,
-      icon: Users,
-    },
-    {
-      key: "providers_count",
-      titleAr: "إجمالي المراكز",
-      titleEn: "Total Providers",
-      descriptionAr: t.totalProvidersDesc,
-      descriptionEn: t.totalProvidersDesc,
-      value: summary.providers_count || 0,
-      icon: Building2,
-    },
-    {
-      key: "orders_count",
-      titleAr: "إجمالي الطلبات",
-      titleEn: "Total Orders",
-      descriptionAr: t.totalOrdersDesc,
-      descriptionEn: t.totalOrdersDesc,
-      value: summary.orders_count || 0,
-      icon: ShoppingCart,
-    },
-    {
-      key: "invoices_count",
-      titleAr: "إجمالي الفواتير",
-      titleEn: "Total Invoices",
-      descriptionAr: t.totalInvoicesDesc,
-      descriptionEn: t.totalInvoicesDesc,
-      value: summary.invoices_count || 0,
-      icon: ReceiptText,
-    },
-    {
-      key: "payments_count",
-      titleAr: "إجمالي المدفوعات",
-      titleEn: "Total Payments",
-      descriptionAr: t.totalPaymentsDesc,
-      descriptionEn: t.totalPaymentsDesc,
-      value: summary.payments_count || 0,
-      icon: CreditCard,
-    },
-    {
-      key: "orders_total",
-      titleAr: "قيمة الطلبات",
-      titleEn: "Orders Value",
-      descriptionAr: t.ordersValueDesc,
-      descriptionEn: t.ordersValueDesc,
-      value: summary.orders_total || 0,
-      icon: BarChart3,
-      isMoney: true,
-    },
-    {
-      key: "invoices_total",
-      titleAr: "قيمة الفواتير",
-      titleEn: "Invoices Value",
-      descriptionAr: t.invoicesValueDesc,
-      descriptionEn: t.invoicesValueDesc,
-      value: summary.invoices_total || 0,
-      icon: FileText,
-      isMoney: true,
-    },
-    {
-      key: "payments_total",
-      titleAr: "قيمة المدفوعات",
-      titleEn: "Payments Value",
-      descriptionAr: t.paymentsValueDesc,
-      descriptionEn: t.paymentsValueDesc,
-      value: summary.payments_total || 0,
-      icon: CreditCard,
-      isMoney: true,
-    },
-  ];
+function MoneyText({ value }: { value: unknown }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span>{formatMoney(value)}</span>
+      <SarIcon className="h-3.5 w-3.5" />
+    </span>
+  );
 }
 
-function downloadExcel(
-  filename: string,
-  rows: {
-    label: string;
-    value: string;
-  }[],
-  locale: AppLocale,
-) {
-  const title = locale === "ar" ? "ملخص التقارير" : "Reports Summary";
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+}
 
-  const body = rows
+function PageSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-5">
+              <SkeletonLine className="h-8 w-28" />
+              <SkeletonLine className="mt-3 h-4 w-24" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 7 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-28 w-full rounded-2xl" />
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function reportTitle(report: ReportCard, locale: AppLocale) {
+  return locale === "ar" ? report.titleAr : report.titleEn;
+}
+
+function reportDescription(report: ReportCard, locale: AppLocale) {
+  return locale === "ar" ? report.descriptionAr : report.descriptionEn;
+}
+
+/* ============================================================
+   Export / Print
+============================================================ */
+
+function downloadExcel({
+  filename,
+  title,
+  locale,
+  summary,
+  reports,
+}: {
+  filename: string;
+  title: string;
+  locale: AppLocale;
+  summary: ReportsSummary;
+  reports: ReportCard[];
+}) {
+  const isArabic = locale === "ar";
+  const dir = isArabic ? "rtl" : "ltr";
+  const align = isArabic ? "right" : "left";
+  const t = dictionary(locale);
+
+  const rowsHtml = reports
     .map(
-      (row) => `
+      (report) => `
         <tr>
-          <td>${escapeHtml(row.label)}</td>
-          <td>${escapeHtml(row.value)}</td>
-        </tr>
-      `,
+          <td>${escapeHtml(reportTitle(report, locale))}</td>
+          <td>${escapeHtml(reportDescription(report, locale))}</td>
+          <td>${escapeHtml(formatNumber(summary[report.metricKey]))}</td>
+          <td>${escapeHtml(report.href)}</td>
+        </tr>`,
     )
     .join("");
 
-  const html = `
-    <html dir="${locale === "ar" ? "rtl" : "ltr"}">
+  const workbook = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office"
+          xmlns:x="urn:schemas-microsoft-com:office:excel"
+          xmlns="http://www.w3.org/TR/REC-html40">
       <head>
-        <meta charset="utf-8" />
+        <meta charset="UTF-8" />
+        <style>
+          body { direction: ${dir}; font-family: Arial, sans-serif; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td {
+            border: 1px solid #d9e2ef;
+            padding: 8px;
+            text-align: ${align};
+            vertical-align: top;
+            mso-number-format: "\\@";
+          }
+          th { background: #d8ecfb; font-weight: 700; }
+          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
+          .section { font-weight: 700; background: #eef6ff; }
+          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
+        </style>
       </head>
-      <body>
-        <table border="1">
-          <thead>
-            <tr>
-              <th colspan="2">${escapeHtml(title)}</th>
-            </tr>
-            <tr>
-              <th>${locale === "ar" ? "المؤشر" : "Metric"}</th>
-              <th>${locale === "ar" ? "القيمة" : "Value"}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${body}
-          </tbody>
+      <body dir="${dir}">
+        <table>
+          <tr><td class="title" colspan="4">${escapeHtml(title)}</td></tr>
+          <tr><td colspan="4"></td></tr>
+          <tr><td class="section" colspan="4">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalRevenue)}</td><td colspan="3">${escapeHtml(formatMoney(summary.total_revenue))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalPaid)}</td><td colspan="3">${escapeHtml(formatMoney(summary.total_paid))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.treasuryBalance)}</td><td colspan="3">${escapeHtml(formatMoney(summary.treasury_balance))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalOrders)}</td><td colspan="3">${escapeHtml(formatNumber(summary.total_orders))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalInvoices)}</td><td colspan="3">${escapeHtml(formatNumber(summary.total_invoices))}</td></tr>
+
+          <tr><td colspan="4"></td></tr>
+          <tr>
+            <th>${escapeHtml(t.reportsTitle)}</th>
+            <th>${escapeHtml("Description")}</th>
+            <th>${escapeHtml("Metric")}</th>
+            <th>${escapeHtml("Page")}</th>
+          </tr>
+          ${rowsHtml}
         </table>
       </body>
-    </html>
-  `;
+    </html>`;
 
-  const blob = new Blob([html], {
-    type: "application/vnd.ms-excel;charset=utf-8",
+  const blob = new Blob([workbook], {
+    type: "application/vnd.ms-excel;charset=utf-8;",
   });
 
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
 
   anchor.href = url;
-  anchor.download = `${filename}.xls`;
+  anchor.download = filename;
   anchor.click();
 
   URL.revokeObjectURL(url);
 }
 
+function buildPrintHtml({
+  locale,
+  title,
+  summary,
+  reports,
+}: {
+  locale: AppLocale;
+  title: string;
+  summary: ReportsSummary;
+  reports: ReportCard[];
+}) {
+  const isArabic = locale === "ar";
+  const t = dictionary(locale);
+
+  const rows = reports
+    .map(
+      (report) => `
+        <tr>
+          <td>${escapeHtml(reportTitle(report, locale))}</td>
+          <td>${escapeHtml(reportDescription(report, locale))}</td>
+          <td>${escapeHtml(formatNumber(summary[report.metricKey]))}</td>
+        </tr>`,
+    )
+    .join("");
+
+  return `
+    <!doctype html>
+    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            padding: 24px;
+            font-family: Arial, Tahoma, sans-serif;
+            color: #111827;
+            background: #fff;
+            direction: ${isArabic ? "rtl" : "ltr"};
+            text-align: ${isArabic ? "right" : "left"};
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 14px;
+            margin-bottom: 18px;
+          }
+          h1 { margin: 0; font-size: 22px; font-weight: 800; }
+          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
+          .badge {
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            padding: 5px 12px;
+            font-size: 12px;
+            height: fit-content;
+          }
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 18px;
+          }
+          .box {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 10px;
+          }
+          .box span { color: #6b7280; display: block; font-size: 11px; }
+          .box strong { display: block; margin-top: 6px; font-size: 16px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+          th { background: #f3f4f6; font-weight: 700; }
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 8px;
+            text-align: ${isArabic ? "right" : "left"};
+          }
+          @page { size: A4 landscape; margin: 12mm; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1>${escapeHtml(title)}</h1>
+            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
+          </div>
+          <div class="badge">Primey Care</div>
+        </div>
+
+        <div class="grid">
+          <div class="box"><span>${escapeHtml(t.totalRevenue)}</span><strong>${escapeHtml(formatMoney(summary.total_revenue))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.totalPaid)}</span><strong>${escapeHtml(formatMoney(summary.total_paid))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.treasuryBalance)}</span><strong>${escapeHtml(formatMoney(summary.treasury_balance))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.totalOrders)}</span><strong>${escapeHtml(formatNumber(summary.total_orders))}</strong></div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>${escapeHtml(t.reportsTitle)}</th>
+              <th>${escapeHtml("Description")}</th>
+              <th>${escapeHtml("Metric")}</th>
+            </tr>
+          </thead>
+          <tbody>${rows || `<tr><td colspan="3">${escapeHtml(t.noReportsTitle)}</td></tr>`}</tbody>
+        </table>
+
+        <script>
+          window.addEventListener("load", () => {
+            window.focus();
+            window.print();
+          });
+        </script>
+      </body>
+    </html>
+  `;
+}
+
 /* ============================================================
-   Component
+   Reports
+============================================================ */
+
+function getReportCards(): ReportCard[] {
+  return [
+    {
+      key: "accounting",
+      href: "/system/reports/accounting",
+      icon: <Calculator className="h-5 w-5" />,
+      permissionCodes: [
+        "reports.view",
+        "reports.accounting.view",
+        "accounting.view",
+      ],
+      titleAr: "تقرير المحاسبة",
+      titleEn: "Accounting Report",
+      descriptionAr: "ملخص القيود والترحيل والأثر المالي.",
+      descriptionEn: "Journal entries, posting, and financial impact.",
+      metricKey: "accounting_entries",
+    },
+    {
+      key: "customers",
+      href: "/system/reports/customers",
+      icon: <Users className="h-5 w-5" />,
+      permissionCodes: ["reports.view", "reports.customers.view", "customers.view"],
+      titleAr: "تقرير العملاء",
+      titleEn: "Customers Report",
+      descriptionAr: "تحليل العملاء والنشاط والطلبات والمدفوعات.",
+      descriptionEn: "Customer activity, orders, and payments analysis.",
+      metricKey: "total_customers",
+    },
+    {
+      key: "invoices",
+      href: "/system/reports/invoices",
+      icon: <ReceiptText className="h-5 w-5" />,
+      permissionCodes: ["reports.view", "reports.invoices.view", "invoices.view"],
+      titleAr: "تقرير الفواتير",
+      titleEn: "Invoices Report",
+      descriptionAr: "تحليل الفواتير والإصدار والمستحقات.",
+      descriptionEn: "Invoice issuance and outstanding analysis.",
+      metricKey: "total_invoices",
+    },
+    {
+      key: "orders",
+      href: "/system/reports/orders",
+      icon: <ShoppingCart className="h-5 w-5" />,
+      permissionCodes: ["reports.view", "reports.orders.view", "orders.view"],
+      titleAr: "تقرير الطلبات",
+      titleEn: "Orders Report",
+      descriptionAr: "متابعة دورة الطلب والحالات والتنفيذ.",
+      descriptionEn: "Order lifecycle, statuses, and fulfillment.",
+      metricKey: "total_orders",
+    },
+    {
+      key: "payments",
+      href: "/system/reports/payments",
+      icon: <CreditCard className="h-5 w-5" />,
+      permissionCodes: ["reports.view", "reports.payments.view", "payments.view"],
+      titleAr: "تقرير المدفوعات",
+      titleEn: "Payments Report",
+      descriptionAr: "تحليل الدفعات وطرق الدفع والتأكيد.",
+      descriptionEn: "Payments, methods, and confirmations analysis.",
+      metricKey: "total_payments",
+    },
+    {
+      key: "providers",
+      href: "/system/reports/providers",
+      icon: <Stethoscope className="h-5 w-5" />,
+      permissionCodes: [
+        "reports.view",
+        "reports.providers.view",
+        "providers.view",
+        "centers.view",
+      ],
+      titleAr: "تقرير شبكة الخدمة",
+      titleEn: "Service Network Report",
+      descriptionAr: "تحليل مقدمي الخدمة والمراكز والعقود.",
+      descriptionEn: "Providers, centers, and contracts analysis.",
+      metricKey: "total_providers",
+    },
+    {
+      key: "treasury",
+      href: "/system/reports/treasury",
+      icon: <Landmark className="h-5 w-5" />,
+      permissionCodes: [
+        "reports.view",
+        "reports.treasury.view",
+        "treasury.view",
+        "treasury.reports.view",
+      ],
+      titleAr: "تقرير الخزينة",
+      titleEn: "Treasury Report",
+      descriptionAr: "ملخص الصناديق والبنوك والحركات المالية والأرصدة.",
+      descriptionEn: "Cashboxes, banks, transactions, and treasury balances.",
+      metricKey: "treasury_balance",
+    },
+  ];
+}
+
+/* ============================================================
+   Page
 ============================================================ */
 
 export default function SystemReportsPage() {
+  const auth = useAuth() as unknown;
+
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [data, setData] = useState<ReportsOverviewData | null>(null);
+  const [summary, setSummary] = useState<ReportsSummary>(DEFAULT_SUMMARY);
+  const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
+  const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
-  const t = useMemo(() => getDictionary(locale), [locale]);
+  const authResolving = isAuthResolving(auth);
 
-  const summary = useMemo<ReportsSummary>(() => {
-    return data?.summary || {};
-  }, [data]);
+  const canView = hasAnyPermission(auth, ["reports.view"], "view");
 
-  const summaryCards = useMemo(() => {
-    return buildSummaryCards(summary, locale);
-  }, [summary, locale]);
-
-  const financialLinks = useMemo(
-    () => [
-      {
-        title: t.trialBalance,
-        href: "/system/accounting/trial-balance",
-        icon: BarChart3,
-      },
-      {
-        title: t.profitLoss,
-        href: "/system/accounting/profit-loss",
-        icon: FileText,
-      },
-      {
-        title: t.balanceSheet,
-        href: "/system/accounting/balance-sheet",
-        icon: Building2,
-      },
-      {
-        title: t.ledger,
-        href: "/system/accounting/ledger",
-        icon: Calculator,
-      },
-    ],
-    [t],
+  const canExport = hasAnyPermission(
+    auth,
+    ["reports.export", "reports.view"],
+    "action",
   );
 
-  async function loadReportsOverview(showToast = false) {
-    try {
-      setIsLoading(true);
+  const canPrint = hasAnyPermission(
+    auth,
+    ["reports.print", "reports.view"],
+    "action",
+  );
 
-      const result = await apiGet<ReportsOverviewResponse>(
-        API_PATHS.reports.overview,
-      );
+  const allReports = useMemo(() => getReportCards(), []);
 
-      if (!result.ok) {
-        throw new Error(result.message);
+  const permittedReports = useMemo(
+    () =>
+      allReports.filter((report) =>
+        hasAnyPermission(auth, report.permissionCodes, "view"),
+      ),
+    [allReports, auth],
+  );
+
+  const filteredReports = useMemo(() => {
+    const clean = query.trim().toLowerCase();
+
+    if (!clean) return permittedReports;
+
+    return permittedReports.filter((report) =>
+      [
+        report.titleAr,
+        report.titleEn,
+        report.descriptionAr,
+        report.descriptionEn,
+        report.key,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(clean),
+    );
+  }, [permittedReports, query]);
+
+  const hasReports = filteredReports.length > 0;
+
+  const loadReports = useCallback(
+    async (showToast = false) => {
+      if (!canView) {
+        setSummary(DEFAULT_SUMMARY);
+        setIsLoading(false);
+        return;
       }
 
-      const normalizedData = normalizeOverviewPayload(result.data);
+      try {
+        setIsLoading(true);
+        setErrorMessage("");
 
-      setData(normalizedData);
+        const payload = await loadFirstAvailable([
+          "/api/reports/overview/",
+          "/api/reports/",
+        ]);
 
-      if (showToast) {
-        toast.success(t.refreshSuccess);
+        if (!payload) {
+          throw new Error(t.loadError);
+        }
+
+        setSummary(buildSummary(extractSummary(payload)));
+
+        if (showToast) toast.success(t.loadSuccess);
+      } catch (error) {
+        console.error("Reports overview load error:", error);
+        setSummary(DEFAULT_SUMMARY);
+        setErrorMessage(t.loadError);
+        toast.error(t.loadError);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error("Load reports overview error:", error);
-      setData(null);
-      toast.error(t.loadError);
-    } finally {
-      setIsLoading(false);
+    },
+    [canView, t.loadError, t.loadSuccess],
+  );
+
+  function exportExcel() {
+    if (!canExport) return;
+
+    if (filteredReports.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
     }
-  }
 
-  function handleExport() {
-    const rows = summaryCards.map((card) => ({
-      label: isArabic ? card.titleAr : card.titleEn,
-      value: formatNumber(card.value),
-    }));
+    downloadExcel({
+      filename: `primey-care-reports-${new Date().toISOString().slice(0, 10)}.xls`,
+      title: t.title,
+      locale,
+      summary,
+      reports: filteredReports,
+    });
 
-    downloadExcel("primey-care-reports-overview", rows, locale);
     toast.success(t.exportSuccess);
   }
 
-  function handlePrint() {
-    toast.success(t.printReady);
+  function printPage() {
+    if (!canPrint) return;
 
-    window.setTimeout(() => {
-      window.print();
-    }, 100);
+    if (filteredReports.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(t.printError);
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(
+      buildPrintHtml({
+        locale,
+        title: t.title,
+        summary,
+        reports: filteredReports,
+      }),
+    );
+    printWindow.document.close();
+
+    toast.success(t.printSuccess);
   }
 
   useEffect(() => {
@@ -642,55 +1104,68 @@ export default function SystemReportsPage() {
       setLocale(nextLocale);
     };
 
-    const syncLocaleAfterPaint = () => {
+    const syncAfterPaint = () => {
       syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
+      window.setTimeout(syncLocale, 0);
     };
 
-    syncLocaleAfterPaint();
+    syncAfterPaint();
 
-    window.addEventListener("primey-locale-changed", syncLocaleAfterPaint);
-    window.addEventListener("storage", syncLocaleAfterPaint);
+    window.addEventListener("primey-locale-changed", syncAfterPaint);
+    window.addEventListener("storage", syncAfterPaint);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncLocaleAfterPaint);
-      window.removeEventListener("storage", syncLocaleAfterPaint);
+      window.removeEventListener("primey-locale-changed", syncAfterPaint);
+      window.removeEventListener("storage", syncAfterPaint);
     };
   }, []);
 
   useEffect(() => {
-    loadReportsOverview(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locale]);
+    if (authResolving) return;
+    loadReports(false);
+  }, [authResolving, loadReports]);
+
+  if (!authResolving && !canView) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            <span>Primey Care Reports</span>
-          </div>
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+            {t.title}
+          </h1>
 
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              {t.pageTitle}
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              {t.pageSubtitle}
-            </p>
-          </div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
+          </p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row print:hidden">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Button
             variant="outline"
             className="h-10 rounded-xl"
-            onClick={() => loadReportsOverview(true)}
+            onClick={() => loadReports(true)}
             disabled={isLoading}
           >
             {isLoading ? (
@@ -701,215 +1176,294 @@ export default function SystemReportsPage() {
             <span>{t.refresh}</span>
           </Button>
 
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={handleExport}
-            disabled={summaryCards.length === 0}
-          >
-            <Download className="h-4 w-4" />
-            <span>{t.exportExcel}</span>
-          </Button>
+          {canExport ? (
+            <Button
+              className="h-10 rounded-xl"
+              onClick={exportExcel}
+              disabled={isLoading || !hasReports}
+            >
+              <Download className="h-4 w-4" />
+              <span>{t.exportExcel}</span>
+            </Button>
+          ) : null}
 
-          <Button className="h-10 rounded-xl" onClick={handlePrint}>
-            <Printer className="h-4 w-4" />
-            <span>{t.printPdf}</span>
-          </Button>
+          {canPrint ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl"
+              onClick={printPage}
+              disabled={isLoading || !hasReports}
+            >
+              <Printer className="h-4 w-4" />
+              <span>{t.print}</span>
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      {/* Summary */}
-      <Card>
-        <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <BarChart3 className="h-5 w-5" />
-              {t.overviewTitle}
-            </CardTitle>
-            <CardDescription className="mt-1">
-              {data?.meta?.generated_at
-                ? `${t.generatedAt}: ${formatDate(data.meta.generated_at)}`
-                : t.overviewDescription}
-            </CardDescription>
+      {!isLoading && errorMessage ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                <XCircle className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="font-semibold text-destructive">{errorMessage}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t.loadErrorHint}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => loadReports(true)}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              {t.retry}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {isLoading ? (
+        <PageSkeleton />
+      ) : (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              title={t.totalRevenue}
+              value={<MoneyText value={summary.total_revenue} />}
+              icon={<BarChart3 className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.totalPaid}
+              value={<MoneyText value={summary.total_paid} />}
+              icon={<WalletCards className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.treasuryBalance}
+              value={<MoneyText value={summary.treasury_balance} />}
+              icon={<Landmark className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.totalOrders}
+              value={formatNumber(summary.total_orders)}
+              icon={<ShoppingCart className="h-5 w-5" />}
+            />
           </div>
 
-          <Badge variant="secondary" className="w-fit rounded-full">
-            {t.currency}: SAR
-          </Badge>
-        </CardHeader>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MiniStat title={t.totalCustomers} value={summary.total_customers} />
+            <MiniStat title={t.totalProviders} value={summary.total_providers} />
+            <MiniStat title={t.totalInvoices} value={summary.total_invoices} />
+            <MiniStat title={t.totalPayments} value={summary.total_payments} />
+          </div>
 
-        <CardContent>
-          {isLoading ? (
-            <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t.loading}</span>
-            </div>
-          ) : summaryCards.length === 0 ? (
-            <div className="rounded-2xl border border-dashed p-10 text-center">
-              <p className="font-semibold">{t.emptyTitle}</p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {t.emptyText}
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {summaryCards.map((card) => {
-                const Icon = card.icon;
-                const title = isArabic ? card.titleAr : card.titleEn;
-                const description = isArabic
-                  ? card.descriptionAr
-                  : card.descriptionEn;
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-4">
+              <div className="relative w-full">
+                <Search
+                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+                    isArabic ? "right-3" : "left-3"
+                  }`}
+                />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={t.searchPlaceholder}
+                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+                />
+              </div>
+            </CardContent>
+          </Card>
 
-                return (
-                  <Card key={card.key} className="shadow-none">
-                    <CardContent className="p-5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <p className="text-sm text-muted-foreground">
-                            {title}
-                          </p>
-                          <p className="text-2xl font-bold">
-                            {formatNumber(card.value)}
-                          </p>
-                        </div>
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.reportsTitle}
+                  </CardTitle>
+                  <CardDescription>{t.reportsDesc}</CardDescription>
+                </div>
 
-                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-muted">
-                          {card.isMoney ? (
-                            <Image
-                              src="/currency/sar.svg"
-                              alt="SAR"
-                              width={20}
-                              height={20}
-                            />
-                          ) : (
-                            <Icon className="h-5 w-5" />
-                          )}
-                        </div>
-                      </div>
+                <Badge variant="outline" className="rounded-full">
+                  <FileBarChart className="h-3.5 w-3.5" />
+                  {formatNumber(filteredReports.length)} {t.available}
+                </Badge>
+              </div>
+            </CardHeader>
 
-                      <p className="mt-4 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                        {description}
-                      </p>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            <CardContent>
+              {filteredReports.length > 0 ? (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {filteredReports.map((report) => (
+                    <Link key={report.key} href={report.href}>
+                      <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
+                        <CardContent className="flex h-full flex-col gap-4 p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                              {report.icon}
+                            </div>
 
-      {/* Reports Modules */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t.modulesTitle}</CardTitle>
-          <CardDescription>{t.modulesDescription}</CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {REPORT_MODULES.map((module) => {
-              const Icon = module.icon;
-              const title = isArabic ? module.titleAr : module.titleEn;
-              const description = isArabic
-                ? module.descriptionAr
-                : module.descriptionEn;
-              const metricValue = getSummaryValue(summary, module.metricKey);
-              const amountValue = getAmountValue(summary, module.amountKey);
-
-              return (
-                <Link key={module.key} href={module.href} className="block">
-                  <Card className="h-full shadow-none transition hover:-translate-y-0.5 hover:shadow-md">
-                    <CardContent className="flex h-full flex-col justify-between gap-5 p-5">
-                      <div className="space-y-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-muted">
-                            <Icon className="h-5 w-5" />
+                            <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
                           </div>
 
-                          <Badge variant="secondary" className="rounded-full">
-                            {formatNumber(metricValue)}
-                          </Badge>
-                        </div>
-
-                        <div>
-                          <h2 className="font-semibold">{title}</h2>
-                          <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground">
-                            {description}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-3">
-                        {module.amountKey ? (
-                          <div className="inline-flex items-center gap-1 text-sm font-semibold">
-                            <Image
-                              src="/currency/sar.svg"
-                              alt="SAR"
-                              width={16}
-                              height={16}
-                            />
-                            <span>{formatNumber(amountValue)}</span>
+                          <div>
+                            <p className="font-semibold">
+                              {reportTitle(report, locale)}
+                            </p>
+                            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                              {reportDescription(report, locale)}
+                            </p>
                           </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            {t.openReport}
-                          </span>
-                        )}
 
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="rounded-xl"
-                          asChild
-                        >
-                          <span>
-                            {t.openReport}
-                            <ArrowUpRight className="h-4 w-4" />
-                          </span>
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              );
-            })}
+                          <div className="mt-auto flex items-center justify-between gap-3 rounded-xl bg-muted/40 px-3 py-2 text-sm">
+                            <span className="text-muted-foreground">
+                              {t.openReport}
+                            </span>
+                            <span className="font-bold">
+                              {report.metricKey === "treasury_balance" ? (
+                                <MoneyText value={summary[report.metricKey]} />
+                              ) : (
+                                formatNumber(summary[report.metricKey])
+                              )}
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+                  <FileBarChart className="h-12 w-12 text-muted-foreground/40" />
+                  <p className="text-lg font-semibold">{t.noReportsTitle}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {t.noReportsText}
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MiniStat title={t.accountingEntries} value={summary.accounting_entries} />
+            <MiniStat title={t.postedEntries} value={summary.posted_entries} />
+            <MiniStat
+              title={t.treasuryAccounts}
+              value={summary.treasury_accounts}
+            />
+            <MiniStat
+              title={t.treasuryTransactions}
+              value={summary.treasury_transactions}
+            />
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Financial Quick Links */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t.quickLinksTitle}</CardTitle>
-          <CardDescription>{t.quickLinksDescription}</CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {financialLinks.map((link) => {
-              const Icon = link.icon;
-
-              return (
-                <Button
-                  key={link.href}
-                  variant="outline"
-                  className="h-auto justify-between rounded-2xl p-4"
-                  asChild
-                >
-                  <Link href={link.href}>
-                    <span className="inline-flex items-center gap-2">
-                      <Icon className="h-4 w-4" />
-                      <span>{link.title}</span>
-                    </span>
-                    <ArrowUpRight className="h-4 w-4" />
-                  </Link>
-                </Button>
-              );
-            })}
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MiniMoneyStat title={t.cashBalance} value={summary.treasury_cash_balance} />
+            <MiniMoneyStat title={t.bankBalance} value={summary.treasury_bank_balance} />
+            <MiniStat title={t.pendingInvoices} value={summary.pending_invoices} />
+            <MiniStat
+              title={t.confirmedPayments}
+              value={summary.confirmed_payments}
+            />
           </div>
-        </CardContent>
-      </Card>
+        </>
+      )}
     </div>
+  );
+}
+
+/* ============================================================
+   Small Components
+============================================================ */
+
+async function loadFirstAvailable(endpoints: string[]) {
+  let lastError = "";
+
+  for (const endpoint of endpoints) {
+    const response = await fetch(apiUrl(endpoint), {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | ApiEnvelope<unknown>
+      | null;
+
+    if (response.ok && payload?.ok !== false && payload?.success !== false) {
+      return payload;
+    }
+
+    lastError =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `HTTP ${response.status}`;
+  }
+
+  console.warn("Reports endpoint fallback failed:", lastError);
+  return null;
+}
+
+function KpiCard({
+  title,
+  value,
+  icon,
+}: {
+  title: string;
+  value: ReactNode;
+  icon: ReactNode;
+}) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-2xl font-bold">{value}</div>
+            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
+          </div>
+
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            {icon}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MiniStat({ title, value }: { title: string; value: number }) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="text-muted-foreground">{title}</span>
+          <span className="text-lg font-bold">{formatNumber(value)}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MiniMoneyStat({ title, value }: { title: string; value: number }) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="text-muted-foreground">{title}</span>
+          <span className="text-lg font-bold">
+            <MoneyText value={value} />
+          </span>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

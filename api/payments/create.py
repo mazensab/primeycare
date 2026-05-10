@@ -1,61 +1,129 @@
 # ============================================================
 # 📂 api/payments/create.py
-# 🧠 Create Payment API — Primey Care
+# 🧠 Create Payment API — Primey Care V2
 # ------------------------------------------------------------
 # ✅ إنشاء دفعة مرتبطة بفاتورة / طلب / عميل
-# ✅ يدعم cash / bank_transfer / gateway
+# ✅ يستدعي payments.services.create_payment الرسمي فقط
 # ✅ لا يؤكد الدفع تلقائيًا إلا إذا تم تمرير confirm=true
+# ✅ عند التأكيد يستدعي payments.services.confirm_payment الرسمي
+# ✅ يدعم cash / bank_transfer / gateway / cards / wallets / Tamara / Tabby
+# ✅ متوافق مع Accounting + Treasury Backend الجديد
+# ✅ استجابة موحدة للواجهة: ok / success / data
 # ============================================================
 
 from __future__ import annotations
 
 import json
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from django.apps import apps
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 
 from payments.models import PaymentMethod, PaymentProvider
-from payments.services import PaymentServiceError, confirm_payment, create_payment
+from payments.services import (
+    PaymentServiceError,
+    confirm_payment,
+    create_payment,
+)
+
 
 logger = logging.getLogger(__name__)
 
 
-def _json_error(message: str, status: int = 400, details: Any = None) -> JsonResponse:
-    payload: dict[str, Any] = {"ok": False, "message": message}
-    if details is not None:
-        payload["details"] = details
-    return JsonResponse(payload, status=status)
+# ============================================================
+# JSON Helpers
+# ============================================================
+
+def _decimal_to_string(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+
+    if isinstance(value, dict):
+        return {key: _decimal_to_string(val) for key, val in value.items()}
+
+    if isinstance(value, list):
+        return [_decimal_to_string(item) for item in value]
+
+    if isinstance(value, tuple):
+        return tuple(_decimal_to_string(item) for item in value)
+
+    return value
 
 
-def _json_success(data: dict[str, Any], status: int = 200) -> JsonResponse:
-    payload = {"ok": True}
-    payload.update(data)
-    return JsonResponse(payload, status=status)
+def _json_error(
+    message: str,
+    *,
+    status: int = 400,
+    errors: Any = None,
+) -> JsonResponse:
+    payload: dict[str, Any] = {
+        "ok": False,
+        "success": False,
+        "message": message,
+    }
 
+    if errors is not None:
+        payload["errors"] = _decimal_to_string(errors)
+
+    return JsonResponse(
+        payload,
+        status=status,
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+def _json_success(
+    data: dict[str, Any],
+    *,
+    message: str = "تم تنفيذ العملية بنجاح.",
+    status: int = 200,
+) -> JsonResponse:
+    return JsonResponse(
+        {
+            "ok": True,
+            "success": True,
+            "message": message,
+            "data": _decimal_to_string(data),
+        },
+        status=status,
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+# ============================================================
+# Safe Helpers
+# ============================================================
 
 def _parse_json_body(request) -> dict[str, Any]:
     if not request.body:
         return {}
 
     try:
-        return json.loads(request.body.decode("utf-8"))
-    except json.JSONDecodeError:
-        return {}
+        parsed = json.loads(request.body.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValidationError("صيغة JSON غير صحيحة.") from exc
+
+    if not isinstance(parsed, dict):
+        raise ValidationError("جسم الطلب يجب أن يكون JSON Object.")
+
+    return parsed
 
 
-def _parse_decimal(value: Any) -> Decimal:
+def _parse_decimal(value: Any, field_name: str = "amount") -> Decimal:
     if value in (None, ""):
         return Decimal("0.00")
 
     try:
-        return Decimal(str(value))
-    except Exception:
-        return Decimal("0.00")
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValidationError({field_name: "القيمة المالية غير صحيحة."}) from exc
+
+    return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -65,7 +133,36 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
 
-    return str(value).lower() in {"true", "1", "yes", "y"}
+    normalized = str(value).strip().lower()
+
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+
+    return default
+
+
+def _clean_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _iso_datetime(value: Any) -> str | None:
+    if not value:
+        return None
+
+    try:
+        return value.isoformat()
+    except Exception:
+        return None
+
+
+def _safe_attr(obj: Any, attr_name: str, default: Any = None) -> Any:
+    try:
+        return getattr(obj, attr_name, default)
+    except Exception:
+        return default
 
 
 def _get_model(app_label: str, model_name: str):
@@ -76,7 +173,7 @@ def _get_model(app_label: str, model_name: str):
 
 
 def _get_object_or_none(model, pk: Any):
-    if not model or not pk:
+    if not model or pk in (None, "", 0, "0"):
         return None
 
     try:
@@ -92,22 +189,90 @@ def _first_non_empty(*values: Any) -> Any:
     return None
 
 
+def _extract_company_id(request) -> int | None:
+    raw_value = (
+        request.GET.get("company_id")
+        or request.headers.get("X-Company-Id")
+        or request.session.get("active_company_id")
+    )
+
+    if raw_value in {None, ""}:
+        return None
+
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+    return parsed if parsed > 0 else None
+
+
+def _filter_by_company_if_supported(queryset, model, request):
+    company_id = _extract_company_id(request)
+
+    if not company_id:
+        return queryset
+
+    model_fields = {field.name for field in model._meta.fields}
+
+    if "company" in model_fields:
+        return queryset.filter(company_id=company_id)
+
+    return queryset
+
+
+def _resolve_invoice_due_amount(invoice) -> Decimal:
+    if not invoice:
+        return Decimal("0.00")
+
+    return _parse_decimal(
+        _first_non_empty(
+            _safe_attr(invoice, "due_amount", None),
+            _safe_attr(invoice, "remaining_amount", None),
+            _safe_attr(invoice, "balance_due", None),
+            _safe_attr(invoice, "total_amount", None),
+            _safe_attr(invoice, "grand_total", None),
+            _safe_attr(invoice, "amount", None),
+        ),
+        field_name="amount",
+    )
+
+
+# ============================================================
+# Payment Method / Provider
+# ============================================================
+
 def _resolve_payment_method(value: str | None) -> str:
     normalized = (value or "").strip().upper()
 
     aliases = {
         "CASH": PaymentMethod.CASH,
+        "CASH_ON_DELIVERY": PaymentMethod.CASH,
+        "COD": PaymentMethod.CASH,
+
         "BANK": PaymentMethod.BANK_TRANSFER,
         "BANK_TRANSFER": PaymentMethod.BANK_TRANSFER,
         "TRANSFER": PaymentMethod.BANK_TRANSFER,
+        "WIRE": PaymentMethod.BANK_TRANSFER,
+
         "GATEWAY": PaymentMethod.GATEWAY,
+        "ONLINE": PaymentMethod.GATEWAY,
+        "ONLINE_PAYMENT": PaymentMethod.GATEWAY,
+
         "CARD": PaymentMethod.CREDIT_CARD,
         "CREDIT_CARD": PaymentMethod.CREDIT_CARD,
+        "VISA": PaymentMethod.CREDIT_CARD,
+        "MASTERCARD": PaymentMethod.CREDIT_CARD,
+
         "DEBIT_CARD": PaymentMethod.DEBIT_CARD,
+        "MADA": PaymentMethod.DEBIT_CARD,
+
         "APPLE_PAY": PaymentMethod.APPLE_PAY,
         "STC_PAY": PaymentMethod.STC_PAY,
+
         "TAMARA": PaymentMethod.TAMARA,
         "TABBY": PaymentMethod.TABBY,
+
         "WALLET": PaymentMethod.WALLET,
     }
 
@@ -133,6 +298,12 @@ def _resolve_provider(value: str | None, payment_method: str) -> str:
     if payment_method == PaymentMethod.BANK_TRANSFER:
         return PaymentProvider.BANK
 
+    if payment_method == PaymentMethod.TAMARA:
+        return PaymentProvider.TAMARA
+
+    if payment_method == PaymentMethod.TABBY:
+        return PaymentProvider.TABBY
+
     if payment_method in {
         PaymentMethod.CREDIT_CARD,
         PaymentMethod.DEBIT_CARD,
@@ -145,32 +316,140 @@ def _resolve_provider(value: str | None, payment_method: str) -> str:
     return PaymentProvider.INTERNAL
 
 
+# ============================================================
+# Serializers
+# ============================================================
+
+def _serialize_invoice(invoice) -> dict[str, Any] | None:
+    if not invoice:
+        return None
+
+    return {
+        "id": _safe_attr(invoice, "id", None),
+        "invoice_number": _safe_attr(invoice, "invoice_number", ""),
+        "status": _safe_attr(invoice, "status", ""),
+        "total_amount": _safe_attr(invoice, "total_amount", None),
+        "paid_amount": _safe_attr(invoice, "paid_amount", None),
+        "due_amount": _safe_attr(invoice, "due_amount", None),
+    }
+
+
+def _serialize_order(order) -> dict[str, Any] | None:
+    if not order:
+        return None
+
+    return {
+        "id": _safe_attr(order, "id", None),
+        "order_number": (
+            _safe_attr(order, "order_number", "")
+            or _safe_attr(order, "number", "")
+            or _safe_attr(order, "code", "")
+        ),
+        "status": _safe_attr(order, "status", ""),
+        "total_amount": _safe_attr(order, "total_amount", None),
+    }
+
+
+def _serialize_customer(customer) -> dict[str, Any] | None:
+    if not customer:
+        return None
+
+    return {
+        "id": _safe_attr(customer, "id", None),
+        "name": (
+            _safe_attr(customer, "full_name", "")
+            or _safe_attr(customer, "name", "")
+            or _safe_attr(customer, "display_name", "")
+        ),
+        "phone": _safe_attr(customer, "phone", ""),
+        "email": _safe_attr(customer, "email", ""),
+    }
+
+
 def _serialize_payment(payment) -> dict[str, Any]:
     return {
         "id": payment.pk,
-        "payment_number": payment.payment_number,
-        "status": payment.status,
-        "payment_method": payment.payment_method,
-        "provider": payment.provider,
-        "amount": str(payment.amount),
-        "paid_amount": str(payment.paid_amount),
-        "refunded_amount": str(payment.refunded_amount),
-        "currency": payment.currency,
-        "invoice_id": payment.invoice_id,
-        "order_id": payment.order_id,
-        "customer_id": payment.customer_id,
-        "external_reference": payment.external_reference,
-        "transaction_id": payment.transaction_id,
-        "is_treasury_posted": payment.is_treasury_posted,
-        "is_accounting_posted": payment.is_accounting_posted,
-        "created_at": payment.created_at.isoformat() if payment.created_at else None,
-        "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
+        "payment_number": _safe_attr(payment, "payment_number", ""),
+        "status": _safe_attr(payment, "status", ""),
+        "payment_method": _safe_attr(payment, "payment_method", ""),
+        "provider": _safe_attr(payment, "provider", ""),
+        "amount": _safe_attr(payment, "amount", None),
+        "paid_amount": _safe_attr(payment, "paid_amount", None),
+        "refunded_amount": _safe_attr(payment, "refunded_amount", None),
+        "currency": _safe_attr(payment, "currency", "SAR") or "SAR",
+        "invoice_id": _safe_attr(payment, "invoice_id", None),
+        "invoice": _serialize_invoice(_safe_attr(payment, "invoice", None)),
+        "order_id": _safe_attr(payment, "order_id", None),
+        "order": _serialize_order(_safe_attr(payment, "order", None)),
+        "customer_id": _safe_attr(payment, "customer_id", None),
+        "customer": _serialize_customer(_safe_attr(payment, "customer", None)),
+        "external_reference": _safe_attr(payment, "external_reference", ""),
+        "transaction_id": _safe_attr(payment, "transaction_id", ""),
+        "gateway_response_code": _safe_attr(payment, "gateway_response_code", ""),
+        "gateway_message": _safe_attr(payment, "gateway_message", ""),
+        "failure_reason": _safe_attr(payment, "failure_reason", ""),
+        "treasury_movement_reference": _safe_attr(payment, "treasury_movement_reference", ""),
+        "accounting_entry_reference": _safe_attr(payment, "accounting_entry_reference", ""),
+        "is_treasury_posted": bool(_safe_attr(payment, "is_treasury_posted", False)),
+        "is_accounting_posted": bool(_safe_attr(payment, "is_accounting_posted", False)),
+        "initiated_at": _iso_datetime(_safe_attr(payment, "initiated_at", None)),
+        "paid_at": _iso_datetime(_safe_attr(payment, "paid_at", None)),
+        "cancelled_at": _iso_datetime(_safe_attr(payment, "cancelled_at", None)),
+        "created_at": _iso_datetime(_safe_attr(payment, "created_at", None)),
+        "updated_at": _iso_datetime(_safe_attr(payment, "updated_at", None)),
     }
 
+
+def _serialize_confirm_result(confirm_result) -> dict[str, Any] | None:
+    if not confirm_result:
+        return None
+
+    return {
+        "status_before": _safe_attr(confirm_result, "status_before", None),
+        "status_after": _safe_attr(confirm_result, "status_after", None),
+        "treasury": {
+            "requested": bool(_safe_attr(confirm_result, "treasury_requested", False)),
+            "dispatched": bool(_safe_attr(confirm_result, "treasury_dispatched", False)),
+            "message": _safe_attr(confirm_result, "treasury_message", ""),
+        },
+        "accounting": {
+            "requested": bool(_safe_attr(confirm_result, "accounting_post_requested", False)),
+            "dispatched": bool(_safe_attr(confirm_result, "accounting_post_dispatched", False)),
+            "message": _safe_attr(confirm_result, "accounting_post_message", ""),
+        },
+    }
+
+
+# ============================================================
+# API
+# ============================================================
 
 @login_required
 @require_POST
 def create_payment_api(request):
+    """
+    إنشاء دفعة.
+
+    Body:
+    {
+      "invoice_id": 1,
+      "order_id": 1,
+      "customer_id": 1,
+      "amount": "115.00",
+      "payment_method": "cash",
+      "provider": "internal",
+      "currency": "SAR",
+      "external_reference": "BANK-REF-001",
+      "transaction_id": "TXN-001",
+      "notes": "...",
+      "confirm": false,
+      "paid_amount": "115.00",
+      "gateway_response_code": "APPROVED",
+      "gateway_message": "Payment approved",
+      "auto_create_treasury_movement": true,
+      "auto_post_accounting": true
+    }
+    """
     try:
         body = _parse_json_body(request)
 
@@ -182,35 +461,77 @@ def create_payment_api(request):
         order = _get_object_or_none(Order, body.get("order_id"))
         customer = _get_object_or_none(Customer, body.get("customer_id"))
 
+        if Invoice and invoice:
+            invoice_queryset = _filter_by_company_if_supported(
+                Invoice.objects.filter(pk=invoice.pk),
+                Invoice,
+                request,
+            )
+            invoice = invoice_queryset.first()
+
+        if Order and order:
+            order_queryset = _filter_by_company_if_supported(
+                Order.objects.filter(pk=order.pk),
+                Order,
+                request,
+            )
+            order = order_queryset.first()
+
+        if Customer and customer:
+            customer_queryset = _filter_by_company_if_supported(
+                Customer.objects.filter(pk=customer.pk),
+                Customer,
+                request,
+            )
+            customer = customer_queryset.first()
+
         if invoice:
-            order = order or getattr(invoice, "order", None)
-            customer = customer or getattr(invoice, "customer", None)
+            order = order or _safe_attr(invoice, "order", None)
+            customer = customer or _safe_attr(invoice, "customer", None)
 
         if order:
-            customer = customer or getattr(order, "customer", None)
+            customer = customer or _safe_attr(order, "customer", None)
 
         if not order:
-            return _json_error("يجب تحديد الطلب أو فاتورة مرتبطة بطلب.", status=400)
+            return _json_error(
+                "يجب تحديد الطلب أو فاتورة مرتبطة بطلب.",
+                status=400,
+            )
 
         if not customer:
-            return _json_error("يجب تحديد العميل أو اختيار طلب/فاتورة مرتبطة بعميل.", status=400)
+            return _json_error(
+                "يجب تحديد العميل أو اختيار طلب/فاتورة مرتبطة بعميل.",
+                status=400,
+            )
 
         amount = _parse_decimal(
             _first_non_empty(
                 body.get("amount"),
                 body.get("paid_amount"),
-                getattr(invoice, "remaining_amount", None) if invoice else None,
-                getattr(invoice, "total_amount", None) if invoice else None,
-                getattr(invoice, "grand_total", None) if invoice else None,
-                getattr(invoice, "amount", None) if invoice else None,
-            )
+                _resolve_invoice_due_amount(invoice) if invoice else None,
+                _safe_attr(invoice, "total_amount", None) if invoice else None,
+                _safe_attr(invoice, "grand_total", None) if invoice else None,
+                _safe_attr(invoice, "amount", None) if invoice else None,
+            ),
+            field_name="amount",
         )
 
         if amount <= Decimal("0.00"):
-            return _json_error("مبلغ الدفع يجب أن يكون أكبر من صفر.", status=400)
+            return _json_error(
+                "مبلغ الدفع يجب أن يكون أكبر من صفر.",
+                status=400,
+            )
 
-        payment_method = _resolve_payment_method(body.get("payment_method") or body.get("method"))
-        provider = _resolve_provider(body.get("provider"), payment_method)
+        payment_method = _resolve_payment_method(
+            body.get("payment_method")
+            or body.get("method")
+        )
+        provider = _resolve_provider(
+            body.get("provider"),
+            payment_method,
+        )
+
+        currency = _clean_text(body.get("currency") or "SAR").upper() or "SAR"
 
         result = create_payment(
             order=order,
@@ -219,23 +540,45 @@ def create_payment_api(request):
             amount=amount,
             payment_method=payment_method,
             provider=provider,
-            currency=body.get("currency") or "SAR",
-            external_reference=body.get("external_reference") or "",
-            transaction_id=body.get("transaction_id") or "",
-            notes=body.get("notes") or "",
+            currency=currency,
+            external_reference=_clean_text(body.get("external_reference")),
+            transaction_id=_clean_text(body.get("transaction_id")),
+            notes=_clean_text(body.get("notes")),
         )
 
         payment = result.payment
+        confirm_result = None
 
         if _as_bool(body.get("confirm"), default=False):
+            paid_amount = _parse_decimal(
+                _first_non_empty(body.get("paid_amount"), amount),
+                field_name="paid_amount",
+            )
+
             confirm_result = confirm_payment(
                 payment=payment,
                 actor=request.user,
-                paid_amount=_parse_decimal(body.get("paid_amount") or amount),
-                external_reference=body.get("external_reference"),
-                transaction_id=body.get("transaction_id"),
-                gateway_response_code=body.get("gateway_response_code"),
-                gateway_message=body.get("gateway_message"),
+                paid_amount=paid_amount,
+                external_reference=(
+                    _clean_text(body.get("external_reference"))
+                    if "external_reference" in body
+                    else None
+                ),
+                transaction_id=(
+                    _clean_text(body.get("transaction_id"))
+                    if "transaction_id" in body
+                    else None
+                ),
+                gateway_response_code=(
+                    _clean_text(body.get("gateway_response_code"))
+                    if "gateway_response_code" in body
+                    else None
+                ),
+                gateway_message=(
+                    _clean_text(body.get("gateway_message"))
+                    if "gateway_message" in body
+                    else None
+                ),
                 auto_create_treasury_movement=_as_bool(
                     body.get("auto_create_treasury_movement"),
                     default=True,
@@ -246,14 +589,26 @@ def create_payment_api(request):
                 ),
             )
             payment = confirm_result.payment
-            payment.refresh_from_db()
+
+        payment.refresh_from_db()
 
         return _json_success(
             {
-                "message": "تم إنشاء الدفعة بنجاح.",
                 "payment": _serialize_payment(payment),
+                "created": bool(_safe_attr(result, "created", True)),
+                "confirmed": confirm_result is not None,
+                "confirmation": _serialize_confirm_result(confirm_result),
             },
+            message="تم إنشاء الدفعة بنجاح.",
             status=201,
+        )
+
+    except ValidationError as exc:
+        logger.warning("Invalid payment creation request: %s", exc)
+        return _json_error(
+            "بيانات الطلب غير صحيحة.",
+            status=400,
+            errors=getattr(exc, "message_dict", None) or getattr(exc, "messages", None) or str(exc),
         )
 
     except PaymentServiceError as exc:

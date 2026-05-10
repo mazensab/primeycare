@@ -7,6 +7,8 @@
 #    - Cards
 #    - Programs
 #    - Services
+#    - Provider Medical Offers
+#    - Landing / Mobile / Offers Marketing Images
 #    - Pricing Tiers
 #    - Benefits
 # ✅ جاهز للربط مع:
@@ -15,6 +17,8 @@
 #    - Providers / Centers
 #    - Invoices
 #    - Payments
+#    - Landing Pages
+#    - Mobile App
 # ============================================================
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 # ============================================================
@@ -141,6 +146,20 @@ class ProductCategory(models.Model):
 
 # ============================================================
 # 🧩 Product
+# ------------------------------------------------------------
+# المنتج هنا يمثل:
+# - بطاقة عامة
+# - برنامج طبي عام
+# - خدمة طبية
+# - عرض/برنامج مرتبط بمقدم خدمة
+#
+# الصورة الرمزية:
+# - للوحة الإدارة وقوائم النظام.
+#
+# الصورة التسويقية:
+# - للهبوط، العروض، التطبيق، الحملات.
+# - إذا كان المنتج مربوطًا بمقدم خدمة، يتم رفعها لاحقًا إلى:
+#   Google Drive / Provider Folder / Products
 # ============================================================
 
 class Product(models.Model):
@@ -173,6 +192,10 @@ class Product(models.Model):
         BOTH = "both", "Both"
         SERVICE_BASED = "service_based", "Service Based"
         NONE = "none", "None"
+
+    # ========================================================
+    # 🆔 Core Information
+    # ========================================================
 
     code = models.CharField(
         max_length=40,
@@ -213,6 +236,16 @@ class Product(models.Model):
         verbose_name="Category",
     )
 
+    provider = models.ForeignKey(
+        "providers.Provider",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="products",
+        verbose_name="Provider",
+        help_text="Optional provider for provider-specific medical programs or offers.",
+    )
+
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -236,6 +269,10 @@ class Product(models.Model):
         db_index=True,
         verbose_name="Fulfillment Type",
     )
+
+    # ========================================================
+    # 📝 Descriptions
+    # ========================================================
 
     short_description = models.CharField(
         max_length=255,
@@ -265,6 +302,91 @@ class Product(models.Model):
         verbose_name="Tags",
         help_text="Comma-separated tags for quick filtering.",
     )
+
+    # ========================================================
+    # 🖼️ Product Images
+    # --------------------------------------------------------
+    # thumbnail_*: صورة رمزية داخل النظام.
+    # marketing_*: صورة العرض للهبوط والتطبيق والعروض.
+    # ========================================================
+
+    thumbnail_image_url = models.URLField(
+        max_length=1000,
+        blank=True,
+        verbose_name="Thumbnail Image URL",
+        help_text="Small symbolic image used inside the admin/system UI.",
+    )
+
+    thumbnail_image_drive_file_id = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Thumbnail Drive File ID",
+    )
+
+    thumbnail_image_drive_view_url = models.URLField(
+        max_length=1000,
+        blank=True,
+        verbose_name="Thumbnail Drive View URL",
+    )
+
+    thumbnail_image_folder_id = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Thumbnail Folder ID",
+    )
+
+    thumbnail_image_folder_url = models.URLField(
+        max_length=1000,
+        blank=True,
+        verbose_name="Thumbnail Folder URL",
+    )
+
+    thumbnail_image_alt_text = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Thumbnail Alt Text",
+    )
+
+    marketing_image_url = models.URLField(
+        max_length=1000,
+        blank=True,
+        verbose_name="Marketing Image URL",
+        help_text="Large marketing image used for landing, offers, mobile app, and campaigns.",
+    )
+
+    marketing_image_drive_file_id = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Marketing Drive File ID",
+    )
+
+    marketing_image_drive_view_url = models.URLField(
+        max_length=1000,
+        blank=True,
+        verbose_name="Marketing Drive View URL",
+    )
+
+    marketing_image_folder_id = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Marketing Folder ID",
+    )
+
+    marketing_image_folder_url = models.URLField(
+        max_length=1000,
+        blank=True,
+        verbose_name="Marketing Folder URL",
+    )
+
+    marketing_image_alt_text = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Marketing Alt Text",
+    )
+
+    # ========================================================
+    # 💰 Pricing
+    # ========================================================
 
     currency_code = models.CharField(
         max_length=10,
@@ -308,6 +430,10 @@ class Product(models.Model):
         verbose_name="Tax Rate (%)",
     )
 
+    # ========================================================
+    # ⏳ Duration / Product Validity
+    # ========================================================
+
     duration_value = models.PositiveIntegerField(
         default=0,
         verbose_name="Duration Value",
@@ -320,6 +446,78 @@ class Product(models.Model):
         default=DurationUnit.NONE,
         verbose_name="Duration Unit",
     )
+
+    # ========================================================
+    # 📣 Marketing / Offer Controls
+    # ========================================================
+
+    is_offer = models.BooleanField(
+        default=False,
+        db_index=True,
+        verbose_name="Is Offer",
+        help_text="Marks this product as a customer-facing offer or medical program.",
+    )
+
+    offer_title = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Offer Title",
+        help_text="Optional marketing title for landing/offers/mobile display.",
+    )
+
+    offer_subtitle = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Offer Subtitle",
+    )
+
+    offer_badge = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Offer Badge",
+        help_text="Example: Limited Offer, Free Card, New Program.",
+    )
+
+    offer_terms = models.TextField(
+        blank=True,
+        verbose_name="Offer Terms",
+    )
+
+    offer_start_date = models.DateField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Offer Start Date",
+    )
+
+    offer_end_date = models.DateField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Offer End Date",
+    )
+
+    show_on_landing = models.BooleanField(
+        default=False,
+        db_index=True,
+        verbose_name="Show On Landing",
+    )
+
+    show_on_mobile = models.BooleanField(
+        default=False,
+        db_index=True,
+        verbose_name="Show On Mobile",
+    )
+
+    show_on_offers = models.BooleanField(
+        default=False,
+        db_index=True,
+        verbose_name="Show On Offers",
+    )
+
+    # ========================================================
+    # 🛒 Sales Controls
+    # ========================================================
 
     is_public = models.BooleanField(
         default=True,
@@ -393,6 +591,10 @@ class Product(models.Model):
         verbose_name="Sort Order",
     )
 
+    # ========================================================
+    # 🧾 Audit Information
+    # ========================================================
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -430,10 +632,18 @@ class Product(models.Model):
             models.Index(fields=["code"]),
             models.Index(fields=["slug"]),
             models.Index(fields=["name"]),
+            models.Index(fields=["provider"]),
             models.Index(fields=["product_type", "status"]),
+            models.Index(fields=["provider", "product_type"]),
+            models.Index(fields=["provider", "status"]),
             models.Index(fields=["billing_type"]),
             models.Index(fields=["fulfillment_type"]),
             models.Index(fields=["is_public", "is_featured"]),
+            models.Index(fields=["is_offer", "status"]),
+            models.Index(fields=["show_on_landing", "status"]),
+            models.Index(fields=["show_on_mobile", "status"]),
+            models.Index(fields=["show_on_offers", "status"]),
+            models.Index(fields=["offer_start_date", "offer_end_date"]),
             models.Index(fields=["can_be_ordered", "status"]),
             models.Index(fields=["can_be_used_in_contracts", "status"]),
             models.Index(fields=["requires_provider"]),
@@ -488,6 +698,36 @@ class Product(models.Model):
     def is_membership(self) -> bool:
         return self.product_type == self.ProductType.MEMBERSHIP
 
+    @property
+    def is_provider_product(self) -> bool:
+        return self.provider_id is not None
+
+    @property
+    def has_thumbnail_image(self) -> bool:
+        return bool(self.thumbnail_image_url or self.thumbnail_image_drive_file_id)
+
+    @property
+    def has_marketing_image(self) -> bool:
+        return bool(self.marketing_image_url or self.marketing_image_drive_file_id)
+
+    @property
+    def is_current_offer(self) -> bool:
+        if not self.is_offer:
+            return False
+
+        if self.status != self.Status.ACTIVE:
+            return False
+
+        today = timezone.localdate()
+
+        if self.offer_start_date and self.offer_start_date > today:
+            return False
+
+        if self.offer_end_date and self.offer_end_date < today:
+            return False
+
+        return True
+
     def _generate_code(self) -> str:
         prefix_map = {
             self.ProductType.MEMBERSHIP: "MEM",
@@ -534,6 +774,24 @@ class Product(models.Model):
         self.currency_code = (self.currency_code or "SAR").strip().upper()
         self.tags = (self.tags or "").strip()
 
+        self.offer_title = (self.offer_title or "").strip()
+        self.offer_subtitle = (self.offer_subtitle or "").strip()
+        self.offer_badge = (self.offer_badge or "").strip()
+
+        self.thumbnail_image_url = (self.thumbnail_image_url or "").strip()
+        self.thumbnail_image_drive_file_id = (self.thumbnail_image_drive_file_id or "").strip()
+        self.thumbnail_image_drive_view_url = (self.thumbnail_image_drive_view_url or "").strip()
+        self.thumbnail_image_folder_id = (self.thumbnail_image_folder_id or "").strip()
+        self.thumbnail_image_folder_url = (self.thumbnail_image_folder_url or "").strip()
+        self.thumbnail_image_alt_text = (self.thumbnail_image_alt_text or "").strip()
+
+        self.marketing_image_url = (self.marketing_image_url or "").strip()
+        self.marketing_image_drive_file_id = (self.marketing_image_drive_file_id or "").strip()
+        self.marketing_image_drive_view_url = (self.marketing_image_drive_view_url or "").strip()
+        self.marketing_image_folder_id = (self.marketing_image_folder_id or "").strip()
+        self.marketing_image_folder_url = (self.marketing_image_folder_url or "").strip()
+        self.marketing_image_alt_text = (self.marketing_image_alt_text or "").strip()
+
         if not self.name:
             raise ValidationError("Product name is required.")
 
@@ -567,6 +825,11 @@ class Product(models.Model):
         if self.default_agent_commission_rate > Decimal("100.00"):
             raise ValidationError("Default agent commission rate cannot be greater than 100%.")
 
+        if self.offer_start_date and self.offer_end_date and self.offer_end_date < self.offer_start_date:
+            raise ValidationError(
+                {"offer_end_date": "Offer end date must be after offer start date."}
+            )
+
         if self.billing_type == self.BillingType.RECURRING:
             if self.duration_value <= 0:
                 raise ValidationError("Recurring products must have a valid duration value.")
@@ -591,6 +854,9 @@ class Product(models.Model):
 
         if self.requires_provider and not self.can_be_used_in_contracts:
             raise ValidationError("Products that require a provider must be usable in contracts.")
+
+        if self.provider_id:
+            self.requires_provider = True
 
     def save(self, *args, **kwargs):
         self.full_clean()

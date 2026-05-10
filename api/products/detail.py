@@ -5,6 +5,8 @@
 # ✅ Category detail/update/delete
 # ✅ Product detail/update/delete
 # ✅ Supports:
+#    - Provider-linked products
+#    - Landing / Mobile / Offers marketing fields
 #    - Benefits
 #    - Pricing Tiers
 #    - Service Items
@@ -72,7 +74,7 @@ def _validation_errors(exc: ValidationError):
 def _product_queryset():
     return (
         Product.objects
-        .select_related("category")
+        .select_related("category", "provider")
         .prefetch_related(
             "benefits",
             "pricing_tiers",

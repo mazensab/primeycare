@@ -1,21 +1,28 @@
 # ============================================================
 # 📂 payments/services.py
-# 🧠 Primey Care | Payment Services
+# 🧠 Primey Care | Payment Services V2
 # ------------------------------------------------------------
 # ✅ إنشاء دفعة مرتبطة بفاتورة / طلب / عميل
 # ✅ تأكيد الدفع
 # ✅ تحديث حالة الفاتورة قدر الإمكان
-# ✅ جدولة حركة الخزينة بعد commit
 # ✅ جدولة الترحيل المحاسبي بعد commit
+# ✅ جدولة حركة الخزينة بعد commit
+# ✅ ربط الدفعة مع Accounting Backend الجديد
+# ✅ ربط الدفعة مع Treasury Backend الجديد
 # ✅ إلغاء آمن للدفعات غير المؤكدة
 # ✅ منع التكرار قدر الإمكان
+# ------------------------------------------------------------
+# المسار المالي المعتمد:
+# Payment Confirmed
+# → Accounting JournalEntry via accounting.services.post_payment_receipt
+# → TreasuryTransaction via treasury.services.create_payment_receipt_movement
 # ============================================================
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from importlib import import_module
 from typing import Any, Callable, Optional
 
@@ -29,28 +36,39 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# ⚙️ دوال مرشحة للربط مع الخزينة والمحاسبة
+# ⚙️ دوال مرشحة للربط مع المحاسبة والخزينة
 # ============================================================
 
 CANDIDATE_ACCOUNTING_POSTING_TARGETS = [
-    ("accounting.services.posting", "post_payment_confirm"),
-    ("accounting.services.posting", "post_payment_confirmation"),
-    ("accounting.services.posting", "post_payment"),
+    # ✅ الدالة الرسمية الحالية بعد إعادة بناء Backend المالي
+    ("accounting.services", "post_payment_receipt"),
+
+    # توافق خلفي لأي أسماء قديمة إن وجدت
     ("accounting.services", "post_payment_confirm"),
     ("accounting.services", "post_payment_confirmation"),
     ("accounting.services", "post_payment"),
+
+    ("accounting.services.posting", "post_payment_receipt"),
+    ("accounting.services.posting", "post_payment_confirm"),
+    ("accounting.services.posting", "post_payment_confirmation"),
+    ("accounting.services.posting", "post_payment"),
+
+    ("accounting.services.payment_posting", "post_payment_receipt"),
     ("accounting.services.payment_posting", "post_payment_confirm"),
     ("accounting.services.payment_posting", "post_payment_confirmation"),
     ("accounting.services.payment_posting", "post_payment"),
 ]
 
 CANDIDATE_TREASURY_TARGETS = [
-    ("treasury.services", "create_payment_treasury_movement"),
+    # ✅ الدالة الرسمية الحالية بعد إعادة بناء Backend المالي
     ("treasury.services", "create_payment_receipt_movement"),
-    ("treasury.services.movements", "create_payment_treasury_movement"),
+    ("treasury.services", "create_payment_treasury_movement"),
+
+    # توافق خلفي إن وجدت ملفات قديمة
     ("treasury.services.movements", "create_payment_receipt_movement"),
-    ("treasury.services.posting", "create_payment_treasury_movement"),
+    ("treasury.services.movements", "create_payment_treasury_movement"),
     ("treasury.services.posting", "create_payment_receipt_movement"),
+    ("treasury.services.posting", "create_payment_treasury_movement"),
 ]
 
 
@@ -108,14 +126,19 @@ class PaymentCancelResult:
 # 🛠️ Helpers عامة
 # ============================================================
 
-def _safe_decimal(value: Any, default: Decimal = Decimal("0.00")) -> Decimal:
+def _safe_decimal(
+    value: Any,
+    default: Decimal = Decimal("0.00"),
+) -> Decimal:
     if value in (None, ""):
-        return default
+        amount = default
+    else:
+        try:
+            amount = Decimal(str(value))
+        except Exception:
+            amount = default
 
-    try:
-        return Decimal(str(value))
-    except Exception:
-        return default
+    return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _safe_getattr(obj: Any, attr_name: str, default: Any = None) -> Any:
@@ -145,14 +168,22 @@ def _resolve_payment_identifier(payment: Payment) -> str:
     )
 
 
-def _resolve_import_callable(candidates: list[tuple[str, str]]) -> Optional[Callable[..., Any]]:
+def _resolve_import_callable(
+    candidates: list[tuple[str, str]],
+) -> Optional[Callable[..., Any]]:
     for module_path, function_name in candidates:
         try:
             module = import_module(module_path)
             fn = getattr(module, function_name, None)
+
             if callable(fn):
-                logger.info("✅ تم العثور على الدالة: %s.%s", module_path, function_name)
+                logger.info(
+                    "✅ تم العثور على الدالة: %s.%s",
+                    module_path,
+                    function_name,
+                )
                 return fn
+
         except Exception as exc:
             logger.debug(
                 "تعذر تحميل %s.%s أثناء البحث عن الدالة المطلوبة: %s",
@@ -165,7 +196,16 @@ def _resolve_import_callable(candidates: list[tuple[str, str]]) -> Optional[Call
     return None
 
 
-def _call_with_fallbacks(fn: Callable[..., Any], payment: Payment, actor: Any = None) -> Any:
+def _call_accounting_with_fallbacks(
+    fn: Callable[..., Any],
+    payment: Payment,
+    actor: Any = None,
+) -> Any:
+    """
+    استدعاء مرن لدوال الترحيل المحاسبي.
+    الدالة الرسمية الحالية:
+      post_payment_receipt(payment, actor=None)
+    """
     try:
         return fn(payment=payment, actor=actor)
     except TypeError:
@@ -173,6 +213,50 @@ def _call_with_fallbacks(fn: Callable[..., Any], payment: Payment, actor: Any = 
             return fn(payment=payment)
         except TypeError:
             return fn(payment)
+
+
+def _call_treasury_with_fallbacks(
+    fn: Callable[..., Any],
+    payment: Payment,
+    actor: Any = None,
+) -> Any:
+    """
+    استدعاء مرن لدوال الخزينة.
+    الدالة الرسمية الحالية:
+      create_payment_receipt_movement(
+          payment,
+          actor=None,
+          auto_confirm=True,
+          post_to_accounting=False,
+      )
+
+    ملاحظة:
+    - لا نجعل الخزينة ترحل محاسبيًا هنا لأن payments.services
+      يقوم بالترحيل المحاسبي أولًا ثم ينشئ حركة الخزينة.
+    - هذا يمنع الترحيل المكرر.
+    """
+    try:
+        return fn(
+            payment=payment,
+            actor=actor,
+            auto_confirm=True,
+            post_to_accounting=False,
+        )
+    except TypeError:
+        try:
+            return fn(
+                payment=payment,
+                actor=actor,
+                auto_confirm=True,
+            )
+        except TypeError:
+            try:
+                return fn(payment=payment, actor=actor)
+            except TypeError:
+                try:
+                    return fn(payment=payment)
+                except TypeError:
+                    return fn(payment)
 
 
 def _refresh_payment(payment: Payment) -> None:
@@ -201,7 +285,48 @@ def _get_invoice_paid_amount(invoice: Any) -> Decimal:
     )
 
 
-def _set_invoice_status(invoice: Any, paid_amount: Decimal, total_amount: Decimal) -> list[str]:
+def _resolve_payment_total(payment: Payment) -> Decimal:
+    return _safe_decimal(
+        _first_non_empty(
+            _safe_getattr(payment, "amount"),
+            _safe_getattr(payment, "total_amount"),
+            "0.00",
+        )
+    )
+
+
+def _resolve_payment_paid_amount(payment: Payment) -> Decimal:
+    return _safe_decimal(
+        _first_non_empty(
+            _safe_getattr(payment, "paid_amount"),
+            _safe_getattr(payment, "amount"),
+            "0.00",
+        )
+    )
+
+
+def _set_payment_confirmed_status(payment: Payment) -> None:
+    """
+    ضبط حالة الدفعة بناء على paid_amount مقابل amount.
+    """
+    amount = _resolve_payment_total(payment)
+    paid_amount = _resolve_payment_paid_amount(payment)
+
+    if paid_amount <= Decimal("0.00"):
+        return
+
+    if amount > Decimal("0.00") and paid_amount < amount:
+        payment.status = PaymentStatus.PARTIALLY_PAID
+        return
+
+    payment.status = PaymentStatus.PAID
+
+
+def _set_invoice_status(
+    invoice: Any,
+    paid_amount: Decimal,
+    total_amount: Decimal,
+) -> list[str]:
     changed_fields: list[str] = []
 
     if hasattr(invoice, "paid_amount"):
@@ -241,6 +366,7 @@ def _set_invoice_status(invoice: Any, paid_amount: Decimal, total_amount: Decima
 
 def _update_invoice_after_payment(payment: Payment) -> None:
     invoice = getattr(payment, "invoice", None)
+
     if not invoice:
         return
 
@@ -257,6 +383,7 @@ def _update_invoice_after_payment(payment: Payment) -> None:
     )
 
     paid_amount = Decimal("0.00")
+
     for item in confirmed_payments:
         paid_amount += _safe_decimal(item.paid_amount) - _safe_decimal(item.refunded_amount)
 
@@ -283,6 +410,50 @@ def _update_invoice_after_payment(payment: Payment) -> None:
     )
 
 
+def _mark_payment_accounting_posted(
+    payment: Payment,
+    result: Any,
+) -> None:
+    update_fields = ["is_accounting_posted", "updated_at"]
+    payment.is_accounting_posted = True
+
+    reference = _first_non_empty(
+        _safe_getattr(result, "entry_number"),
+        _safe_getattr(result, "journal_number"),
+        _safe_getattr(result, "reference"),
+        _safe_getattr(result, "number"),
+        _safe_getattr(result, "id"),
+    )
+
+    if reference and hasattr(payment, "accounting_entry_reference"):
+        payment.accounting_entry_reference = str(reference)
+        update_fields.append("accounting_entry_reference")
+
+    payment.save(update_fields=list(dict.fromkeys(update_fields)))
+
+
+def _mark_payment_treasury_posted(
+    payment: Payment,
+    result: Any,
+) -> None:
+    update_fields = ["is_treasury_posted", "updated_at"]
+    payment.is_treasury_posted = True
+
+    reference = _first_non_empty(
+        _safe_getattr(result, "transaction_number"),
+        _safe_getattr(result, "reference"),
+        _safe_getattr(result, "movement_number"),
+        _safe_getattr(result, "number"),
+        _safe_getattr(result, "id"),
+    )
+
+    if reference and hasattr(payment, "treasury_movement_reference"):
+        payment.treasury_movement_reference = str(reference)
+        update_fields.append("treasury_movement_reference")
+
+    payment.save(update_fields=list(dict.fromkeys(update_fields)))
+
+
 # ============================================================
 # ✅ التحقق
 # ============================================================
@@ -302,9 +473,14 @@ def validate_payment_for_confirmation(payment: Payment) -> None:
             f"لا يمكن تأكيد الدفعة {payment_id} لأن حالتها الحالية هي {payment.status}."
         )
 
-    if payment.amount <= Decimal("0.00"):
+    if _resolve_payment_total(payment) <= Decimal("0.00"):
         raise PaymentValidationError(
             f"لا يمكن تأكيد الدفعة {payment_id} لأن مبلغها غير صالح: {payment.amount}."
+        )
+
+    if _resolve_payment_paid_amount(payment) <= Decimal("0.00"):
+        raise PaymentValidationError(
+            f"لا يمكن تأكيد الدفعة {payment_id} لأن المبلغ المدفوع غير صالح: {payment.paid_amount}."
         )
 
     try:
@@ -331,7 +507,7 @@ def validate_payment_for_cancel(payment: Payment) -> None:
             f"لا يمكن إلغاء الدفعة {payment_id} لأنها مؤكدة أو مستردة."
         )
 
-    if payment.paid_amount > Decimal("0.00"):
+    if _safe_decimal(payment.paid_amount) > Decimal("0.00"):
         raise PaymentValidationError(
             f"لا يمكن إلغاء الدفعة {payment_id} لأنها تحتوي على مبلغ مدفوع."
         )
@@ -341,13 +517,26 @@ def validate_payment_for_cancel(payment: Payment) -> None:
 # 🏦 حركة الخزينة
 # ============================================================
 
-def dispatch_payment_treasury_movement(payment: Payment, actor: Any = None) -> tuple[bool, str]:
+def dispatch_payment_treasury_movement(
+    payment: Payment,
+    actor: Any = None,
+) -> tuple[bool, str]:
     payment_id = _resolve_payment_identifier(payment)
+
+    if payment is None:
+        raise PaymentTreasuryError("payment is required for treasury movement.")
+
+    payment.refresh_from_db()
 
     if payment.is_treasury_posted:
         message = f"تم تجاوز إنشاء حركة الخزينة لأن الدفعة {payment_id} مرحلة خزينة مسبقًا."
         logger.info(message)
         return True, message
+
+    if payment.status not in {PaymentStatus.PAID, PaymentStatus.PARTIALLY_PAID}:
+        message = f"لا يمكن إنشاء حركة خزينة للدفعة {payment_id} لأنها غير مؤكدة."
+        logger.warning(message)
+        return False, message
 
     treasury_callable = _resolve_import_callable(CANDIDATE_TREASURY_TARGETS)
 
@@ -360,22 +549,16 @@ def dispatch_payment_treasury_movement(payment: Payment, actor: Any = None) -> t
         return False, message
 
     try:
-        result = _call_with_fallbacks(treasury_callable, payment=payment, actor=actor)
-
-        update_fields = ["is_treasury_posted", "updated_at"]
-        payment.is_treasury_posted = True
-
-        reference = _first_non_empty(
-            _safe_getattr(result, "reference"),
-            _safe_getattr(result, "movement_number"),
-            _safe_getattr(result, "number"),
-            _safe_getattr(result, "id"),
+        result = _call_treasury_with_fallbacks(
+            treasury_callable,
+            payment=payment,
+            actor=actor,
         )
-        if reference and hasattr(payment, "treasury_movement_reference"):
-            payment.treasury_movement_reference = str(reference)
-            update_fields.append("treasury_movement_reference")
 
-        payment.save(update_fields=update_fields)
+        payment.refresh_from_db()
+
+        if not payment.is_treasury_posted:
+            _mark_payment_treasury_posted(payment, result)
 
         message = f"تم إنشاء/إطلاق حركة الخزينة بنجاح للدفعة {payment_id}."
         logger.info(message)
@@ -392,42 +575,48 @@ def dispatch_payment_treasury_movement(payment: Payment, actor: Any = None) -> t
 # 📘 الترحيل المحاسبي
 # ============================================================
 
-def dispatch_payment_accounting_post(payment: Payment, actor: Any = None) -> tuple[bool, str]:
+def dispatch_payment_accounting_post(
+    payment: Payment,
+    actor: Any = None,
+) -> tuple[bool, str]:
     payment_id = _resolve_payment_identifier(payment)
+
+    if payment is None:
+        raise PaymentPostingError("payment is required for accounting posting.")
+
+    payment.refresh_from_db()
 
     if payment.is_accounting_posted:
         message = f"تم تجاوز الترحيل المحاسبي لأن الدفعة {payment_id} مرحلة محاسبيًا مسبقًا."
         logger.info(message)
         return True, message
 
+    if payment.status not in {PaymentStatus.PAID, PaymentStatus.PARTIALLY_PAID}:
+        message = f"لا يمكن ترحيل الدفعة {payment_id} محاسبيًا لأنها غير مؤكدة."
+        logger.warning(message)
+        return False, message
+
     posting_callable = _resolve_import_callable(CANDIDATE_ACCOUNTING_POSTING_TARGETS)
 
     if posting_callable is None:
         message = (
             "لم يتم العثور على دالة ترحيل محاسبي للدفعات. "
-            "تحقق من ربط accounting.services.posting."
+            "تحقق من ربط accounting.services.post_payment_receipt."
         )
         logger.warning("Payment %s: %s", payment_id, message)
         return False, message
 
     try:
-        result = _call_with_fallbacks(posting_callable, payment=payment, actor=actor)
-
-        update_fields = ["is_accounting_posted", "updated_at"]
-        payment.is_accounting_posted = True
-
-        reference = _first_non_empty(
-            _safe_getattr(result, "entry_number"),
-            _safe_getattr(result, "journal_number"),
-            _safe_getattr(result, "reference"),
-            _safe_getattr(result, "number"),
-            _safe_getattr(result, "id"),
+        result = _call_accounting_with_fallbacks(
+            posting_callable,
+            payment=payment,
+            actor=actor,
         )
-        if reference and hasattr(payment, "accounting_entry_reference"):
-            payment.accounting_entry_reference = str(reference)
-            update_fields.append("accounting_entry_reference")
 
-        payment.save(update_fields=update_fields)
+        payment.refresh_from_db()
+
+        if not payment.is_accounting_posted:
+            _mark_payment_accounting_posted(payment, result)
 
         message = f"تم الترحيل المحاسبي للدفعة بنجاح للدفعة {payment_id}."
         logger.info(message)
@@ -472,7 +661,7 @@ def create_payment(
         refunded_amount=Decimal("0.00"),
         payment_method=payment_method,
         provider=provider,
-        currency=currency or "SAR",
+        currency=(currency or "SAR").upper(),
         external_reference=external_reference or "",
         transaction_id=transaction_id or "",
         notes=notes or "",
@@ -507,22 +696,47 @@ def confirm_payment(
     """
     تأكيد الدفعة رسميًا مع:
     - تعبئة paid_amount إذا لم تكن معبأة
+    - ضبط status إلى PAID أو PARTIALLY_PAID
     - تثبيت paid_at
     - تحديث الفاتورة المرتبطة
-    - جدولة حركة الخزينة بعد نجاح commit
     - جدولة الترحيل المحاسبي بعد نجاح commit
+    - جدولة حركة الخزينة بعد نجاح commit
+
+    ترتيب on_commit مهم:
+    1) الترحيل المحاسبي
+    2) حركة الخزينة
+
+    السبب:
+    - المحاسبة تنشئ JournalEntry للدفعة.
+    - الخزينة تنشئ TreasuryTransaction وتستطيع لاحقًا الارتباط بمرجع القيد.
     """
     if payment is None:
         raise PaymentValidationError("payment is required.")
 
+    payment = Payment.objects.select_for_update().get(pk=payment.pk)
+
     payment_id = _resolve_payment_identifier(payment)
     status_before = payment.status
 
-    logger.info("🚀 بدء تأكيد الدفعة %s | status_before=%s", payment_id, status_before)
+    logger.info(
+        "🚀 بدء تأكيد الدفعة %s | status_before=%s",
+        payment_id,
+        status_before,
+    )
 
-    amount_to_confirm = _safe_decimal(paid_amount, default=payment.amount)
+    if payment.status in {
+        PaymentStatus.PAID,
+        PaymentStatus.PARTIALLY_PAID,
+    }:
+        logger.info("الدفعة %s مؤكدة مسبقًا.", payment_id)
+
+    amount_to_confirm = _safe_decimal(
+        paid_amount,
+        default=_safe_decimal(payment.amount),
+    )
+
     if amount_to_confirm <= Decimal("0.00"):
-        amount_to_confirm = payment.amount
+        amount_to_confirm = _safe_decimal(payment.amount)
 
     payment.paid_amount = amount_to_confirm
 
@@ -541,6 +755,7 @@ def confirm_payment(
     if not payment.paid_at:
         payment.paid_at = timezone.now()
 
+    _set_payment_confirmed_status(payment)
     validate_payment_for_confirmation(payment)
 
     payment.save(
@@ -564,19 +779,27 @@ def confirm_payment(
     accounting_post_dispatched = False
     accounting_post_message = "لم يُطلب الترحيل المحاسبي."
 
-    if auto_create_treasury_movement:
-        def _create_treasury_after_commit() -> None:
-            dispatch_payment_treasury_movement(payment=payment, actor=actor)
-
-        transaction.on_commit(_create_treasury_after_commit)
-        treasury_message = "تمت جدولة إنشاء حركة الخزينة بعد نجاح commit."
-
     if auto_post_accounting:
-        def _post_accounting_after_commit() -> None:
-            dispatch_payment_accounting_post(payment=payment, actor=actor)
+        def _post_accounting_after_commit(payment_id_for_callback: int = payment.pk) -> None:
+            fresh_payment = Payment.objects.get(pk=payment_id_for_callback)
+            dispatch_payment_accounting_post(
+                payment=fresh_payment,
+                actor=actor,
+            )
 
         transaction.on_commit(_post_accounting_after_commit)
         accounting_post_message = "تمت جدولة الترحيل المحاسبي بعد نجاح commit."
+
+    if auto_create_treasury_movement:
+        def _create_treasury_after_commit(payment_id_for_callback: int = payment.pk) -> None:
+            fresh_payment = Payment.objects.get(pk=payment_id_for_callback)
+            dispatch_payment_treasury_movement(
+                payment=fresh_payment,
+                actor=actor,
+            )
+
+        transaction.on_commit(_create_treasury_after_commit)
+        treasury_message = "تمت جدولة إنشاء حركة الخزينة بعد نجاح commit."
 
     _refresh_payment(payment)
     status_after = payment.status
@@ -616,6 +839,8 @@ def cancel_payment(
     if payment is None:
         raise PaymentValidationError("payment is required.")
 
+    payment = Payment.objects.select_for_update().get(pk=payment.pk)
+
     status_before = payment.status
 
     validate_payment_for_cancel(payment)
@@ -654,21 +879,35 @@ def cancel_payment(
 # 🔁 خدمات مساعدة لإعادة التشغيل عند الحاجة
 # ============================================================
 
-def recreate_payment_treasury_movement(payment: Payment, *, actor: Any = None) -> tuple[bool, str]:
+def recreate_payment_treasury_movement(
+    payment: Payment,
+    *,
+    actor: Any = None,
+) -> tuple[bool, str]:
     if payment is None:
         raise PaymentValidationError("payment is required for treasury recreation.")
 
     payment_id = _resolve_payment_identifier(payment)
     logger.info("🔁 إعادة إنشاء حركة خزينة للدفعة %s", payment_id)
 
-    return dispatch_payment_treasury_movement(payment=payment, actor=actor)
+    return dispatch_payment_treasury_movement(
+        payment=payment,
+        actor=actor,
+    )
 
 
-def repost_payment_accounting(payment: Payment, *, actor: Any = None) -> tuple[bool, str]:
+def repost_payment_accounting(
+    payment: Payment,
+    *,
+    actor: Any = None,
+) -> tuple[bool, str]:
     if payment is None:
         raise PaymentValidationError("payment is required for reposting.")
 
     payment_id = _resolve_payment_identifier(payment)
     logger.info("🔁 إعادة ترحيل محاسبي للدفعة %s", payment_id)
 
-    return dispatch_payment_accounting_post(payment=payment, actor=actor)
+    return dispatch_payment_accounting_post(
+        payment=payment,
+        actor=actor,
+    )

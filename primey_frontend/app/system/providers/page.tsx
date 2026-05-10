@@ -1,50 +1,56 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/providers/page.tsx
+   📂 primey_frontend/app/system/providers/page.tsx
    🧠 Primey Care | Providers Dashboard
    ------------------------------------------------------------
    ✅ المرحلة 17 + المرحلة 2
-   ✅ مبني بنفس نمط المراكز/العملاء المعتمد
-   ✅ لا تظهر مسارات تقنية أو أسماء API داخل الواجهة
-   ✅ لا توجد روابط تقارير داخل الوحدة
+   ✅ لوحة مقدمي الخدمة الرئيسية
+   ✅ تحميل سريع عبر Request واحد فقط
+   ✅ الاعتماد على summary من الباكند بدل تحميل كل الصفحات
+   ✅ إزالة بطاقات البيانات النظامية / الشعار / Drive
+   ✅ إزالة أعمدة الشعار / السجل التجاري / الرقم الضريبي / Drive
+   ✅ Excel export بصيغة .xls HTML Workbook للبيانات المعروضة
+   ✅ Web PDF Print للبيانات المعروضة
    ✅ Error State مستقل
    ✅ Empty State ذكي
    ✅ Skeleton Loading
-   ✅ البحث في صف مستقل
-   ✅ الفلاتر في صف مستقل تحت البحث
-   ✅ Excel export بصيغة .xls HTML Workbook
-   ✅ Web PDF Print
    ✅ حماية الأزرار والطلبات حسب الصلاحيات
-   ✅ fallback آمن لـ system_admin / superadmin
+   ✅ fallback آمن لـ system_admin / superuser
    ✅ دعم عربي / إنجليزي عبر primey-locale
    ✅ استخدام toast من sonner
    ✅ بدون localhost hardcoded
+   ✅ بدون main / min-h-screen / max-w
+   ✅ بدون نصوص تقنية ظاهرة
    ✅ الأرقام تبقى بالإنجليزية
 ============================================================ */
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  BadgeCheck,
+  AlertTriangle,
+  ArrowUpRight,
   Building2,
+  CheckCircle2,
   ClipboardList,
-  Columns3,
+  Copy,
   Download,
   Eye,
+  FileText,
   Hospital,
-  Layers3,
-  ListChecks,
   Loader2,
   MapPin,
-  Phone,
-  Plus,
+  PlusCircle,
   Printer,
   RefreshCcw,
   Search,
   ShieldCheck,
   Sparkles,
   Stethoscope,
+  TestTube2,
+  TrendingUp,
+  UploadCloud,
+  UsersRound,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -94,12 +100,13 @@ type ProviderType =
   | "OTHER"
   | "UNKNOWN";
 
-type StatusFilter = "all" | ProviderStatus;
-type TypeFilter = "all" | ProviderType;
-
-type Provider = {
+type ProviderRow = {
   id: number | string;
   name: string;
+  nameAr: string;
+  nameEn: string;
+  displayNameAr: string;
+  displayNameEn: string;
   code: string;
   providerType: ProviderType;
   status: ProviderStatus;
@@ -108,48 +115,81 @@ type Provider = {
   mobile: string;
   email: string;
   website: string;
+  region: string;
   city: string;
   area: string;
+  street: string;
   address: string;
   googleMapsLink: string;
+  sourceCategory: string;
+  importSource: string;
+  externalReference: string;
+  ordersCount: number;
   notes: string;
   isFeatured: boolean;
   createdAt: string;
   updatedAt: string;
-  raw: Record<string, unknown>;
 };
 
-type ProvidersApiResponse = {
+type ProvidersSummary = {
+  total_providers: number;
+  active_providers: number;
+  inactive_providers: number;
+  suspended_providers: number;
+  draft_providers: number;
+  hospitals_count: number;
+  medical_centers_count: number;
+  pharmacies_count: number;
+  labs_count: number;
+  clinics_count: number;
+  partners_count: number;
+  others_count: number;
+  featured_providers: number;
+  imported_providers: number;
+  manual_providers: number;
+  total_orders: number;
+};
+
+type ProvidersApiEnvelope = {
   ok?: boolean;
   message?: string;
-  count?: number;
+  detail?: string;
+  error?: string;
   results?: unknown[];
   providers?: unknown[];
-  centers?: unknown[];
   items?: unknown[];
   data?:
     | unknown[]
     | {
         results?: unknown[];
         providers?: unknown[];
-        centers?: unknown[];
         items?: unknown[];
       };
+  summary?: Partial<ProvidersSummary>;
+  stats?: Partial<ProvidersSummary>;
 };
 
-type ExcelSheetOptions = {
-  filename: string;
-  worksheetName: string;
-  title: string;
-  locale: AppLocale;
-  summaryRows: Array<[string, string | number]>;
-  filterRows: Array<[string, string | number]>;
-  headers: string[];
-  rows: Array<Array<string | number>>;
+const DEFAULT_SUMMARY: ProvidersSummary = {
+  total_providers: 0,
+  active_providers: 0,
+  inactive_providers: 0,
+  suspended_providers: 0,
+  draft_providers: 0,
+  hospitals_count: 0,
+  medical_centers_count: 0,
+  pharmacies_count: 0,
+  labs_count: 0,
+  clinics_count: 0,
+  partners_count: 0,
+  others_count: 0,
+  featured_providers: 0,
+  imported_providers: 0,
+  manual_providers: 0,
+  total_orders: 0,
 };
 
 /* ============================================================
-   Locale Helpers
+   Locale / API Helpers
 ============================================================ */
 
 function readLocale(): AppLocale {
@@ -162,8 +202,7 @@ function readLocale(): AppLocale {
     if (savedLocale === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
@@ -175,14 +214,10 @@ function applyDocumentLocale(locale: AppLocale) {
     document.documentElement.lang = locale;
     document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
     document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
+  } catch {
+    // ignore
   }
 }
-
-/* ============================================================
-   API Helper
-============================================================ */
 
 function apiUrl(path: string) {
   const base =
@@ -203,7 +238,7 @@ function asRecord(value: unknown): AuthRecord {
   return value && typeof value === "object" ? (value as AuthRecord) : {};
 }
 
-function getNestedRecord(source: AuthRecord, keys: string[]) {
+function getNestedRecord(source: AuthRecord, keys: string[]): AuthRecord {
   for (const key of keys) {
     const value = source[key];
 
@@ -422,126 +457,6 @@ function hasSafePermission(
 }
 
 /* ============================================================
-   Normalizers
-============================================================ */
-
-function normalizeStatus(value: unknown): ProviderStatus {
-  const status = String(value || "").toUpperCase();
-
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "INACTIVE") return "INACTIVE";
-  if (status === "SUSPENDED") return "SUSPENDED";
-  if (status === "DRAFT") return "DRAFT";
-
-  if (value === true) return "ACTIVE";
-  if (value === false) return "INACTIVE";
-
-  return "UNKNOWN";
-}
-
-function normalizeProviderType(value: unknown): ProviderType {
-  const providerType = String(value || "").toUpperCase();
-
-  if (providerType === "HOSPITAL") return "HOSPITAL";
-  if (providerType === "MEDICAL_CENTER") return "MEDICAL_CENTER";
-  if (providerType === "PHARMACY") return "PHARMACY";
-  if (providerType === "PARTNER") return "PARTNER";
-  if (providerType === "LAB") return "LAB";
-  if (providerType === "CLINIC") return "CLINIC";
-  if (providerType === "OTHER") return "OTHER";
-
-  return "UNKNOWN";
-}
-
-function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
-  const direct = obj[key];
-
-  if (direct !== undefined && direct !== null && direct !== "") {
-    return direct;
-  }
-
-  const containers = ["provider", "center", "item", "data", "profile"];
-
-  for (const container of containers) {
-    const nested = obj[container];
-
-    if (nested && typeof nested === "object") {
-      const nestedObj = nested as Record<string, unknown>;
-      const value = nestedObj[key];
-
-      if (value !== undefined && value !== null && value !== "") {
-        return value;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function extractProviders(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-
-  if (!payload || typeof payload !== "object") return [];
-
-  const response = payload as ProvidersApiResponse;
-
-  if (Array.isArray(response.results)) return response.results;
-  if (Array.isArray(response.providers)) return response.providers;
-  if (Array.isArray(response.centers)) return response.centers;
-  if (Array.isArray(response.items)) return response.items;
-  if (Array.isArray(response.data)) return response.data;
-
-  if (response.data && typeof response.data === "object") {
-    if (Array.isArray(response.data.results)) return response.data.results;
-    if (Array.isArray(response.data.providers)) return response.data.providers;
-    if (Array.isArray(response.data.centers)) return response.data.centers;
-    if (Array.isArray(response.data.items)) return response.data.items;
-  }
-
-  return [];
-}
-
-function normalizeProvider(item: unknown): Provider {
-  const obj = (item || {}) as Record<string, unknown>;
-  const id = getObjectValue(obj, "id") ?? "";
-  const name =
-    getObjectValue(obj, "name") ??
-    getObjectValue(obj, "provider_name") ??
-    getObjectValue(obj, "center_name") ??
-    "-";
-
-  return {
-    id: id as number | string,
-    name: String(name || "-"),
-    code: String(
-      getObjectValue(obj, "code") ??
-        getObjectValue(obj, "provider_code") ??
-        (id ? `PRV-${id}` : "-"),
-    ),
-    providerType: normalizeProviderType(
-      getObjectValue(obj, "provider_type") ?? getObjectValue(obj, "type"),
-    ),
-    status: normalizeStatus(getObjectValue(obj, "status")),
-    contactPerson: String(getObjectValue(obj, "contact_person") ?? ""),
-    phone: String(getObjectValue(obj, "phone") ?? ""),
-    mobile: String(getObjectValue(obj, "mobile") ?? ""),
-    email: String(getObjectValue(obj, "email") ?? ""),
-    website: String(getObjectValue(obj, "website") ?? ""),
-    city: String(getObjectValue(obj, "city") ?? ""),
-    area: String(getObjectValue(obj, "area") ?? ""),
-    address: String(getObjectValue(obj, "address") ?? ""),
-    googleMapsLink: String(getObjectValue(obj, "google_maps_link") ?? ""),
-    notes: String(getObjectValue(obj, "notes") ?? ""),
-    isFeatured: Boolean(
-      getObjectValue(obj, "is_featured") ?? getObjectValue(obj, "featured"),
-    ),
-    createdAt: String(getObjectValue(obj, "created_at") ?? ""),
-    updatedAt: String(getObjectValue(obj, "updated_at") ?? ""),
-    raw: obj,
-  };
-}
-
-/* ============================================================
    Dictionary
 ============================================================ */
 
@@ -549,130 +464,113 @@ function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    pageTitle: isArabic ? "إدارة مقدمي الخدمة" : "Providers Management",
-    pageSubtitle: isArabic
-      ? "متابعة مقدمي الخدمة والمراكز، حالة التفعيل، المدن، والتصنيفات التشغيلية."
-      : "Monitor providers and centers, activation status, cities, and operational categories.",
+    title: isArabic ? "مقدمو الخدمة" : "Providers",
+    subtitle: isArabic
+      ? "لوحة تشغيلية لإدارة مقدمي الخدمة والمراكز الطبية والعقود المرتبطة بهم."
+      : "Operational dashboard for providers, medical centers, and linked contracts.",
 
-    addProvider: isArabic ? "إنشاء مقدم خدمة" : "Create Provider",
-    providersList: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
     refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
+    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
+    print: isArabic ? "طباعة" : "Print",
+    createProvider: isArabic ? "إضافة مقدم خدمة" : "Create Provider",
+    providersList: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
+    importProviders: isArabic ? "استيراد الشبكة الطبية" : "Import Medical Network",
+    contracts: isArabic ? "العقود" : "Contracts",
+    centers: isArabic ? "المراكز" : "Centers",
 
+    search: isArabic ? "بحث سريع" : "Quick Search",
     searchPlaceholder: isArabic
-      ? "ابحث باسم مقدم الخدمة أو الكود أو المدينة أو التصنيف أو بيانات التواصل..."
-      : "Search by provider name, code, city, type, or contact details...",
-
-    all: isArabic ? "الكل" : "All",
-    allStatuses: isArabic ? "كل الحالات" : "All Statuses",
-    allTypes: isArabic ? "كل التصنيفات" : "All Types",
-
-    totalProviders: isArabic ? "إجمالي مقدمي الخدمة" : "Total Providers",
-    activeProviders: isArabic ? "النشطون" : "Active Providers",
-    featuredProviders: isArabic ? "المميزون" : "Featured Providers",
-    citiesCount: isArabic ? "المدن" : "Cities",
-
-    latestProviders: isArabic ? "أحدث مقدمي الخدمة" : "Latest Providers",
-    latestProvidersDesc: isArabic
-      ? "عرض مختصر لأحدث مقدمي الخدمة حسب الفلاتر الحالية."
-      : "A compact view of latest providers based on current filters.",
-
-    statusTitle: isArabic ? "حالة مقدمي الخدمة" : "Providers Status",
-    statusDesc: isArabic
-      ? "تحليل سريع لحالة مقدمي الخدمة والمراكز."
-      : "Quick analysis of provider and center statuses.",
-
-    quickAccessTitle: isArabic
-      ? "إجراءات وحدة مقدمي الخدمة"
-      : "Providers Module Actions",
-    quickAccessSubtitle: isArabic
-      ? "اختصارات منظمة للوصول إلى أهم صفحات وحدة مقدمي الخدمة."
-      : "Organized shortcuts to the key providers module pages.",
-    actionListTitle: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
-    actionListDesc: isArabic
-      ? "استعراض جميع مقدمي الخدمة، البحث، الفلترة، وإدارة السجلات."
-      : "Browse all providers, search, filter, and manage records.",
-    actionCreateTitle: isArabic ? "إنشاء مقدم خدمة" : "Create Provider",
-    actionCreateDesc: isArabic
-      ? "إضافة مقدم خدمة أو مركز جديد وربطه لاحقًا بالعقود والخدمات."
-      : "Add a new provider or center and later connect it with contracts and services.",
-    open: isArabic ? "فتح" : "Open",
-    manage: isArabic ? "إدارة" : "Manage",
-    viewFullList: isArabic ? "عرض القائمة الكاملة" : "View Full List",
-
-    active: isArabic ? "نشط" : "Active",
-    draft: isArabic ? "مسودة" : "Draft",
-    suspended: isArabic ? "موقوف" : "Suspended",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    table: {
-      provider: isArabic ? "مقدم الخدمة" : "Provider",
-      type: isArabic ? "التصنيف" : "Type",
-      city: isArabic ? "المدينة" : "City",
-      contact: isArabic ? "التواصل" : "Contact",
-      status: isArabic ? "الحالة" : "Status",
-      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    emptyTitle: isArabic
-      ? "لا يوجد مقدمو خدمة بعد"
-      : "No providers yet",
-    emptyText: isArabic
-      ? "عند إضافة مقدمي خدمة جدد ستظهر بياناتهم هنا مباشرة."
-      : "New providers will appear here once they are created.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو فلاتر الحالة والتصنيف."
-      : "Try changing search keywords, status filters, or type filters.",
+      ? "ابحث بالاسم العربي أو الإنجليزي، الكود، المدينة، الجوال..."
+      : "Search by Arabic/English name, code, city, phone...",
+    viewAll: isArabic ? "عرض الكل" : "View All",
+    details: isArabic ? "التفاصيل" : "Details",
 
     accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
     accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض بيانات مقدمي الخدمة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view providers data. Contact your system administrator if you need access.",
+      ? "لا تملك صلاحية عرض لوحة مقدمي الخدمة."
+      : "You do not have permission to view the providers dashboard.",
 
-    apiError: isArabic
+    loadError: isArabic
       ? "تعذر تحميل بيانات مقدمي الخدمة."
-      : "Unable to load providers data.",
-    apiErrorHint: isArabic
+      : "Unable to load providers.",
+    loadErrorHint: isArabic
       ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
       : "Check the connection or permissions, then try again.",
+    retry: isArabic ? "إعادة المحاولة" : "Retry",
     refreshSuccess: isArabic
-      ? "تم تحديث بيانات مقدمي الخدمة بنجاح."
-      : "Providers data refreshed successfully.",
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
+      ? "تم تحديث بيانات مقدمي الخدمة."
+      : "Providers refreshed successfully.",
+    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
+    printReady: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
+    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
+    copied: isArabic ? "تم النسخ." : "Copied.",
 
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    latestRecords: isArabic ? "آخر السجلات" : "Latest records",
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    reportScope: isArabic ? "نطاق التقرير" : "Report Scope",
-    currentFilteredData: isArabic
-      ? "حسب الفلاتر الحالية"
-      : "Current filtered data",
-    filterSearch: isArabic ? "البحث" : "Search",
-    filterStatus: isArabic ? "فلتر الحالة" : "Status Filter",
-    filterType: isArabic ? "فلتر التصنيف" : "Type Filter",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
-    printTitle: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
+    emptyTitle: isArabic ? "لا يوجد مقدمو خدمة" : "No providers found",
+    emptyText: isArabic
+      ? "ابدأ بإضافة مقدم خدمة جديد أو استيراد الشبكة الطبية من ملف Excel."
+      : "Start by creating a provider or importing the medical network from Excel.",
+    noSearchTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
+    noSearchText: isArabic
+      ? "جرّب تعديل كلمات البحث لعرض نتائج أكثر."
+      : "Try changing the search terms to show more results.",
 
-    typeLabels: {
+    overview: isArabic ? "ملخص مقدمي الخدمة" : "Providers Overview",
+    overviewDesc: isArabic
+      ? "نظرة تشغيلية على مقدمي الخدمة حسب الحالة والتصنيف والطلبات."
+      : "Operational overview by status, type, and orders.",
+    recentProviders: isArabic ? "أحدث مقدمي الخدمة" : "Recent Providers",
+    recentProvidersDesc: isArabic
+      ? "آخر الجهات المسجلة أو المحدثة في النظام."
+      : "Latest providers registered or updated in the system.",
+    typeDistribution: isArabic ? "توزيع التصنيفات" : "Type Distribution",
+    typeDistributionDesc: isArabic
+      ? "تصنيف مقدمي الخدمة المسجلين."
+      : "Classification of registered providers.",
+    quickActions: isArabic ? "إجراءات سريعة" : "Quick Actions",
+    quickActionsDesc: isArabic
+      ? "انتقل إلى صفحات إدارة مقدمي الخدمة."
+      : "Navigate to provider management pages.",
+
+    totalProviders: isArabic ? "إجمالي مقدمي الخدمة" : "Total Providers",
+    activeProviders: isArabic ? "النشطون" : "Active",
+    inactiveProviders: isArabic ? "غير النشطين" : "Inactive",
+    suspendedProviders: isArabic ? "الموقوفون" : "Suspended",
+    draftProviders: isArabic ? "المسودات" : "Drafts",
+    featuredProviders: isArabic ? "المميزون" : "Featured",
+    importedProviders: isArabic ? "مستوردة من الشبكة" : "Imported",
+    manualProviders: isArabic ? "إدخال يدوي" : "Manual",
+    ordersCount: isArabic ? "عدد الطلبات" : "Orders Count",
+
+    hospitals: isArabic ? "المستشفيات" : "Hospitals",
+    medicalCenters: isArabic ? "المراكز الطبية" : "Medical Centers",
+    clinics: isArabic ? "العيادات" : "Clinics",
+    labs: isArabic ? "المختبرات" : "Labs",
+    pharmacies: isArabic ? "الصيدليات" : "Pharmacies",
+    partners: isArabic ? "الشركاء" : "Partners",
+    others: isArabic ? "أخرى" : "Others",
+
+    table: {
+      code: isArabic ? "الكود" : "Code",
+      provider: isArabic ? "مقدم الخدمة" : "Provider",
+      nameAr: isArabic ? "الاسم العربي" : "Arabic Name",
+      nameEn: isArabic ? "الاسم الإنجليزي" : "English Name",
+      type: isArabic ? "التصنيف" : "Type",
+      status: isArabic ? "الحالة" : "Status",
+      location: isArabic ? "الموقع" : "Location",
+      contact: isArabic ? "التواصل" : "Contact",
+      orders: isArabic ? "الطلبات" : "Orders",
+      actions: isArabic ? "الإجراءات" : "Actions",
+    },
+
+    statuses: {
+      ACTIVE: isArabic ? "نشط" : "Active",
+      INACTIVE: isArabic ? "غير نشط" : "Inactive",
+      SUSPENDED: isArabic ? "موقوف" : "Suspended",
+      DRAFT: isArabic ? "مسودة" : "Draft",
+      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
+    } satisfies Record<ProviderStatus, string>,
+
+    types: {
       HOSPITAL: isArabic ? "مستشفى" : "Hospital",
       MEDICAL_CENTER: isArabic ? "مركز طبي" : "Medical Center",
       PHARMACY: isArabic ? "صيدلية" : "Pharmacy",
@@ -682,12 +580,205 @@ function dictionary(locale: AppLocale) {
       OTHER: isArabic ? "أخرى" : "Other",
       UNKNOWN: isArabic ? "غير محدد" : "Unknown",
     } satisfies Record<ProviderType, string>,
+
+    yes: isArabic ? "نعم" : "Yes",
+    no: isArabic ? "لا" : "No",
+    notAvailable: isArabic ? "غير متوفر" : "Not available",
+    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
   };
 }
 
 /* ============================================================
-   UI Helpers
+   Data Helpers
 ============================================================ */
+
+function pickString(...values: unknown[]): string {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+
+    const text = String(value).trim();
+
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function pickNumber(...values: unknown[]): number {
+  for (const value of values) {
+    const numericValue = Number(value);
+
+    if (Number.isFinite(numericValue)) return numericValue;
+  }
+
+  return 0;
+}
+
+function pickBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  const text = String(value || "").trim().toLowerCase();
+
+  return ["1", "true", "yes", "on", "نعم"].includes(text);
+}
+
+function normalizeStatus(value: unknown): ProviderStatus {
+  const status = String(value || "").trim().toUpperCase();
+
+  if (["ACTIVE", "INACTIVE", "SUSPENDED", "DRAFT"].includes(status)) {
+    return status as ProviderStatus;
+  }
+
+  return "UNKNOWN";
+}
+
+function normalizeProviderType(value: unknown): ProviderType {
+  const type = String(value || "").trim().toUpperCase();
+
+  if (
+    [
+      "HOSPITAL",
+      "MEDICAL_CENTER",
+      "PHARMACY",
+      "PARTNER",
+      "LAB",
+      "CLINIC",
+      "OTHER",
+    ].includes(type)
+  ) {
+    return type as ProviderType;
+  }
+
+  return "UNKNOWN";
+}
+
+function normalizeProvider(item: unknown): ProviderRow {
+  const obj = asRecord(item);
+
+  const name = pickString(obj.name, obj.provider_name, obj.title);
+  const nameAr = pickString(obj.name_ar, obj.arabic_name, obj.nameAr);
+  const nameEn = pickString(obj.name_en, obj.english_name, obj.nameEn);
+
+  return {
+    id: pickString(obj.id, obj.pk, obj.provider_id),
+    name,
+    nameAr,
+    nameEn,
+    displayNameAr: pickString(obj.display_name_ar, nameAr, name),
+    displayNameEn: pickString(obj.display_name_en, nameEn, name),
+    code: pickString(obj.code, obj.provider_code),
+    providerType: normalizeProviderType(obj.provider_type ?? obj.type),
+    status: normalizeStatus(obj.status),
+    contactPerson: pickString(obj.contact_person, obj.contactPerson),
+    phone: pickString(obj.phone),
+    mobile: pickString(obj.mobile),
+    email: pickString(obj.email),
+    website: pickString(obj.website),
+    region: pickString(obj.region),
+    city: pickString(obj.city),
+    area: pickString(obj.area),
+    street: pickString(obj.street),
+    address: pickString(obj.address),
+    googleMapsLink: pickString(obj.google_maps_link, obj.googleMapsLink),
+    sourceCategory: pickString(obj.source_category, obj.sourceCategory),
+    importSource: pickString(obj.import_source, obj.importSource),
+    externalReference: pickString(obj.external_reference, obj.externalReference),
+    ordersCount: pickNumber(
+      obj.orders_count,
+      obj.order_count,
+      obj.total_orders,
+      obj.requests_count,
+      obj.completed_orders_count,
+    ),
+    notes: pickString(obj.notes),
+    isFeatured: pickBoolean(obj.is_featured ?? obj.isFeatured),
+    createdAt: pickString(obj.created_at, obj.createdAt),
+    updatedAt: pickString(obj.updated_at, obj.updatedAt),
+  };
+}
+
+function extractProviders(payload: ProvidersApiEnvelope | null): ProviderRow[] {
+  if (!payload) return [];
+
+  const data = asRecord(payload.data);
+
+  const source =
+    payload.results ||
+    payload.items ||
+    payload.providers ||
+    (Array.isArray(payload.data) ? payload.data : undefined) ||
+    (Array.isArray(data.results) ? data.results : undefined) ||
+    (Array.isArray(data.items) ? data.items : undefined) ||
+    (Array.isArray(data.providers) ? data.providers : undefined) ||
+    [];
+
+  return source
+    .map(normalizeProvider)
+    .filter(
+      (provider) =>
+        provider.id || provider.name || provider.nameAr || provider.nameEn,
+    );
+}
+
+function buildSummary(
+  providers: ProviderRow[],
+  remoteSummary?: Partial<ProvidersSummary>,
+): ProvidersSummary {
+  return {
+    total_providers: Number(remoteSummary?.total_providers) || providers.length,
+    active_providers:
+      Number(remoteSummary?.active_providers) ||
+      providers.filter((provider) => provider.status === "ACTIVE").length,
+    inactive_providers:
+      Number(remoteSummary?.inactive_providers) ||
+      providers.filter((provider) => provider.status === "INACTIVE").length,
+    suspended_providers:
+      Number(remoteSummary?.suspended_providers) ||
+      providers.filter((provider) => provider.status === "SUSPENDED").length,
+    draft_providers:
+      Number(remoteSummary?.draft_providers) ||
+      providers.filter((provider) => provider.status === "DRAFT").length,
+    hospitals_count:
+      Number(remoteSummary?.hospitals_count) ||
+      providers.filter((provider) => provider.providerType === "HOSPITAL")
+        .length,
+    medical_centers_count:
+      Number(remoteSummary?.medical_centers_count) ||
+      providers.filter(
+        (provider) => provider.providerType === "MEDICAL_CENTER",
+      ).length,
+    pharmacies_count:
+      Number(remoteSummary?.pharmacies_count) ||
+      providers.filter((provider) => provider.providerType === "PHARMACY")
+        .length,
+    labs_count:
+      Number(remoteSummary?.labs_count) ||
+      providers.filter((provider) => provider.providerType === "LAB").length,
+    clinics_count:
+      Number(remoteSummary?.clinics_count) ||
+      providers.filter((provider) => provider.providerType === "CLINIC").length,
+    partners_count:
+      Number(remoteSummary?.partners_count) ||
+      providers.filter((provider) => provider.providerType === "PARTNER")
+        .length,
+    others_count:
+      Number(remoteSummary?.others_count) ||
+      providers.filter((provider) => provider.providerType === "OTHER").length,
+    featured_providers:
+      Number(remoteSummary?.featured_providers) ||
+      providers.filter((provider) => provider.isFeatured).length,
+    imported_providers:
+      Number(remoteSummary?.imported_providers) ||
+      providers.filter((provider) => provider.importSource).length,
+    manual_providers:
+      Number(remoteSummary?.manual_providers) ||
+      providers.filter((provider) => !provider.importSource).length,
+    total_orders:
+      Number(remoteSummary?.total_orders) ||
+      providers.reduce((total, provider) => total + provider.ordersCount, 0),
+  };
+}
 
 function formatNumber(value: number | string): string {
   const numericValue = Number(value);
@@ -699,20 +790,6 @@ function formatNumber(value: number | string): string {
   }).format(numericValue);
 }
 
-function formatDate(value: string): string {
-  if (!value) return "-";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return "-";
-
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
-}
-
 function escapeHtml(value: string | number) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -722,326 +799,188 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function percent(value: number, total: number) {
-  if (!total) return 0;
-  return Math.min(100, Math.max(0, Math.round((value / total) * 100)));
+function providerTypeLabel(type: ProviderType, locale: AppLocale) {
+  return dictionary(locale).types[type] || dictionary(locale).types.UNKNOWN;
 }
 
-function isValidProviderId(id: Provider["id"]) {
-  const value = String(id || "").trim();
-
-  return value.length > 0 && value !== "-" && value !== "undefined";
-}
-
-function statusLabel(status: ProviderStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<ProviderStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
-    SUSPENDED: t.suspended,
-    DRAFT: t.draft,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function typeLabel(type: ProviderType, locale: AppLocale) {
-  return dictionary(locale).typeLabels[type];
-}
-
-function statusBadge(status: ProviderStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "DRAFT") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "SUSPENDED") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "INACTIVE") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
+function providerStatusLabel(status: ProviderStatus, locale: AppLocale) {
   return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
+    dictionary(locale).statuses[status] || dictionary(locale).statuses.UNKNOWN
   );
 }
 
-function providerIcon(type: ProviderType): LucideIcon {
+function getProviderIcon(type: ProviderType): LucideIcon {
   if (type === "HOSPITAL") return Hospital;
   if (type === "MEDICAL_CENTER") return Stethoscope;
-  if (type === "PHARMACY") return ShieldCheck;
-  if (type === "LAB") return Layers3;
+  if (type === "LAB") return TestTube2;
   if (type === "CLINIC") return Stethoscope;
+  if (type === "PHARMACY") return ShieldCheck;
 
   return Building2;
 }
 
-/* ============================================================
-   Skeleton
-============================================================ */
+function getStatusBadgeClass(status: ProviderStatus) {
+  if (status === "ACTIVE") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
 
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+  if (status === "SUSPENDED") {
+    return "border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-50";
+  }
+
+  if (status === "DRAFT") {
+    return "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  if (status === "INACTIVE") {
+    return "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-50";
+  }
+
+  return "border-slate-200 bg-white text-slate-700";
 }
 
-function SummaryCardsSkeleton() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-2">
-                <SkeletonLine className="h-7 w-20" />
-                <SkeletonLine className="h-4 w-32" />
-              </div>
-              <SkeletonLine className="h-10 w-10 rounded-xl" />
-            </div>
-            <div className="mt-4 flex items-center gap-2">
-              <SkeletonLine className="h-3 w-8" />
-              <SkeletonLine className="h-2 flex-1" />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
-}
+function copyText(value: string, successMessage: string) {
+  if (!value) return;
 
-function StatusCardsSkeleton() {
-  return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <div
-          key={index}
-          className="space-y-3 rounded-xl border bg-background/70 p-3"
-        >
-          <SkeletonLine className="h-7 w-14" />
-          <SkeletonLine className="h-4 w-20" />
-          <SkeletonLine className="h-2 w-full" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
-  return (
-    <>
-      {Array.from({ length: 6 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 0
-                    ? "h-9 w-56 rounded-lg"
-                    : "h-4 w-24 rounded-lg"
-                }
-              />
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </>
-  );
+  navigator.clipboard
+    ?.writeText(value)
+    .then(() => toast.success(successMessage))
+    .catch(() => toast.success(successMessage));
 }
 
 /* ============================================================
    Export / Print
 ============================================================ */
 
-function downloadExcel(options: ExcelSheetOptions) {
-  const dir = options.locale === "ar" ? "rtl" : "ltr";
-  const align = options.locale === "ar" ? "right" : "left";
-  const colspan = Math.max(options.headers.length, 2);
+function buildExcelWorkbook({
+  locale,
+  providers,
+  summary,
+}: {
+  locale: AppLocale;
+  providers: ProviderRow[];
+  summary: ProvidersSummary;
+}) {
+  const t = dictionary(locale);
+  const isArabic = locale === "ar";
 
-  const summaryHtml = options.summaryRows
+  const summaryRows: Array<[string, string | number]> = [
+    [t.totalProviders, summary.total_providers],
+    [t.activeProviders, summary.active_providers],
+    [t.featuredProviders, summary.featured_providers],
+    [t.importedProviders, summary.imported_providers],
+    [t.ordersCount, summary.total_orders],
+  ];
+
+  const summaryHtml = summaryRows
     .map(
       ([label, value]) => `
         <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
+          <td style="font-weight:700;background:#f3f4f6;">${escapeHtml(label)}</td>
+          <td>${escapeHtml(value)}</td>
+        </tr>
+      `,
     )
     .join("");
 
-  const filterHtml = options.filterRows
+  const rows = providers
     .map(
-      ([label, value]) => `
+      (provider) => `
         <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
+          <td>${escapeHtml(provider.code || "-")}</td>
+          <td>${escapeHtml(provider.nameAr || provider.displayNameAr || "-")}</td>
+          <td>${escapeHtml(provider.nameEn || provider.displayNameEn || "-")}</td>
+          <td>${escapeHtml(providerTypeLabel(provider.providerType, locale))}</td>
+          <td>${escapeHtml([provider.region, provider.city, provider.area].filter(Boolean).join(" - ") || "-")}</td>
+          <td>${escapeHtml(provider.mobile || provider.phone || provider.email || "-")}</td>
+          <td>${escapeHtml(provider.ordersCount)}</td>
+          <td>${escapeHtml(providerStatusLabel(provider.status, locale))}</td>
+          <td>${escapeHtml(provider.isFeatured ? t.yes : t.no)}</td>
+        </tr>
+      `,
     )
     .join("");
 
-  const headerHtml = options.headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
-    .join("");
-
-  const rowsHtml = options.rows
-    .map(
-      (row) => `
-        <tr>
-          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
+  return `
+    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
       <head>
-        <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(options.worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${options.locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-        <style>
-          body {
-            direction: ${dir};
-            font-family: Arial, sans-serif;
-          }
-          table {
-            border-collapse: collapse;
-            width: 100%;
-          }
-          th,
-          td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th {
-            background: #d8ecfb;
-            color: #000000;
-            font-weight: 700;
-          }
-          .title {
-            font-size: 20px;
-            font-weight: 700;
-            text-align: center;
-            background: #ffffff;
-          }
-          .section {
-            font-weight: 700;
-            background: #eef6ff;
-          }
-          .summary-label {
-            font-weight: 700;
-            background: #f8fafc;
-            width: 240px;
-          }
-          .summary-value {
-            font-weight: 700;
-          }
-        </style>
+        <meta charset="utf-8" />
       </head>
-      <body dir="${dir}">
-        <table>
-          <tr>
-            <td class="title" colspan="${colspan}">
-              ${escapeHtml(options.title)}
-            </td>
-          </tr>
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "ملخص القائمة" : "List Summary"}
-          </td></tr>
-          ${summaryHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "الفلاتر المستخدمة" : "Applied Filters"}
-          </td></tr>
-          ${filterHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr>${headerHtml}</tr>
-          ${rowsHtml}
+      <body>
+        <h2>${escapeHtml(t.title)}</h2>
+        <table border="1">
+          <tbody>${summaryHtml}</tbody>
+        </table>
+        <br />
+        <table border="1">
+          <thead>
+            <tr>
+              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.code)}</th>
+              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.nameAr)}</th>
+              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.nameEn)}</th>
+              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.type)}</th>
+              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.location)}</th>
+              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.contact)}</th>
+              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.orders)}</th>
+              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.status)}</th>
+              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.featuredProviders)}</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
         </table>
       </body>
-    </html>`;
+    </html>
+  `;
+}
 
-  const blob = new Blob([workbook], {
+function downloadExcelFile(options: {
+  locale: AppLocale;
+  providers: ProviderRow[];
+  summary: ProvidersSummary;
+}) {
+  const html = buildExcelWorkbook(options);
+  const blob = new Blob(["\ufeff", html], {
     type: "application/vnd.ms-excel;charset=utf-8;",
   });
-
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
+  const link = document.createElement("a");
 
-  anchor.href = url;
-  anchor.download = options.filename;
-  anchor.click();
+  link.href = url;
+  link.download = `primey-care-providers-${new Date()
+    .toISOString()
+    .slice(0, 10)}.xls`;
 
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
 
 function buildPrintHtml({
   locale,
-  title,
-  rows,
-  t,
+  providers,
+  summary,
 }: {
   locale: AppLocale;
-  title: string;
-  rows: Provider[];
-  t: ReturnType<typeof dictionary>;
+  providers: ProviderRow[];
+  summary: ProvidersSummary;
 }) {
+  const t = dictionary(locale);
   const isArabic = locale === "ar";
   const now = new Date().toLocaleString("en-US");
 
-  const tableRows = rows
+  const rows = providers
     .map(
-      (provider, index) => `
+      (provider) => `
         <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(provider.name || "-")}</td>
           <td>${escapeHtml(provider.code || "-")}</td>
-          <td>${escapeHtml(typeLabel(provider.providerType, locale))}</td>
-          <td>${escapeHtml(provider.city || "-")}</td>
-          <td>${escapeHtml(provider.phone || provider.mobile || "-")}</td>
-          <td>${escapeHtml(statusLabel(provider.status, locale))}</td>
-          <td>${escapeHtml(formatDate(provider.createdAt))}</td>
+          <td>${escapeHtml(provider.nameAr || provider.displayNameAr || "-")}</td>
+          <td>${escapeHtml(provider.nameEn || provider.displayNameEn || "-")}</td>
+          <td>${escapeHtml(providerTypeLabel(provider.providerType, locale))}</td>
+          <td>${escapeHtml([provider.region, provider.city, provider.area].filter(Boolean).join(" - ") || "-")}</td>
+          <td>${escapeHtml(provider.mobile || provider.phone || provider.email || "-")}</td>
+          <td>${escapeHtml(provider.ordersCount)}</td>
+          <td>${escapeHtml(providerStatusLabel(provider.status, locale))}</td>
         </tr>
       `,
     )
@@ -1052,7 +991,7 @@ function buildPrintHtml({
     <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
       <head>
         <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
+        <title>${escapeHtml(t.title)}</title>
         <style>
           * { box-sizing: border-box; }
           body {
@@ -1064,95 +1003,105 @@ function buildPrintHtml({
             direction: ${isArabic ? "rtl" : "ltr"};
             text-align: ${isArabic ? "right" : "left"};
           }
-          .print-header {
+          .header {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
             gap: 16px;
-            margin-bottom: 18px;
             border-bottom: 1px solid #e5e7eb;
             padding-bottom: 14px;
+            margin-bottom: 18px;
           }
           h1 {
             margin: 0;
-            font-size: 22px;
+            font-size: 24px;
             font-weight: 800;
           }
           .meta {
             margin-top: 8px;
             color: #6b7280;
             font-size: 12px;
-            line-height: 1.8;
           }
-          .badge {
-            display: inline-block;
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            color: #374151;
+          .cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 18px;
+          }
+          .card {
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 12px;
+          }
+          .card span {
+            display: block;
+            color: #6b7280;
+            font-size: 11px;
+          }
+          .card strong {
+            display: block;
+            margin-top: 6px;
+            font-size: 18px;
           }
           table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 12px;
-          }
-          th {
-            background: #f3f4f6;
-            color: #111827;
-            font-weight: 700;
+            font-size: 11px;
           }
           th,
           td {
             border: 1px solid #e5e7eb;
-            padding: 9px 8px;
+            padding: 8px;
             text-align: ${isArabic ? "right" : "left"};
             vertical-align: top;
           }
-          tr:nth-child(even) td {
-            background: #fafafa;
-          }
-          @page {
-            size: A4 landscape;
-            margin: 12mm;
-          }
-          @media print {
-            body { padding: 0; }
-          }
+          th { background: #f3f4f6; }
+          @page { size: A4 landscape; margin: 10mm; }
+          @media print { body { padding: 0; } }
         </style>
       </head>
 
       <body>
-        <div class="print-header">
+        <div class="header">
           <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
+            <h1>${escapeHtml(t.title)}</h1>
+            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
           </div>
-          <div class="badge">Primey Care</div>
+          <strong>Primey Care</strong>
+        </div>
+
+        <div class="cards">
+          <div class="card">
+            <span>${escapeHtml(t.totalProviders)}</span>
+            <strong>${escapeHtml(formatNumber(summary.total_providers))}</strong>
+          </div>
+          <div class="card">
+            <span>${escapeHtml(t.activeProviders)}</span>
+            <strong>${escapeHtml(formatNumber(summary.active_providers))}</strong>
+          </div>
+          <div class="card">
+            <span>${escapeHtml(t.importedProviders)}</span>
+            <strong>${escapeHtml(formatNumber(summary.imported_providers))}</strong>
+          </div>
+          <div class="card">
+            <span>${escapeHtml(t.ordersCount)}</span>
+            <strong>${escapeHtml(formatNumber(summary.total_orders))}</strong>
+          </div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th>#</th>
-              <th>${escapeHtml(t.table.provider)}</th>
-              <th>Code</th>
+              <th>${escapeHtml(t.table.code)}</th>
+              <th>${escapeHtml(t.table.nameAr)}</th>
+              <th>${escapeHtml(t.table.nameEn)}</th>
               <th>${escapeHtml(t.table.type)}</th>
-              <th>${escapeHtml(t.table.city)}</th>
+              <th>${escapeHtml(t.table.location)}</th>
               <th>${escapeHtml(t.table.contact)}</th>
+              <th>${escapeHtml(t.table.orders)}</th>
               <th>${escapeHtml(t.table.status)}</th>
-              <th>${escapeHtml(t.table.createdAt)}</th>
             </tr>
           </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="8" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
+          <tbody>${rows}</tbody>
         </table>
 
         <script>
@@ -1167,6 +1116,155 @@ function buildPrintHtml({
 }
 
 /* ============================================================
+   UI Helpers
+============================================================ */
+
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="space-y-3 p-5">
+              <SkeletonLine className="h-4 w-28" />
+              <SkeletonLine className="h-8 w-20" />
+              <SkeletonLine className="h-3 w-36" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="space-y-3 p-5">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
+            ))}
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="space-y-3 p-5">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <SkeletonLine key={index} className="h-10 w-full rounded-xl" />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function KpiCard({
+  icon: Icon,
+  title,
+  value,
+  description,
+}: {
+  icon: LucideIcon;
+  title: string;
+  value: number;
+  description: string;
+}) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm text-muted-foreground">{title}</p>
+            <p className="mt-2 text-2xl font-bold tracking-tight">
+              {formatNumber(value)}
+            </p>
+            <p className="mt-1 truncate text-xs text-muted-foreground">
+              {description}
+            </p>
+          </div>
+
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-muted">
+            <Icon className="h-5 w-5" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ActionCard({
+  href,
+  icon: Icon,
+  title,
+  description,
+}: {
+  href: string;
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group block rounded-2xl border bg-background p-4 transition hover:border-primary/40 hover:bg-muted/30"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+            <Icon className="h-5 w-5" />
+          </div>
+
+          <div>
+            <p className="font-semibold">{title}</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {description}
+            </p>
+          </div>
+        </div>
+
+        <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:text-primary" />
+      </div>
+    </Link>
+  );
+}
+
+function TypeDistributionRow({
+  icon: Icon,
+  label,
+  value,
+  total,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: number;
+  total: number;
+}) {
+  const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+
+  return (
+    <div className="space-y-2 rounded-xl border bg-background p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
+            <Icon className="h-4 w-4" />
+          </div>
+          <span className="text-sm font-medium">{label}</span>
+        </div>
+
+        <span className="text-sm font-bold">{formatNumber(value)}</span>
+      </div>
+
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary"
+          style={{ width: `${percentage}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    Page
 ============================================================ */
 
@@ -1174,11 +1272,10 @@ export default function SystemProvidersPage() {
   const auth = useAuth() as unknown;
 
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [providers, setProviders] = useState<Provider[]>([]);
+  const [providers, setProviders] = useState<ProviderRow[]>([]);
+  const [summary, setSummary] = useState<ProvidersSummary>(DEFAULT_SUMMARY);
+  const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [errorMessage, setErrorMessage] = useState("");
 
   const t = useMemo(() => dictionary(locale), [locale]);
@@ -1187,277 +1284,38 @@ export default function SystemProvidersPage() {
 
   const canViewProviders = hasSafePermission(
     auth,
-    ["providers.view", "providers.list", "centers.view", "centers.list"],
+    ["providers.view", "providers.list"],
     "view",
   );
 
   const canCreateProviders = hasSafePermission(
     auth,
-    ["providers.create", "centers.create"],
+    ["providers.create"],
+    "action",
+  );
+
+  const canImportProviders = hasSafePermission(
+    auth,
+    ["providers.import", "providers.create"],
     "action",
   );
 
   const canExportProviders = hasSafePermission(
     auth,
-    ["providers.export", "centers.export", "reports.export"],
+    ["providers.export", "reports.export"],
     "action",
   );
 
   const canPrintProviders = hasSafePermission(
     auth,
-    ["providers.print", "centers.print", "reports.print"],
+    ["providers.print", "reports.print"],
     "action",
   );
 
-  const canViewProviderDetails = hasSafePermission(
+  const canViewContracts = hasSafePermission(
     auth,
-    ["providers.view", "providers.detail", "centers.view", "centers.detail"],
+    ["contracts.view", "contracts.list"],
     "view",
-  );
-
-  const stats = useMemo(() => {
-    const total = providers.length;
-    const active = providers.filter((item) => item.status === "ACTIVE").length;
-    const inactive = providers.filter((item) => item.status === "INACTIVE").length;
-    const suspended = providers.filter(
-      (item) => item.status === "SUSPENDED",
-    ).length;
-    const draft = providers.filter((item) => item.status === "DRAFT").length;
-    const featured = providers.filter((item) => item.isFeatured).length;
-    const cities = new Set(
-      providers.map((item) => item.city.trim()).filter(Boolean),
-    ).size;
-
-    return {
-      total,
-      active,
-      inactive,
-      suspended,
-      draft,
-      featured,
-      cities,
-    };
-  }, [providers]);
-
-  const filteredProviders = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
-
-    return providers.filter((provider) => {
-      const matchesStatus =
-        statusFilter === "all" ? true : provider.status === statusFilter;
-
-      const matchesType =
-        typeFilter === "all" ? true : provider.providerType === typeFilter;
-
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            provider.name,
-            provider.code,
-            provider.city,
-            provider.area,
-            provider.address,
-            provider.contactPerson,
-            provider.phone,
-            provider.mobile,
-            provider.email,
-            provider.status,
-            provider.providerType,
-            statusLabel(provider.status, locale),
-            typeLabel(provider.providerType, locale),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
-
-      return matchesStatus && matchesType && matchesQuery;
-    });
-  }, [locale, providers, query, statusFilter, typeFilter]);
-
-  const latestProviders = useMemo(
-    () =>
-      [...filteredProviders]
-        .sort((a, b) => {
-          const first = new Date(a.createdAt || a.updatedAt || 0).getTime();
-          const second = new Date(b.createdAt || b.updatedAt || 0).getTime();
-
-          return second - first;
-        })
-        .slice(0, 8),
-    [filteredProviders],
-  );
-
-  const hasSearchOrFilter =
-    query.trim().length > 0 || statusFilter !== "all" || typeFilter !== "all";
-
-  const statusFilters = useMemo(
-    () => [
-      {
-        value: "all" as StatusFilter,
-        label: t.allStatuses,
-        count: providers.length,
-      },
-      {
-        value: "ACTIVE" as StatusFilter,
-        label: t.active,
-        count: stats.active,
-      },
-      {
-        value: "DRAFT" as StatusFilter,
-        label: t.draft,
-        count: stats.draft,
-      },
-      {
-        value: "SUSPENDED" as StatusFilter,
-        label: t.suspended,
-        count: stats.suspended,
-      },
-      {
-        value: "INACTIVE" as StatusFilter,
-        label: t.inactive,
-        count: stats.inactive,
-      },
-    ],
-    [providers.length, stats, t],
-  );
-
-  const typeFilters = useMemo(
-    () => [
-      {
-        value: "all" as TypeFilter,
-        label: t.allTypes,
-        count: providers.length,
-      },
-      ...(
-        [
-          "HOSPITAL",
-          "MEDICAL_CENTER",
-          "PHARMACY",
-          "LAB",
-          "CLINIC",
-          "PARTNER",
-          "OTHER",
-        ] as ProviderType[]
-      ).map((type) => ({
-        value: type as TypeFilter,
-        label: typeLabel(type, locale),
-        count: providers.filter((item) => item.providerType === type).length,
-      })),
-    ],
-    [locale, providers, t.allTypes],
-  );
-
-  const summaryCards = useMemo(
-    () => [
-      {
-        title: t.totalProviders,
-        value: stats.total,
-        icon: Building2,
-        helper: t.activeProviders,
-        helperValue: formatNumber(stats.active),
-        percent: stats.total > 0 ? 100 : 0,
-      },
-      {
-        title: t.activeProviders,
-        value: stats.active,
-        icon: BadgeCheck,
-        helper: t.totalProviders,
-        helperValue: `${percent(stats.active, stats.total)}%`,
-        percent: percent(stats.active, stats.total),
-      },
-      {
-        title: t.featuredProviders,
-        value: stats.featured,
-        icon: Sparkles,
-        helper: t.totalProviders,
-        helperValue: `${percent(stats.featured, stats.total)}%`,
-        percent: percent(stats.featured, stats.total),
-      },
-      {
-        title: t.citiesCount,
-        value: stats.cities,
-        icon: MapPin,
-        helper: t.totalProviders,
-        helperValue: formatNumber(stats.total),
-        percent: stats.total > 0 ? 100 : 0,
-      },
-    ],
-    [stats, t],
-  );
-
-  const statusCards = useMemo(
-    () => [
-      {
-        title: t.active,
-        value: stats.active,
-        icon: BadgeCheck,
-        percent: percent(stats.active, stats.total),
-        filter: "ACTIVE" as StatusFilter,
-      },
-      {
-        title: t.draft,
-        value: stats.draft,
-        icon: Layers3,
-        percent: percent(stats.draft, stats.total),
-        filter: "DRAFT" as StatusFilter,
-      },
-      {
-        title: t.suspended,
-        value: stats.suspended,
-        icon: XCircle,
-        percent: percent(stats.suspended, stats.total),
-        filter: "SUSPENDED" as StatusFilter,
-      },
-      {
-        title: t.inactive,
-        value: stats.inactive,
-        icon: ShieldCheck,
-        percent: percent(stats.inactive, stats.total),
-        filter: "INACTIVE" as StatusFilter,
-      },
-      {
-        title: t.featuredProviders,
-        value: stats.featured,
-        icon: Sparkles,
-        percent: percent(stats.featured, stats.total),
-        filter: "all" as StatusFilter,
-      },
-    ],
-    [stats, t],
-  );
-
-  const moduleActions = useMemo(
-    () =>
-      [
-        canViewProviders
-          ? {
-              title: t.actionListTitle,
-              description: t.actionListDesc,
-              href: "/system/providers/list",
-              icon: ListChecks,
-              badge: `${formatNumber(stats.total)}`,
-              cta: t.manage,
-            }
-          : null,
-        canCreateProviders
-          ? {
-              title: t.actionCreateTitle,
-              description: t.actionCreateDesc,
-              href: "/system/providers/create",
-              icon: Plus,
-              badge: isArabic ? "جديد" : "New",
-              cta: t.open,
-            }
-          : null,
-      ].filter(Boolean) as Array<{
-        title: string;
-        description: string;
-        href: string;
-        icon: LucideIcon;
-        badge: string;
-        cta: string;
-      }>,
-    [canCreateProviders, canViewProviders, isArabic, stats.total, t],
   );
 
   const loadProviders = useCallback(
@@ -1465,6 +1323,7 @@ export default function SystemProvidersPage() {
       if (!canViewProviders) {
         setIsLoading(false);
         setProviders([]);
+        setSummary(DEFAULT_SUMMARY);
         return;
       }
 
@@ -1472,23 +1331,35 @@ export default function SystemProvidersPage() {
         setIsLoading(true);
         setErrorMessage("");
 
-        const response = await fetch(apiUrl("/api/providers/?page_size=100"), {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
+        const response = await fetch(
+          apiUrl("/api/providers/?page=1&page_size=8&ordering=-created_at"),
+          {
+            method: "GET",
+            credentials: "include",
+            headers: {
+              Accept: "application/json",
+            },
           },
-        });
+        );
 
         const payload = (await response.json().catch(() => null)) as
-          | ProvidersApiResponse
+          | ProvidersApiEnvelope
           | null;
 
         if (!response.ok || payload?.ok === false) {
-          throw new Error(payload?.message || `HTTP ${response.status}`);
+          throw new Error(
+            payload?.message ||
+              payload?.detail ||
+              payload?.error ||
+              `HTTP ${response.status}`,
+          );
         }
 
-        setProviders(extractProviders(payload).map(normalizeProvider));
+        const rows = extractProviders(payload);
+        const remoteSummary = payload?.summary || payload?.stats;
+
+        setProviders(rows);
+        setSummary(buildSummary(rows, remoteSummary));
 
         if (showToast) {
           toast.success(t.refreshSuccess);
@@ -1496,95 +1367,121 @@ export default function SystemProvidersPage() {
       } catch (error) {
         console.error("Failed to load providers:", error);
         setProviders([]);
-        setErrorMessage(t.apiError);
-        toast.error(t.apiError);
+        setSummary(DEFAULT_SUMMARY);
+        setErrorMessage(t.loadError);
+        toast.error(t.loadError);
       } finally {
         setIsLoading(false);
       }
     },
-    [canViewProviders, t.apiError, t.refreshSuccess],
+    [canViewProviders, t.loadError, t.refreshSuccess],
   );
 
-  function clearFilters() {
-    setQuery("");
-    setStatusFilter("all");
-    setTypeFilter("all");
-  }
+  const filteredProviders = useMemo(() => {
+    const query = search.trim().toLowerCase();
 
-  function exportProviders() {
+    if (!query) return providers;
+
+    return providers.filter((provider) => {
+      const haystack = [
+        provider.name,
+        provider.nameAr,
+        provider.nameEn,
+        provider.displayNameAr,
+        provider.displayNameEn,
+        provider.code,
+        provider.region,
+        provider.city,
+        provider.area,
+        provider.street,
+        provider.address,
+        provider.phone,
+        provider.mobile,
+        provider.email,
+        provider.contactPerson,
+        provider.sourceCategory,
+        provider.externalReference,
+        providerTypeLabel(provider.providerType, locale),
+        providerStatusLabel(provider.status, locale),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(query);
+    });
+  }, [locale, providers, search]);
+
+  const recentProviders = useMemo(() => {
+    return [...filteredProviders]
+      .sort((a, b) => {
+        const left = new Date(a.createdAt || a.updatedAt).getTime() || 0;
+        const right = new Date(b.createdAt || b.updatedAt).getTime() || 0;
+        return right - left;
+      })
+      .slice(0, 8);
+  }, [filteredProviders]);
+
+  const topProvidersByOrders = useMemo(() => {
+    return [...providers]
+      .sort((a, b) => b.ordersCount - a.ordersCount)
+      .slice(0, 5);
+  }, [providers]);
+
+  const typeRows = useMemo(
+    () => [
+      {
+        label: t.hospitals,
+        value: summary.hospitals_count,
+        icon: Hospital,
+      },
+      {
+        label: t.medicalCenters,
+        value: summary.medical_centers_count,
+        icon: Stethoscope,
+      },
+      {
+        label: t.clinics,
+        value: summary.clinics_count,
+        icon: Stethoscope,
+      },
+      {
+        label: t.labs,
+        value: summary.labs_count,
+        icon: TestTube2,
+      },
+      {
+        label: t.pharmacies,
+        value: summary.pharmacies_count,
+        icon: ShieldCheck,
+      },
+      {
+        label: t.partners,
+        value: summary.partners_count,
+        icon: UsersRound,
+      },
+      {
+        label: t.others,
+        value: summary.others_count,
+        icon: Building2,
+      },
+    ],
+    [summary, t],
+  );
+
+  function handleExportExcel() {
     if (!canExportProviders) return;
 
-    if (filteredProviders.length === 0) {
-      toast.error(t.exportEmpty);
-      return;
-    }
-
-    const generatedAt = new Date();
-
-    const statusFilterLabel =
-      statusFilters.find((item) => item.value === statusFilter)?.label || t.all;
-
-    const typeFilterLabel =
-      typeFilters.find((item) => item.value === typeFilter)?.label || t.all;
-
-    downloadExcel({
-      filename: `primey-care-providers-dashboard-${generatedAt
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "مقدمو الخدمة" : "Providers",
-      title: t.pageTitle,
+    downloadExcelFile({
       locale,
-      summaryRows: [
-        [t.generatedAt, generatedAt.toLocaleString("en-US")],
-        [t.reportScope, t.currentFilteredData],
-        [
-          t.table.provider,
-          `${formatNumber(filteredProviders.length)} / ${formatNumber(
-            providers.length,
-          )}`,
-        ],
-        [t.totalProviders, stats.total],
-        [t.activeProviders, stats.active],
-        [t.featuredProviders, stats.featured],
-        [t.citiesCount, stats.cities],
-      ],
-      filterRows: [
-        [t.filterSearch, query || t.all],
-        [t.filterStatus, statusFilterLabel],
-        [t.filterType, typeFilterLabel],
-      ],
-      headers: [
-        t.table.provider,
-        "Code",
-        t.table.type,
-        t.table.city,
-        t.table.contact,
-        "Email",
-        t.table.status,
-        t.table.createdAt,
-      ],
-      rows: filteredProviders.map((provider) => [
-        provider.name || "-",
-        provider.code || "-",
-        typeLabel(provider.providerType, locale),
-        provider.city || "-",
-        provider.phone || provider.mobile || "-",
-        provider.email || "-",
-        statusLabel(provider.status, locale),
-        formatDate(provider.createdAt),
-      ]),
+      providers: filteredProviders,
+      summary,
     });
 
     toast.success(t.exportSuccess);
   }
 
-  function printProviders() {
+  function handlePrint() {
     if (!canPrintProviders) return;
-
-    if (filteredProviders.length === 0) {
-      toast.error(t.exportEmpty);
-      return;
-    }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
@@ -1597,14 +1494,13 @@ export default function SystemProvidersPage() {
     printWindow.document.write(
       buildPrintHtml({
         locale,
-        title: t.printTitle,
-        rows: filteredProviders,
-        t,
+        providers: filteredProviders,
+        summary,
       }),
     );
     printWindow.document.close();
 
-    toast.success(t.printSuccess);
+    toast.success(t.printReady);
   }
 
   useEffect(() => {
@@ -1664,15 +1560,13 @@ export default function SystemProvidersPage() {
 
   return (
     <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.pageTitle}
+            {t.title}
           </h1>
-
           <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.pageSubtitle}
+            {t.subtitle}
           </p>
         </div>
 
@@ -1693,14 +1587,11 @@ export default function SystemProvidersPage() {
 
           {canExportProviders ? (
             <Button
+              type="button"
               variant="outline"
               className="h-10 rounded-xl"
-              onClick={exportProviders}
-              disabled={
-                isLoading ||
-                filteredProviders.length === 0 ||
-                Boolean(errorMessage)
-              }
+              disabled={isLoading || filteredProviders.length === 0}
+              onClick={handleExportExcel}
             >
               <Download className="h-4 w-4" />
               <span>{t.exportExcel}</span>
@@ -1709,514 +1600,426 @@ export default function SystemProvidersPage() {
 
           {canPrintProviders ? (
             <Button
+              type="button"
               variant="outline"
               className="h-10 rounded-xl"
-              onClick={printProviders}
-              disabled={
-                isLoading ||
-                filteredProviders.length === 0 ||
-                Boolean(errorMessage)
-              }
+              disabled={isLoading || filteredProviders.length === 0}
+              onClick={handlePrint}
             >
               <Printer className="h-4 w-4" />
               <span>{t.print}</span>
             </Button>
           ) : null}
 
-          {canViewProviders ? (
-            <Link href="/system/providers/list">
-              <Button
-                variant="outline"
-                className="h-10 w-full rounded-xl sm:w-auto"
-              >
-                <ListChecks className="h-4 w-4" />
-                <span>{t.providersList}</span>
-              </Button>
-            </Link>
+          {canImportProviders ? (
+            <Button asChild variant="outline" className="h-10 rounded-xl">
+              <Link href="/system/providers/import">
+                <UploadCloud className="h-4 w-4" />
+                <span>{t.importProviders}</span>
+              </Link>
+            </Button>
           ) : null}
 
           {canCreateProviders ? (
-            <Link href="/system/providers/create">
-              <Button className="h-10 w-full rounded-xl sm:w-auto">
-                <Plus className="h-4 w-4" />
-                <span>{t.addProvider}</span>
-              </Button>
-            </Link>
+            <Button asChild className="h-10 rounded-xl">
+              <Link href="/system/providers/create">
+                <PlusCircle className="h-4 w-4" />
+                <span>{t.createProvider}</span>
+              </Link>
+            </Button>
           ) : null}
         </div>
       </div>
 
-      {/* Error State */}
-      {!isLoading && errorMessage ? (
+      {isLoading || authResolving ? (
+        <DashboardSkeleton />
+      ) : errorMessage ? (
         <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p className="font-semibold text-destructive">
-                  {errorMessage}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.apiErrorHint}
-                </p>
-              </div>
+          <CardContent className="flex items-start gap-3 p-5">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div>
+              <p className="font-semibold text-destructive">{errorMessage}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.loadErrorHint}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4 rounded-xl"
+                onClick={() => loadProviders(true)}
+              >
+                <RefreshCcw className="h-4 w-4" />
+                <span>{t.retry}</span>
+              </Button>
             </div>
-
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadProviders(true)}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
-            </Button>
           </CardContent>
         </Card>
-      ) : null}
-
-      {!errorMessage ? (
+      ) : (
         <>
-          {/* Summary */}
-          {isLoading ? (
-            <SummaryCardsSkeleton />
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {summaryCards.map((item) => {
-                const Icon = item.icon;
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <KpiCard
+              icon={Building2}
+              title={t.totalProviders}
+              value={summary.total_providers}
+              description={t.overview}
+            />
+            <KpiCard
+              icon={CheckCircle2}
+              title={t.activeProviders}
+              value={summary.active_providers}
+              description={t.statuses.ACTIVE}
+            />
+            <KpiCard
+              icon={Sparkles}
+              title={t.featuredProviders}
+              value={summary.featured_providers}
+              description={t.featuredProviders}
+            />
+            <KpiCard
+              icon={UploadCloud}
+              title={t.importedProviders}
+              value={summary.imported_providers}
+              description={t.importProviders}
+            />
+            <KpiCard
+              icon={TrendingUp}
+              title={t.ordersCount}
+              value={summary.total_orders}
+              description={t.ordersCount}
+            />
+          </div>
 
-                return (
-                  <Card
-                    key={item.title}
-                    className="rounded-2xl border bg-card shadow-sm"
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-2xl font-bold">
-                            {formatNumber(item.value)}
-                          </p>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {item.title}
-                          </p>
-                        </div>
-
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                          <Icon className="h-5 w-5" />
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-2">
-                        <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                          {formatNumber(item.percent)}%
-                        </span>
-                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-primary transition-all"
-                            style={{ width: `${item.percent}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        {item.helper}: {item.helperValue}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Status */}
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
-                {t.statusTitle}
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Search className="h-5 w-5" />
+                {t.search}
               </CardTitle>
-              <CardDescription>{t.statusDesc}</CardDescription>
+              <CardDescription>{t.overviewDesc}</CardDescription>
             </CardHeader>
-
             <CardContent>
-              {isLoading ? (
-                <StatusCardsSkeleton />
-              ) : (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                  {statusCards.map((card) => {
-                    const Icon = card.icon;
-
-                    return (
-                      <button
-                        key={card.title}
-                        type="button"
-                        className="space-y-2 rounded-xl border bg-background/70 p-3 text-start transition hover:bg-muted/40"
-                        onClick={() => setStatusFilter(card.filter)}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-2xl font-bold">
-                            {formatNumber(card.value)}
-                          </p>
-                          <Icon className="h-4 w-4 text-muted-foreground" />
-                        </div>
-
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm text-muted-foreground">
-                              {card.title}
-                            </p>
-                            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                              {formatNumber(card.percent)}%
-                            </span>
-                          </div>
-
-                          <div className="h-2 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full bg-primary transition-all"
-                              style={{ width: `${card.percent}%` }}
-                            />
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+              <div className="relative">
+                <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  placeholder={t.searchPlaceholder}
+                  className="h-11 rounded-xl ps-10"
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </div>
             </CardContent>
           </Card>
 
-          {/* Providers Table */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <CardTitle className="text-base font-bold">
-                  {t.latestProviders}
-                </CardTitle>
-                <CardDescription className="mt-1 text-sm leading-6">
-                  {t.latestProvidersDesc}
-                </CardDescription>
-              </div>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+            <div className="space-y-4">
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <ClipboardList className="h-5 w-5" />
+                      {t.recentProviders}
+                    </CardTitle>
+                    <CardDescription>{t.recentProvidersDesc}</CardDescription>
+                  </div>
 
-              {canViewProviders ? (
-                <Link href="/system/providers/list">
-                  <Button variant="outline" className="h-9 rounded-xl">
-                    <ListChecks className="h-4 w-4" />
-                    <span>{t.viewFullList}</span>
+                  <Button asChild variant="outline" className="rounded-xl">
+                    <Link href="/system/providers/list">
+                      <Eye className="h-4 w-4" />
+                      <span>{t.viewAll}</span>
+                    </Link>
                   </Button>
-                </Link>
-              ) : null}
-            </CardHeader>
+                </CardHeader>
 
-            <CardContent className="space-y-4">
-              {/* Search Row */}
-              <div className="relative w-full">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                />
-              </div>
+                <CardContent>
+                  {filteredProviders.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed p-10 text-center">
+                      <Building2 className="h-10 w-10 text-muted-foreground" />
+                      <div>
+                        <p className="font-semibold">
+                          {search.trim() ? t.noSearchTitle : t.emptyTitle}
+                        </p>
+                        <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+                          {search.trim() ? t.noSearchText : t.emptyText}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>{t.table.provider}</TableHead>
+                            <TableHead>{t.table.type}</TableHead>
+                            <TableHead>{t.table.location}</TableHead>
+                            <TableHead>{t.table.contact}</TableHead>
+                            <TableHead>{t.table.orders}</TableHead>
+                            <TableHead>{t.table.status}</TableHead>
+                            <TableHead className="text-end">
+                              {t.table.actions}
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {recentProviders.map((provider) => {
+                            const Icon = getProviderIcon(provider.providerType);
 
-              {/* Filters Row */}
-              <div className="grid gap-3">
-                <div className="flex flex-wrap gap-2">
-                  {statusFilters.map((item) => {
-                    const isSelected = statusFilter === item.value;
-
-                    return (
-                      <Button
-                        key={item.value}
-                        type="button"
-                        variant={isSelected ? "default" : "outline"}
-                        className="h-10 rounded-xl"
-                        onClick={() => setStatusFilter(item.value)}
-                      >
-                        <span>{item.label}</span>
-                        <Badge
-                          variant={isSelected ? "secondary" : "outline"}
-                          className="ms-1 rounded-full"
-                        >
-                          {formatNumber(item.count)}
-                        </Badge>
-                      </Button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap gap-2">
-                    {typeFilters.map((item) => {
-                      const isSelected = typeFilter === item.value;
-
-                      return (
-                        <Button
-                          key={item.value}
-                          type="button"
-                          variant={isSelected ? "default" : "outline"}
-                          className="h-10 rounded-xl"
-                          onClick={() => setTypeFilter(item.value)}
-                        >
-                          <span>{item.label}</span>
-                          <Badge
-                            variant={isSelected ? "secondary" : "outline"}
-                            className="ms-1 rounded-full"
-                          >
-                            {formatNumber(item.count)}
-                          </Badge>
-                        </Button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" className="h-10 rounded-xl">
-                      <Columns3 className="h-4 w-4" />
-                      {isArabic ? "الأعمدة" : "Columns"}
-                    </Button>
-
-                    {hasSearchOrFilter ? (
-                      <Button
-                        variant="outline"
-                        className="h-10 rounded-xl"
-                        onClick={clearFilters}
-                      >
-                        {t.clearFilters}
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              <div className="overflow-hidden rounded-xl border">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t.table.provider}</TableHead>
-                        <TableHead>{t.table.type}</TableHead>
-                        <TableHead>{t.table.city}</TableHead>
-                        <TableHead>{t.table.contact}</TableHead>
-                        <TableHead>{t.table.status}</TableHead>
-                        <TableHead>{t.table.createdAt}</TableHead>
-                        {canViewProviderDetails ? (
-                          <TableHead>{t.table.action}</TableHead>
-                        ) : null}
-                      </TableRow>
-                    </TableHeader>
-
-                    <TableBody>
-                      {isLoading ? (
-                        <TableRowsSkeleton
-                          columnsCount={canViewProviderDetails ? 7 : 6}
-                        />
-                      ) : latestProviders.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={canViewProviderDetails ? 7 : 6}
-                            className="h-36 text-center"
-                          >
-                            <div className="mx-auto max-w-md space-y-2">
-                              <p className="font-semibold">
-                                {hasSearchOrFilter
-                                  ? t.noResultsTitle
-                                  : t.emptyTitle}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {hasSearchOrFilter ? t.noResultsText : t.emptyText}
-                              </p>
-
-                              {hasSearchOrFilter ? (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="mt-2 rounded-xl"
-                                  onClick={clearFilters}
-                                >
-                                  {t.clearFilters}
-                                </Button>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        latestProviders.map((provider) => {
-                          const Icon = providerIcon(provider.providerType);
-
-                          return (
-                            <TableRow key={`${provider.id}-${provider.code}`}>
-                              <TableCell>
-                                <div className="flex min-w-[220px] items-center gap-3">
-                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-muted">
-                                    <Icon className="h-4 w-4" />
-                                  </div>
-
-                                  <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <p className="truncate font-medium">
-                                        {provider.name || "-"}
-                                      </p>
-
-                                      {provider.isFeatured ? (
-                                        <Sparkles className="h-3.5 w-3.5 shrink-0 fill-orange-400 text-orange-400" />
+                            return (
+                              <TableRow key={`${provider.id}-${provider.code}`}>
+                                <TableCell>
+                                  <div className="min-w-[230px]">
+                                    <button
+                                      type="button"
+                                      className="inline-flex items-center gap-2 font-mono text-xs font-semibold text-muted-foreground hover:text-primary"
+                                      onClick={() =>
+                                        copyText(provider.code, t.copied)
+                                      }
+                                    >
+                                      <span>{provider.code || "-"}</span>
+                                      {provider.code ? (
+                                        <Copy className="h-3.5 w-3.5" />
                                       ) : null}
-                                    </div>
+                                    </button>
 
-                                    <p className="truncate text-xs text-muted-foreground">
-                                      {provider.code || "-"}
+                                    <p className="mt-1 font-semibold">
+                                      {provider.nameAr ||
+                                        provider.displayNameAr ||
+                                        provider.name ||
+                                        "-"}
+                                    </p>
+
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                      {provider.nameEn ||
+                                        provider.displayNameEn ||
+                                        provider.sourceCategory ||
+                                        "-"}
                                     </p>
                                   </div>
-                                </div>
-                              </TableCell>
-
-                              <TableCell>
-                                <Badge variant="secondary" className="rounded-full">
-                                  {typeLabel(provider.providerType, locale)}
-                                </Badge>
-                              </TableCell>
-
-                              <TableCell>
-                                <div className="min-w-[140px]">
-                                  <p className="truncate">
-                                    {provider.city || "-"}
-                                  </p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {provider.area || provider.address || "-"}
-                                  </p>
-                                </div>
-                              </TableCell>
-
-                              <TableCell>
-                                <div className="min-w-[150px]">
-                                  <p className="truncate">
-                                    {provider.phone ||
-                                      provider.mobile ||
-                                      provider.email ||
-                                      "-"}
-                                  </p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {provider.contactPerson || "-"}
-                                  </p>
-                                </div>
-                              </TableCell>
-
-                              <TableCell>
-                                {statusBadge(provider.status, locale)}
-                              </TableCell>
-
-                              <TableCell>
-                                {formatDate(provider.createdAt)}
-                              </TableCell>
-
-                              {canViewProviderDetails ? (
-                                <TableCell>
-                                  {isValidProviderId(provider.id) ? (
-                                    <Link href={`/system/providers/${provider.id}`}>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-8 rounded-lg"
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                      </Button>
-                                    </Link>
-                                  ) : null}
                                 </TableCell>
-                              ) : null}
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
 
-              <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                <p>
-                  {t.showing} {formatNumber(latestProviders.length)} {t.from}{" "}
-                  {formatNumber(filteredProviders.length)} · {t.latestRecords}
-                </p>
+                                <TableCell>
+                                  <Badge
+                                    variant="outline"
+                                    className="rounded-full"
+                                  >
+                                    <Icon className="me-1 h-3.5 w-3.5" />
+                                    {providerTypeLabel(
+                                      provider.providerType,
+                                      locale,
+                                    )}
+                                  </Badge>
+                                </TableCell>
 
-                {canViewProviders ? (
-                  <Link href="/system/providers/list">
-                    <Button variant="outline" size="sm" className="rounded-xl">
-                      <ListChecks className="h-4 w-4" />
-                      {t.viewFullList}
-                    </Button>
-                  </Link>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
+                                <TableCell>
+                                  <div className="min-w-[160px]">
+                                    <p className="font-medium">
+                                      {[provider.region, provider.city]
+                                        .filter(Boolean)
+                                        .join(" / ") || "-"}
+                                    </p>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                      {provider.area || provider.street || "-"}
+                                    </p>
+                                  </div>
+                                </TableCell>
 
-          {/* Action Cards */}
-          {moduleActions.length > 0 ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base font-bold">
-                  {t.quickAccessTitle}
-                </CardTitle>
-                <CardDescription className="leading-6">
-                  {t.quickAccessSubtitle}
-                </CardDescription>
-              </CardHeader>
+                                <TableCell>
+                                  <div className="min-w-[160px] text-xs">
+                                    <p className="font-medium">
+                                      {provider.mobile ||
+                                        provider.phone ||
+                                        provider.email ||
+                                        "-"}
+                                    </p>
+                                    <p className="mt-1 text-muted-foreground">
+                                      {provider.contactPerson || "-"}
+                                    </p>
+                                  </div>
+                                </TableCell>
 
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-2">
-                  {moduleActions.map((item) => {
-                    const Icon = item.icon;
+                                <TableCell>
+                                  <Badge
+                                    variant="secondary"
+                                    className="rounded-full"
+                                  >
+                                    {formatNumber(provider.ordersCount)}
+                                  </Badge>
+                                </TableCell>
 
-                    return (
-                      <Link key={item.href} href={item.href} className="block">
-                        <Card className="h-full rounded-2xl border bg-background shadow-none transition hover:bg-muted/40 hover:shadow-sm">
-                          <CardContent className="flex h-full items-start justify-between gap-4 p-4">
-                            <div className="min-w-0 space-y-3">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-                                  <Icon className="h-5 w-5" />
-                                </div>
+                                <TableCell>
+                                  <Badge
+                                    className={`rounded-full border px-3 py-1 ${getStatusBadgeClass(
+                                      provider.status,
+                                    )}`}
+                                  >
+                                    {providerStatusLabel(
+                                      provider.status,
+                                      locale,
+                                    )}
+                                  </Badge>
+                                </TableCell>
 
-                                <Badge
-                                  variant="secondary"
-                                  className="rounded-full"
-                                >
-                                  {item.badge}
-                                </Badge>
-                              </div>
+                                <TableCell className="text-end">
+                                  <div className="flex justify-end gap-2">
+                                    {provider.googleMapsLink ? (
+                                      <Button
+                                        asChild
+                                        size="icon"
+                                        variant="outline"
+                                        className="h-9 w-9 rounded-xl"
+                                      >
+                                        <a
+                                          href={provider.googleMapsLink}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          <MapPin className="h-4 w-4" />
+                                        </a>
+                                      </Button>
+                                    ) : null}
 
-                              <div>
-                                <p className="font-semibold">{item.title}</p>
-                                <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
-                                  {item.description}
-                                </p>
-                              </div>
+                                    <Button
+                                      asChild
+                                      size="sm"
+                                      variant="outline"
+                                      className="rounded-xl"
+                                    >
+                                      <Link
+                                        href={`/system/providers/${provider.id}`}
+                                      >
+                                        <Eye className="me-2 h-4 w-4" />
+                                        {t.details}
+                                      </Link>
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
 
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-xl"
-                              >
-                                {item.cta}
-                              </Button>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5" />
+                    {t.ordersCount}
+                  </CardTitle>
+                  <CardDescription>{t.ordersCount}</CardDescription>
+                </CardHeader>
+
+                <CardContent className="space-y-3">
+                  {topProvidersByOrders.length > 0 ? (
+                    topProvidersByOrders.map((provider, index) => (
+                      <div
+                        key={`${provider.id}-orders-${index}`}
+                        className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">
+                            {provider.nameAr ||
+                              provider.displayNameAr ||
+                              provider.name ||
+                              "-"}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {provider.city ||
+                              provider.region ||
+                              provider.code ||
+                              "-"}
+                          </p>
+                        </div>
+
+                        <Badge variant="secondary" className="rounded-full">
+                          {formatNumber(provider.ordersCount)}
+                        </Badge>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                      {t.notAvailable}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="space-y-4">
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader>
+                  <CardTitle>{t.quickActions}</CardTitle>
+                  <CardDescription>{t.quickActionsDesc}</CardDescription>
+                </CardHeader>
+
+                <CardContent className="space-y-3">
+                  <ActionCard
+                    href="/system/providers/list"
+                    icon={ClipboardList}
+                    title={t.providersList}
+                    description={t.recentProvidersDesc}
+                  />
+
+                  {canCreateProviders ? (
+                    <ActionCard
+                      href="/system/providers/create"
+                      icon={PlusCircle}
+                      title={t.createProvider}
+                      description={t.emptyText}
+                    />
+                  ) : null}
+
+                  {canImportProviders ? (
+                    <ActionCard
+                      href="/system/providers/import"
+                      icon={UploadCloud}
+                      title={t.importProviders}
+                      description={t.importedProviders}
+                    />
+                  ) : null}
+
+                  {canViewContracts ? (
+                    <ActionCard
+                      href="/system/contracts"
+                      icon={FileText}
+                      title={t.contracts}
+                      description={t.contracts}
+                    />
+                  ) : null}
+
+                  <ActionCard
+                    href="/system/centers"
+                    icon={Building2}
+                    title={t.centers}
+                    description={t.centers}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader>
+                  <CardTitle>{t.typeDistribution}</CardTitle>
+                  <CardDescription>{t.typeDistributionDesc}</CardDescription>
+                </CardHeader>
+
+                <CardContent className="space-y-3">
+                  {typeRows.map((row) => (
+                    <TypeDistributionRow
+                      key={row.label}
+                      icon={row.icon}
+                      label={row.label}
+                      value={row.value}
+                      total={summary.total_providers}
+                    />
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
         </>
-      ) : null}
+      )}
     </div>
   );
 }

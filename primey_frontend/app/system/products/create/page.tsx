@@ -2,39 +2,13 @@
 
 /* ============================================================
    📂 app/system/products/create/page.tsx
-   🧠 Primey Care | Create Product
+   🧠 Primey Care | Create Product / Medical Offer
    ------------------------------------------------------------
-   ✅ المسار: /system/products/create
-   ✅ الإصدار: v2.0.0 - Centers Pattern + Safe Permissions
-
-   ✅ العمل:
-      إنشاء منتج / بطاقة / برنامج / خدمة جديدة.
-
-   ✅ Backend:
-      POST /api/products/create/
-
-   ✅ المعيار:
-      - مبني بصريًا على نمط المراكز والعملاء المعتمد.
-      - دمج UX Refinement مع حماية المرحلة 2.
-      - لا يتم إظهار مسارات تقنية أو API داخل الواجهة.
-      - الصفحة ممتدة على عرض المساحة وليست متمركزة.
-      - Main Form + Sidebar Summary.
-      - حماية زر الإنشاء حسب صلاحية products.create.
-      - إخفاء روابط غير مصرح بها بدل تعطيلها.
-      - عدم كسر system_admin / superadmin.
-      - تحذير عند مغادرة الصفحة وفيها بيانات غير محفوظة.
-      - beforeunload protection.
-      - Error Alert داخلي عند فشل الحفظ.
-      - Field-level validation.
-      - تعطيل الحقول أثناء الحفظ.
-      - تنظيف البيانات قبل الإرسال.
-      - حفظ واستعادة مسودة محلية.
-      - تأكيد تفريغ النموذج.
-      - دعم عربي / إنجليزي عبر primey-locale.
-      - استخدام sonner للتنبيهات.
-      - استخدام /currency/sar.svg.
-      - الأرقام بالإنجليزية.
-      - بدون localhost hardcoded.
+   ✅ إنشاء منتج / برنامج / خدمة / عرض طبي
+   ✅ دعم مقدم خدمة اختياري
+   ✅ دعم صورة رمزية وصورة تسويقية
+   ✅ دعم الظهور في الهبوط والموبايل والعروض
+   ✅ UX Pattern المعتمد + صلاحيات المرحلة 2
 ============================================================ */
 
 import Image from "next/image";
@@ -46,11 +20,14 @@ import {
   ArrowLeft,
   BadgeCheck,
   Boxes,
+  CalendarDays,
   CheckCircle2,
   CircleDollarSign,
   ClipboardList,
   CreditCard,
+  FileImage,
   FileText,
+  ImagePlus,
   Layers3,
   Loader2,
   Package,
@@ -62,6 +39,7 @@ import {
   Stethoscope,
   Tag,
   Trash2,
+  UploadCloud,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -92,7 +70,7 @@ type ProductType = "membership" | "card" | "program" | "service" | "other";
 type ProductStatus = "draft" | "active" | "inactive" | "archived";
 type BillingType = "one_time" | "recurring";
 type FulfillmentType = "digital" | "physical" | "both" | "service_based" | "none";
-type DurationUnit = "day" | "month" | "year" | "visit" | "none";
+type DurationUnit = "day" | "month" | "year" | "none";
 
 type ProductFormData = {
   name: string;
@@ -100,13 +78,18 @@ type ProductFormData = {
   slug: string;
   product_type: ProductType;
   status: ProductStatus;
-  category_name: string;
+  category_id: string;
+  provider_id: string;
+
   short_description: string;
   description: string;
+  terms_and_conditions: string;
+  features: string;
   tags: string;
 
   price: string;
   sale_price: string;
+  cost_price: string;
   billing_type: BillingType;
   fulfillment_type: FulfillmentType;
   duration_value: string;
@@ -114,6 +97,17 @@ type ProductFormData = {
 
   is_taxable: boolean;
   tax_rate: string;
+
+  is_offer: boolean;
+  offer_title: string;
+  offer_subtitle: string;
+  offer_badge: string;
+  offer_terms: string;
+  offer_start_date: string;
+  offer_end_date: string;
+  show_on_landing: boolean;
+  show_on_mobile: boolean;
+  show_on_offers: boolean;
 
   is_public: boolean;
   is_featured: boolean;
@@ -132,10 +126,25 @@ type ProductFormData = {
 
   pricing_tiers_text: string;
   service_items_text: string;
-  notes: string;
 };
 
 type ProductFormErrors = Partial<Record<keyof ProductFormData, string>>;
+
+type SelectOption = {
+  id: number | string;
+  name?: string;
+  name_ar?: string;
+  name_en?: string;
+  code?: string;
+  title?: string;
+};
+
+type ListApiResponse<T> = {
+  ok?: boolean;
+  results?: T[];
+  data?: T[] | { results?: T[]; items?: T[] };
+  items?: T[];
+};
 
 type CreateProductApiResponse = {
   ok?: boolean;
@@ -154,7 +163,8 @@ type CreateProductApiResponse = {
 };
 
 const SAR_ICON_PATH = "/currency/sar.svg";
-const DRAFT_STORAGE_KEY = "primey-care-product-create-draft";
+const DRAFT_STORAGE_KEY = "primey-care-product-create-draft-v3";
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
 /* ============================================================
    Locale Helpers
@@ -211,6 +221,17 @@ function readCookie(name: string) {
     .find((cookie) => cookie.startsWith(`${name}=`));
 
   return match ? decodeURIComponent(match.split("=")[1] || "") : "";
+}
+
+function extractList<T>(payload: ListApiResponse<T>): T[] {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (payload.data && typeof payload.data === "object") {
+    if (Array.isArray(payload.data.results)) return payload.data.results;
+    if (Array.isArray(payload.data.items)) return payload.data.items;
+  }
+  return [];
 }
 
 /* ============================================================
@@ -447,10 +468,10 @@ function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    title: isArabic ? "إنشاء منتج جديد" : "Create New Product",
+    title: isArabic ? "إنشاء منتج أو عرض طبي" : "Create Product or Medical Offer",
     subtitle: isArabic
-      ? "إضافة بطاقة أو عضوية أو برنامج أو خدمة وربطها لاحقًا بالطلبات والعقود."
-      : "Add a card, membership, program, or service and later connect it with orders and contracts.",
+      ? "إضافة بطاقة أو برنامج أو خدمة، مع إمكانية ربطها بمقدم خدمة وعرضها في الهبوط والتطبيق."
+      : "Add a card, program, or service, with optional provider linking and landing/mobile visibility.",
 
     back: isArabic ? "العودة للمنتجات" : "Back to Products",
     productsList: isArabic ? "قائمة المنتجات" : "Products List",
@@ -462,18 +483,28 @@ function dictionary(locale: AppLocale) {
 
     basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
     basicDesc: isArabic
-      ? "اسم المنتج، الكود، النوع، التصنيف، وحالة التشغيل."
-      : "Product name, code, type, category, and operational status.",
+      ? "اسم المنتج، الكود، النوع، التصنيف، ومقدم الخدمة عند الحاجة."
+      : "Product name, code, type, category, and provider when needed.",
 
-    descriptionInfo: isArabic ? "الوصف والوسوم" : "Description & Tags",
+    descriptionInfo: isArabic ? "الوصف والمحتوى" : "Description & Content",
     descriptionDesc: isArabic
-      ? "وصف مختصر، وصف تفصيلي، ووسوم تساعد في البحث."
-      : "Short description, full description, and tags for search.",
+      ? "وصف مختصر، وصف تفصيلي، مزايا، شروط، ووسوم."
+      : "Short description, full description, features, terms, and tags.",
+
+    marketingInfo: isArabic ? "العرض والظهور التسويقي" : "Offer & Marketing Visibility",
+    marketingDesc: isArabic
+      ? "تحديد ظهور المنتج في صفحة الهبوط والتطبيق والعروض."
+      : "Control product visibility on landing, mobile, and offers.",
+
+    imagesInfo: isArabic ? "صور المنتج" : "Product Images",
+    imagesDesc: isArabic
+      ? "صورة رمزية للنظام وصورة تسويقية للهبوط والتطبيق."
+      : "Thumbnail for the system and marketing image for landing/mobile.",
 
     pricingInfo: isArabic ? "التسعير والفوترة" : "Pricing & Billing",
     pricingDesc: isArabic
-      ? "السعر الأساسي، الخصم، الفوترة، الضريبة، والمدة."
-      : "Base price, sale price, billing, tax, and duration.",
+      ? "السعر الأساسي، سعر الخصم، الضريبة، الفوترة، والمدة."
+      : "Base price, sale price, tax, billing, and duration.",
 
     availabilityInfo: isArabic ? "الجاهزية وقنوات البيع" : "Readiness & Sales Channels",
     availabilityDesc: isArabic
@@ -489,11 +520,6 @@ function dictionary(locale: AppLocale) {
     advancedDesc: isArabic
       ? "شرائح التسعير وعناصر الخدمات للبرامج والخدمات المركبة."
       : "Pricing tiers and service items for programs and bundled services.",
-
-    notesInfo: isArabic ? "ملاحظات تشغيلية" : "Operational Notes",
-    notesDesc: isArabic
-      ? "أي ملاحظات داخلية مرتبطة بالمنتج."
-      : "Any internal notes related to this product.",
 
     summaryTitle: isArabic ? "ملخص المنتج" : "Product Summary",
     summaryDesc: isArabic
@@ -519,17 +545,33 @@ function dictionary(locale: AppLocale) {
       type: isArabic ? "نوع المنتج" : "Product Type",
       status: isArabic ? "الحالة" : "Status",
       category: isArabic ? "التصنيف" : "Category",
+      provider: isArabic ? "مقدم الخدمة" : "Provider",
       shortDescription: isArabic ? "الوصف المختصر" : "Short Description",
       description: isArabic ? "الوصف التفصيلي" : "Full Description",
+      features: isArabic ? "المزايا" : "Features",
+      terms: isArabic ? "الشروط والأحكام" : "Terms & Conditions",
       tags: isArabic ? "الوسوم" : "Tags",
       price: isArabic ? "السعر الأساسي" : "Base Price",
       salePrice: isArabic ? "سعر الخصم" : "Sale Price",
+      costPrice: isArabic ? "التكلفة" : "Cost Price",
       billingType: isArabic ? "نوع الفوترة" : "Billing Type",
       fulfillmentType: isArabic ? "نوع التسليم" : "Fulfillment Type",
       durationValue: isArabic ? "مدة المنتج" : "Duration",
       durationUnit: isArabic ? "وحدة المدة" : "Duration Unit",
       taxable: isArabic ? "خاضع للضريبة" : "Taxable",
       taxRate: isArabic ? "نسبة الضريبة" : "Tax Rate",
+      isOffer: isArabic ? "منتج يظهر كعرض" : "Mark as Offer",
+      offerTitle: isArabic ? "عنوان العرض" : "Offer Title",
+      offerSubtitle: isArabic ? "وصف العرض المختصر" : "Offer Subtitle",
+      offerBadge: isArabic ? "شارة العرض" : "Offer Badge",
+      offerTerms: isArabic ? "شروط العرض" : "Offer Terms",
+      offerStart: isArabic ? "بداية العرض" : "Offer Start",
+      offerEnd: isArabic ? "نهاية العرض" : "Offer End",
+      landing: isArabic ? "يظهر في صفحة الهبوط" : "Show on Landing",
+      mobile: isArabic ? "يظهر في التطبيق" : "Show on Mobile",
+      offers: isArabic ? "يظهر في صفحة العروض" : "Show on Offers",
+      thumbnail: isArabic ? "الصورة الرمزية" : "Thumbnail Image",
+      marketingImage: isArabic ? "الصورة التسويقية" : "Marketing Image",
       public: isArabic ? "منتج عام" : "Public Product",
       featured: isArabic ? "منتج مميز" : "Featured Product",
       requiresApproval: isArabic ? "يتطلب موافقة" : "Requires Approval",
@@ -543,36 +585,43 @@ function dictionary(locale: AppLocale) {
       agentCommission: isArabic ? "عمولة المندوب الافتراضية" : "Default Agent Commission",
       pricingTiers: isArabic ? "شرائح التسعير" : "Pricing Tiers",
       serviceItems: isArabic ? "عناصر الخدمات" : "Service Items",
-      notes: isArabic ? "الملاحظات" : "Notes",
     },
 
     placeholders: {
-      name: isArabic ? "مثال: بطاقة Primey Care الذهبية" : "Example: Primey Care Gold Card",
-      code: isArabic ? "مثال: PRD-001" : "Example: PRD-001",
-      slug: isArabic ? "primey-care-gold-card" : "primey-care-gold-card",
-      category: isArabic ? "مثال: بطاقات الرعاية" : "Example: Care Cards",
+      name: isArabic ? "مثال: برنامج الولادة الطبيعية" : "Example: Natural Delivery Program",
+      code: isArabic ? "اتركه فارغًا للتوليد التلقائي" : "Leave blank for auto generation",
+      slug: isArabic ? "natural-delivery-program" : "natural-delivery-program",
       shortDescription: isArabic
         ? "وصف مختصر يظهر في القوائم..."
         : "Short description shown in lists...",
       description: isArabic
-        ? "اكتب وصفًا تفصيليًا للمنتج..."
-        : "Write a detailed product description...",
-      tags: isArabic ? "بطاقة، رعاية، خصومات" : "card, care, discounts",
-      price: isArabic ? "مثال: 199" : "Example: 199",
-      salePrice: isArabic ? "مثال: 149" : "Example: 149",
+        ? "اكتب وصفًا تفصيليًا للمنتج أو العرض..."
+        : "Write a detailed product or offer description...",
+      features: isArabic
+        ? "ميزة في كل سطر..."
+        : "One feature per line...",
+      terms: isArabic
+        ? "شروط وأحكام المنتج أو العرض..."
+        : "Product or offer terms...",
+      tags: isArabic ? "ولادة، عروض، مستشفى" : "delivery, offers, hospital",
+      price: isArabic ? "مثال: 2300" : "Example: 2300",
+      salePrice: isArabic ? "مثال: 1999" : "Example: 1999",
+      costPrice: isArabic ? "اختياري" : "Optional",
       durationValue: isArabic ? "مثال: 12" : "Example: 12",
       taxRate: isArabic ? "مثال: 15" : "Example: 15",
+      offerTitle: isArabic ? "مثال: عرض الولادة الطبيعية" : "Example: Natural Delivery Offer",
+      offerSubtitle: isArabic
+        ? "مثال: بطاقة خصومات مجانية لمدة عام"
+        : "Example: Free discount card for one year",
+      offerBadge: isArabic ? "مثال: عرض محدود" : "Example: Limited Offer",
       maxDiscount: isArabic ? "مثال: 20" : "Example: 20",
       agentCommission: isArabic ? "مثال: 10" : "Example: 10",
       pricingTiers: isArabic
-        ? "اكتب كل شريحة في سطر: الاسم | السعر | المدة"
-        : "One tier per line: name | price | duration",
+        ? "اكتب كل شريحة في سطر: الاسم | السعر | سعر الخصم"
+        : "One tier per line: name | price | sale price",
       serviceItems: isArabic
-        ? "اكتب كل خدمة في سطر: اسم الخدمة | الكمية | الملاحظات"
-        : "One service per line: service name | quantity | notes",
-      notes: isArabic
-        ? "أي ملاحظات تشغيلية عن المنتج..."
-        : "Any operational notes about this product...",
+        ? "اكتب كل خدمة في سطر: اسم الخدمة | الكمية | السعر"
+        : "One service per line: service name | quantity | price",
     },
 
     productTypes: {
@@ -607,13 +656,11 @@ function dictionary(locale: AppLocale) {
       day: isArabic ? "يوم" : "Day",
       month: isArabic ? "شهر" : "Month",
       year: isArabic ? "سنة" : "Year",
-      visit: isArabic ? "زيارة" : "Visit",
       none: isArabic ? "بدون" : "None",
     } satisfies Record<DurationUnit, string>,
 
     validation: {
       name: isArabic ? "اسم المنتج مطلوب." : "Product name is required.",
-      code: isArabic ? "كود المنتج مطلوب." : "Product code is required.",
       price: isArabic ? "السعر يجب أن يكون رقمًا صحيحًا." : "Price must be a valid number.",
       salePrice: isArabic ? "سعر الخصم يجب أن يكون رقمًا صحيحًا." : "Sale price must be a valid number.",
       saleGreater: isArabic
@@ -623,9 +670,27 @@ function dictionary(locale: AppLocale) {
         ? "النسبة يجب أن تكون بين 0 و 100."
         : "Percentage must be between 0 and 100.",
       duration: isArabic ? "المدة يجب أن تكون رقمًا صحيحًا." : "Duration must be a valid number.",
+      offerDates: isArabic
+        ? "تاريخ نهاية العرض يجب أن يكون بعد تاريخ البداية."
+        : "Offer end date must be after start date.",
+      imageSize: isArabic
+        ? "حجم الصورة يجب ألا يتجاوز 10MB."
+        : "Image size must not exceed 10MB.",
+      imageType: isArabic
+        ? "يرجى اختيار ملف صورة صالح."
+        : "Please select a valid image file.",
     },
 
+    loadingLookups: isArabic ? "جاري تحميل الخيارات..." : "Loading options...",
+    noCategory: isArabic ? "بدون تصنيف" : "No Category",
+    noProvider: isArabic ? "بدون مقدم خدمة" : "No Provider",
+    chooseFile: isArabic ? "اختيار صورة" : "Choose Image",
+    fileSelected: isArabic ? "تم اختيار الصورة" : "Image selected",
+
     success: isArabic ? "تم إنشاء المنتج بنجاح." : "Product created successfully.",
+    imageUploadPartial: isArabic
+      ? "تم إنشاء المنتج، لكن تعذر رفع إحدى الصور."
+      : "Product created, but one image could not be uploaded.",
     draftSaved: isArabic ? "تم حفظ المسودة محليًا." : "Draft saved locally.",
     draftRestored: isArabic ? "تمت استعادة المسودة." : "Draft restored.",
     noDraft: isArabic ? "لا توجد مسودة محفوظة." : "No saved draft found.",
@@ -649,20 +714,21 @@ function dictionary(locale: AppLocale) {
     priceSummary: isArabic ? "التسعير" : "Pricing",
     saleChannelsSummary: isArabic ? "قنوات البيع" : "Sales Channels",
     readinessSummary: isArabic ? "الجاهزية" : "Readiness",
+    offerSummary: isArabic ? "العرض" : "Offer",
 
     yes: isArabic ? "نعم" : "Yes",
     no: isArabic ? "لا" : "No",
 
     quickNotes: [
       isArabic
-        ? "كود المنتج يجب أن يكون فريدًا وواضحًا."
-        : "Product code must be unique and clear.",
+        ? "صورة المنتج الرمزية مخصصة للنظام الداخلي."
+        : "The thumbnail image is for the internal system.",
       isArabic
-        ? "فعّل جاهزية الطلبات فقط عندما يكون المنتج قابلًا للبيع."
-        : "Enable order readiness only when the product is sellable.",
+        ? "الصورة التسويقية مخصصة للهبوط والتطبيق والعروض."
+        : "The marketing image is for landing, mobile, and offers.",
       isArabic
-        ? "استخدم جاهزية العقود للمنتجات التي تدخل في عقود المراكز."
-        : "Use contracts readiness for products that can be used in provider contracts.",
+        ? "اربط المنتج بمقدم خدمة عندما يكون العرض خاصًا بمستشفى أو مركز."
+        : "Link a provider when the offer belongs to a hospital or center.",
       isArabic
         ? "يمكن حفظ البيانات كمسودة محلية قبل الإرسال."
         : "You can save the form as a local draft before submitting.",
@@ -678,22 +744,38 @@ const initialFormData: ProductFormData = {
   name: "",
   code: "",
   slug: "",
-  product_type: "card",
+  product_type: "program",
   status: "active",
-  category_name: "",
+  category_id: "",
+  provider_id: "",
+
   short_description: "",
   description: "",
+  terms_and_conditions: "",
+  features: "",
   tags: "",
 
   price: "",
   sale_price: "",
+  cost_price: "",
   billing_type: "one_time",
-  fulfillment_type: "digital",
-  duration_value: "",
-  duration_unit: "month",
+  fulfillment_type: "service_based",
+  duration_value: "0",
+  duration_unit: "none",
 
   is_taxable: true,
   tax_rate: "15",
+
+  is_offer: false,
+  offer_title: "",
+  offer_subtitle: "",
+  offer_badge: "",
+  offer_terms: "",
+  offer_start_date: "",
+  offer_end_date: "",
+  show_on_landing: false,
+  show_on_mobile: false,
+  show_on_offers: false,
 
   is_public: true,
   is_featured: false,
@@ -712,7 +794,6 @@ const initialFormData: ProductFormData = {
 
   pricing_tiers_text: "",
   service_items_text: "",
-  notes: "",
 };
 
 function normalizeCode(value: string) {
@@ -742,7 +823,7 @@ function normalizeNumberString(value: string, fallback = "0.00") {
 }
 
 function toNumber(value: string) {
-  const parsed = Number(value.replace(/,/g, ""));
+  const parsed = Number(String(value || "").replace(/,/g, ""));
 
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -763,20 +844,66 @@ function isPercent(value: string) {
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100;
 }
 
-function parseLines(value: string) {
+function isValidImage(file: File | null) {
+  if (!file) return true;
+
+  return file.type.startsWith("image/");
+}
+
+function isValidImageSize(file: File | null) {
+  if (!file) return true;
+
+  return file.size <= MAX_IMAGE_SIZE;
+}
+
+function parsePricingTiers(value: string) {
   return value
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => {
-      const [name = "", valueA = "", valueB = ""] = line
+    .map((line, index) => {
+      const [name = "", price = "0", salePrice = ""] = line
         .split("|")
         .map((part) => part.trim());
 
       return {
         name,
-        value: valueA,
-        notes: valueB,
+        pricing_type: "standard",
+        currency_code: "SAR",
+        price: normalizeNumberString(price || "0"),
+        sale_price: salePrice ? normalizeNumberString(salePrice) : null,
+        min_quantity: 1,
+        discount_rate: "0",
+        agent_commission_rate: "0",
+        provider_share_rate: "0",
+        system_share_rate: "0",
+        sort_order: index,
+        is_active: true,
+      };
+    })
+    .filter((item) => item.name);
+}
+
+function parseServiceItems(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const [name = "", quantity = "1", unitPrice = "0"] = line
+        .split("|")
+        .map((part) => part.trim());
+
+      return {
+        name,
+        description: "",
+        included_quantity: Math.max(1, Math.round(toNumber(quantity || "1"))),
+        unit_price: normalizeNumberString(unitPrice || "0"),
+        discount_rate: "0",
+        requires_provider: true,
+        is_optional: false,
+        sort_order: index,
+        is_active: true,
       };
     })
     .filter((item) => item.name);
@@ -786,34 +913,56 @@ function normalizePayload(formData: ProductFormData) {
   const price = normalizeNumberString(formData.price);
   const salePrice = formData.sale_price.trim()
     ? normalizeNumberString(formData.sale_price)
-    : "";
+    : null;
+  const costPrice = formData.cost_price.trim()
+    ? normalizeNumberString(formData.cost_price)
+    : null;
+
+  const providerId = formData.provider_id.trim();
+  const categoryId = formData.category_id.trim();
 
   return {
     name: formData.name.trim(),
-    code: normalizeCode(formData.code),
-    slug: normalizeSlug(formData.slug || formData.name),
+    ...(formData.code.trim() ? { code: normalizeCode(formData.code) } : {}),
+    ...(formData.slug.trim()
+      ? { slug: normalizeSlug(formData.slug) }
+      : { slug: normalizeSlug(formData.name) }),
     product_type: formData.product_type,
-    type: formData.product_type,
     status: formData.status,
-    category_name: formData.category_name.trim(),
+    category_id: categoryId || null,
+    provider_id: providerId || null,
+
     short_description: formData.short_description.trim(),
     description: formData.description.trim(),
+    terms_and_conditions: formData.terms_and_conditions.trim(),
+    features: formData.features.trim(),
     tags: formData.tags.trim(),
 
     price,
-    base_price: price,
     sale_price: salePrice,
+    cost_price: costPrice,
     billing_type: formData.billing_type,
     fulfillment_type: formData.fulfillment_type,
     duration_value: formData.duration_value.trim()
-      ? String(toNumber(formData.duration_value))
-      : "",
+      ? String(Math.max(0, Math.round(toNumber(formData.duration_value))))
+      : "0",
     duration_unit: formData.duration_unit,
 
     is_taxable: formData.is_taxable,
     tax_rate: formData.tax_rate.trim()
       ? String(toNumber(formData.tax_rate))
       : "0",
+
+    is_offer: formData.is_offer,
+    offer_title: formData.offer_title.trim(),
+    offer_subtitle: formData.offer_subtitle.trim(),
+    offer_badge: formData.offer_badge.trim(),
+    offer_terms: formData.offer_terms.trim(),
+    offer_start_date: formData.offer_start_date || null,
+    offer_end_date: formData.offer_end_date || null,
+    show_on_landing: formData.show_on_landing,
+    show_on_mobile: formData.show_on_mobile,
+    show_on_offers: formData.show_on_offers,
 
     is_public: formData.is_public,
     is_featured: formData.is_featured,
@@ -825,7 +974,7 @@ function normalizePayload(formData: ProductFormData) {
 
     can_be_ordered: formData.can_be_ordered,
     can_be_used_in_contracts: formData.can_be_used_in_contracts,
-    requires_provider: formData.requires_provider,
+    requires_provider: Boolean(providerId) || formData.requires_provider,
 
     max_discount_rate: formData.max_discount_rate.trim()
       ? String(toNumber(formData.max_discount_rate))
@@ -834,9 +983,8 @@ function normalizePayload(formData: ProductFormData) {
       ? String(toNumber(formData.default_agent_commission_rate))
       : "0",
 
-    pricing_tiers: parseLines(formData.pricing_tiers_text),
-    service_items: parseLines(formData.service_items_text),
-    notes: formData.notes.trim(),
+    pricing_tiers: parsePricingTiers(formData.pricing_tiers_text),
+    service_items: parseServiceItems(formData.service_items_text),
   };
 }
 
@@ -873,10 +1021,15 @@ function mapApiFieldErrors(
       nextErrors.product_type = String(message);
     }
     if (key === "status") nextErrors.status = String(message);
+    if (key === "category_id") nextErrors.category_id = String(message);
+    if (key === "provider_id") nextErrors.provider_id = String(message);
     if (key === "price" || key === "base_price") nextErrors.price = String(message);
     if (key === "sale_price") nextErrors.sale_price = String(message);
+    if (key === "cost_price") nextErrors.cost_price = String(message);
     if (key === "tax_rate") nextErrors.tax_rate = String(message);
     if (key === "duration_value") nextErrors.duration_value = String(message);
+    if (key === "offer_start_date") nextErrors.offer_start_date = String(message);
+    if (key === "offer_end_date") nextErrors.offer_end_date = String(message);
     if (key === "max_discount_rate") nextErrors.max_discount_rate = String(message);
     if (key === "default_agent_commission_rate") {
       nextErrors.default_agent_commission_rate = String(message);
@@ -884,16 +1037,6 @@ function mapApiFieldErrors(
   });
 
   return nextErrors;
-}
-
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0";
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(numericValue);
 }
 
 function formatMoney(value: number | string): string {
@@ -905,6 +1048,17 @@ function formatMoney(value: number | string): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function optionLabel(option: SelectOption, locale: AppLocale) {
+  const primary =
+    locale === "ar"
+      ? option.name_ar || option.name || option.title || option.name_en
+      : option.name_en || option.name || option.title || option.name_ar;
+
+  const code = option.code ? ` - ${option.code}` : "";
+
+  return `${primary || option.id}${code}`;
 }
 
 function SarAmount({ value }: { value: number | string }) {
@@ -1005,6 +1159,57 @@ function SummaryItem({
   );
 }
 
+function FilePicker({
+  label,
+  file,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  file: File | null;
+  disabled?: boolean;
+  onChange: (file: File | null) => void;
+}) {
+  return (
+    <div className="rounded-2xl border bg-background p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">{label}</p>
+          <p className="text-xs text-muted-foreground">
+            {file ? file.name : "PNG / JPG / WEBP"}
+          </p>
+        </div>
+
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+          <FileImage className="h-5 w-5" />
+        </div>
+      </div>
+
+      <Input
+        type="file"
+        accept="image/*"
+        disabled={disabled}
+        className="mt-4"
+        onChange={(event) => onChange(event.target.files?.[0] || null)}
+      />
+
+      {file ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          className="mt-2"
+          onClick={() => onChange(null)}
+        >
+          <Trash2 className="me-2 h-4 w-4" />
+          إزالة
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 /* ============================================================
    Page
 ============================================================ */
@@ -1018,37 +1223,36 @@ export default function SystemCreateProductPage() {
   const [errors, setErrors] = useState<ProductFormErrors>({});
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [categories, setCategories] = useState<SelectOption[]>([]);
+  const [providers, setProviders] = useState<SelectOption[]>([]);
+  const [isLoadingLookups, setIsLoadingLookups] = useState(true);
+  const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
+  const [marketingFile, setMarketingFile] = useState<File | null>(null);
 
   const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const isDirty = useMemo(() => hasFormChanges(formData), [formData]);
-
   const authResolving = isAuthResolving(auth);
+  const isDirty = useMemo(() => hasFormChanges(formData), [formData]);
 
   const canCreateProducts = hasSafePermission(
     auth,
-    ["products.create"],
+    ["products.create", "products.add", "products.add_product"],
     "action",
   );
 
   const canViewProducts = hasSafePermission(
     auth,
-    ["products.view", "products.list"],
+    ["products.view", "products.list", "products.view_product"],
     "view",
   );
 
   const completedFields = useMemo(() => {
     const keys: Array<keyof ProductFormData> = [
       "name",
-      "code",
-      "slug",
       "product_type",
       "status",
-      "category_name",
       "price",
       "billing_type",
       "fulfillment_type",
-      "duration_value",
       "tax_rate",
       "max_discount_rate",
       "default_agent_commission_rate",
@@ -1062,7 +1266,7 @@ export default function SystemCreateProductPage() {
     }).length;
   }, [formData]);
 
-  const progressPercent = Math.round((completedFields / 13) * 100);
+  const progressPercent = Math.round((completedFields / 9) * 100);
 
   const effectivePrice = useMemo(() => {
     const salePrice = toNumber(formData.sale_price);
@@ -1071,19 +1275,32 @@ export default function SystemCreateProductPage() {
     return salePrice > 0 ? salePrice : basePrice;
   }, [formData.price, formData.sale_price]);
 
+  const selectedProductTypeLabel = t.productTypes[formData.product_type];
+  const selectedStatusLabel = t.statuses[formData.status];
+
   const isReadyToSave =
-    formData.name.trim().length > 0 &&
-    formData.code.trim().length > 0 &&
-    isValidNumber(formData.price);
+    formData.name.trim().length > 0 && isValidNumber(formData.price);
 
   function updateField<K extends keyof ProductFormData>(
     key: K,
     value: ProductFormData[K],
   ) {
-    setFormData((current) => ({
-      ...current,
-      [key]: value,
-    }));
+    setFormData((current) => {
+      const next = {
+        ...current,
+        [key]: value,
+      };
+
+      if (key === "provider_id") {
+        next.requires_provider = Boolean(value) || next.requires_provider;
+      }
+
+      if (key === "is_offer" && value === true) {
+        next.show_on_offers = true;
+      }
+
+      return next;
+    });
 
     setErrors((current) => ({
       ...current,
@@ -1105,10 +1322,6 @@ export default function SystemCreateProductPage() {
       nextErrors.name = t.validation.name;
     }
 
-    if (!formData.code.trim()) {
-      nextErrors.code = t.validation.code;
-    }
-
     if (!isValidNumber(formData.price)) {
       nextErrors.price = t.validation.price;
     }
@@ -1124,6 +1337,10 @@ export default function SystemCreateProductPage() {
       salePrice > basePrice
     ) {
       nextErrors.sale_price = t.validation.saleGreater;
+    }
+
+    if (!isValidNumber(formData.cost_price)) {
+      nextErrors.cost_price = t.validation.price;
     }
 
     if (!isValidNumber(formData.duration_value)) {
@@ -1142,9 +1359,54 @@ export default function SystemCreateProductPage() {
       nextErrors.default_agent_commission_rate = t.validation.percent;
     }
 
+    if (
+      formData.offer_start_date &&
+      formData.offer_end_date &&
+      formData.offer_end_date < formData.offer_start_date
+    ) {
+      nextErrors.offer_end_date = t.validation.offerDates;
+    }
+
+    if (!isValidImage(thumbnailFile) || !isValidImage(marketingFile)) {
+      toast.error(t.validation.imageType);
+      return false;
+    }
+
+    if (!isValidImageSize(thumbnailFile) || !isValidImageSize(marketingFile)) {
+      toast.error(t.validation.imageSize);
+      return false;
+    }
+
     setErrors(nextErrors);
 
     return Object.keys(nextErrors).length === 0;
+  }
+
+  async function uploadProductImage(
+    productId: string | number,
+    imageType: "thumbnail" | "marketing",
+    file: File,
+  ) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("image_type", imageType);
+    form.append("alt_text", formData.name.trim());
+
+    const csrfToken = readCookie("csrftoken");
+
+    const response = await fetch(apiUrl(`/api/products/${productId}/upload-image/`), {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+      },
+      body: form,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Upload failed: ${imageType}`);
+    }
   }
 
   async function submitForm() {
@@ -1160,7 +1422,7 @@ export default function SystemCreateProductPage() {
 
       const csrfToken = readCookie("csrftoken");
 
-      const response = await fetch(apiUrl("/api/products/create/"), {
+      const response = await fetch(apiUrl("/api/products/"), {
         method: "POST",
         credentials: "include",
         headers: {
@@ -1171,28 +1433,42 @@ export default function SystemCreateProductPage() {
         body: JSON.stringify(normalizePayload(formData)),
       });
 
-      const result = (await response.json().catch(() => null)) as
-        | CreateProductApiResponse
-        | null;
+      const result = (await response.json().catch(() => ({}))) as CreateProductApiResponse;
 
-      if (!response.ok || result?.ok === false) {
-        const apiErrors = mapApiFieldErrors(result?.errors);
-        const message = result?.message || t.apiError;
+      if (!response.ok || result.ok === false) {
+        const apiErrors = mapApiFieldErrors(result.errors);
 
-        setErrors((current) => ({
-          ...current,
-          ...apiErrors,
-        }));
-
-        setSubmitError(message);
-        toast.error(message);
+        setErrors(apiErrors);
+        setSubmitError(result.message || t.apiError);
+        toast.error(result.message || t.apiError);
         return;
       }
 
-      const createdId = result ? resolveCreatedId(result) : null;
+      const createdId = resolveCreatedId(result);
+      let imageUploadFailed = false;
 
-      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
-      toast.success(t.success);
+      if (createdId) {
+        try {
+          if (thumbnailFile) {
+            await uploadProductImage(createdId, "thumbnail", thumbnailFile);
+          }
+
+          if (marketingFile) {
+            await uploadProductImage(createdId, "marketing", marketingFile);
+          }
+        } catch (error) {
+          console.error("Product image upload error:", error);
+          imageUploadFailed = true;
+        }
+      }
+
+      try {
+        window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+      } catch (error) {
+        console.error("Remove draft error:", error);
+      }
+
+      toast.success(imageUploadFailed ? t.imageUploadPartial : t.success);
 
       if (createdId) {
         router.push(`/system/products/${createdId}`);
@@ -1214,114 +1490,133 @@ export default function SystemCreateProductPage() {
       window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(formData));
       toast.success(t.draftSaved);
     } catch (error) {
-      console.error("Save product draft error:", error);
-      toast.error(t.apiError);
+      console.error("Save draft error:", error);
     }
   }
 
   function restoreDraft() {
     try {
-      const rawDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+      const saved = window.localStorage.getItem(DRAFT_STORAGE_KEY);
 
-      if (!rawDraft) {
-        toast.error(t.noDraft);
+      if (!saved) {
+        toast.message(t.noDraft);
         return;
       }
 
-      const parsed = JSON.parse(rawDraft) as ProductFormData;
-
-      setFormData({
-        ...initialFormData,
-        ...parsed,
-      });
-
-      setErrors({});
-      setSubmitError("");
+      const parsed = JSON.parse(saved) as ProductFormData;
+      setFormData({ ...initialFormData, ...parsed });
       toast.success(t.draftRestored);
     } catch (error) {
-      console.error("Restore product draft error:", error);
-      toast.error(t.apiError);
+      console.error("Restore draft error:", error);
     }
   }
 
   function clearForm() {
-    if (isDirty && !window.confirm(t.confirmClear)) return;
+    if (!window.confirm(t.confirmClear)) return;
 
     setFormData(initialFormData);
     setErrors({});
     setSubmitError("");
+    setThumbnailFile(null);
+    setMarketingFile(null);
     toast.success(t.formCleared);
   }
 
-  function confirmNavigate(path: string) {
-    if (isSubmitting) return;
+  function safeBack() {
+    if (isDirty && !window.confirm(t.confirmLeave)) return;
 
-    if (isDirty && !window.confirm(t.confirmLeave)) {
-      return;
+    router.push("/system/products");
+  }
+
+  async function loadLookups() {
+    try {
+      setIsLoadingLookups(true);
+
+      const [categoriesResponse, providersResponse] = await Promise.all([
+        fetch(apiUrl("/api/products/categories/?page=1&page_size=100"), {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        }),
+        fetch(apiUrl("/api/providers/?page=1&page_size=100&ordering=name"), {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        }),
+      ]);
+
+      if (categoriesResponse.ok) {
+        const categoriesPayload =
+          (await categoriesResponse.json().catch(() => ({}))) as ListApiResponse<SelectOption>;
+        setCategories(extractList(categoriesPayload));
+      }
+
+      if (providersResponse.ok) {
+        const providersPayload =
+          (await providersResponse.json().catch(() => ({}))) as ListApiResponse<SelectOption>;
+        setProviders(extractList(providersPayload));
+      }
+    } catch (error) {
+      console.error("Load product create lookups error:", error);
+    } finally {
+      setIsLoadingLookups(false);
     }
-
-    router.push(path);
   }
 
   useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
+    const nextLocale = readLocale();
 
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
+    setLocale(nextLocale);
+    applyDocumentLocale(nextLocale);
+    loadLookups();
   }, []);
 
   useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!isDirty || isSubmitting) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      if (!hasFormChanges(formData)) return;
 
       event.preventDefault();
-      event.returnValue = t.confirmLeave;
+      event.returnValue = "";
     };
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("beforeunload", handler);
 
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [isDirty, isSubmitting, t.confirmLeave]);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [formData]);
 
-  if (!authResolving && !canCreateProducts) {
+  if (authResolving) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
+      <div className="w-full space-y-4">
+        <Card>
+          <CardContent className="flex items-center gap-3 p-6">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm text-muted-foreground">{t.loadingLookups}</span>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!canCreateProducts) {
+    return (
+      <div className="w-full space-y-4">
+        <Card className="border-destructive/20">
+          <CardContent className="flex flex-col items-center justify-center gap-4 p-10 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
+              <ShieldCheck className="h-7 w-7 text-destructive" />
             </div>
 
             <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <h2 className="text-lg font-semibold">{t.accessDeniedTitle}</h2>
+              <p className="mt-2 max-w-xl text-sm text-muted-foreground">
                 {t.accessDeniedText}
               </p>
             </div>
+
+            {canViewProducts ? (
+              <Button type="button" variant="outline" onClick={() => router.push("/system/products")}>
+                <ArrowLeft className="me-2 h-4 w-4" />
+                {t.back}
+              </Button>
+            ) : null}
           </CardContent>
         </Card>
       </div>
@@ -1329,116 +1624,106 @@ export default function SystemCreateProductPage() {
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.title}
-          </h1>
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="rounded-full">
+              <Package className="me-1 h-3.5 w-3.5" />
+              {selectedProductTypeLabel}
+            </Badge>
 
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+            <Badge variant={formData.status === "active" ? "default" : "outline"} className="rounded-full">
+              {selectedStatusLabel}
+            </Badge>
+
+            {formData.is_offer ? (
+              <Badge variant="outline" className="rounded-full">
+                <Sparkles className="me-1 h-3.5 w-3.5" />
+                {t.fields.isOffer}
+              </Badge>
+            ) : null}
+          </div>
+
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">{t.title}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{t.subtitle}</p>
+          </div>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={() => confirmNavigate("/system/products")}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            <span>{t.back}</span>
-          </Button>
-
+        <div className="flex flex-wrap gap-2">
           {canViewProducts ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-              disabled={isSubmitting}
-              onClick={() => confirmNavigate("/system/products/list")}
-            >
-              <ClipboardList className="h-4 w-4" />
-              <span>{t.productsList}</span>
+            <Button type="button" variant="outline" onClick={safeBack}>
+              <ArrowLeft className="me-2 h-4 w-4" />
+              {t.back}
             </Button>
           ) : null}
 
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={saveDraft}
-          >
-            <Save className="h-4 w-4" />
-            <span>{t.saveDraft}</span>
+          <Button type="button" variant="outline" onClick={restoreDraft} disabled={isSubmitting}>
+            <RotateCcw className="me-2 h-4 w-4" />
+            {t.restoreDraft}
           </Button>
 
-          <Button
-            type="button"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={submitForm}
-          >
+          <Button type="button" variant="outline" onClick={saveDraft} disabled={isSubmitting}>
+            <ClipboardList className="me-2 h-4 w-4" />
+            {t.saveDraft}
+          </Button>
+
+          <Button type="button" variant="destructive" onClick={clearForm} disabled={isSubmitting}>
+            <Trash2 className="me-2 h-4 w-4" />
+            {t.clearForm}
+          </Button>
+
+          <Button type="button" onClick={submitForm} disabled={isSubmitting || !isReadyToSave}>
             {isSubmitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="me-2 h-4 w-4 animate-spin" />
             ) : (
-              <CheckCircle2 className="h-4 w-4" />
+              <Save className="me-2 h-4 w-4" />
             )}
-            <span>{isSubmitting ? t.saving : t.create}</span>
+            {isSubmitting ? t.saving : t.create}
           </Button>
         </div>
       </div>
 
-      {/* Submit Error */}
       {submitError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5 text-destructive">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+        <Card className="border-destructive/20 bg-destructive/5">
+          <CardContent className="flex items-start gap-3 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 text-destructive" />
             <div>
-              <p className="font-semibold">{t.formErrorTitle}</p>
-              <p className="mt-1 text-sm">{submitError}</p>
+              <p className="font-semibold text-destructive">{t.formErrorTitle}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{submitError}</p>
             </div>
           </CardContent>
         </Card>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        {/* Main Form */}
+      <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
         <div className="space-y-4">
-          {/* Basic Info */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Package className="h-4 w-4" />
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Layers3 className="h-5 w-5" />
                 {t.basicInfo}
               </CardTitle>
               <CardDescription>{t.basicDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
+            <CardContent className="grid gap-4 lg:grid-cols-2">
               <FieldBlock label={t.fields.name} error={errors.name} required>
                 <Input
                   value={formData.name}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.name}
-                  className="h-10 rounded-xl"
                   onChange={(event) => updateField("name", event.target.value)}
                 />
               </FieldBlock>
 
-              <FieldBlock label={t.fields.code} error={errors.code} required>
+              <FieldBlock label={t.fields.code} error={errors.code}>
                 <Input
                   value={formData.code}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.code}
-                  className="h-10 rounded-xl"
-                  onChange={(event) => updateField("code", event.target.value)}
-                  onBlur={() => updateField("code", normalizeCode(formData.code))}
+                  onChange={(event) => updateField("code", normalizeCode(event.target.value))}
                 />
               </FieldBlock>
 
@@ -1447,24 +1732,7 @@ export default function SystemCreateProductPage() {
                   value={formData.slug}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.slug}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
-                  onChange={(event) => updateField("slug", event.target.value)}
-                  onBlur={() =>
-                    updateField("slug", normalizeSlug(formData.slug || formData.name))
-                  }
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.category} error={errors.category_name}>
-                <Input
-                  value={formData.category_name}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.category}
-                  className="h-10 rounded-xl"
-                  onChange={(event) =>
-                    updateField("category_name", event.target.value)
-                  }
+                  onChange={(event) => updateField("slug", normalizeSlug(event.target.value))}
                 />
               </FieldBlock>
 
@@ -1472,13 +1740,13 @@ export default function SystemCreateProductPage() {
                 <select
                   value={formData.product_type}
                   disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   onChange={(event) =>
                     updateField("product_type", event.target.value as ProductType)
                   }
                 >
-                  {Object.entries(t.productTypes).map(([value, label]) => (
-                    <option key={value} value={value}>
+                  {Object.entries(t.productTypes).map(([key, label]) => (
+                    <option key={key} value={key}>
                       {label}
                     </option>
                   ))}
@@ -1489,14 +1757,46 @@ export default function SystemCreateProductPage() {
                 <select
                   value={formData.status}
                   disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   onChange={(event) =>
                     updateField("status", event.target.value as ProductStatus)
                   }
                 >
-                  {Object.entries(t.statuses).map(([value, label]) => (
-                    <option key={value} value={value}>
+                  {Object.entries(t.statuses).map(([key, label]) => (
+                    <option key={key} value={key}>
                       {label}
+                    </option>
+                  ))}
+                </select>
+              </FieldBlock>
+
+              <FieldBlock label={t.fields.category} error={errors.category_id}>
+                <select
+                  value={formData.category_id}
+                  disabled={isSubmitting || isLoadingLookups}
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  onChange={(event) => updateField("category_id", event.target.value)}
+                >
+                  <option value="">{t.noCategory}</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {optionLabel(category, locale)}
+                    </option>
+                  ))}
+                </select>
+              </FieldBlock>
+
+              <FieldBlock label={t.fields.provider} error={errors.provider_id}>
+                <select
+                  value={formData.provider_id}
+                  disabled={isSubmitting || isLoadingLookups}
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  onChange={(event) => updateField("provider_id", event.target.value)}
+                >
+                  <option value="">{t.noProvider}</option>
+                  {providers.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {optionLabel(provider, locale)}
                     </option>
                   ))}
                 </select>
@@ -1504,29 +1804,22 @@ export default function SystemCreateProductPage() {
             </CardContent>
           </Card>
 
-          {/* Description */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <FileText className="h-4 w-4" />
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
                 {t.descriptionInfo}
               </CardTitle>
               <CardDescription>{t.descriptionDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="grid gap-4">
-              <FieldBlock
-                label={t.fields.shortDescription}
-                error={errors.short_description}
-              >
+              <FieldBlock label={t.fields.shortDescription} error={errors.short_description}>
                 <Input
                   value={formData.short_description}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.shortDescription}
-                  className="h-10 rounded-xl"
-                  onChange={(event) =>
-                    updateField("short_description", event.target.value)
-                  }
+                  onChange={(event) => updateField("short_description", event.target.value)}
                 />
               </FieldBlock>
 
@@ -1535,196 +1828,306 @@ export default function SystemCreateProductPage() {
                   value={formData.description}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.description}
-                  className="min-h-28 rounded-xl"
-                  onChange={(event) =>
-                    updateField("description", event.target.value)
-                  }
+                  className="min-h-28"
+                  onChange={(event) => updateField("description", event.target.value)}
                 />
               </FieldBlock>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <FieldBlock label={t.fields.features} error={errors.features}>
+                  <Textarea
+                    value={formData.features}
+                    disabled={isSubmitting}
+                    placeholder={t.placeholders.features}
+                    className="min-h-24"
+                    onChange={(event) => updateField("features", event.target.value)}
+                  />
+                </FieldBlock>
+
+                <FieldBlock label={t.fields.terms} error={errors.terms_and_conditions}>
+                  <Textarea
+                    value={formData.terms_and_conditions}
+                    disabled={isSubmitting}
+                    placeholder={t.placeholders.terms}
+                    className="min-h-24"
+                    onChange={(event) =>
+                      updateField("terms_and_conditions", event.target.value)
+                    }
+                  />
+                </FieldBlock>
+              </div>
 
               <FieldBlock label={t.fields.tags} error={errors.tags}>
                 <Input
                   value={formData.tags}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.tags}
-                  className="h-10 rounded-xl"
                   onChange={(event) => updateField("tags", event.target.value)}
                 />
               </FieldBlock>
             </CardContent>
           </Card>
 
-          {/* Pricing */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <CircleDollarSign className="h-4 w-4" />
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5" />
+                {t.marketingInfo}
+              </CardTitle>
+              <CardDescription>{t.marketingDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <ToggleBox
+                  checked={formData.is_offer}
+                  disabled={isSubmitting}
+                  title={t.fields.isOffer}
+                  description={t.fields.isOffer}
+                  onChange={(value) => updateField("is_offer", value)}
+                />
+
+                <ToggleBox
+                  checked={formData.show_on_landing}
+                  disabled={isSubmitting}
+                  title={t.fields.landing}
+                  description={t.fields.landing}
+                  onChange={(value) => updateField("show_on_landing", value)}
+                />
+
+                <ToggleBox
+                  checked={formData.show_on_mobile}
+                  disabled={isSubmitting}
+                  title={t.fields.mobile}
+                  description={t.fields.mobile}
+                  onChange={(value) => updateField("show_on_mobile", value)}
+                />
+
+                <ToggleBox
+                  checked={formData.show_on_offers}
+                  disabled={isSubmitting}
+                  title={t.fields.offers}
+                  description={t.fields.offers}
+                  onChange={(value) => updateField("show_on_offers", value)}
+                />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-3">
+                <FieldBlock label={t.fields.offerTitle} error={errors.offer_title}>
+                  <Input
+                    value={formData.offer_title}
+                    disabled={isSubmitting}
+                    placeholder={t.placeholders.offerTitle}
+                    onChange={(event) => updateField("offer_title", event.target.value)}
+                  />
+                </FieldBlock>
+
+                <FieldBlock label={t.fields.offerSubtitle} error={errors.offer_subtitle}>
+                  <Input
+                    value={formData.offer_subtitle}
+                    disabled={isSubmitting}
+                    placeholder={t.placeholders.offerSubtitle}
+                    onChange={(event) => updateField("offer_subtitle", event.target.value)}
+                  />
+                </FieldBlock>
+
+                <FieldBlock label={t.fields.offerBadge} error={errors.offer_badge}>
+                  <Input
+                    value={formData.offer_badge}
+                    disabled={isSubmitting}
+                    placeholder={t.placeholders.offerBadge}
+                    onChange={(event) => updateField("offer_badge", event.target.value)}
+                  />
+                </FieldBlock>
+
+                <FieldBlock label={t.fields.offerStart} error={errors.offer_start_date}>
+                  <Input
+                    type="date"
+                    value={formData.offer_start_date}
+                    disabled={isSubmitting}
+                    onChange={(event) => updateField("offer_start_date", event.target.value)}
+                  />
+                </FieldBlock>
+
+                <FieldBlock label={t.fields.offerEnd} error={errors.offer_end_date}>
+                  <Input
+                    type="date"
+                    value={formData.offer_end_date}
+                    disabled={isSubmitting}
+                    onChange={(event) => updateField("offer_end_date", event.target.value)}
+                  />
+                </FieldBlock>
+              </div>
+
+              <FieldBlock label={t.fields.offerTerms} error={errors.offer_terms}>
+                <Textarea
+                  value={formData.offer_terms}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.terms}
+                  className="min-h-24"
+                  onChange={(event) => updateField("offer_terms", event.target.value)}
+                />
+              </FieldBlock>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ImagePlus className="h-5 w-5" />
+                {t.imagesInfo}
+              </CardTitle>
+              <CardDescription>{t.imagesDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 lg:grid-cols-2">
+              <FilePicker
+                label={t.fields.thumbnail}
+                file={thumbnailFile}
+                disabled={isSubmitting}
+                onChange={setThumbnailFile}
+              />
+
+              <FilePicker
+                label={t.fields.marketingImage}
+                file={marketingFile}
+                disabled={isSubmitting}
+                onChange={setMarketingFile}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CircleDollarSign className="h-5 w-5" />
                 {t.pricingInfo}
               </CardTitle>
               <CardDescription>{t.pricingDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
+            <CardContent className="grid gap-4 lg:grid-cols-3">
               <FieldBlock label={t.fields.price} error={errors.price} required>
-                <div className="relative">
-                  <Input
-                    value={formData.price}
-                    disabled={isSubmitting}
-                    placeholder={t.placeholders.price}
-                    className={`h-10 rounded-xl ${isArabic ? "pl-10" : "pr-10"}`}
-                    onChange={(event) => updateField("price", event.target.value)}
-                    onBlur={() =>
-                      updateField("price", normalizeNumberString(formData.price))
-                    }
-                  />
-                  <Image
-                    src={SAR_ICON_PATH}
-                    alt=""
-                    width={16}
-                    height={16}
-                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "left-3" : "right-3"
-                    }`}
-                  />
-                </div>
+                <Input
+                  inputMode="decimal"
+                  value={formData.price}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.price}
+                  onChange={(event) => updateField("price", event.target.value)}
+                />
               </FieldBlock>
 
               <FieldBlock label={t.fields.salePrice} error={errors.sale_price}>
-                <div className="relative">
-                  <Input
-                    value={formData.sale_price}
-                    disabled={isSubmitting}
-                    placeholder={t.placeholders.salePrice}
-                    className={`h-10 rounded-xl ${isArabic ? "pl-10" : "pr-10"}`}
-                    onChange={(event) =>
-                      updateField("sale_price", event.target.value)
-                    }
-                    onBlur={() =>
-                      updateField(
-                        "sale_price",
-                        formData.sale_price.trim()
-                          ? normalizeNumberString(formData.sale_price)
-                          : "",
-                      )
-                    }
-                  />
-                  <Image
-                    src={SAR_ICON_PATH}
-                    alt=""
-                    width={16}
-                    height={16}
-                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "left-3" : "right-3"
-                    }`}
-                  />
-                </div>
+                <Input
+                  inputMode="decimal"
+                  value={formData.sale_price}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.salePrice}
+                  onChange={(event) => updateField("sale_price", event.target.value)}
+                />
+              </FieldBlock>
+
+              <FieldBlock label={t.fields.costPrice} error={errors.cost_price}>
+                <Input
+                  inputMode="decimal"
+                  value={formData.cost_price}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.costPrice}
+                  onChange={(event) => updateField("cost_price", event.target.value)}
+                />
               </FieldBlock>
 
               <FieldBlock label={t.fields.billingType} error={errors.billing_type}>
                 <select
                   value={formData.billing_type}
                   disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   onChange={(event) =>
                     updateField("billing_type", event.target.value as BillingType)
                   }
                 >
-                  {Object.entries(t.billingTypes).map(([value, label]) => (
-                    <option key={value} value={value}>
+                  {Object.entries(t.billingTypes).map(([key, label]) => (
+                    <option key={key} value={key}>
                       {label}
                     </option>
                   ))}
                 </select>
               </FieldBlock>
 
-              <FieldBlock
-                label={t.fields.fulfillmentType}
-                error={errors.fulfillment_type}
-              >
+              <FieldBlock label={t.fields.fulfillmentType} error={errors.fulfillment_type}>
                 <select
                   value={formData.fulfillment_type}
                   disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   onChange={(event) =>
-                    updateField(
-                      "fulfillment_type",
-                      event.target.value as FulfillmentType,
-                    )
+                    updateField("fulfillment_type", event.target.value as FulfillmentType)
                   }
                 >
-                  {Object.entries(t.fulfillmentTypes).map(([value, label]) => (
-                    <option key={value} value={value}>
+                  {Object.entries(t.fulfillmentTypes).map(([key, label]) => (
+                    <option key={key} value={key}>
                       {label}
                     </option>
                   ))}
                 </select>
-              </FieldBlock>
-
-              <FieldBlock
-                label={t.fields.durationValue}
-                error={errors.duration_value}
-              >
-                <Input
-                  value={formData.duration_value}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.durationValue}
-                  className="h-10 rounded-xl"
-                  onChange={(event) =>
-                    updateField("duration_value", event.target.value)
-                  }
-                />
               </FieldBlock>
 
               <FieldBlock label={t.fields.durationUnit} error={errors.duration_unit}>
                 <select
                   value={formData.duration_unit}
                   disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                   onChange={(event) =>
                     updateField("duration_unit", event.target.value as DurationUnit)
                   }
                 >
-                  {Object.entries(t.durationUnits).map(([value, label]) => (
-                    <option key={value} value={value}>
+                  {Object.entries(t.durationUnits).map(([key, label]) => (
+                    <option key={key} value={key}>
                       {label}
                     </option>
                   ))}
                 </select>
               </FieldBlock>
 
+              <FieldBlock label={t.fields.durationValue} error={errors.duration_value}>
+                <Input
+                  inputMode="numeric"
+                  value={formData.duration_value}
+                  disabled={isSubmitting}
+                  placeholder={t.placeholders.durationValue}
+                  onChange={(event) => updateField("duration_value", event.target.value)}
+                />
+              </FieldBlock>
+
               <FieldBlock label={t.fields.taxRate} error={errors.tax_rate}>
                 <Input
+                  inputMode="decimal"
                   value={formData.tax_rate}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.taxRate}
-                  className="h-10 rounded-xl"
                   onChange={(event) => updateField("tax_rate", event.target.value)}
                 />
               </FieldBlock>
 
-              <div className="flex items-end">
-                <ToggleBox
-                  checked={formData.is_taxable}
-                  disabled={isSubmitting}
-                  title={t.fields.taxable}
-                  description={`${t.fields.taxRate}: ${formData.tax_rate || "0"}%`}
-                  onChange={(value) => updateField("is_taxable", value)}
-                />
-              </div>
+              <ToggleBox
+                checked={formData.is_taxable}
+                disabled={isSubmitting}
+                title={t.fields.taxable}
+                description={t.fields.taxable}
+                onChange={(value) => updateField("is_taxable", value)}
+              />
             </CardContent>
           </Card>
 
-          {/* Readiness */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <ShieldCheck className="h-4 w-4" />
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5" />
                 {t.availabilityInfo}
               </CardTitle>
               <CardDescription>{t.availabilityDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
+            <CardContent className="grid gap-4 lg:grid-cols-3">
               <ToggleBox
                 checked={formData.is_public}
                 disabled={isSubmitting}
@@ -1750,32 +2153,6 @@ export default function SystemCreateProductPage() {
               />
 
               <ToggleBox
-                checked={formData.can_be_ordered}
-                disabled={isSubmitting}
-                title={t.fields.canBeOrdered}
-                description={t.fields.canBeOrdered}
-                onChange={(value) => updateField("can_be_ordered", value)}
-              />
-
-              <ToggleBox
-                checked={formData.can_be_used_in_contracts}
-                disabled={isSubmitting}
-                title={t.fields.contractsReady}
-                description={t.fields.contractsReady}
-                onChange={(value) =>
-                  updateField("can_be_used_in_contracts", value)
-                }
-              />
-
-              <ToggleBox
-                checked={formData.requires_provider}
-                disabled={isSubmitting}
-                title={t.fields.requiresProvider}
-                description={t.fields.requiresProvider}
-                onChange={(value) => updateField("requires_provider", value)}
-              />
-
-              <ToggleBox
                 checked={formData.allow_online_purchase}
                 disabled={isSubmitting}
                 title={t.fields.onlinePurchase}
@@ -1798,29 +2175,49 @@ export default function SystemCreateProductPage() {
                 description={t.fields.providerSale}
                 onChange={(value) => updateField("allow_provider_sale", value)}
               />
+
+              <ToggleBox
+                checked={formData.can_be_ordered}
+                disabled={isSubmitting}
+                title={t.fields.canBeOrdered}
+                description={t.fields.canBeOrdered}
+                onChange={(value) => updateField("can_be_ordered", value)}
+              />
+
+              <ToggleBox
+                checked={formData.can_be_used_in_contracts}
+                disabled={isSubmitting}
+                title={t.fields.contractsReady}
+                description={t.fields.contractsReady}
+                onChange={(value) => updateField("can_be_used_in_contracts", value)}
+              />
+
+              <ToggleBox
+                checked={formData.requires_provider}
+                disabled={isSubmitting}
+                title={t.fields.requiresProvider}
+                description={t.fields.requiresProvider}
+                onChange={(value) => updateField("requires_provider", value)}
+              />
             </CardContent>
           </Card>
 
-          {/* Limits */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Percent className="h-4 w-4" />
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Percent className="h-5 w-5" />
                 {t.limitsInfo}
               </CardTitle>
               <CardDescription>{t.limitsDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock
-                label={t.fields.maxDiscount}
-                error={errors.max_discount_rate}
-              >
+            <CardContent className="grid gap-4 lg:grid-cols-2">
+              <FieldBlock label={t.fields.maxDiscount} error={errors.max_discount_rate}>
                 <Input
+                  inputMode="decimal"
                   value={formData.max_discount_rate}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.maxDiscount}
-                  className="h-10 rounded-xl"
                   onChange={(event) =>
                     updateField("max_discount_rate", event.target.value)
                   }
@@ -1832,267 +2229,195 @@ export default function SystemCreateProductPage() {
                 error={errors.default_agent_commission_rate}
               >
                 <Input
+                  inputMode="decimal"
                   value={formData.default_agent_commission_rate}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.agentCommission}
-                  className="h-10 rounded-xl"
                   onChange={(event) =>
-                    updateField(
-                      "default_agent_commission_rate",
-                      event.target.value,
-                    )
+                    updateField("default_agent_commission_rate", event.target.value)
                   }
                 />
               </FieldBlock>
             </CardContent>
           </Card>
 
-          {/* Advanced */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Layers3 className="h-4 w-4" />
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Boxes className="h-5 w-5" />
                 {t.advancedInfo}
               </CardTitle>
               <CardDescription>{t.advancedDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="grid gap-4">
-              <FieldBlock
-                label={t.fields.pricingTiers}
-                error={errors.pricing_tiers_text}
-              >
+            <CardContent className="grid gap-4 lg:grid-cols-2">
+              <FieldBlock label={t.fields.pricingTiers} error={errors.pricing_tiers_text}>
                 <Textarea
                   value={formData.pricing_tiers_text}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.pricingTiers}
-                  className="min-h-24 rounded-xl"
-                  onChange={(event) =>
-                    updateField("pricing_tiers_text", event.target.value)
-                  }
+                  className="min-h-32"
+                  onChange={(event) => updateField("pricing_tiers_text", event.target.value)}
                 />
               </FieldBlock>
 
-              <FieldBlock
-                label={t.fields.serviceItems}
-                error={errors.service_items_text}
-              >
+              <FieldBlock label={t.fields.serviceItems} error={errors.service_items_text}>
                 <Textarea
                   value={formData.service_items_text}
                   disabled={isSubmitting}
                   placeholder={t.placeholders.serviceItems}
-                  className="min-h-24 rounded-xl"
-                  onChange={(event) =>
-                    updateField("service_items_text", event.target.value)
-                  }
-                />
-              </FieldBlock>
-            </CardContent>
-          </Card>
-
-          {/* Notes */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <FileText className="h-4 w-4" />
-                {t.notesInfo}
-              </CardTitle>
-              <CardDescription>{t.notesDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <FieldBlock label={t.fields.notes} error={errors.notes}>
-                <Textarea
-                  value={formData.notes}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.notes}
-                  className="min-h-28 rounded-xl"
-                  onChange={(event) => updateField("notes", event.target.value)}
+                  className="min-h-32"
+                  onChange={(event) => updateField("service_items_text", event.target.value)}
                 />
               </FieldBlock>
             </CardContent>
           </Card>
         </div>
 
-        {/* Sidebar Summary */}
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BadgeCheck className="h-5 w-5" />
                 {t.summaryTitle}
               </CardTitle>
               <CardDescription>{t.summaryDesc}</CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-4">
-              <div className="rounded-xl border bg-background p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground">
-                      {t.completion}
-                    </p>
-                    <p className="mt-1 text-2xl font-bold">
-                      {formatNumber(progressPercent)}%
-                    </p>
-                  </div>
-
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
-                    <BadgeCheck className="h-5 w-5" />
-                  </div>
+              <div className="rounded-2xl border bg-background p-4">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium">{t.completion}</span>
+                  <span className="font-semibold">{progressPercent}%</span>
                 </div>
 
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${progressPercent}%` }}
+                    style={{ width: `${Math.min(100, progressPercent)}%` }}
                   />
                 </div>
 
-                <div className="mt-3">
+                <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                   {isReadyToSave ? (
-                    <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      {t.ready}
-                    </Badge>
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                   ) : (
-                    <Badge variant="outline" className="rounded-full">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      {t.missingData}
-                    </Badge>
+                    <XCircle className="h-4 w-4 text-destructive" />
                   )}
+                  <span>{isReadyToSave ? t.ready : t.missingData}</span>
                 </div>
               </div>
 
               <SummaryItem
                 icon={Package}
                 label={t.fields.name}
-                value={formData.name || "-"}
-              />
-
-              <SummaryItem
-                icon={ShieldCheck}
-                label={t.fields.code}
-                value={normalizeCode(formData.code) || "-"}
+                value={formData.name}
               />
 
               <SummaryItem
                 icon={Tag}
                 label={t.fields.type}
-                value={t.productTypes[formData.product_type]}
-              />
-
-              <SummaryItem
-                icon={CheckCircle2}
-                label={t.fields.status}
-                value={t.statuses[formData.status]}
-              />
-
-              <div className="rounded-xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">
-                  {t.priceSummary}
-                </p>
-                <p className="mt-1 text-lg font-bold">
-                  <SarAmount value={effectivePrice} />
-                </p>
-              </div>
-
-              <SummaryItem
-                icon={CreditCard}
-                label={t.fields.billingType}
-                value={t.billingTypes[formData.billing_type]}
-              />
-
-              <SummaryItem
-                icon={Boxes}
-                label={t.readinessSummary}
-                value={[
-                  formData.can_be_ordered ? t.fields.canBeOrdered : "",
-                  formData.can_be_used_in_contracts ? t.fields.contractsReady : "",
-                ]
-                  .filter(Boolean)
-                  .join(" / ")}
+                value={selectedProductTypeLabel}
               />
 
               <SummaryItem
                 icon={Stethoscope}
-                label={t.saleChannelsSummary}
-                value={[
-                  formData.allow_online_purchase ? t.fields.onlinePurchase : "",
-                  formData.allow_agent_sale ? t.fields.agentSale : "",
-                  formData.allow_provider_sale ? t.fields.providerSale : "",
-                ]
-                  .filter(Boolean)
-                  .join(" / ")}
+                label={t.fields.provider}
+                value={
+                  providers.find((item) => String(item.id) === formData.provider_id)
+                    ? optionLabel(
+                        providers.find((item) => String(item.id) === formData.provider_id)!,
+                        locale,
+                      )
+                    : t.noProvider
+                }
               />
 
-              <div className="grid gap-2">
-                <Button
-                  type="button"
-                  className="h-10 rounded-xl"
-                  disabled={isSubmitting}
-                  onClick={submitForm}
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  {isSubmitting ? t.saving : t.create}
-                </Button>
+              <SummaryItem
+                icon={CircleDollarSign}
+                label={t.priceSummary}
+                value={formatMoney(effectivePrice)}
+              />
 
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 rounded-xl"
-                    disabled={isSubmitting}
-                    onClick={restoreDraft}
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    {t.restoreDraft}
-                  </Button>
+              <div className="rounded-2xl border bg-background p-4">
+                <p className="mb-3 text-sm font-semibold">{t.priceSummary}</p>
+                <div className="grid gap-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">{t.fields.price}</span>
+                    <SarAmount value={toNumber(formData.price)} />
+                  </div>
 
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 rounded-xl"
-                    disabled={isSubmitting}
-                    onClick={clearForm}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {t.clearForm}
-                  </Button>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">{t.fields.salePrice}</span>
+                    <SarAmount value={toNumber(formData.sale_price)} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 font-semibold">
+                    <span>{t.ready}</span>
+                    <SarAmount value={effectivePrice} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-background p-4">
+                <p className="mb-3 text-sm font-semibold">{t.offerSummary}</p>
+                <div className="flex flex-wrap gap-2">
+                  {formData.is_offer ? <Badge>{t.fields.isOffer}</Badge> : null}
+                  {formData.show_on_landing ? <Badge variant="outline">{t.fields.landing}</Badge> : null}
+                  {formData.show_on_mobile ? <Badge variant="outline">{t.fields.mobile}</Badge> : null}
+                  {formData.show_on_offers ? <Badge variant="outline">{t.fields.offers}</Badge> : null}
+                  {thumbnailFile ? <Badge variant="secondary">{t.fields.thumbnail}</Badge> : null}
+                  {marketingFile ? <Badge variant="secondary">{t.fields.marketingImage}</Badge> : null}
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <UploadCloud className="h-5 w-5" />
+                {t.imagesInfo}
+              </CardTitle>
+              <CardDescription>{t.imagesDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-3">
+              <SummaryItem
+                icon={FileImage}
+                label={t.fields.thumbnail}
+                value={thumbnailFile ? t.fileSelected : t.no}
+              />
+
+              <SummaryItem
+                icon={CalendarDays}
+                label={t.fields.marketingImage}
+                value={marketingFile ? t.fileSelected : t.no}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CreditCard className="h-5 w-5" />
                 {t.stepsTitle}
               </CardTitle>
               <CardDescription>{t.stepsDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-3">
-              {t.quickNotes.map((item, index) => (
-                <div
-                  key={item}
-                  className="flex items-start gap-3 rounded-xl border bg-background p-3"
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                    {index + 1}
-                  </div>
-
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {item}
-                  </p>
-                </div>
-              ))}
+            <CardContent>
+              <ul className="space-y-3 text-sm text-muted-foreground">
+                {t.quickNotes.map((note) => (
+                  <li key={note} className="flex gap-2">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                    <span>{note}</span>
+                  </li>
+                ))}
+              </ul>
             </CardContent>
           </Card>
-        </aside>
+        </div>
       </div>
     </div>
   );

@@ -1,29 +1,83 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/invoices/page.tsx
+   🧠 Primey Care | Invoices Dashboard
+
+   ✅ المسار:
+      app/system/invoices/page.tsx
+
+   ✅ العمل:
+      صفحة لوحة الفواتير داخل النظام.
+      تعرض ملخص الفواتير، إجماليات المبالغ، حالة الإصدار، حالة الدفع، وآخر الفواتير.
+
+   ✅ الإصدار:
+      Phase 17 UX Refinement + Phase 2 Permissions
+
+   ✅ يعتمد على:
+      - /api/invoices/list/
+      - /api/invoices/
+      - primey-locale
+      - AuthProvider
+      - sonner
+      - /currency/sar.svg
+
+   ✅ متوافق مع:
+      - Invoices list page
+      - Invoices create page
+      - Invoices detail page
+      - Central reports module
+      - Centers / Customers approved UX standard
+
+   ✅ الوظائف:
+      - عرض ملخص الفواتير.
+      - عرض آخر الفواتير.
+      - البحث في صف مستقل.
+      - الفلاتر في صف مستقل.
+      - فلترة حسب حالة الفاتورة وحالة الدفع.
+      - Excel export بصيغة .xls HTML Workbook.
+      - Web PDF Print.
+      - Error State مستقل.
+      - Empty State ذكي.
+      - Skeleton Loading.
+      - صلاحيات آمنة بدون كسر system_admin/superuser.
+      - إخفاء الأزرار غير المصرح بها بدل تعطيلها.
+      - أرقام إنجليزية دائمًا.
+      - رمز SAR من /currency/sar.svg بعد الرقم.
+      - استخدام sonner للتنبيهات.
+      - بدون localhost hardcoded.
+      - بدون إظهار مسارات أو عبارات تقنية داخل الواجهة.
+
+   ✅ إصلاحات هذا الإصدار:
+      - إصلاح TypeError الخاص بـ invoices_count عند apiSummary undefined.
+      - جعل buildSummary تستخدم asDict(apiSummary) بدل cast غير آمن.
+      - إضافة fallback للتحميل من /api/invoices/list/ ثم /api/invoices/.
+      - تحسين قراءة رسائل الخطأ بدون كسر الصفحة.
+============================================================ */
+
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Activity,
-  ArrowDownUp,
+  ArrowDown,
   ArrowLeft,
-  BadgeCheck,
-  BarChart3,
-  CalendarDays,
+  ArrowUp,
   CheckCircle2,
-  Clock3,
+  Download,
+  Eye,
   FileText,
   Loader2,
-  Plus,
+  PlusCircle,
+  Printer,
   ReceiptText,
   RefreshCcw,
   Search,
-  ShieldCheck,
-  Sparkles,
-  Wallet,
+  WalletCards,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,958 +88,2118 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-/* =====================================================
-   TYPES
-===================================================== */
+/* ============================================================
+   Types
+============================================================ */
 
 type AppLocale = "ar" | "en";
+type Dict = Record<string, unknown>;
 
-type ApiCustomer = {
-  id?: number | null;
-  name?: string | null;
-  phone?: string | null;
-  email?: string | null;
+type InvoiceStatus =
+  | "DRAFT"
+  | "ISSUED"
+  | "PAID"
+  | "PARTIALLY_PAID"
+  | "CANCELLED"
+  | "OVERDUE"
+  | "UNKNOWN";
+
+type PaymentStatus =
+  | "UNPAID"
+  | "PARTIAL"
+  | "PAID"
+  | "REFUNDED"
+  | "CANCELLED"
+  | "UNKNOWN";
+
+type StatusFilter = "ALL" | InvoiceStatus;
+type PaymentFilter = "ALL" | PaymentStatus;
+
+type SortKey =
+  | "issue_date"
+  | "invoice_number"
+  | "customer_name"
+  | "status"
+  | "payment_status"
+  | "total_amount"
+  | "paid_amount"
+  | "remaining_amount"
+  | "created_at";
+
+type SortDirection = "asc" | "desc";
+
+type InvoiceRow = {
+  id: string;
+  invoice_number: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_id: string;
+  order_number: string;
+  order_id: string;
+  status: InvoiceStatus;
+  payment_status: PaymentStatus;
+  subtotal: number;
+  discount_amount: number;
+  tax_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  issue_date: string;
+  due_date: string;
+  created_at: string;
+  source_reference: string;
+  notes: string;
 };
 
-type ApiOrder = {
-  id?: number | null;
-  order_number?: string | null;
-  status?: string | null;
-  payment_status?: string | null;
-  fulfillment_status?: string | null;
-  total_amount?: string | number | null;
+type InvoiceSummary = {
+  total_invoices: number;
+  issued_invoices: number;
+  paid_invoices: number;
+  partial_invoices: number;
+  unpaid_invoices: number;
+  cancelled_invoices: number;
+  overdue_invoices: number;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  tax_amount: number;
+  discount_amount: number;
 };
 
-type ApiInvoice = {
-  id: number;
-  invoice_number?: string | null;
-  number?: string | null;
-  invoice_type?: string | null;
-  status?: string | null;
-  issue_date?: string | null;
-  due_date?: string | null;
-  invoice_date?: string | null;
-  customer_id?: number | null;
-  order_id?: number | null;
-  customer?: ApiCustomer | null;
-  order?: ApiOrder | null;
-  subtotal?: string | number | null;
-  discount_amount?: string | number | null;
-  taxable_amount?: string | number | null;
-  tax_rate?: string | number | null;
-  tax_amount?: string | number | null;
-  total_amount?: string | number | null;
-  paid_amount?: string | number | null;
-  due_amount?: string | number | null;
-  currency?: string | null;
-  notes?: string | null;
-  internal_notes?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
-type ApiSummary = {
-  subtotal?: string | number | null;
-  discount_amount?: string | number | null;
-  tax_amount?: string | number | null;
-  total_amount?: string | number | null;
-  paid_amount?: string | number | null;
-  due_amount?: string | number | null;
-  currency?: string | null;
-};
-
-type InvoicesApiResponse = {
+type ApiEnvelope<T> = {
   ok?: boolean;
-  count?: number;
-  total_count?: number;
-  page?: number;
-  page_size?: number;
-  has_next?: boolean;
-  has_previous?: boolean;
-  summary?: ApiSummary;
-  results?: ApiInvoice[];
+  success?: boolean;
   message?: string;
+  detail?: string;
+  error?: string;
+  data?: T;
+  results?: unknown[];
+  items?: unknown[];
+  rows?: unknown[];
+  invoices?: unknown[];
+  summary?: Partial<InvoiceSummary>;
 };
-
-type InvoiceStatusMeta = {
-  labelAr: string;
-  labelEn: string;
-  className: string;
-};
-
-/* =====================================================
-   CONSTANTS
-===================================================== */
 
 const SAR_ICON_PATH = "/currency/sar.svg";
+const PAGE_SIZE = 10;
 
-const STATUS_META: Record<string, InvoiceStatusMeta> = {
-  DRAFT: {
-    labelAr: "مسودة",
-    labelEn: "Draft",
-    className:
-      "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300",
-  },
-  ISSUED: {
-    labelAr: "مصدرة",
-    labelEn: "Issued",
-    className:
-      "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300",
-  },
-  PARTIALLY_PAID: {
-    labelAr: "مدفوعة جزئيًا",
-    labelEn: "Partially Paid",
-    className:
-      "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300",
-  },
-  PAID: {
-    labelAr: "مدفوعة",
-    labelEn: "Paid",
-    className:
-      "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300",
-  },
-  OVERDUE: {
-    labelAr: "متأخرة",
-    labelEn: "Overdue",
-    className:
-      "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300",
-  },
-  CANCELLED: {
-    labelAr: "ملغاة",
-    labelEn: "Cancelled",
-    className:
-      "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300",
-  },
-  REFUNDED: {
-    labelAr: "مستردة",
-    labelEn: "Refunded",
-    className:
-      "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900/60 dark:bg-purple-950/40 dark:text-purple-300",
-  },
+const DEFAULT_SUMMARY: InvoiceSummary = {
+  total_invoices: 0,
+  issued_invoices: 0,
+  paid_invoices: 0,
+  partial_invoices: 0,
+  unpaid_invoices: 0,
+  cancelled_invoices: 0,
+  overdue_invoices: 0,
+  total_amount: 0,
+  paid_amount: 0,
+  remaining_amount: 0,
+  tax_amount: 0,
+  discount_amount: 0,
 };
 
-/* =====================================================
-   LOCALE HELPERS
-===================================================== */
+/* ============================================================
+   Locale / API
+============================================================ */
 
-function getInitialLocale(): AppLocale {
-  if (typeof window === "undefined") return "ar";
+function readLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
 
-  const stored = window.localStorage.getItem("primey-locale");
-  if (stored === "en" || stored === "ar") return stored;
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
 
-  const htmlLang = document.documentElement.lang;
-  if (htmlLang === "en") return "en";
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
-  return "ar";
+    return document.documentElement.lang === "en" ? "en" : "ar";
+  } catch {
+    return "ar";
+  }
 }
 
-function applyLocaleToDocument(locale: AppLocale) {
-  if (typeof document === "undefined") return;
+function applyDocumentLocale(locale: AppLocale) {
+  try {
+    if (typeof document === "undefined") return;
 
-  document.documentElement.lang = locale;
-  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-  document.body.dir = locale === "ar" ? "rtl" : "ltr";
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch (error) {
+    console.error("Apply locale error:", error);
+  }
 }
 
-/* =====================================================
-   FORMAT HELPERS
-===================================================== */
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
 
-function toNumber(value: string | number | null | undefined): number {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  if (!value) return 0;
+  if (!base) return path;
 
-  const parsed = Number(String(value).replace(/,/g, ""));
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
+/* ============================================================
+   Auth / Permissions
+============================================================ */
+
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
+}
+
+function getNested(source: Dict, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+
+    if (value && typeof value === "object") return value as Dict;
+  }
+
+  return {};
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
+
+          if (typeof value === "string") return [value];
+
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
+
+              if (item && typeof item === "object") {
+                const obj = item as Dict;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as Dict;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return getNested(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
+}
+
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
+  );
+}
+
+function isSystemAdmin(authValue: unknown) {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
+
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
+}
+
+function hasSafePermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const permissions = getAuthPermissionCodes(authValue);
+
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "accountant",
+          "support",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
+    );
+  }
+
+  return true;
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
+
+function dictionary(locale: AppLocale) {
+  const isArabic = locale === "ar";
+
+  return {
+    title: isArabic ? "الفواتير" : "Invoices",
+    subtitle: isArabic
+      ? "متابعة الفواتير وإجماليات المبالغ وحالة الإصدار والدفع."
+      : "Track invoices, totals, issue status, and payment status.",
+
+    list: isArabic ? "قائمة الفواتير" : "Invoices List",
+    create: isArabic ? "إنشاء فاتورة" : "Create Invoice",
+    refresh: isArabic ? "تحديث" : "Refresh",
+    retry: isArabic ? "إعادة المحاولة" : "Retry",
+    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
+
+    summaryTitle: isArabic ? "ملخص الفواتير" : "Invoices Summary",
+    latestTitle: isArabic ? "آخر الفواتير" : "Latest Invoices",
+    latestDesc: isArabic
+      ? "آخر الفواتير المسجلة حسب الفلاتر الحالية."
+      : "Latest invoices based on the current filters.",
+
+    totalInvoices: isArabic ? "إجمالي الفواتير" : "Total Invoices",
+    issuedInvoices: isArabic ? "فواتير مصدرة" : "Issued Invoices",
+    paidInvoices: isArabic ? "فواتير مدفوعة" : "Paid Invoices",
+    partialInvoices: isArabic ? "مدفوعة جزئيًا" : "Partially Paid",
+    unpaidInvoices: isArabic ? "غير مدفوعة" : "Unpaid",
+    cancelledInvoices: isArabic ? "ملغاة" : "Cancelled",
+    overdueInvoices: isArabic ? "متأخرة" : "Overdue",
+    totalAmount: isArabic ? "إجمالي الفواتير" : "Total Amount",
+    paidAmount: isArabic ? "المحصل" : "Paid Amount",
+    remainingAmount: isArabic ? "المتبقي" : "Remaining",
+    taxAmount: isArabic ? "الضريبة" : "Tax",
+    discountAmount: isArabic ? "الخصومات" : "Discounts",
+
+    searchPlaceholder: isArabic
+      ? "ابحث برقم الفاتورة أو العميل أو الطلب أو المرجع..."
+      : "Search by invoice number, customer, order, or reference...",
+
+    allStatuses: isArabic ? "كل حالات الفاتورة" : "All Invoice Statuses",
+    allPaymentStatuses: isArabic
+      ? "كل حالات الدفع"
+      : "All Payment Statuses",
+    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
+
+    draft: isArabic ? "مسودة" : "Draft",
+    issued: isArabic ? "مصدرة" : "Issued",
+    paid: isArabic ? "مدفوعة" : "Paid",
+    partiallyPaid: isArabic ? "مدفوعة جزئيًا" : "Partially Paid",
+    cancelled: isArabic ? "ملغاة" : "Cancelled",
+    overdue: isArabic ? "متأخرة" : "Overdue",
+    unpaid: isArabic ? "غير مدفوعة" : "Unpaid",
+    refunded: isArabic ? "مستردة" : "Refunded",
+    unknown: isArabic ? "غير محدد" : "Unknown",
+
+    table: {
+      date: isArabic ? "تاريخ الإصدار" : "Issue Date",
+      number: isArabic ? "رقم الفاتورة" : "Invoice No.",
+      customer: isArabic ? "العميل" : "Customer",
+      order: isArabic ? "الطلب" : "Order",
+      status: isArabic ? "حالة الفاتورة" : "Invoice Status",
+      payment: isArabic ? "حالة الدفع" : "Payment Status",
+      total: isArabic ? "الإجمالي" : "Total",
+      paid: isArabic ? "المدفوع" : "Paid",
+      remaining: isArabic ? "المتبقي" : "Remaining",
+      dueDate: isArabic ? "تاريخ الاستحقاق" : "Due Date",
+      action: isArabic ? "الإجراء" : "Action",
+    },
+
+    view: isArabic ? "عرض" : "View",
+
+    emptyTitle: isArabic ? "لا توجد فواتير" : "No invoices",
+    emptyText: isArabic
+      ? "ستظهر الفواتير هنا بعد إنشائها."
+      : "Invoices will appear here after they are created.",
+    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
+    noResultsText: isArabic
+      ? "جرّب تغيير البحث أو الفلاتر."
+      : "Try changing the search or filters.",
+
+    accessDeniedTitle: isArabic ? "غير مصرح بعرض الفواتير" : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية عرض الفواتير. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to view invoices. Contact your system administrator if you need access.",
+
+    loadError: isArabic ? "تعذر تحميل الفواتير." : "Unable to load invoices.",
+    loadErrorHint: isArabic
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
+    loadSuccess: isArabic
+      ? "تم تحديث الفواتير بنجاح."
+      : "Invoices refreshed successfully.",
+
+    exportSuccess: isArabic
+      ? "تم تجهيز ملف Excel بنجاح."
+      : "Excel file prepared successfully.",
+    exportEmpty: isArabic
+      ? "لا توجد بيانات قابلة للتصدير."
+      : "No data available to export.",
+    printSuccess: isArabic
+      ? "تم تجهيز نافذة الطباعة."
+      : "Print window prepared.",
+    printError: isArabic
+      ? "تعذر فتح نافذة الطباعة."
+      : "Unable to open print window.",
+
+    previous: isArabic ? "السابق" : "Previous",
+    next: isArabic ? "التالي" : "Next",
+    showing: isArabic ? "عرض" : "Showing",
+    from: isArabic ? "من" : "of",
+    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
+    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
+    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
+  };
+}
+
+/* ============================================================
+   Helpers
+============================================================ */
+
+function toNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatNumber(value: number): string {
+function formatNumber(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(value || 0);
+  }).format(toNumber(value));
 }
 
-function formatMoney(value: number): string {
+function formatMoney(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value || 0);
+  }).format(toNumber(value));
 }
 
-function formatDate(value: string | null | undefined, locale: AppLocale): string {
+function formatDate(value: string, locale: AppLocale): string {
   if (!value) return locale === "ar" ? "غير محدد" : "Not set";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return locale === "ar" ? "غير محدد" : "Not set";
+  if (Number.isNaN(date.getTime())) return value;
 
-  return new Intl.DateTimeFormat("en-GB", {
+  return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
-    month: "2-digit",
+    month: "short",
     day: "2-digit",
   }).format(date);
 }
 
-function getInvoiceNumber(invoice: ApiInvoice): string {
-  return invoice.invoice_number || invoice.number || `INV-${invoice.id}`;
+function escapeHtml(value: string | number) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function getInvoiceDate(invoice: ApiInvoice): string | null | undefined {
-  return invoice.issue_date || invoice.invoice_date || invoice.created_at;
-}
+function getNestedValue(obj: Dict, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = obj[key];
 
-function getCustomerName(invoice: ApiInvoice, fallback: string): string {
-  return invoice.customer?.name || (invoice.customer_id ? `#${invoice.customer_id}` : fallback);
-}
-
-function getOrderNumber(invoice: ApiInvoice, fallback: string): string {
-  return invoice.order?.order_number || (invoice.order_id ? `#${invoice.order_id}` : fallback);
-}
-
-function getStatusLabel(status: string | null | undefined, locale: AppLocale) {
-  const key = String(status || "DRAFT").toUpperCase();
-  const meta = STATUS_META[key];
-
-  if (!meta) return status || (locale === "ar" ? "غير محدد" : "Unknown");
-
-  return locale === "ar" ? meta.labelAr : meta.labelEn;
-}
-
-function getStatusClassName(status: string | null | undefined) {
-  const key = String(status || "DRAFT").toUpperCase();
-  return STATUS_META[key]?.className || STATUS_META.DRAFT.className;
-}
-
-/* =====================================================
-   API HELPER
-===================================================== */
-
-async function fetchInvoices(): Promise<{
-  invoices: ApiInvoice[];
-  summary: ApiSummary | null;
-  totalCount: number;
-}> {
-  const response = await fetch("/api/invoices/?page_size=200", {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-
-  const data = (await response.json().catch(() => null)) as InvoicesApiResponse | null;
-
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.message || "Failed to load invoices.");
+    if (value !== undefined && value !== null && value !== "") return value;
   }
 
-  return {
-    invoices: Array.isArray(data.results) ? data.results : [],
-    summary: data.summary || null,
-    totalCount: Number(data.total_count || data.count || 0),
-  };
-}
+  for (const container of [
+    "customer",
+    "client",
+    "order",
+    "invoice",
+    "payment",
+    "item",
+    "data",
+  ]) {
+    const nested = obj[container];
 
-/* =====================================================
-   PAGE
-===================================================== */
+    if (nested && typeof nested === "object") {
+      const value = getNestedValue(nested as Dict, keys);
 
-export default function SystemInvoicesPage() {
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [invoices, setInvoices] = useState<ApiInvoice[]>([]);
-  const [apiSummary, setApiSummary] = useState<ApiSummary | null>(null);
-  const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [search, setSearch] = useState("");
-
-  const isAr = locale === "ar";
-
-  const t = useMemo(
-    () => ({
-      badge: isAr ? "وحدة الفواتير" : "Invoices Module",
-      title: isAr ? "إدارة الفواتير" : "Invoices Management",
-      subtitle: isAr
-        ? "لوحة تشغيلية لمتابعة الفواتير، الحالات المالية، الضريبة، والتحصيل المرتبط بالطلبات."
-        : "Operational dashboard for invoices, financial statuses, tax totals, and order-linked billing.",
-      refresh: isAr ? "تحديث" : "Refresh",
-      create: isAr ? "إنشاء فاتورة" : "Create Invoice",
-      list: isAr ? "قائمة الفواتير" : "Invoices List",
-      reports: isAr ? "تقارير الفواتير" : "Invoices Reports",
-      details: isAr ? "التفاصيل" : "Details",
-      issue: isAr ? "إصدار" : "Issue",
-      search: isAr ? "ابحث برقم الفاتورة أو العميل أو الطلب..." : "Search by invoice, customer, or order...",
-      latest: isAr ? "آخر الفواتير" : "Latest Invoices",
-      latestDesc: isAr
-        ? "آخر العمليات المسجلة من واجهة الفواتير."
-        : "Latest records from the invoices API.",
-      overview: isAr ? "ملخص الفواتير" : "Invoices Overview",
-      overviewDesc: isAr
-        ? "مؤشرات مباشرة مبنية على الفواتير الحالية."
-        : "Live indicators based on current invoices.",
-      empty: isAr ? "لا توجد فواتير مطابقة حاليًا." : "No matching invoices found.",
-      loading: isAr ? "جاري تحميل بيانات الفواتير..." : "Loading invoices data...",
-      totalInvoices: isAr ? "إجمالي الفواتير" : "Total Invoices",
-      issuedInvoices: isAr ? "الفواتير المصدرة" : "Issued Invoices",
-      paidInvoices: isAr ? "الفواتير المدفوعة" : "Paid Invoices",
-      openInvoices: isAr ? "غير المسددة" : "Open Invoices",
-      totalAmount: isAr ? "إجمالي الفواتير" : "Invoices Total",
-      taxAmount: isAr ? "إجمالي الضريبة" : "Tax Total",
-      draftInvoices: isAr ? "المسودات" : "Drafts",
-      dueAmount: isAr ? "المتبقي" : "Due Amount",
-      paidAmount: isAr ? "المدفوع" : "Paid Amount",
-      activity: isAr ? "الحركة المالية" : "Financial Activity",
-      activityDesc: isAr
-        ? "قراءة سريعة لحالة الفواتير حسب المرحلة."
-        : "Quick reading of invoice status distribution.",
-      quickLinks: isAr ? "اختصارات الوحدة" : "Module Shortcuts",
-      quickLinksDesc: isAr
-        ? "تنقل سريع بين صفحات وحدة الفواتير."
-        : "Fast navigation between invoice module pages.",
-      invoice: isAr ? "الفاتورة" : "Invoice",
-      customer: isAr ? "العميل" : "Customer",
-      order: isAr ? "الطلب" : "Order",
-      status: isAr ? "الحالة" : "Status",
-      date: isAr ? "التاريخ" : "Date",
-      amount: isAr ? "المبلغ" : "Amount",
-      notAvailable: isAr ? "غير متاح" : "N/A",
-      sar: isAr ? "ريال" : "SAR",
-    }),
-    [isAr]
-  );
-
-  const loadInvoices = async (mode: "initial" | "refresh" = "initial") => {
-    try {
-      if (mode === "initial") setLoading(true);
-      if (mode === "refresh") setRefreshing(true);
-
-      const data = await fetchInvoices();
-
-      setInvoices(data.invoices);
-      setApiSummary(data.summary);
-      setTotalCount(data.totalCount);
-
-      if (mode === "refresh") {
-        toast.success(isAr ? "تم تحديث بيانات الفواتير بنجاح" : "Invoices refreshed successfully");
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error(isAr ? "تعذر تحميل بيانات الفواتير" : "Failed to load invoices");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (value !== undefined && value !== null && value !== "") return value;
     }
+  }
+
+  return undefined;
+}
+
+function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
+  if (!payload) return [];
+
+  const data = asDict(payload.data);
+  const directValue = (payload as Dict)[key];
+
+  if (Array.isArray(directValue)) return directValue;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.rows)) return payload.rows;
+
+  if (Array.isArray(data[key])) return data[key] as unknown[];
+  if (Array.isArray(data.results)) return data.results as unknown[];
+  if (Array.isArray(data.items)) return data.items as unknown[];
+  if (Array.isArray(data.rows)) return data.rows as unknown[];
+
+  if (Array.isArray(payload.data)) return payload.data;
+
+  return [];
+}
+
+function extractSummary(payload: ApiEnvelope<unknown> | null) {
+  if (!payload) return {};
+
+  const data = asDict(payload.data);
+
+  return {
+    ...asDict(payload.summary),
+    ...asDict(data.summary),
+    ...asDict(data.totals),
+    ...asDict(data),
+  } as Partial<InvoiceSummary>;
+}
+
+function normalizeInvoiceStatus(value: unknown): InvoiceStatus {
+  const clean = String(value || "").toUpperCase();
+
+  if (["DRAFT", "PENDING"].includes(clean)) return "DRAFT";
+  if (["ISSUED", "APPROVED", "POSTED"].includes(clean)) return "ISSUED";
+  if (["PAID", "FULLY_PAID"].includes(clean)) return "PAID";
+  if (["PARTIALLY_PAID", "PARTIAL", "PARTIAL_PAID"].includes(clean)) {
+    return "PARTIALLY_PAID";
+  }
+  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
+  if (["OVERDUE", "LATE"].includes(clean)) return "OVERDUE";
+
+  return "UNKNOWN";
+}
+
+function normalizePaymentStatus(value: unknown): PaymentStatus {
+  const clean = String(value || "").toUpperCase();
+
+  if (["UNPAID", "NOT_PAID", "PENDING"].includes(clean)) return "UNPAID";
+  if (["PARTIAL", "PARTIALLY_PAID", "PARTIAL_PAID"].includes(clean)) {
+    return "PARTIAL";
+  }
+  if (["PAID", "FULLY_PAID"].includes(clean)) return "PAID";
+  if (["REFUNDED"].includes(clean)) return "REFUNDED";
+  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
+
+  return "UNKNOWN";
+}
+
+function normalizeInvoice(item: unknown, index: number): InvoiceRow {
+  const obj = asDict(item);
+  const customerObj = asDict(obj.customer || obj.client);
+  const orderObj = asDict(obj.order);
+
+  const totalAmount = toNumber(
+    getNestedValue(obj, [
+      "total_amount",
+      "grand_total",
+      "net_amount",
+      "amount",
+      "total",
+    ]),
+  );
+
+  const paidAmount = toNumber(
+    getNestedValue(obj, ["paid_amount", "amount_paid", "collected_amount"]),
+  );
+
+  const remainingValue = getNestedValue(obj, [
+    "remaining_amount",
+    "balance_due",
+    "due_amount",
+  ]);
+
+  const remainingAmount =
+    remainingValue !== undefined && remainingValue !== null
+      ? toNumber(remainingValue)
+      : Math.max(totalAmount - paidAmount, 0);
+
+  const status = normalizeInvoiceStatus(
+    getNestedValue(obj, ["status", "invoice_status", "state"]),
+  );
+
+  const paymentStatus = normalizePaymentStatus(
+    getNestedValue(obj, ["payment_status", "paid_status", "collection_status"]),
+  );
+
+  return {
+    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
+    invoice_number: String(
+      getNestedValue(obj, ["invoice_number", "number", "code", "reference"]) ||
+        "-",
+    ),
+    customer_name: String(
+      customerObj.name ||
+        customerObj.full_name ||
+        getNestedValue(obj, [
+          "customer_name",
+          "client_name",
+          "beneficiary_name",
+          "name",
+        ]) ||
+        "-",
+    ),
+    customer_phone: String(
+      customerObj.phone ||
+        customerObj.mobile ||
+        getNestedValue(obj, ["customer_phone", "phone", "mobile"]) ||
+        "",
+    ),
+    customer_id: String(
+      customerObj.id || getNestedValue(obj, ["customer_id", "client_id"]) || "",
+    ),
+    order_number: String(
+      orderObj.order_number ||
+        orderObj.number ||
+        getNestedValue(obj, ["order_number", "order_reference"]) ||
+        "-",
+    ),
+    order_id: String(orderObj.id || getNestedValue(obj, ["order_id"]) || ""),
+    status,
+    payment_status:
+      paymentStatus === "UNKNOWN"
+        ? status === "PAID"
+          ? "PAID"
+          : status === "PARTIALLY_PAID"
+            ? "PARTIAL"
+            : "UNPAID"
+        : paymentStatus,
+    subtotal: toNumber(getNestedValue(obj, ["subtotal", "sub_total"])),
+    discount_amount: toNumber(
+      getNestedValue(obj, ["discount_amount", "discount", "total_discount"]),
+    ),
+    tax_amount: toNumber(
+      getNestedValue(obj, ["tax_amount", "vat_amount", "total_tax"]),
+    ),
+    total_amount: totalAmount,
+    paid_amount: paidAmount,
+    remaining_amount: remainingAmount,
+    issue_date: String(
+      getNestedValue(obj, ["issue_date", "issued_at", "date", "created_at"]) ||
+        "",
+    ),
+    due_date: String(getNestedValue(obj, ["due_date", "payment_due_date"]) || ""),
+    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
+    source_reference: String(
+      getNestedValue(obj, [
+        "source_reference",
+        "external_reference",
+        "payment_reference",
+        "ref",
+      ]) || "",
+    ),
+    notes: String(getNestedValue(obj, ["notes", "description", "memo"]) || ""),
+  };
+}
+
+function buildSummary(
+  rows: InvoiceRow[],
+  apiSummary?: Partial<InvoiceSummary>,
+): InvoiceSummary {
+  const fallback: InvoiceSummary = {
+    total_invoices: rows.length,
+    issued_invoices: rows.filter((item) => item.status === "ISSUED").length,
+    paid_invoices: rows.filter(
+      (item) => item.status === "PAID" || item.payment_status === "PAID",
+    ).length,
+    partial_invoices: rows.filter(
+      (item) =>
+        item.status === "PARTIALLY_PAID" || item.payment_status === "PARTIAL",
+    ).length,
+    unpaid_invoices: rows.filter((item) => item.payment_status === "UNPAID")
+      .length,
+    cancelled_invoices: rows.filter((item) => item.status === "CANCELLED")
+      .length,
+    overdue_invoices: rows.filter((item) => item.status === "OVERDUE").length,
+    total_amount: rows.reduce((sum, item) => sum + item.total_amount, 0),
+    paid_amount: rows.reduce((sum, item) => sum + item.paid_amount, 0),
+    remaining_amount: rows.reduce((sum, item) => sum + item.remaining_amount, 0),
+    tax_amount: rows.reduce((sum, item) => sum + item.tax_amount, 0),
+    discount_amount: rows.reduce((sum, item) => sum + item.discount_amount, 0),
   };
 
-  useEffect(() => {
-    const currentLocale = getInitialLocale();
-    setLocale(currentLocale);
-    applyLocaleToDocument(currentLocale);
+  const api = asDict(apiSummary);
 
-    const syncLocale = () => {
-      const nextLocale = getInitialLocale();
-      setLocale(nextLocale);
-      applyLocaleToDocument(nextLocale);
-    };
+  return {
+    total_invoices:
+      toNumber(apiSummary?.total_invoices) ||
+      toNumber(api.invoices_count) ||
+      fallback.total_invoices,
+    issued_invoices:
+      toNumber(apiSummary?.issued_invoices) || fallback.issued_invoices,
+    paid_invoices: toNumber(apiSummary?.paid_invoices) || fallback.paid_invoices,
+    partial_invoices:
+      toNumber(apiSummary?.partial_invoices) || fallback.partial_invoices,
+    unpaid_invoices:
+      toNumber(apiSummary?.unpaid_invoices) || fallback.unpaid_invoices,
+    cancelled_invoices:
+      toNumber(apiSummary?.cancelled_invoices) || fallback.cancelled_invoices,
+    overdue_invoices:
+      toNumber(apiSummary?.overdue_invoices) || fallback.overdue_invoices,
+    total_amount:
+      toNumber(apiSummary?.total_amount) ||
+      toNumber(api.total_revenue) ||
+      fallback.total_amount,
+    paid_amount:
+      toNumber(apiSummary?.paid_amount) ||
+      toNumber(api.collected_amount) ||
+      fallback.paid_amount,
+    remaining_amount:
+      toNumber(apiSummary?.remaining_amount) ||
+      toNumber(api.outstanding_amount) ||
+      fallback.remaining_amount,
+    tax_amount: toNumber(apiSummary?.tax_amount) || fallback.tax_amount,
+    discount_amount:
+      toNumber(apiSummary?.discount_amount) || fallback.discount_amount,
+  };
+}
 
-    window.addEventListener("primey-locale-changed", syncLocale);
-    window.addEventListener("storage", syncLocale);
+function invoiceStatusLabel(status: InvoiceStatus, locale: AppLocale) {
+  const t = dictionary(locale);
 
-    const timeout = window.setTimeout(syncLocale, 50);
+  const labels: Record<InvoiceStatus, string> = {
+    DRAFT: t.draft,
+    ISSUED: t.issued,
+    PAID: t.paid,
+    PARTIALLY_PAID: t.partiallyPaid,
+    CANCELLED: t.cancelled,
+    OVERDUE: t.overdue,
+    UNKNOWN: t.unknown,
+  };
 
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncLocale);
-      window.removeEventListener("storage", syncLocale);
-      window.clearTimeout(timeout);
-    };
-  }, []);
+  return labels[status];
+}
 
-  useEffect(() => {
-    loadInvoices("initial");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+function paymentStatusLabel(status: PaymentStatus, locale: AppLocale) {
+  const t = dictionary(locale);
 
-  const filteredInvoices = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
+  const labels: Record<PaymentStatus, string> = {
+    UNPAID: t.unpaid,
+    PARTIAL: t.partiallyPaid,
+    PAID: t.paid,
+    REFUNDED: t.refunded,
+    CANCELLED: t.cancelled,
+    UNKNOWN: t.unknown,
+  };
 
-    if (!keyword) return invoices;
+  return labels[status];
+}
 
-    return invoices.filter((invoice) => {
-      const haystack = [
-        getInvoiceNumber(invoice),
-        invoice.status,
-        invoice.invoice_type,
-        invoice.customer?.name,
-        invoice.customer?.phone,
-        invoice.customer?.email,
-        invoice.customer_id,
-        invoice.order?.order_number,
-        invoice.order?.status,
-        invoice.order_id,
-        invoice.total_amount,
-        invoice.paid_amount,
-        invoice.due_amount,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
+function invoiceStatusBadge(status: InvoiceStatus, locale: AppLocale) {
+  const label = invoiceStatusLabel(status, locale);
 
-      return haystack.includes(keyword);
-    });
-  }, [invoices, search]);
+  if (status === "PAID" || status === "ISSUED") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
+    );
+  }
 
-  const stats = useMemo(() => {
-    const totalInvoices = totalCount || invoices.length;
+  if (status === "PARTIALLY_PAID" || status === "DRAFT") {
+    return (
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+        {label}
+      </Badge>
+    );
+  }
 
-    const issuedInvoices = invoices.filter(
-      (invoice) => String(invoice.status || "").toUpperCase() === "ISSUED"
-    ).length;
-
-    const paidInvoices = invoices.filter(
-      (invoice) => String(invoice.status || "").toUpperCase() === "PAID"
-    ).length;
-
-    const draftInvoices = invoices.filter(
-      (invoice) => String(invoice.status || "").toUpperCase() === "DRAFT"
-    ).length;
-
-    const openInvoices = invoices.filter((invoice) => {
-      const status = String(invoice.status || "").toUpperCase();
-      return ["DRAFT", "ISSUED", "PARTIALLY_PAID", "OVERDUE"].includes(status);
-    }).length;
-
-    const totalAmount =
-      apiSummary?.total_amount !== undefined && apiSummary?.total_amount !== null
-        ? toNumber(apiSummary.total_amount)
-        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.total_amount), 0);
-
-    const taxAmount =
-      apiSummary?.tax_amount !== undefined && apiSummary?.tax_amount !== null
-        ? toNumber(apiSummary.tax_amount)
-        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.tax_amount), 0);
-
-    const paidAmount =
-      apiSummary?.paid_amount !== undefined && apiSummary?.paid_amount !== null
-        ? toNumber(apiSummary.paid_amount)
-        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.paid_amount), 0);
-
-    const dueAmount =
-      apiSummary?.due_amount !== undefined && apiSummary?.due_amount !== null
-        ? toNumber(apiSummary.due_amount)
-        : invoices.reduce((sum, invoice) => sum + toNumber(invoice.due_amount), 0);
-
-    return {
-      totalInvoices,
-      issuedInvoices,
-      paidInvoices,
-      draftInvoices,
-      openInvoices,
-      totalAmount,
-      taxAmount,
-      paidAmount,
-      dueAmount,
-    };
-  }, [apiSummary, invoices, totalCount]);
-
-  const latestInvoices = useMemo(() => filteredInvoices.slice(0, 8), [filteredInvoices]);
-
-  const paidRate = useMemo(() => {
-    if (!stats.totalInvoices) return 0;
-    return Math.round((stats.paidInvoices / stats.totalInvoices) * 100);
-  }, [stats.paidInvoices, stats.totalInvoices]);
-
-  const issuedRate = useMemo(() => {
-    if (!stats.totalInvoices) return 0;
-    return Math.round((stats.issuedInvoices / stats.totalInvoices) * 100);
-  }, [stats.issuedInvoices, stats.totalInvoices]);
-
-  const openRate = useMemo(() => {
-    if (!stats.totalInvoices) return 0;
-    return Math.round((stats.openInvoices / stats.totalInvoices) * 100);
-  }, [stats.openInvoices, stats.totalInvoices]);
-
-  const statCards = [
-    {
-      title: t.totalInvoices,
-      value: formatNumber(stats.totalInvoices),
-      icon: ReceiptText,
-      href: "/system/invoices/list",
-      description: isAr ? "كل الفواتير المسجلة" : "All registered invoices",
-    },
-    {
-      title: t.issuedInvoices,
-      value: formatNumber(stats.issuedInvoices),
-      icon: FileText,
-      href: "/system/invoices/list?status=ISSUED",
-      description: isAr ? "فواتير تم إصدارها" : "Invoices already issued",
-    },
-    {
-      title: t.paidInvoices,
-      value: formatNumber(stats.paidInvoices),
-      icon: CheckCircle2,
-      href: "/system/invoices/list?status=PAID",
-      description: isAr ? "فواتير مسددة بالكامل" : "Fully paid invoices",
-    },
-    {
-      title: t.openInvoices,
-      value: formatNumber(stats.openInvoices),
-      icon: Clock3,
-      href: "/system/invoices/list",
-      description: isAr ? "فواتير تحتاج متابعة" : "Invoices requiring follow-up",
-    },
-  ];
+  if (status === "OVERDUE" || status === "CANCELLED") {
+    return (
+      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
+        {label}
+      </Badge>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-background">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        {/* =====================================================
-            HERO
-        ===================================================== */}
-        <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm">
-          <div className="pointer-events-none absolute -top-24 end-10 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
-
-          <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-            <div className="max-w-3xl space-y-4">
-              <Badge
-                variant="outline"
-                className="w-fit rounded-full border-primary/20 bg-primary/5 px-3 py-1 text-primary"
-              >
-                <Sparkles className="me-2 h-3.5 w-3.5" />
-                {t.badge}
-              </Badge>
-
-              <div className="space-y-2">
-                <h1 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
-                  {t.title}
-                </h1>
-                <p className="max-w-2xl text-sm leading-7 text-muted-foreground md:text-base">
-                  {t.subtitle}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <Button asChild className="rounded-2xl">
-                  <Link href="/system/invoices/create">
-                    <Plus className="me-2 h-4 w-4" />
-                    {t.create}
-                  </Link>
-                </Button>
-
-                <Button asChild variant="outline" className="rounded-2xl">
-                  <Link href="/system/invoices/list">
-                    <FileText className="me-2 h-4 w-4" />
-                    {t.list}
-                  </Link>
-                </Button>
-
-                <Button asChild variant="ghost" className="rounded-2xl">
-                  <Link href="/system/invoices/reports">
-                    <BarChart3 className="me-2 h-4 w-4" />
-                    {t.reports}
-                  </Link>
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="rounded-2xl"
-                  onClick={() => loadInvoices("refresh")}
-                  disabled={refreshing}
-                >
-                  {refreshing ? (
-                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="me-2 h-4 w-4" />
-                  )}
-                  {t.refresh}
-                </Button>
-              </div>
-            </div>
-
-            <Card className="w-full rounded-[1.5rem] border-primary/10 bg-card/80 shadow-sm backdrop-blur lg:max-w-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Wallet className="h-5 w-5 text-primary" />
-                  {t.totalAmount}
-                </CardTitle>
-                <CardDescription>{t.overviewDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                <div className="flex items-end justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Image
-                        src={SAR_ICON_PATH}
-                        alt="SAR"
-                        width={18}
-                        height={18}
-                        className="shrink-0"
-                      />
-                      <p className="text-3xl font-bold">
-                        {formatMoney(stats.totalAmount)}
-                      </p>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">{t.sar}</p>
-                  </div>
-
-                  <Badge
-                    variant="outline"
-                    className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
-                  >
-                    {formatNumber(paidRate)}%
-                  </Badge>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border bg-muted/30 p-3">
-                    <p className="text-xs text-muted-foreground">{t.taxAmount}</p>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
-                      <p className="font-semibold">{formatMoney(stats.taxAmount)}</p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border bg-muted/30 p-3">
-                    <p className="text-xs text-muted-foreground">{t.dueAmount}</p>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
-                      <p className="font-semibold">{formatMoney(stats.dueAmount)}</p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border bg-muted/30 p-3">
-                    <p className="text-xs text-muted-foreground">{t.paidAmount}</p>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
-                      <p className="font-semibold">{formatMoney(stats.paidAmount)}</p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border bg-muted/30 p-3">
-                    <p className="text-xs text-muted-foreground">{t.draftInvoices}</p>
-                    <p className="mt-1 font-semibold">{formatNumber(stats.draftInvoices)}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-
-        {/* =====================================================
-            STATS
-        ===================================================== */}
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {statCards.map((item) => {
-            const Icon = item.icon;
-
-            return (
-              <Link key={item.title} href={item.href} className="group">
-                <Card className="h-full rounded-[1.5rem] transition hover:-translate-y-0.5 hover:shadow-md">
-                  <CardContent className="flex h-full items-center justify-between gap-4 p-5">
-                    <div className="space-y-2">
-                      <p className="text-sm text-muted-foreground">{item.title}</p>
-                      <p className="text-3xl font-bold tracking-tight">{item.value}</p>
-                      <p className="text-xs text-muted-foreground">{item.description}</p>
-                    </div>
-
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary transition group-hover:scale-105">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            );
-          })}
-        </section>
-
-        {/* =====================================================
-            CONTENT GRID
-        ===================================================== */}
-        <section className="grid gap-6 xl:grid-cols-[1.7fr_1fr]">
-          <Card className="rounded-[1.5rem]">
-            <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <ReceiptText className="h-5 w-5 text-primary" />
-                  {t.latest}
-                </CardTitle>
-                <CardDescription>{t.latestDesc}</CardDescription>
-              </div>
-
-              <div className="relative w-full md:max-w-xs">
-                <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder={t.search}
-                  className="rounded-2xl ps-9"
-                />
-              </div>
-            </CardHeader>
-
-            <CardContent>
-              {loading ? (
-                <div className="flex min-h-72 flex-col items-center justify-center gap-3 text-muted-foreground">
-                  <Loader2 className="h-7 w-7 animate-spin text-primary" />
-                  <p className="text-sm">{t.loading}</p>
-                </div>
-              ) : latestInvoices.length === 0 ? (
-                <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
-                  <FileText className="h-10 w-10 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">{t.empty}</p>
-                </div>
-              ) : (
-                <div className="overflow-hidden rounded-3xl border">
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[760px] text-sm">
-                      <thead className="bg-muted/50 text-xs text-muted-foreground">
-                        <tr>
-                          <th className="px-4 py-3 text-start font-medium">{t.invoice}</th>
-                          <th className="px-4 py-3 text-start font-medium">{t.customer}</th>
-                          <th className="px-4 py-3 text-start font-medium">{t.order}</th>
-                          <th className="px-4 py-3 text-start font-medium">{t.status}</th>
-                          <th className="px-4 py-3 text-start font-medium">{t.date}</th>
-                          <th className="px-4 py-3 text-start font-medium">{t.amount}</th>
-                          <th className="px-4 py-3 text-end font-medium">{t.details}</th>
-                        </tr>
-                      </thead>
-
-                      <tbody className="divide-y">
-                        {latestInvoices.map((invoice) => (
-                          <tr key={invoice.id} className="bg-card transition hover:bg-muted/30">
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                                  <ReceiptText className="h-4 w-4" />
-                                </div>
-                                <div>
-                                  <p className="font-medium">{getInvoiceNumber(invoice)}</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    ID: {invoice.id}
-                                  </p>
-                                </div>
-                              </div>
-                            </td>
-
-                            <td className="px-4 py-3">
-                              {getCustomerName(invoice, t.notAvailable)}
-                            </td>
-
-                            <td className="px-4 py-3">
-                              {getOrderNumber(invoice, t.notAvailable)}
-                            </td>
-
-                            <td className="px-4 py-3">
-                              <Badge
-                                variant="outline"
-                                className={`rounded-full ${getStatusClassName(invoice.status)}`}
-                              >
-                                {getStatusLabel(invoice.status, locale)}
-                              </Badge>
-                            </td>
-
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2 text-muted-foreground">
-                                <CalendarDays className="h-4 w-4" />
-                                {formatDate(getInvoiceDate(invoice), locale)}
-                              </div>
-                            </td>
-
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-1.5 font-medium">
-                                <Image
-                                  src={SAR_ICON_PATH}
-                                  alt="SAR"
-                                  width={14}
-                                  height={14}
-                                />
-                                {formatMoney(toNumber(invoice.total_amount))}
-                              </div>
-                            </td>
-
-                            <td className="px-4 py-3 text-end">
-                              <Button
-                                asChild
-                                variant="ghost"
-                                size="sm"
-                                className="rounded-xl"
-                              >
-                                <Link href={`/system/invoices/${invoice.id}`}>
-                                  {t.details}
-                                  {isAr ? (
-                                    <ArrowLeft className="ms-2 h-4 w-4" />
-                                  ) : (
-                                    <ArrowLeft className="ms-2 h-4 w-4 rotate-180" />
-                                  )}
-                                </Link>
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="space-y-6">
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5 text-primary" />
-                  {t.activity}
-                </CardTitle>
-                <CardDescription>{t.activityDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                <StatusProgress
-                  label={t.paidInvoices}
-                  value={paidRate}
-                  count={stats.paidInvoices}
-                />
-                <StatusProgress
-                  label={t.issuedInvoices}
-                  value={issuedRate}
-                  count={stats.issuedInvoices}
-                />
-                <StatusProgress
-                  label={t.openInvoices}
-                  value={openRate}
-                  count={stats.openInvoices}
-                />
-
-                <div className="rounded-3xl border bg-muted/20 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium">{t.taxAmount}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {isAr ? "إجمالي الضريبة المسجلة" : "Recorded tax total"}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1.5 font-bold">
-                      <Image src={SAR_ICON_PATH} alt="SAR" width={15} height={15} />
-                      {formatMoney(stats.taxAmount)}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
-                  {t.quickLinks}
-                </CardTitle>
-                <CardDescription>{t.quickLinksDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-3">
-                <QuickLink
-                  href="/system/invoices/list"
-                  icon={FileText}
-                  title={t.list}
-                  description={isAr ? "استعراض الفواتير والفلترة" : "Browse and filter invoices"}
-                />
-                <QuickLink
-                  href="/system/invoices/create"
-                  icon={Plus}
-                  title={t.create}
-                  description={isAr ? "إنشاء فاتورة جديدة من طلب" : "Create a new invoice from an order"}
-                />
-                <QuickLink
-                  href="/system/invoices/reports"
-                  icon={BarChart3}
-                  title={t.reports}
-                  description={isAr ? "تحليلات وتصدير Excel" : "Analytics and Excel export"}
-                />
-                <QuickLink
-                  href="/system/payments"
-                  icon={Wallet}
-                  title={isAr ? "المدفوعات" : "Payments"}
-                  description={isAr ? "متابعة التحصيل والسداد" : "Track collections and payments"}
-                />
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-      </div>
-    </main>
+    <Badge variant="outline" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
   );
 }
 
-/* =====================================================
-   SMALL COMPONENTS
-===================================================== */
+function paymentStatusBadge(status: PaymentStatus, locale: AppLocale) {
+  const label = paymentStatusLabel(status, locale);
 
-function StatusProgress({
-  label,
-  value,
-  count,
-}: {
-  label: string;
-  value: number;
-  count: number;
-}) {
+  if (status === "PAID") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "PARTIAL") {
+    return (
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "UNPAID" || status === "CANCELLED") {
+    return (
+      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
+        {label}
+      </Badge>
+    );
+  }
+
   return (
-    <div className="space-y-2 rounded-3xl border bg-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <BadgeCheck className="h-4 w-4 text-primary" />
-          <p className="text-sm font-medium">{label}</p>
-        </div>
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <span>{formatNumber(count)}</span>
-          <span className="text-muted-foreground">/</span>
-          <span>{formatNumber(value)}%</span>
-        </div>
-      </div>
+    <Badge variant="outline" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
+  );
+}
 
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-primary transition-all"
-          style={{ width: `${Math.max(0, Math.min(value, 100))}%` }}
-        />
-      </div>
+function sortValue(row: InvoiceRow, key: SortKey): string | number {
+  if (["total_amount", "paid_amount", "remaining_amount"].includes(key)) {
+    return row[key as "total_amount" | "paid_amount" | "remaining_amount"];
+  }
+
+  return String(row[key] || "");
+}
+
+function isValidId(value: unknown) {
+  const id = String(value || "").trim();
+
+  return id && id !== "-" && id !== "undefined" && id !== "null";
+}
+
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
+}
+
+function MoneyText({ value }: { value: unknown }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span>{formatMoney(value)}</span>
+      <SarIcon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+}
+
+function KpiSkeleton() {
+  return (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="p-5">
+            <SkeletonLine className="h-8 w-28" />
+            <SkeletonLine className="mt-3 h-4 w-24" />
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }
 
-function QuickLink({
-  href,
-  icon: Icon,
-  title,
-  description,
-}: {
-  href: string;
-  icon: typeof FileText;
-  title: string;
-  description: string;
-}) {
+function TableSkeleton() {
   return (
-    <Link
-      href={href}
-      className="group flex items-center justify-between gap-3 rounded-3xl border bg-card p-4 transition hover:-translate-y-0.5 hover:bg-muted/30 hover:shadow-sm"
-    >
-      <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary transition group-hover:scale-105">
-          <Icon className="h-5 w-5" />
+    <>
+      {Array.from({ length: 7 }).map((_, rowIndex) => (
+        <TableRow key={rowIndex}>
+          {Array.from({ length: 10 }).map((__, columnIndex) => (
+            <TableCell key={columnIndex}>
+              <SkeletonLine
+                className={
+                  columnIndex === 1
+                    ? "h-8 w-44 rounded-lg"
+                    : "h-4 w-24 rounded-lg"
+                }
+              />
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
+/* ============================================================
+   Export / Print
+============================================================ */
+
+function downloadExcel({
+  filename,
+  worksheetName,
+  title,
+  locale,
+  summary,
+  rows,
+}: {
+  filename: string;
+  worksheetName: string;
+  title: string;
+  locale: AppLocale;
+  summary: InvoiceSummary;
+  rows: InvoiceRow[];
+}) {
+  const isArabic = locale === "ar";
+  const dir = isArabic ? "rtl" : "ltr";
+  const align = isArabic ? "right" : "left";
+  const t = dictionary(locale);
+
+  const rowsHtml = rows
+    .map(
+      (item) => `
+        <tr>
+          <td>${escapeHtml(formatDate(item.issue_date, locale))}</td>
+          <td>${escapeHtml(item.invoice_number)}</td>
+          <td>${escapeHtml(item.customer_name)}</td>
+          <td>${escapeHtml(item.order_number || "-")}</td>
+          <td>${escapeHtml(invoiceStatusLabel(item.status, locale))}</td>
+          <td>${escapeHtml(paymentStatusLabel(item.payment_status, locale))}</td>
+          <td>${escapeHtml(formatMoney(item.total_amount))}</td>
+          <td>${escapeHtml(formatMoney(item.paid_amount))}</td>
+          <td>${escapeHtml(formatMoney(item.remaining_amount))}</td>
+          <td>${escapeHtml(formatDate(item.due_date, locale))}</td>
+        </tr>`,
+    )
+    .join("");
+
+  const workbook = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office"
+          xmlns:x="urn:schemas-microsoft-com:office:excel"
+          xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="UTF-8" />
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>${escapeHtml(worksheetName)}</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayRightToLeft>${isArabic ? "True" : "False"}</x:DisplayRightToLeft>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <style>
+          body { direction: ${dir}; font-family: Arial, sans-serif; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td {
+            border: 1px solid #d9e2ef;
+            padding: 8px;
+            text-align: ${align};
+            vertical-align: top;
+            mso-number-format: "\\@";
+          }
+          th { background: #d8ecfb; color: #000; font-weight: 700; }
+          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
+          .section { font-weight: 700; background: #eef6ff; }
+          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
+          .summary-value { font-weight: 700; }
+        </style>
+      </head>
+
+      <body dir="${dir}">
+        <table>
+          <tr><td class="title" colspan="10">${escapeHtml(title)}</td></tr>
+          <tr><td colspan="10"></td></tr>
+          <tr><td class="section" colspan="10">${escapeHtml(t.summaryTitle)}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.generatedAt)}</td><td class="summary-value" colspan="9">${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalInvoices)}</td><td class="summary-value" colspan="9">${escapeHtml(formatNumber(summary.total_invoices))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalAmount)}</td><td class="summary-value" colspan="9">${escapeHtml(formatMoney(summary.total_amount))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.paidAmount)}</td><td class="summary-value" colspan="9">${escapeHtml(formatMoney(summary.paid_amount))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.remainingAmount)}</td><td class="summary-value" colspan="9">${escapeHtml(formatMoney(summary.remaining_amount))}</td></tr>
+
+          <tr><td colspan="10"></td></tr>
+          <tr>
+            <th>${escapeHtml(t.table.date)}</th>
+            <th>${escapeHtml(t.table.number)}</th>
+            <th>${escapeHtml(t.table.customer)}</th>
+            <th>${escapeHtml(t.table.order)}</th>
+            <th>${escapeHtml(t.table.status)}</th>
+            <th>${escapeHtml(t.table.payment)}</th>
+            <th>${escapeHtml(t.table.total)}</th>
+            <th>${escapeHtml(t.table.paid)}</th>
+            <th>${escapeHtml(t.table.remaining)}</th>
+            <th>${escapeHtml(t.table.dueDate)}</th>
+          </tr>
+          ${rowsHtml}
+        </table>
+      </body>
+    </html>`;
+
+  const blob = new Blob([workbook], {
+    type: "application/vnd.ms-excel;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+
+  URL.revokeObjectURL(url);
+}
+
+function buildPrintHtml({
+  locale,
+  title,
+  summary,
+  rows,
+}: {
+  locale: AppLocale;
+  title: string;
+  summary: InvoiceSummary;
+  rows: InvoiceRow[];
+}) {
+  const isArabic = locale === "ar";
+  const t = dictionary(locale);
+  const now = new Date().toLocaleString("en-US");
+
+  const tableRows = rows
+    .map(
+      (item, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(formatDate(item.issue_date, locale))}</td>
+          <td>${escapeHtml(item.invoice_number)}</td>
+          <td>${escapeHtml(item.customer_name)}</td>
+          <td>${escapeHtml(invoiceStatusLabel(item.status, locale))}</td>
+          <td>${escapeHtml(paymentStatusLabel(item.payment_status, locale))}</td>
+          <td>${escapeHtml(formatMoney(item.total_amount))}</td>
+          <td>${escapeHtml(formatMoney(item.remaining_amount))}</td>
+        </tr>`,
+    )
+    .join("");
+
+  return `
+    <!doctype html>
+    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            padding: 24px;
+            font-family: Arial, Tahoma, sans-serif;
+            color: #111827;
+            background: #fff;
+            direction: ${isArabic ? "rtl" : "ltr"};
+            text-align: ${isArabic ? "right" : "left"};
+          }
+          .print-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 18px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 14px;
+          }
+          h1 { margin: 0; font-size: 22px; font-weight: 800; }
+          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
+          .badge {
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            height: fit-content;
+          }
+          .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 18px;
+          }
+          .summary-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 10px;
+          }
+          .summary-card span {
+            display: block;
+            color: #6b7280;
+            font-size: 11px;
+            margin-bottom: 5px;
+          }
+          .summary-card strong { font-size: 16px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th { background: #f3f4f6; color: #111827; font-weight: 700; }
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 9px 8px;
+            text-align: ${isArabic ? "right" : "left"};
+            vertical-align: top;
+          }
+          tr:nth-child(even) td { background: #fafafa; }
+          @page { size: A4 landscape; margin: 12mm; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+
+      <body>
+        <div class="print-header">
+          <div>
+            <h1>${escapeHtml(title)}</h1>
+            <div class="meta">
+              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
+              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
+            </div>
+          </div>
+          <div class="badge">Primey Care</div>
         </div>
 
+        <div class="summary-grid">
+          <div class="summary-card"><span>${escapeHtml(t.totalInvoices)}</span><strong>${formatNumber(summary.total_invoices)}</strong></div>
+          <div class="summary-card"><span>${escapeHtml(t.totalAmount)}</span><strong>${formatMoney(summary.total_amount)}</strong></div>
+          <div class="summary-card"><span>${escapeHtml(t.paidAmount)}</span><strong>${formatMoney(summary.paid_amount)}</strong></div>
+          <div class="summary-card"><span>${escapeHtml(t.remainingAmount)}</span><strong>${formatMoney(summary.remaining_amount)}</strong></div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>${escapeHtml(t.table.date)}</th>
+              <th>${escapeHtml(t.table.number)}</th>
+              <th>${escapeHtml(t.table.customer)}</th>
+              <th>${escapeHtml(t.table.status)}</th>
+              <th>${escapeHtml(t.table.payment)}</th>
+              <th>${escapeHtml(t.table.total)}</th>
+              <th>${escapeHtml(t.table.remaining)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              tableRows ||
+              `<tr><td colspan="8" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
+            }
+          </tbody>
+        </table>
+
+        <script>
+          window.addEventListener("load", () => {
+            window.focus();
+            window.print();
+          });
+        </script>
+      </body>
+    </html>
+  `;
+}
+
+/* ============================================================
+   Page
+============================================================ */
+
+export default function SystemInvoicesPage() {
+  const auth = useAuth() as unknown;
+
+  const [locale, setLocale] = useState<AppLocale>("ar");
+  const [rows, setRows] = useState<InvoiceRow[]>([]);
+  const [summary, setSummary] = useState<InvoiceSummary>(DEFAULT_SUMMARY);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("ALL");
+  const [sortKey, setSortKey] = useState<SortKey>("issue_date");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [page, setPage] = useState(1);
+
+  const t = useMemo(() => dictionary(locale), [locale]);
+  const isArabic = locale === "ar";
+  const authResolving = isAuthResolving(auth);
+
+  const canView = hasSafePermission(
+    auth,
+    ["invoices.view", "billing.invoices.view"],
+    "view",
+  );
+
+  const canCreate = hasSafePermission(
+    auth,
+    ["invoices.create", "billing.invoices.create"],
+    "action",
+  );
+
+  const canExport = hasSafePermission(
+    auth,
+    ["invoices.export", "reports.export"],
+    "action",
+  );
+
+  const canPrint = hasSafePermission(
+    auth,
+    ["invoices.print", "reports.print"],
+    "action",
+  );
+
+  const canViewDetails = hasSafePermission(
+    auth,
+    ["invoices.view", "billing.invoices.view"],
+    "view",
+  );
+
+  const filteredRows = useMemo(() => {
+    const cleanQuery = query.trim().toLowerCase();
+
+    const filtered = rows.filter((item) => {
+      const matchesStatus =
+        statusFilter === "ALL" ? true : item.status === statusFilter;
+
+      const matchesPayment =
+        paymentFilter === "ALL" ? true : item.payment_status === paymentFilter;
+
+      const matchesQuery = !cleanQuery
+        ? true
+        : [
+            item.invoice_number,
+            item.customer_name,
+            item.customer_phone,
+            item.order_number,
+            item.source_reference,
+            item.notes,
+            invoiceStatusLabel(item.status, locale),
+            paymentStatusLabel(item.payment_status, locale),
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(cleanQuery);
+
+      return matchesStatus && matchesPayment && matchesQuery;
+    });
+
+    return [...filtered].sort((a, b) => {
+      const first = sortValue(a, sortKey);
+      const second = sortValue(b, sortKey);
+
+      if (typeof first === "number" && typeof second === "number") {
+        return sortDirection === "asc" ? first - second : second - first;
+      }
+
+      return sortDirection === "asc"
+        ? String(first).localeCompare(String(second))
+        : String(second).localeCompare(String(first));
+    });
+  }, [locale, paymentFilter, query, rows, sortDirection, sortKey, statusFilter]);
+
+  const activeSummary = useMemo(() => buildSummary(filteredRows), [filteredRows]);
+
+  const displaySummary =
+    query.trim().length > 0 || statusFilter !== "ALL" || paymentFilter !== "ALL"
+      ? activeSummary
+      : summary;
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+
+  const paginatedRows = useMemo(() => {
+    const safePage = Math.min(page, totalPages);
+    const startIndex = (safePage - 1) * PAGE_SIZE;
+
+    return filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [filteredRows, page, totalPages]);
+
+  const hasSearchOrFilter =
+    query.trim().length > 0 || statusFilter !== "ALL" || paymentFilter !== "ALL";
+
+  const statusOptions: Array<{ value: StatusFilter; label: string }> = [
+    { value: "ALL", label: t.allStatuses },
+    { value: "DRAFT", label: t.draft },
+    { value: "ISSUED", label: t.issued },
+    { value: "PAID", label: t.paid },
+    { value: "PARTIALLY_PAID", label: t.partiallyPaid },
+    { value: "OVERDUE", label: t.overdue },
+    { value: "CANCELLED", label: t.cancelled },
+  ];
+
+  const paymentOptions: Array<{ value: PaymentFilter; label: string }> = [
+    { value: "ALL", label: t.allPaymentStatuses },
+    { value: "UNPAID", label: t.unpaid },
+    { value: "PARTIAL", label: t.partiallyPaid },
+    { value: "PAID", label: t.paid },
+    { value: "REFUNDED", label: t.refunded },
+    { value: "CANCELLED", label: t.cancelled },
+  ];
+
+  const loadInvoices = useCallback(
+    async (showToast = false) => {
+      if (!canView) {
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setErrorMessage("");
+
+        const endpoints = [
+          "/api/invoices/list/?page_size=500",
+          "/api/invoices/?page_size=500",
+        ];
+
+        let payload: ApiEnvelope<unknown> | null = null;
+        let lastError = "";
+
+        for (const endpoint of endpoints) {
+          const response = await fetch(apiUrl(endpoint), {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+          });
+
+          const responsePayload = (await response.json().catch(() => null)) as
+            | ApiEnvelope<unknown>
+            | null;
+
+          if (
+            response.ok &&
+            responsePayload?.ok !== false &&
+            responsePayload?.success !== false
+          ) {
+            payload = responsePayload;
+            break;
+          }
+
+          lastError =
+            responsePayload?.message ||
+            responsePayload?.detail ||
+            responsePayload?.error ||
+            `HTTP ${response.status}`;
+        }
+
+        if (!payload) {
+          throw new Error(lastError || t.loadError);
+        }
+
+        const normalizedRows = extractRows(payload, "invoices")
+          .map(normalizeInvoice)
+          .filter((item) => item.id || item.invoice_number);
+
+        setRows(normalizedRows);
+        setSummary(buildSummary(normalizedRows, extractSummary(payload)));
+        setPage(1);
+
+        if (showToast) toast.success(t.loadSuccess);
+      } catch (error) {
+        console.error("Invoices dashboard load error:", error);
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
+        setErrorMessage(t.loadError);
+        toast.error(t.loadError);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [canView, t.loadError, t.loadSuccess],
+  );
+
+  function clearFilters() {
+    setQuery("");
+    setStatusFilter("ALL");
+    setPaymentFilter("ALL");
+    setPage(1);
+  }
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+
+    setSortKey(key);
+    setSortDirection("asc");
+  }
+
+  function exportExcel() {
+    if (!canExport) return;
+
+    if (filteredRows.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
+    downloadExcel({
+      filename: `primey-care-invoices-${new Date().toISOString().slice(0, 10)}.xls`,
+      worksheetName: isArabic ? "الفواتير" : "Invoices",
+      title: t.title,
+      locale,
+      summary: displaySummary,
+      rows: filteredRows,
+    });
+
+    toast.success(t.exportSuccess);
+  }
+
+  function printPage() {
+    if (!canPrint) return;
+
+    if (filteredRows.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(t.printError);
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(
+      buildPrintHtml({
+        locale,
+        title: t.title,
+        summary: displaySummary,
+        rows: filteredRows,
+      }),
+    );
+    printWindow.document.close();
+
+    toast.success(t.printSuccess);
+  }
+
+  useEffect(() => {
+    const syncLocale = () => {
+      const nextLocale = readLocale();
+
+      applyDocumentLocale(nextLocale);
+      setLocale(nextLocale);
+    };
+
+    const syncAfterPaint = () => {
+      syncLocale();
+      window.setTimeout(syncLocale, 0);
+    };
+
+    syncAfterPaint();
+
+    window.addEventListener("primey-locale-changed", syncAfterPaint);
+    window.addEventListener("storage", syncAfterPaint);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", syncAfterPaint);
+      window.removeEventListener("storage", syncAfterPaint);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authResolving) return;
+    loadInvoices(false);
+  }, [authResolving, loadInvoices]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, statusFilter, paymentFilter]);
+
+  if (!authResolving && !canView) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <p className="text-sm font-semibold">{title}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+            {t.title}
+          </h1>
+
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Link href="/system/invoices/list">
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>{t.list}</span>
+            </Button>
+          </Link>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={() => loadInvoices(true)}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+            <span>{t.refresh}</span>
+          </Button>
+
+          {canExport ? (
+            <Button
+              className="h-10 rounded-xl"
+              onClick={exportExcel}
+              disabled={
+                isLoading || filteredRows.length === 0 || Boolean(errorMessage)
+              }
+            >
+              <Download className="h-4 w-4" />
+              <span>{t.exportExcel}</span>
+            </Button>
+          ) : null}
+
+          {canPrint ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl"
+              onClick={printPage}
+              disabled={
+                isLoading || filteredRows.length === 0 || Boolean(errorMessage)
+              }
+            >
+              <Printer className="h-4 w-4" />
+              <span>{t.print}</span>
+            </Button>
+          ) : null}
+
+          {canCreate ? (
+            <Link href="/system/invoices/create">
+              <Button className="h-10 w-full rounded-xl sm:w-auto">
+                <PlusCircle className="h-4 w-4" />
+                <span>{t.create}</span>
+              </Button>
+            </Link>
+          ) : null}
         </div>
       </div>
 
-      <ArrowDownUp className="h-4 w-4 text-muted-foreground transition group-hover:text-primary" />
-    </Link>
+      {!isLoading && errorMessage ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                <XCircle className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="font-semibold text-destructive">{errorMessage}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t.loadErrorHint}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => loadInvoices(true)}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              {t.retry}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {isLoading ? (
+        <KpiSkeleton />
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-2xl font-bold">
+                    {formatNumber(displaySummary.total_invoices)}
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {t.totalInvoices}
+                  </p>
+                </div>
+
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300">
+                  <ReceiptText className="h-5 w-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-2xl font-bold">
+                    <MoneyText value={displaySummary.total_amount} />
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {t.totalAmount}
+                  </p>
+                </div>
+
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-300">
+                  <WalletCards className="h-5 w-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-2xl font-bold">
+                    <MoneyText value={displaySummary.paid_amount} />
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {t.paidAmount}
+                  </p>
+                </div>
+
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-2xl font-bold">
+                    <MoneyText value={displaySummary.remaining_amount} />
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {t.remainingAmount}
+                  </p>
+                </div>
+
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+                  <FileText className="h-5 w-5" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-muted-foreground">{t.paidInvoices}</span>
+              <span className="font-semibold">
+                {formatNumber(displaySummary.paid_invoices)}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-muted-foreground">{t.partialInvoices}</span>
+              <span className="font-semibold">
+                {formatNumber(displaySummary.partial_invoices)}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-muted-foreground">{t.unpaidInvoices}</span>
+              <span className="font-semibold">
+                {formatNumber(displaySummary.unpaid_invoices)}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-muted-foreground">
+                {t.cancelledInvoices}
+              </span>
+              <span className="font-semibold">
+                {formatNumber(displaySummary.cancelled_invoices)}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardHeader className="space-y-4 pb-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <CardTitle className="text-base font-bold">
+                {t.latestTitle}
+              </CardTitle>
+              <CardDescription className="mt-1">{t.latestDesc}</CardDescription>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                className="h-10 rounded-xl"
+                onClick={() => loadInvoices(true)}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-4 w-4" />
+                )}
+                {t.refresh}
+              </Button>
+
+              {hasSearchOrFilter ? (
+                <Button
+                  variant="outline"
+                  className="h-10 rounded-xl"
+                  onClick={clearFilters}
+                >
+                  {t.clearFilters}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          <div className="relative w-full">
+            <Search
+              className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+                isArabic ? "right-3" : "left-3"
+              }`}
+            />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t.searchPlaceholder}
+              className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+            />
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-2">
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+              className="h-11 rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            >
+              {statusOptions.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={paymentFilter}
+              onChange={(event) =>
+                setPaymentFilter(event.target.value as PaymentFilter)
+              }
+              className="h-11 rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+            >
+              {paymentOptions.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[130px]">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("issue_date")}
+                        className="inline-flex items-center gap-1 font-medium"
+                      >
+                        {t.table.date}
+                        {sortKey === "issue_date" &&
+                          (sortDirection === "asc" ? (
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          ) : (
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          ))}
+                      </button>
+                    </TableHead>
+
+                    <TableHead className="min-w-[150px]">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("invoice_number")}
+                        className="inline-flex items-center gap-1 font-medium"
+                      >
+                        {t.table.number}
+                        {sortKey === "invoice_number" &&
+                          (sortDirection === "asc" ? (
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          ) : (
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          ))}
+                      </button>
+                    </TableHead>
+
+                    <TableHead className="min-w-[220px]">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("customer_name")}
+                        className="inline-flex items-center gap-1 font-medium"
+                      >
+                        {t.table.customer}
+                        {sortKey === "customer_name" &&
+                          (sortDirection === "asc" ? (
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          ) : (
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          ))}
+                      </button>
+                    </TableHead>
+
+                    <TableHead className="min-w-[130px]">{t.table.order}</TableHead>
+                    <TableHead className="min-w-[130px]">
+                      {t.table.status}
+                    </TableHead>
+                    <TableHead className="min-w-[130px]">
+                      {t.table.payment}
+                    </TableHead>
+                    <TableHead className="min-w-[140px]">
+                      {t.table.total}
+                    </TableHead>
+                    <TableHead className="min-w-[140px]">
+                      {t.table.paid}
+                    </TableHead>
+                    <TableHead className="min-w-[140px]">
+                      {t.table.remaining}
+                    </TableHead>
+
+                    {canViewDetails ? (
+                      <TableHead className="min-w-[90px]">
+                        {t.table.action}
+                      </TableHead>
+                    ) : null}
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {isLoading ? (
+                    <TableSkeleton />
+                  ) : paginatedRows.length > 0 ? (
+                    paginatedRows.map((item) => (
+                      <TableRow key={`${item.id}-${item.invoice_number}`}>
+                        <TableCell className="whitespace-nowrap">
+                          {formatDate(item.issue_date, locale)}
+                        </TableCell>
+
+                        <TableCell className="font-semibold" dir="ltr">
+                          {item.invoice_number || "-"}
+                        </TableCell>
+
+                        <TableCell>
+                          <div className="min-w-[200px]">
+                            <p className="font-medium">
+                              {item.customer_name || "-"}
+                            </p>
+                            <p className="text-xs text-muted-foreground" dir="ltr">
+                              {item.customer_phone || "-"}
+                            </p>
+                          </div>
+                        </TableCell>
+
+                        <TableCell dir="ltr">{item.order_number || "-"}</TableCell>
+
+                        <TableCell>{invoiceStatusBadge(item.status, locale)}</TableCell>
+
+                        <TableCell>
+                          {paymentStatusBadge(item.payment_status, locale)}
+                        </TableCell>
+
+                        <TableCell>
+                          <MoneyText value={item.total_amount} />
+                        </TableCell>
+
+                        <TableCell>
+                          <MoneyText value={item.paid_amount} />
+                        </TableCell>
+
+                        <TableCell>
+                          <MoneyText value={item.remaining_amount} />
+                        </TableCell>
+
+                        {canViewDetails ? (
+                          <TableCell>
+                            {isValidId(item.id) ? (
+                              <Link href={`/system/invoices/${item.id}`}>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 rounded-lg"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  <span className="sr-only">{t.view}</span>
+                                </Button>
+                              </Link>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">
+                                -
+                              </span>
+                            )}
+                          </TableCell>
+                        ) : null}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell
+                        colSpan={canViewDetails ? 10 : 9}
+                        className="h-44 text-center"
+                      >
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <ReceiptText className="h-10 w-10 text-muted-foreground/40" />
+                          <p className="font-semibold">
+                            {hasSearchOrFilter ? t.noResultsTitle : t.emptyTitle}
+                          </p>
+                          <p className="max-w-md text-sm text-muted-foreground">
+                            {hasSearchOrFilter ? t.noResultsText : t.emptyText}
+                          </p>
+
+                          {hasSearchOrFilter ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="mt-2 rounded-xl"
+                              onClick={clearFilters}
+                            >
+                              {t.clearFilters}
+                            </Button>
+                          ) : canCreate ? (
+                            <Link href="/system/invoices/create">
+                              <Button size="sm" className="mt-2 rounded-xl">
+                                <PlusCircle className="h-4 w-4" />
+                                {t.create}
+                              </Button>
+                            </Link>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              {t.showing} {formatNumber(paginatedRows.length)} {t.from}{" "}
+              {formatNumber(filteredRows.length)}
+            </span>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                disabled={page <= 1 || isLoading}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+              >
+                {t.previous}
+              </Button>
+
+              <Badge variant="outline" className="rounded-full px-3 py-1">
+                {formatNumber(Math.min(page, totalPages))} /{" "}
+                {formatNumber(totalPages)}
+              </Badge>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                disabled={page >= totalPages || isLoading}
+                onClick={() =>
+                  setPage((current) => Math.min(totalPages, current + 1))
+                }
+              >
+                {t.next}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

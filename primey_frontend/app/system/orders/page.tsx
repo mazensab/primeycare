@@ -2,67 +2,47 @@
 
 /* ============================================================
    📂 app/system/orders/page.tsx
-   🧠 Primey Care | Orders Dashboard
-   ------------------------------------------------------------
-   ✅ المسار: /system/orders
-   ✅ الإصدار: v2.0.0 - Centers Pattern + Safe Permissions
+   🧠 Primey Care | Orders Overview
 
-   ✅ العمل:
-      لوحة تشغيلية مختصرة لإدارة الطلبات ودورة الطلب.
-
-   ✅ Backend:
-      GET /api/orders/?page_size=100
-
-   ✅ المعيار:
-      - مبني بصريًا على نمط المراكز والعملاء المعتمد.
-      - دمج UX Refinement مع حماية المرحلة 2.
-      - لا يتم إظهار مسارات تقنية أو API داخل الواجهة.
-      - لا توجد روابط تقارير داخل الوحدة.
-      - لا توجد أزرار وهمية.
-      - إخفاء الأزرار غير المصرح بها بدل تعطيلها.
-      - عدم كسر system_admin / superadmin.
-      - منع طلب البيانات فقط عند وجود منع صريح لصلاحية العرض.
-      - Error State مستقل عن Empty State.
-      - Skeleton Loading.
-      - Empty State ذكي.
-      - البحث في صف مستقل.
-      - الفلاتر في صف مستقل تحت البحث.
-      - Excel بصيغة .xls HTML Workbook.
-      - Web PDF Print.
-      - استخدام /currency/sar.svg.
-      - الأرقام بالإنجليزية.
-      - دعم عربي / إنجليزي عبر primey-locale.
-      - استخدام sonner للتنبيهات.
-      - بدون localhost hardcoded.
+   ✅ المرحلة 17 + المرحلة 2
+   ✅ نفس النمط المعتمد
+   ✅ w-full space-y-4
+   ✅ بدون main / min-h-screen / max-w
+   ✅ أزرار انتقال للصفحات التي أزلناها من السايدر
+   ✅ Skeleton Loading
+   ✅ Error State مستقل
+   ✅ Empty State ذكي
+   ✅ Excel .xls HTML Workbook
+   ✅ Web PDF Print
+   ✅ sonner
+   ✅ SAR icon من /currency/sar.svg
+   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
 ============================================================ */
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowUpRight,
   BadgeCheck,
-  CalendarClock,
   ClipboardList,
   CreditCard,
   Download,
   Eye,
   FileText,
-  Layers3,
-  ListChecks,
   Loader2,
   Package,
-  Plus,
+  PlusCircle,
   Printer,
   RefreshCcw,
-  RotateCcw,
   Search,
   ShieldCheck,
   ShoppingCart,
+  TimerReset,
+  Truck,
   UserRound,
-  Users,
-  Wallet,
+  WalletCards,
   XCircle,
-  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -91,104 +71,128 @@ import {
 ============================================================ */
 
 type AppLocale = "ar" | "en";
-type AuthRecord = Record<string, unknown>;
+type Dict = Record<string, unknown>;
 
 type OrderStatus =
-  | "pending"
-  | "confirmed"
-  | "processing"
-  | "completed"
-  | "cancelled"
-  | "refunded"
+  | "PENDING"
+  | "CONFIRMED"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "REFUNDED"
   | "UNKNOWN";
 
 type PaymentStatus =
-  | "unpaid"
-  | "partial"
-  | "paid"
-  | "refunded"
-  | "cancelled"
+  | "UNPAID"
+  | "PARTIAL"
+  | "PAID"
+  | "REFUNDED"
+  | "CANCELLED"
   | "UNKNOWN";
 
 type FulfillmentStatus =
-  | "not_started"
-  | "in_progress"
-  | "fulfilled"
-  | "failed"
-  | "cancelled"
+  | "NOT_STARTED"
+  | "IN_PROGRESS"
+  | "FULFILLED"
+  | "FAILED"
+  | "CANCELLED"
   | "UNKNOWN";
 
-type StatusFilter = "all" | OrderStatus;
-type PaymentFilter = "all" | PaymentStatus;
-
-type Order = {
-  id: number | string;
-  orderNumber: string;
-  customerName: string;
-  customerPhone: string;
-  productName: string;
-  providerName: string;
-  agentName: string;
-  contractCode: string;
-  invoiceNumber: string;
+type OrderRow = {
+  id: string;
+  order_number: string;
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  product_id: string;
+  product_name: string;
+  provider_id: string;
+  provider_name: string;
+  agent_id: string;
+  agent_name: string;
+  invoice_id: string;
+  invoice_number: string;
   status: OrderStatus;
-  paymentStatus: PaymentStatus;
-  fulfillmentStatus: FulfillmentStatus;
-  totalAmount: number;
-  paidAmount: number;
-  remainingAmount: number;
-  agentCommission: number;
-  createdAt: string;
-  updatedAt: string;
-  raw: Record<string, unknown>;
+  payment_status: PaymentStatus;
+  fulfillment_status: FulfillmentStatus;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  agent_commission: number;
+  created_at: string;
 };
 
-type OrdersApiResponse = {
+type OrdersSummary = {
+  total_orders: number;
+  pending_orders: number;
+  confirmed_orders: number;
+  processing_orders: number;
+  completed_orders: number;
+  cancelled_orders: number;
+  refunded_orders: number;
+  paid_orders: number;
+  unpaid_orders: number;
+  partial_orders: number;
+  fulfilled_orders: number;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  agent_commission: number;
+};
+
+type ApiEnvelope<T> = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
-  count?: number;
+  detail?: string;
+  error?: string;
+  data?: T;
   results?: unknown[];
-  orders?: unknown[];
   items?: unknown[];
-  data?:
-    | unknown[]
-    | {
-        results?: unknown[];
-        orders?: unknown[];
-        items?: unknown[];
-      };
-  stats?: Record<string, unknown>;
-};
-
-type ExcelSheetOptions = {
-  filename: string;
-  worksheetName: string;
-  title: string;
-  locale: AppLocale;
-  summaryRows: Array<[string, string | number]>;
-  filterRows: Array<[string, string | number]>;
-  headers: string[];
-  rows: Array<Array<string | number>>;
+  rows?: unknown[];
+  orders?: unknown[];
+  summary?: Partial<OrdersSummary>;
+  stats?: Partial<OrdersSummary>;
 };
 
 const SAR_ICON_PATH = "/currency/sar.svg";
 
+const DEFAULT_SUMMARY: OrdersSummary = {
+  total_orders: 0,
+  pending_orders: 0,
+  confirmed_orders: 0,
+  processing_orders: 0,
+  completed_orders: 0,
+  cancelled_orders: 0,
+  refunded_orders: 0,
+  paid_orders: 0,
+  unpaid_orders: 0,
+  partial_orders: 0,
+  fulfilled_orders: 0,
+  total_amount: 0,
+  paid_amount: 0,
+  remaining_amount: 0,
+  agent_commission: 0,
+};
+
 /* ============================================================
-   Locale Helpers
+   Locale / API
 ============================================================ */
 
 function readLocale(): AppLocale {
   try {
     if (typeof window === "undefined") return "ar";
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
+  } catch {
     return "ar";
   }
 }
@@ -205,10 +209,6 @@ function applyDocumentLocale(locale: AppLocale) {
   }
 }
 
-/* ============================================================
-   API Helper
-============================================================ */
-
 function apiUrl(path: string) {
   const base =
     process.env.NEXT_PUBLIC_API_URL ||
@@ -221,20 +221,18 @@ function apiUrl(path: string) {
 }
 
 /* ============================================================
-   Permission Helpers
+   Auth / Permissions
 ============================================================ */
 
-function asRecord(value: unknown): AuthRecord {
-  return value && typeof value === "object" ? (value as AuthRecord) : {};
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
 }
 
-function getNestedRecord(source: AuthRecord, keys: string[]) {
+function getNested(source: Dict, keys: string[]) {
   for (const key of keys) {
     const value = source[key];
 
-    if (value && typeof value === "object") {
-      return value as AuthRecord;
-    }
+    if (value && typeof value === "object") return value as Dict;
   }
 
   return {};
@@ -254,7 +252,7 @@ function uniqueStrings(values: unknown[]): string[] {
               if (typeof item === "string") return [item];
 
               if (item && typeof item === "object") {
-                const obj = item as AuthRecord;
+                const obj = item as Dict;
 
                 return [
                   obj.code,
@@ -270,7 +268,7 @@ function uniqueStrings(values: unknown[]): string[] {
           }
 
           if (value && typeof value === "object") {
-            const obj = value as AuthRecord;
+            const obj = value as Dict;
 
             return [
               obj.code,
@@ -289,10 +287,10 @@ function uniqueStrings(values: unknown[]): string[] {
   );
 }
 
-function getAuthUser(authValue: unknown): AuthRecord {
-  const auth = asRecord(authValue);
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
 
-  return getNestedRecord(auth, [
+  return getNested(auth, [
     "user",
     "currentUser",
     "profile",
@@ -303,7 +301,7 @@ function getAuthUser(authValue: unknown): AuthRecord {
 }
 
 function getAuthRoles(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
+  const auth = asDict(authValue);
   const user = getAuthUser(authValue);
 
   return uniqueStrings([
@@ -327,13 +325,13 @@ function getAuthRoles(authValue: unknown): string[] {
 }
 
 function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
+  const auth = asDict(authValue);
   const user = getAuthUser(authValue);
 
-  const authPermissions = asRecord(auth.permissions);
-  const userPermissions = asRecord(user.permissions);
-  const authProfilePermissions = asRecord(auth.profile_permissions);
-  const userProfilePermissions = asRecord(user.profile_permissions);
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
 
   return uniqueStrings([
     auth.permission_codes,
@@ -352,7 +350,7 @@ function getAuthPermissionCodes(authValue: unknown): string[] {
 }
 
 function isAuthResolving(authValue: unknown) {
-  const auth = asRecord(authValue);
+  const auth = asDict(authValue);
 
   return Boolean(
     auth.isLoading ||
@@ -364,7 +362,7 @@ function isAuthResolving(authValue: unknown) {
 }
 
 function isSystemAdmin(authValue: unknown) {
-  const auth = asRecord(authValue);
+  const auth = asDict(authValue);
   const user = getAuthUser(authValue);
   const roles = getAuthRoles(authValue);
 
@@ -390,32 +388,17 @@ function isSystemAdmin(authValue: unknown) {
   );
 }
 
-function hasKnownPermissionSignal(authValue: unknown) {
-  return (
-    getAuthRoles(authValue).length > 0 ||
-    getAuthPermissionCodes(authValue).length > 0
-  );
-}
-
-function hasPermissionCode(authValue: unknown, codes: string[]) {
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length === 0) return undefined;
-
-  return codes.some((code) => permissions.includes(code));
-}
-
-function hasSafePermission(
+function hasAnyPermission(
   authValue: unknown,
   codes: string[],
   mode: "view" | "action",
 ) {
   if (isSystemAdmin(authValue)) return true;
 
-  const explicitPermission = hasPermissionCode(authValue, codes);
+  const permissions = getAuthPermissionCodes(authValue);
 
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
   }
 
   const roles = getAuthRoles(authValue);
@@ -427,235 +410,19 @@ function hasSafePermission(
           "system_admin",
           "superuser",
           "super_admin",
-          "support",
           "accountant",
+          "support",
           "viewer",
         ].includes(role),
       );
     }
 
     return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin"].includes(role),
+      ["system_admin", "superuser", "super_admin", "support"].includes(role),
     );
   }
 
-  if (!hasKnownPermissionSignal(authValue)) {
-    return true;
-  }
-
-  return mode === "view";
-}
-
-/* ============================================================
-   Normalizers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-
-  const clean = String(value ?? "")
-    .replace(/,/g, "")
-    .replace(/[^\d.-]/g, "");
-
-  const parsed = Number(clean);
-
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function normalizeOrderStatus(value: unknown): OrderStatus {
-  const status = String(value || "").toLowerCase();
-
-  if (status === "pending") return "pending";
-  if (status === "confirmed") return "confirmed";
-  if (status === "processing") return "processing";
-  if (status === "completed") return "completed";
-  if (status === "cancelled") return "cancelled";
-  if (status === "refunded") return "refunded";
-
-  return "UNKNOWN";
-}
-
-function normalizePaymentStatus(value: unknown): PaymentStatus {
-  const status = String(value || "").toLowerCase();
-
-  if (status === "unpaid") return "unpaid";
-  if (status === "partial") return "partial";
-  if (status === "paid") return "paid";
-  if (status === "refunded") return "refunded";
-  if (status === "cancelled") return "cancelled";
-
-  return "UNKNOWN";
-}
-
-function normalizeFulfillmentStatus(value: unknown): FulfillmentStatus {
-  const status = String(value || "").toLowerCase();
-
-  if (status === "not_started") return "not_started";
-  if (status === "in_progress") return "in_progress";
-  if (status === "fulfilled") return "fulfilled";
-  if (status === "failed") return "failed";
-  if (status === "cancelled") return "cancelled";
-
-  return "UNKNOWN";
-}
-
-function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
-  const direct = obj[key];
-
-  if (direct !== undefined && direct !== null && direct !== "") {
-    return direct;
-  }
-
-  const containers = [
-    "order",
-    "customer",
-    "product",
-    "provider",
-    "center",
-    "agent",
-    "invoice",
-    "contract",
-    "summary",
-    "totals",
-  ];
-
-  for (const container of containers) {
-    const nested = obj[container];
-
-    if (nested && typeof nested === "object") {
-      const nestedObj = nested as Record<string, unknown>;
-      const value = nestedObj[key];
-
-      if (value !== undefined && value !== null && value !== "") {
-        return value;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function extractOrders(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-
-  if (!payload || typeof payload !== "object") return [];
-
-  const response = payload as OrdersApiResponse;
-
-  if (Array.isArray(response.results)) return response.results;
-  if (Array.isArray(response.orders)) return response.orders;
-  if (Array.isArray(response.items)) return response.items;
-  if (Array.isArray(response.data)) return response.data;
-
-  if (response.data && typeof response.data === "object") {
-    if (Array.isArray(response.data.results)) return response.data.results;
-    if (Array.isArray(response.data.orders)) return response.data.orders;
-    if (Array.isArray(response.data.items)) return response.data.items;
-  }
-
-  return [];
-}
-
-function normalizeOrder(item: unknown): Order {
-  const obj = (item || {}) as Record<string, unknown>;
-
-  const id = getObjectValue(obj, "id") ?? "";
-  const orderNumber =
-    getObjectValue(obj, "order_number") ??
-    getObjectValue(obj, "number") ??
-    getObjectValue(obj, "reference") ??
-    (id ? `ORD-${id}` : "-");
-
-  const customer = obj.customer as Record<string, unknown> | undefined;
-  const product = obj.product as Record<string, unknown> | undefined;
-  const provider = (obj.provider || obj.center) as Record<string, unknown> | undefined;
-  const agent = obj.agent as Record<string, unknown> | undefined;
-  const invoice = obj.invoice as Record<string, unknown> | undefined;
-  const contract = obj.contract as Record<string, unknown> | undefined;
-
-  const totalAmount = toNumber(
-    getObjectValue(obj, "total_amount") ??
-      getObjectValue(obj, "amount") ??
-      getObjectValue(obj, "final_amount") ??
-      getObjectValue(obj, "grand_total") ??
-      0,
-  );
-
-  const paidAmount = toNumber(
-    getObjectValue(obj, "paid_amount") ??
-      getObjectValue(obj, "amount_paid") ??
-      0,
-  );
-
-  return {
-    id: id as number | string,
-    orderNumber: String(orderNumber || "-"),
-    customerName: String(
-      getObjectValue(obj, "customer_name") ??
-        customer?.name ??
-        customer?.full_name ??
-        "-",
-    ),
-    customerPhone: String(
-      getObjectValue(obj, "customer_phone") ??
-        customer?.phone ??
-        customer?.mobile ??
-        "",
-    ),
-    productName: String(
-      getObjectValue(obj, "product_name") ??
-        product?.name ??
-        product?.title ??
-        "-",
-    ),
-    providerName: String(
-      getObjectValue(obj, "provider_name") ??
-        getObjectValue(obj, "center_name") ??
-        provider?.name ??
-        "-",
-    ),
-    agentName: String(
-      getObjectValue(obj, "agent_name") ??
-        agent?.name ??
-        agent?.full_name ??
-        "-",
-    ),
-    contractCode: String(
-      getObjectValue(obj, "contract_code") ??
-        contract?.code ??
-        contract?.contract_number ??
-        "",
-    ),
-    invoiceNumber: String(
-      getObjectValue(obj, "invoice_number") ??
-        invoice?.invoice_number ??
-        invoice?.number ??
-        "",
-    ),
-    status: normalizeOrderStatus(getObjectValue(obj, "status")),
-    paymentStatus: normalizePaymentStatus(
-      getObjectValue(obj, "payment_status"),
-    ),
-    fulfillmentStatus: normalizeFulfillmentStatus(
-      getObjectValue(obj, "fulfillment_status") ??
-        getObjectValue(obj, "implementation_status"),
-    ),
-    totalAmount,
-    paidAmount,
-    remainingAmount: toNumber(
-      getObjectValue(obj, "remaining_amount") ??
-        getObjectValue(obj, "balance_due") ??
-        Math.max(totalAmount - paidAmount, 0),
-    ),
-    agentCommission: toNumber(
-      getObjectValue(obj, "agent_commission") ??
-        getObjectValue(obj, "commission_amount") ??
-        0,
-    ),
-    createdAt: String(getObjectValue(obj, "created_at") ?? ""),
-    updatedAt: String(getObjectValue(obj, "updated_at") ?? ""),
-    raw: obj,
-  };
+  return true;
 }
 
 /* ============================================================
@@ -666,32 +433,64 @@ function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    pageTitle: isArabic ? "إدارة الطلبات" : "Orders Management",
-    pageSubtitle: isArabic
-      ? "متابعة دورة الطلبات، العملاء، المنتجات، المراكز، الفواتير، والمدفوعات."
-      : "Monitor order lifecycle, customers, products, providers, invoices, and payments.",
+    title: isArabic ? "الطلبات" : "Orders",
+    subtitle: isArabic
+      ? "لوحة متابعة دورة الطلب من الإنشاء وحتى الدفع والتنفيذ."
+      : "Overview of the order lifecycle from creation to payment and fulfillment.",
 
-    createOrder: isArabic ? "إنشاء طلب" : "Create Order",
-    ordersList: isArabic ? "قائمة الطلبات" : "Orders List",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
     refresh: isArabic ? "تحديث" : "Refresh",
     retry: isArabic ? "إعادة المحاولة" : "Retry",
-    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
+    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
+    ordersList: isArabic ? "قائمة الطلبات" : "Orders List",
+    createOrder: isArabic ? "إنشاء طلب" : "Create Order",
+
+    totalOrders: isArabic ? "إجمالي الطلبات" : "Total Orders",
+    pendingOrders: isArabic ? "بانتظار التأكيد" : "Pending",
+    completedOrders: isArabic ? "طلبات مكتملة" : "Completed",
+    processingOrders: isArabic ? "قيد التنفيذ" : "Processing",
+    paidOrders: isArabic ? "طلبات مدفوعة" : "Paid Orders",
+    totalAmount: isArabic ? "إجمالي الطلبات" : "Total Amount",
+    paidAmount: isArabic ? "إجمالي المدفوع" : "Paid Amount",
+    remainingAmount: isArabic ? "المتبقي" : "Remaining",
+    agentCommission: isArabic ? "عمولات المندوبين" : "Agent Commissions",
+    cancelledOrders: isArabic ? "ملغاة" : "Cancelled",
+    fulfilledOrders: isArabic ? "منفذة" : "Fulfilled",
+
+    shortcutsTitle: isArabic ? "اختصارات الطلبات" : "Order Shortcuts",
+    shortcutsDesc: isArabic
+      ? "الوصول السريع لقائمة الطلبات أو إنشاء طلب بعد تنظيف السايدر."
+      : "Quick access to order list and create page after sidebar cleanup.",
+
+    latestTitle: isArabic ? "أحدث الطلبات" : "Latest Orders",
+    latestDesc: isArabic
+      ? "أحدث الطلبات مع العميل والمنتج والحالة والمبلغ."
+      : "Latest orders with customer, product, status, and amount.",
 
     searchPlaceholder: isArabic
-      ? "ابحث برقم الطلب أو العميل أو المنتج أو المركز أو المندوب..."
-      : "Search by order number, customer, product, provider, or agent...",
+      ? "ابحث برقم الطلب أو العميل أو المنتج أو مقدم الخدمة..."
+      : "Search by order number, customer, product, or provider...",
 
-    all: isArabic ? "الكل" : "All",
-    allStatuses: isArabic ? "كل الحالات" : "All Statuses",
-    allPayments: isArabic ? "كل حالات الدفع" : "All Payments",
+    table: {
+      order: isArabic ? "الطلب" : "Order",
+      customer: isArabic ? "العميل" : "Customer",
+      product: isArabic ? "المنتج" : "Product",
+      provider: isArabic ? "مقدم الخدمة" : "Provider",
+      status: isArabic ? "حالة الطلب" : "Order Status",
+      payment: isArabic ? "الدفع" : "Payment",
+      fulfillment: isArabic ? "التنفيذ" : "Fulfillment",
+      total: isArabic ? "الإجمالي" : "Total",
+      paid: isArabic ? "المدفوع" : "Paid",
+      remaining: isArabic ? "المتبقي" : "Remaining",
+      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
+      action: isArabic ? "الإجراء" : "Action",
+    },
 
-    pending: isArabic ? "معلق" : "Pending",
+    pending: isArabic ? "بانتظار التأكيد" : "Pending",
     confirmed: isArabic ? "مؤكد" : "Confirmed",
     processing: isArabic ? "قيد التنفيذ" : "Processing",
     completed: isArabic ? "مكتمل" : "Completed",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
+    cancelled: isArabic ? "ملغى" : "Cancelled",
     refunded: isArabic ? "مسترد" : "Refunded",
     unknown: isArabic ? "غير محدد" : "Unknown",
 
@@ -704,135 +503,67 @@ function dictionary(locale: AppLocale) {
     fulfilled: isArabic ? "منفذ" : "Fulfilled",
     failed: isArabic ? "فشل" : "Failed",
 
-    totalOrders: isArabic ? "إجمالي الطلبات" : "Total Orders",
-    completedOrders: isArabic ? "الطلبات المكتملة" : "Completed Orders",
-    totalRevenue: isArabic ? "قيمة الطلبات" : "Orders Value",
-    unpaidBalance: isArabic ? "الرصيد المتبقي" : "Unpaid Balance",
+    view: isArabic ? "عرض" : "View",
 
-    latestOrders: isArabic ? "آخر الطلبات" : "Latest Orders",
-    latestOrdersDesc: isArabic
-      ? "عرض مختصر لأحدث الطلبات حسب الفلاتر الحالية."
-      : "A compact view of the latest orders based on current filters.",
-
-    lifecycleTitle: isArabic ? "حالة دورة الطلب" : "Order Lifecycle Status",
-    lifecycleDesc: isArabic
-      ? "تحليل سريع لحالات الطلبات والدفع والتنفيذ."
-      : "Quick analysis of order, payment, and fulfillment statuses.",
-
-    quickAccessTitle: isArabic ? "إجراءات وحدة الطلبات" : "Orders Module Actions",
-    quickAccessSubtitle: isArabic
-      ? "اختصارات منظمة للوصول إلى أهم صفحات وحدة الطلبات."
-      : "Organized shortcuts to key orders module pages.",
-    actionListTitle: isArabic ? "قائمة الطلبات" : "Orders List",
-    actionListDesc: isArabic
-      ? "استعراض جميع الطلبات، البحث، الفلترة، وإدارة السجلات."
-      : "Browse all orders, search, filter, and manage records.",
-    actionCreateTitle: isArabic ? "إنشاء طلب" : "Create Order",
-    actionCreateDesc: isArabic
-      ? "إنشاء طلب جديد وربطه بالعميل والمنتج والمركز والمندوب."
-      : "Create a new order and link it with customer, product, provider, and agent.",
-    open: isArabic ? "فتح" : "Open",
-    manage: isArabic ? "إدارة" : "Manage",
-    viewFullList: isArabic ? "عرض القائمة الكاملة" : "View Full List",
-
-    table: {
-      order: isArabic ? "الطلب" : "Order",
-      customer: isArabic ? "العميل" : "Customer",
-      product: isArabic ? "المنتج" : "Product",
-      provider: isArabic ? "المركز" : "Provider",
-      agent: isArabic ? "المندوب" : "Agent",
-      amount: isArabic ? "المبلغ" : "Amount",
-      payment: isArabic ? "الدفع" : "Payment",
-      status: isArabic ? "الحالة" : "Status",
-      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    emptyTitle: isArabic ? "لا توجد طلبات بعد" : "No orders yet",
+    emptyTitle: isArabic ? "لا توجد بيانات طلبات" : "No order data",
     emptyText: isArabic
-      ? "عند إنشاء طلبات جديدة ستظهر بياناتها هنا مباشرة."
-      : "New orders will appear here once they are created.",
+      ? "ستظهر الطلبات هنا بعد إنشاء أول طلب."
+      : "Orders will appear here after creating the first order.",
     noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
     noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو فلاتر الحالة والدفع."
-      : "Try changing search keywords, status filters, or payment filters.",
+      ? "جرّب تغيير كلمات البحث."
+      : "Try changing your search terms.",
 
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
+    accessDeniedTitle: isArabic ? "غير مصرح بعرض الطلبات" : "Access denied",
     accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض بيانات الطلبات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view orders data. Contact your system administrator if you need access.",
+      ? "لا تملك صلاحية عرض الطلبات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to view orders. Contact your system administrator if you need access.",
 
-    apiError: isArabic
-      ? "تعذر تحميل بيانات الطلبات."
-      : "Unable to load orders data.",
-    apiErrorHint: isArabic
+    loadError: isArabic ? "تعذر تحميل بيانات الطلبات." : "Unable to load orders.",
+    loadErrorHint: isArabic
       ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
       : "Check the connection or permissions, then try again.",
-    refreshSuccess: isArabic
-      ? "تم تحديث بيانات الطلبات بنجاح."
-      : "Orders data refreshed successfully.",
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
+    loadSuccess: isArabic ? "تم تحديث بيانات الطلبات." : "Orders refreshed.",
+
+    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
     exportEmpty: isArabic
       ? "لا توجد بيانات قابلة للتصدير."
       : "No data available to export.",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
+    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
+    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
 
-    export: {
-      generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-      scope: isArabic ? "نطاق التقرير" : "Report Scope",
-      currentData: isArabic ? "حسب الفلاتر الحالية" : "Current filtered data",
-      search: isArabic ? "البحث" : "Search",
-      status: isArabic ? "فلتر الحالة" : "Status Filter",
-      payment: isArabic ? "فلتر الدفع" : "Payment Filter",
-    },
-
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    latestRecords: isArabic ? "آخر السجلات" : "Latest records",
+    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
     printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
-    printTitle: isArabic ? "لوحة الطلبات" : "Orders Dashboard",
   };
 }
 
 /* ============================================================
-   UI Helpers
+   Helpers
 ============================================================ */
 
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
+function toNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
-  if (!Number.isFinite(numericValue)) return "0";
-
+function formatNumber(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(numericValue);
+  }).format(toNumber(value));
 }
 
-function formatMoney(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0.00";
-
-  return numericValue.toLocaleString("en-US", {
+function formatMoney(value: unknown): string {
+  return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  });
+  }).format(toNumber(value));
 }
 
-function formatDate(value: string): string {
-  if (!value) return "-";
+function formatDate(value: string, locale: AppLocale): string {
+  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
 
   const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return "-";
+  if (Number.isNaN(date.getTime())) return value;
 
   return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
@@ -850,42 +581,251 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function percent(value: number, total: number) {
-  if (!total) return 0;
-  return Math.min(100, Math.max(0, Math.round((value / total) * 100)));
+function getNestedValue(obj: Dict, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = obj[key];
+
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+
+  for (const container of [
+    "order",
+    "customer",
+    "client",
+    "product",
+    "provider",
+    "center",
+    "agent",
+    "invoice",
+    "data",
+  ]) {
+    const nested = obj[container];
+
+    if (nested && typeof nested === "object") {
+      const value = getNestedValue(nested as Dict, keys);
+
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+  }
+
+  return undefined;
 }
 
-function isValidOrderId(id: Order["id"]) {
-  const value = String(id || "").trim();
+function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
+  if (!payload) return [];
 
-  return value.length > 0 && value !== "-" && value !== "undefined";
+  const data = asDict(payload.data);
+  const directValue = (payload as Dict)[key];
+
+  if (Array.isArray(directValue)) return directValue;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.rows)) return payload.rows;
+
+  if (Array.isArray(data[key])) return data[key] as unknown[];
+  if (Array.isArray(data.results)) return data.results as unknown[];
+  if (Array.isArray(data.items)) return data.items as unknown[];
+  if (Array.isArray(data.rows)) return data.rows as unknown[];
+
+  if (Array.isArray(payload.data)) return payload.data;
+
+  return [];
 }
 
-function SarAmount({ value }: { value: number | string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span>{formatMoney(value)}</span>
-      <Image
-        src={SAR_ICON_PATH}
-        alt=""
-        width={14}
-        height={14}
-        className="h-3.5 w-3.5"
-      />
-    </span>
+function extractSummary(payload: ApiEnvelope<unknown> | null) {
+  if (!payload) return {};
+
+  const data = asDict(payload.data);
+
+  return {
+    ...asDict(payload.summary),
+    ...asDict(payload.stats),
+    ...asDict(data.summary),
+    ...asDict(data.stats),
+    ...asDict(data.totals),
+    ...asDict(data),
+  } as Partial<OrdersSummary>;
+}
+
+function normalizeOrderStatus(value: unknown): OrderStatus {
+  const clean = String(value || "").toUpperCase();
+
+  if (["PENDING", "DRAFT", "NEW"].includes(clean)) return "PENDING";
+  if (["CONFIRMED", "APPROVED"].includes(clean)) return "CONFIRMED";
+  if (["PROCESSING", "IN_PROGRESS"].includes(clean)) return "PROCESSING";
+  if (["COMPLETED", "DONE", "FINISHED"].includes(clean)) return "COMPLETED";
+  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
+  if (["REFUNDED", "RETURNED"].includes(clean)) return "REFUNDED";
+
+  return "UNKNOWN";
+}
+
+function normalizePaymentStatus(value: unknown): PaymentStatus {
+  const clean = String(value || "").toUpperCase();
+
+  if (["UNPAID", "PENDING", "NOT_PAID"].includes(clean)) return "UNPAID";
+  if (["PARTIAL", "PARTIALLY_PAID"].includes(clean)) return "PARTIAL";
+  if (["PAID", "CONFIRMED", "SUCCESS"].includes(clean)) return "PAID";
+  if (["REFUNDED"].includes(clean)) return "REFUNDED";
+  if (["CANCELLED", "CANCELED"].includes(clean)) return "CANCELLED";
+
+  return "UNKNOWN";
+}
+
+function normalizeFulfillmentStatus(value: unknown): FulfillmentStatus {
+  const clean = String(value || "").toUpperCase();
+
+  if (["NOT_STARTED", "NEW", "PENDING"].includes(clean)) return "NOT_STARTED";
+  if (["IN_PROGRESS", "PROCESSING"].includes(clean)) return "IN_PROGRESS";
+  if (["FULFILLED", "DONE", "COMPLETED"].includes(clean)) return "FULFILLED";
+  if (["FAILED"].includes(clean)) return "FAILED";
+  if (["CANCELLED", "CANCELED"].includes(clean)) return "CANCELLED";
+
+  return "UNKNOWN";
+}
+
+function normalizeOrder(item: unknown, index: number): OrderRow {
+  const obj = asDict(item);
+  const customerObj = asDict(obj.customer || obj.client);
+  const productObj = asDict(obj.product || obj.program || obj.service);
+  const providerObj = asDict(obj.provider || obj.center);
+  const agentObj = asDict(obj.agent);
+  const invoiceObj = asDict(obj.invoice);
+
+  const totalAmount = toNumber(
+    getNestedValue(obj, ["total_amount", "grand_total", "amount", "order_total"]),
   );
+
+  const paidAmount = toNumber(
+    getNestedValue(obj, ["paid_amount", "total_paid", "payments_total"]),
+  );
+
+  const remainingValue = getNestedValue(obj, [
+    "remaining_amount",
+    "balance_due",
+    "outstanding_amount",
+  ]);
+
+  return {
+    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
+    order_number: String(
+      getNestedValue(obj, ["order_number", "number", "code", "reference"]) || "-",
+    ),
+    customer_id: String(customerObj.id || getNestedValue(obj, ["customer_id"]) || ""),
+    customer_name: String(
+      customerObj.name ||
+        customerObj.full_name ||
+        getNestedValue(obj, ["customer_name", "client_name"]) ||
+        "-",
+    ),
+    customer_phone: String(
+      customerObj.phone ||
+        customerObj.mobile ||
+        getNestedValue(obj, ["customer_phone", "phone", "mobile"]) ||
+        "",
+    ),
+    product_id: String(productObj.id || getNestedValue(obj, ["product_id"]) || ""),
+    product_name: String(
+      productObj.name ||
+        productObj.title ||
+        getNestedValue(obj, ["product_name", "program_name", "service_name"]) ||
+        "-",
+    ),
+    provider_id: String(
+      providerObj.id || getNestedValue(obj, ["provider_id", "center_id"]) || "",
+    ),
+    provider_name: String(
+      providerObj.name ||
+        providerObj.title ||
+        getNestedValue(obj, ["provider_name", "center_name"]) ||
+        "-",
+    ),
+    agent_id: String(agentObj.id || getNestedValue(obj, ["agent_id"]) || ""),
+    agent_name: String(
+      agentObj.name || getNestedValue(obj, ["agent_name"]) || "",
+    ),
+    invoice_id: String(invoiceObj.id || getNestedValue(obj, ["invoice_id"]) || ""),
+    invoice_number: String(
+      invoiceObj.invoice_number ||
+        invoiceObj.number ||
+        getNestedValue(obj, ["invoice_number"]) ||
+        "",
+    ),
+    status: normalizeOrderStatus(getNestedValue(obj, ["status", "state"])),
+    payment_status: normalizePaymentStatus(
+      getNestedValue(obj, ["payment_status", "payment_state"]),
+    ),
+    fulfillment_status: normalizeFulfillmentStatus(
+      getNestedValue(obj, ["fulfillment_status", "execution_status"]),
+    ),
+    total_amount: totalAmount,
+    paid_amount: paidAmount,
+    remaining_amount:
+      remainingValue !== undefined && remainingValue !== null
+        ? toNumber(remainingValue)
+        : Math.max(totalAmount - paidAmount, 0),
+    agent_commission: toNumber(
+      getNestedValue(obj, ["agent_commission", "commission_amount"]),
+    ),
+    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
+  };
+}
+
+function buildSummary(
+  rows: OrderRow[],
+  apiSummary?: Partial<OrdersSummary>,
+): OrdersSummary {
+  const fallback: OrdersSummary = {
+    total_orders: rows.length,
+    pending_orders: rows.filter((item) => item.status === "PENDING").length,
+    confirmed_orders: rows.filter((item) => item.status === "CONFIRMED").length,
+    processing_orders: rows.filter((item) => item.status === "PROCESSING").length,
+    completed_orders: rows.filter((item) => item.status === "COMPLETED").length,
+    cancelled_orders: rows.filter((item) => item.status === "CANCELLED").length,
+    refunded_orders: rows.filter((item) => item.status === "REFUNDED").length,
+    paid_orders: rows.filter((item) => item.payment_status === "PAID").length,
+    unpaid_orders: rows.filter((item) => item.payment_status === "UNPAID").length,
+    partial_orders: rows.filter((item) => item.payment_status === "PARTIAL").length,
+    fulfilled_orders: rows.filter((item) => item.fulfillment_status === "FULFILLED")
+      .length,
+    total_amount: rows.reduce((sum, item) => sum + item.total_amount, 0),
+    paid_amount: rows.reduce((sum, item) => sum + item.paid_amount, 0),
+    remaining_amount: rows.reduce((sum, item) => sum + item.remaining_amount, 0),
+    agent_commission: rows.reduce((sum, item) => sum + item.agent_commission, 0),
+  };
+
+  const api = asDict(apiSummary);
+
+  return {
+    total_orders:
+      toNumber(api.total_orders) || toNumber(api.orders_count) || fallback.total_orders,
+    pending_orders: toNumber(api.pending_orders) || fallback.pending_orders,
+    confirmed_orders: toNumber(api.confirmed_orders) || fallback.confirmed_orders,
+    processing_orders: toNumber(api.processing_orders) || fallback.processing_orders,
+    completed_orders: toNumber(api.completed_orders) || fallback.completed_orders,
+    cancelled_orders: toNumber(api.cancelled_orders) || fallback.cancelled_orders,
+    refunded_orders: toNumber(api.refunded_orders) || fallback.refunded_orders,
+    paid_orders: toNumber(api.paid_orders) || fallback.paid_orders,
+    unpaid_orders: toNumber(api.unpaid_orders) || fallback.unpaid_orders,
+    partial_orders: toNumber(api.partial_orders) || fallback.partial_orders,
+    fulfilled_orders: toNumber(api.fulfilled_orders) || fallback.fulfilled_orders,
+    total_amount: toNumber(api.total_amount) || fallback.total_amount,
+    paid_amount: toNumber(api.paid_amount) || fallback.paid_amount,
+    remaining_amount: toNumber(api.remaining_amount) || fallback.remaining_amount,
+    agent_commission: toNumber(api.agent_commission) || fallback.agent_commission,
+  };
 }
 
 function orderStatusLabel(status: OrderStatus, locale: AppLocale) {
   const t = dictionary(locale);
 
   const labels: Record<OrderStatus, string> = {
-    pending: t.pending,
-    confirmed: t.confirmed,
-    processing: t.processing,
-    completed: t.completed,
-    cancelled: t.cancelled,
-    refunded: t.refunded,
+    PENDING: t.pending,
+    CONFIRMED: t.confirmed,
+    PROCESSING: t.processing,
+    COMPLETED: t.completed,
+    CANCELLED: t.cancelled,
+    REFUNDED: t.refunded,
     UNKNOWN: t.unknown,
   };
 
@@ -896,11 +836,26 @@ function paymentStatusLabel(status: PaymentStatus, locale: AppLocale) {
   const t = dictionary(locale);
 
   const labels: Record<PaymentStatus, string> = {
-    unpaid: t.unpaid,
-    partial: t.partial,
-    paid: t.paid,
-    refunded: t.refunded,
-    cancelled: t.cancelled,
+    UNPAID: t.unpaid,
+    PARTIAL: t.partial,
+    PAID: t.paid,
+    REFUNDED: t.refunded,
+    CANCELLED: t.cancelled,
+    UNKNOWN: t.unknown,
+  };
+
+  return labels[status];
+}
+
+function fulfillmentStatusLabel(status: FulfillmentStatus, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<FulfillmentStatus, string> = {
+    NOT_STARTED: t.notStarted,
+    IN_PROGRESS: t.inProgress,
+    FULFILLED: t.fulfilled,
+    FAILED: t.failed,
+    CANCELLED: t.cancelled,
     UNKNOWN: t.unknown,
   };
 
@@ -910,7 +865,7 @@ function paymentStatusLabel(status: PaymentStatus, locale: AppLocale) {
 function orderStatusBadge(status: OrderStatus, locale: AppLocale) {
   const label = orderStatusLabel(status, locale);
 
-  if (status === "completed") {
+  if (status === "COMPLETED" || status === "CONFIRMED") {
     return (
       <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
         {label}
@@ -918,59 +873,17 @@ function orderStatusBadge(status: OrderStatus, locale: AppLocale) {
     );
   }
 
-  if (status === "confirmed" || status === "processing") {
+  if (status === "PENDING" || status === "PROCESSING") {
     return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
         {label}
       </Badge>
     );
   }
 
-  if (status === "pending") {
+  if (status === "CANCELLED" || status === "REFUNDED") {
     return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "cancelled" || status === "refunded") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
-  );
-}
-
-function paymentStatusBadge(status: PaymentStatus, locale: AppLocale) {
-  const label = paymentStatusLabel(status, locale);
-
-  if (status === "paid") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "partial") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "unpaid") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
+      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
         {label}
       </Badge>
     );
@@ -983,74 +896,102 @@ function paymentStatusBadge(status: PaymentStatus, locale: AppLocale) {
   );
 }
 
-/* ============================================================
-   Skeleton
-============================================================ */
+function paymentStatusBadge(status: PaymentStatus, locale: AppLocale) {
+  const label = paymentStatusLabel(status, locale);
+
+  if (status === "PAID") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "PARTIAL" || status === "UNPAID") {
+    return (
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "CANCELLED" || status === "REFUNDED") {
+    return (
+      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="outline" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
+  );
+}
+
+function isValidId(value: unknown) {
+  const id = String(value || "").trim();
+
+  return id && id !== "-" && id !== "undefined" && id !== "null";
+}
+
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
+}
+
+function MoneyText({ value }: { value: unknown }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span>{formatMoney(value)}</span>
+      <SarIcon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
 
 function SkeletonLine({ className = "" }: { className?: string }) {
   return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
 }
 
-function SummaryCardsSkeleton() {
+function PageSkeleton() {
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-2">
-                <SkeletonLine className="h-7 w-20" />
-                <SkeletonLine className="h-4 w-28" />
-              </div>
-              <SkeletonLine className="h-10 w-10 rounded-xl" />
-            </div>
-            <div className="mt-4 flex items-center gap-2">
-              <SkeletonLine className="h-3 w-8" />
-              <SkeletonLine className="h-2 flex-1" />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
-}
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
+            <CardContent className="p-5">
+              <SkeletonLine className="h-8 w-28" />
+              <SkeletonLine className="mt-3 h-4 w-24" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
-function StatusCardsSkeleton() {
-  return (
-    <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-      {Array.from({ length: 6 }).map((_, index) => (
-        <div
-          key={index}
-          className="space-y-3 rounded-xl border bg-background/70 p-3"
-        >
-          <SkeletonLine className="h-7 w-14" />
-          <SkeletonLine className="h-4 w-20" />
-          <SkeletonLine className="h-2 w-full" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
-  return (
-    <>
-      {Array.from({ length: 6 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 1
-                    ? "h-9 w-52 rounded-lg"
-                    : "h-4 w-24 rounded-lg"
-                }
-              />
-            </TableCell>
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="grid gap-3 p-5 md:grid-cols-2">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-24 w-full rounded-2xl" />
           ))}
-        </TableRow>
-      ))}
-    </>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl border bg-card shadow-sm">
+        <CardContent className="space-y-3 p-5">
+          <SkeletonLine className="h-7 w-48" />
+          {Array.from({ length: 7 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
+          ))}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -1058,40 +999,39 @@ function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
    Export / Print
 ============================================================ */
 
-function downloadExcel(options: ExcelSheetOptions) {
-  const dir = options.locale === "ar" ? "rtl" : "ltr";
-  const align = options.locale === "ar" ? "right" : "left";
-  const colspan = Math.max(options.headers.length, 2);
+function downloadExcel({
+  filename,
+  title,
+  locale,
+  summary,
+  rows,
+}: {
+  filename: string;
+  title: string;
+  locale: AppLocale;
+  summary: OrdersSummary;
+  rows: OrderRow[];
+}) {
+  const isArabic = locale === "ar";
+  const dir = isArabic ? "rtl" : "ltr";
+  const align = isArabic ? "right" : "left";
+  const t = dictionary(locale);
 
-  const summaryHtml = options.summaryRows
+  const rowsHtml = rows
     .map(
-      ([label, value]) => `
+      (item) => `
         <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const filterHtml = options.filterRows
-    .map(
-      ([label, value]) => `
-        <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const headerHtml = options.headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
-    .join("");
-
-  const rowsHtml = options.rows
-    .map(
-      (row) => `
-        <tr>
-          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
+          <td>${escapeHtml(item.order_number)}</td>
+          <td>${escapeHtml(item.customer_name)}</td>
+          <td>${escapeHtml(item.customer_phone || "-")}</td>
+          <td>${escapeHtml(item.product_name || "-")}</td>
+          <td>${escapeHtml(item.provider_name || "-")}</td>
+          <td>${escapeHtml(orderStatusLabel(item.status, locale))}</td>
+          <td>${escapeHtml(paymentStatusLabel(item.payment_status, locale))}</td>
+          <td>${escapeHtml(formatMoney(item.total_amount))}</td>
+          <td>${escapeHtml(formatMoney(item.paid_amount))}</td>
+          <td>${escapeHtml(formatMoney(item.remaining_amount))}</td>
+          <td>${escapeHtml(formatDate(item.created_at, locale))}</td>
         </tr>`,
     )
     .join("");
@@ -1102,81 +1042,47 @@ function downloadExcel(options: ExcelSheetOptions) {
           xmlns="http://www.w3.org/TR/REC-html40">
       <head>
         <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(options.worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${options.locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
         <style>
-          body {
-            direction: ${dir};
-            font-family: Arial, sans-serif;
-          }
-          table {
-            border-collapse: collapse;
-            width: 100%;
-          }
-          th,
-          td {
+          body { direction: ${dir}; font-family: Arial, sans-serif; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td {
             border: 1px solid #d9e2ef;
             padding: 8px;
             text-align: ${align};
             vertical-align: top;
             mso-number-format: "\\@";
           }
-          th {
-            background: #d8ecfb;
-            color: #000000;
-            font-weight: 700;
-          }
-          .title {
-            font-size: 20px;
-            font-weight: 700;
-            text-align: center;
-            background: #ffffff;
-          }
-          .section {
-            font-weight: 700;
-            background: #eef6ff;
-          }
-          .summary-label {
-            font-weight: 700;
-            background: #f8fafc;
-            width: 240px;
-          }
-          .summary-value {
-            font-weight: 700;
-          }
+          th { background: #d8ecfb; font-weight: 700; }
+          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
+          .section { font-weight: 700; background: #eef6ff; }
+          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
         </style>
       </head>
       <body dir="${dir}">
         <table>
+          <tr><td class="title" colspan="11">${escapeHtml(title)}</td></tr>
+          <tr><td colspan="11"></td></tr>
+          <tr><td class="section" colspan="11">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalOrders)}</td><td colspan="10">${escapeHtml(formatNumber(summary.total_orders))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.completedOrders)}</td><td colspan="10">${escapeHtml(formatNumber(summary.completed_orders))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalAmount)}</td><td colspan="10">${escapeHtml(formatMoney(summary.total_amount))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.paidAmount)}</td><td colspan="10">${escapeHtml(formatMoney(summary.paid_amount))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.remainingAmount)}</td><td colspan="10">${escapeHtml(formatMoney(summary.remaining_amount))}</td></tr>
+
+          <tr><td colspan="11"></td></tr>
           <tr>
-            <td class="title" colspan="${colspan}">
-              ${escapeHtml(options.title)}
-            </td>
+            <th>${escapeHtml(t.table.order)}</th>
+            <th>${escapeHtml(t.table.customer)}</th>
+            <th>${escapeHtml("Phone")}</th>
+            <th>${escapeHtml(t.table.product)}</th>
+            <th>${escapeHtml(t.table.provider)}</th>
+            <th>${escapeHtml(t.table.status)}</th>
+            <th>${escapeHtml(t.table.payment)}</th>
+            <th>${escapeHtml(t.table.total)}</th>
+            <th>${escapeHtml(t.table.paid)}</th>
+            <th>${escapeHtml(t.table.remaining)}</th>
+            <th>${escapeHtml(t.table.createdAt)}</th>
           </tr>
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "ملخص القائمة" : "List Summary"}
-          </td></tr>
-          ${summaryHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "الفلاتر المستخدمة" : "Applied Filters"}
-          </td></tr>
-          ${filterHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr>${headerHtml}</tr>
           ${rowsHtml}
         </table>
       </body>
@@ -1190,7 +1096,7 @@ function downloadExcel(options: ExcelSheetOptions) {
   const anchor = document.createElement("a");
 
   anchor.href = url;
-  anchor.download = options.filename;
+  anchor.download = filename;
   anchor.click();
 
   URL.revokeObjectURL(url);
@@ -1199,32 +1105,29 @@ function downloadExcel(options: ExcelSheetOptions) {
 function buildPrintHtml({
   locale,
   title,
+  summary,
   rows,
-  t,
 }: {
   locale: AppLocale;
   title: string;
-  rows: Order[];
-  t: ReturnType<typeof dictionary>;
+  summary: OrdersSummary;
+  rows: OrderRow[];
 }) {
   const isArabic = locale === "ar";
-  const now = new Date().toLocaleString("en-US");
+  const t = dictionary(locale);
 
   const tableRows = rows
+    .slice(0, 40)
     .map(
-      (order, index) => `
+      (item) => `
         <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(order.orderNumber || "-")}</td>
-          <td>${escapeHtml(order.customerName || "-")}</td>
-          <td>${escapeHtml(order.productName || "-")}</td>
-          <td>${escapeHtml(order.providerName || "-")}</td>
-          <td>${escapeHtml(formatMoney(order.totalAmount))}</td>
-          <td>${escapeHtml(paymentStatusLabel(order.paymentStatus, locale))}</td>
-          <td>${escapeHtml(orderStatusLabel(order.status, locale))}</td>
-          <td>${escapeHtml(formatDate(order.createdAt))}</td>
-        </tr>
-      `,
+          <td>${escapeHtml(item.order_number)}</td>
+          <td>${escapeHtml(item.customer_name)}</td>
+          <td>${escapeHtml(item.product_name)}</td>
+          <td>${escapeHtml(orderStatusLabel(item.status, locale))}</td>
+          <td>${escapeHtml(paymentStatusLabel(item.payment_status, locale))}</td>
+          <td>${escapeHtml(formatMoney(item.total_amount))}</td>
+        </tr>`,
     )
     .join("");
 
@@ -1241,100 +1144,79 @@ function buildPrintHtml({
             padding: 24px;
             font-family: Arial, Tahoma, sans-serif;
             color: #111827;
-            background: #ffffff;
+            background: #fff;
             direction: ${isArabic ? "rtl" : "ltr"};
             text-align: ${isArabic ? "right" : "left"};
           }
-          .print-header {
+          .header {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
             gap: 16px;
-            margin-bottom: 18px;
             border-bottom: 1px solid #e5e7eb;
             padding-bottom: 14px;
+            margin-bottom: 18px;
           }
-          h1 {
-            margin: 0;
-            font-size: 22px;
-            font-weight: 800;
-          }
-          .meta {
-            margin-top: 8px;
-            color: #6b7280;
-            font-size: 12px;
-            line-height: 1.8;
-          }
+          h1 { margin: 0; font-size: 22px; font-weight: 800; }
+          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
           .badge {
-            display: inline-block;
             border: 1px solid #d1d5db;
             border-radius: 999px;
-            padding: 4px 10px;
+            padding: 5px 12px;
             font-size: 12px;
-            color: #374151;
+            height: fit-content;
           }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 18px;
           }
-          th {
-            background: #f3f4f6;
-            color: #111827;
-            font-weight: 700;
-          }
-          th,
-          td {
+          .box {
             border: 1px solid #e5e7eb;
-            padding: 9px 8px;
+            border-radius: 12px;
+            padding: 10px;
+          }
+          .box span { color: #6b7280; display: block; font-size: 11px; }
+          .box strong { display: block; margin-top: 6px; font-size: 16px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+          th { background: #f3f4f6; font-weight: 700; }
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 8px;
             text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
           }
-          tr:nth-child(even) td {
-            background: #fafafa;
-          }
-          @page {
-            size: A4 landscape;
-            margin: 12mm;
-          }
-          @media print {
-            body { padding: 0; }
-          }
+          @page { size: A4 landscape; margin: 12mm; }
+          @media print { body { padding: 0; } }
         </style>
       </head>
-
       <body>
-        <div class="print-header">
+        <div class="header">
           <div>
             <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
+            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
           </div>
           <div class="badge">Primey Care</div>
+        </div>
+
+        <div class="grid">
+          <div class="box"><span>${escapeHtml(t.totalOrders)}</span><strong>${escapeHtml(formatNumber(summary.total_orders))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.completedOrders)}</span><strong>${escapeHtml(formatNumber(summary.completed_orders))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.paidAmount)}</span><strong>${escapeHtml(formatMoney(summary.paid_amount))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.remainingAmount)}</span><strong>${escapeHtml(formatMoney(summary.remaining_amount))}</strong></div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th>#</th>
               <th>${escapeHtml(t.table.order)}</th>
               <th>${escapeHtml(t.table.customer)}</th>
               <th>${escapeHtml(t.table.product)}</th>
-              <th>${escapeHtml(t.table.provider)}</th>
-              <th>${escapeHtml(t.table.amount)}</th>
-              <th>${escapeHtml(t.table.payment)}</th>
               <th>${escapeHtml(t.table.status)}</th>
-              <th>${escapeHtml(t.table.createdAt)}</th>
+              <th>${escapeHtml(t.table.payment)}</th>
+              <th>${escapeHtml(t.table.total)}</th>
             </tr>
           </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="9" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
+          <tbody>${tableRows || `<tr><td colspan="6">${escapeHtml(t.emptyTitle)}</td></tr>`}</tbody>
         </table>
 
         <script>
@@ -1356,313 +1238,75 @@ export default function SystemOrdersPage() {
   const auth = useAuth() as unknown;
 
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [rows, setRows] = useState<OrderRow[]>([]);
+  const [summary, setSummary] = useState<OrdersSummary>(DEFAULT_SUMMARY);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("all");
+  const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
-
   const authResolving = isAuthResolving(auth);
 
-  const canViewOrders = hasSafePermission(
-    auth,
-    ["orders.view", "orders.list"],
-    "view",
-  );
-
-  const canCreateOrders = hasSafePermission(
-    auth,
-    ["orders.create"],
-    "action",
-  );
-
-  const canExportOrders = hasSafePermission(
+  const canView = hasAnyPermission(auth, ["orders.view", "orders.list"], "view");
+  const canCreate = hasAnyPermission(auth, ["orders.create"], "action");
+  const canExport = hasAnyPermission(
     auth,
     ["orders.export", "reports.export"],
     "action",
   );
-
-  const canPrintOrders = hasSafePermission(
+  const canPrint = hasAnyPermission(
     auth,
     ["orders.print", "reports.print"],
     "action",
   );
+  const canViewDetails = hasAnyPermission(auth, ["orders.view"], "view");
 
-  const canViewOrderDetails = hasSafePermission(
-    auth,
-    ["orders.view", "orders.detail"],
-    "view",
-  );
+  const filteredRows = useMemo(() => {
+    const clean = query.trim().toLowerCase();
 
-  const stats = useMemo(() => {
-    const total = orders.length;
-    const completed = orders.filter((item) => item.status === "completed").length;
-    const pending = orders.filter((item) => item.status === "pending").length;
-    const confirmed = orders.filter((item) => item.status === "confirmed").length;
-    const processing = orders.filter((item) => item.status === "processing").length;
-    const cancelled = orders.filter((item) => item.status === "cancelled").length;
-    const refunded = orders.filter((item) => item.status === "refunded").length;
-    const paid = orders.filter((item) => item.paymentStatus === "paid").length;
-    const partial = orders.filter((item) => item.paymentStatus === "partial").length;
-    const unpaid = orders.filter((item) => item.paymentStatus === "unpaid").length;
-
-    const totalRevenue = orders.reduce((sum, item) => sum + item.totalAmount, 0);
-    const paidAmount = orders.reduce((sum, item) => sum + item.paidAmount, 0);
-    const unpaidBalance = orders.reduce(
-      (sum, item) => sum + item.remainingAmount,
-      0,
+    const sorted = [...rows].sort((a, b) =>
+      String(b.created_at).localeCompare(String(a.created_at)),
     );
 
-    return {
-      total,
-      completed,
-      pending,
-      confirmed,
-      processing,
-      cancelled,
-      refunded,
-      paid,
-      partial,
-      unpaid,
-      totalRevenue,
-      paidAmount,
-      unpaidBalance,
-    };
-  }, [orders]);
+    if (!clean) return sorted.slice(0, 12);
 
-  const filteredOrders = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
+    return sorted
+      .filter((item) =>
+        [
+          item.order_number,
+          item.customer_name,
+          item.customer_phone,
+          item.product_name,
+          item.provider_name,
+          item.agent_name,
+          item.invoice_number,
+          orderStatusLabel(item.status, locale),
+          paymentStatusLabel(item.payment_status, locale),
+          fulfillmentStatusLabel(item.fulfillment_status, locale),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(clean),
+      )
+      .slice(0, 12);
+  }, [locale, query, rows]);
 
-    return orders.filter((order) => {
-      const matchesStatus =
-        statusFilter === "all" ? true : order.status === statusFilter;
-
-      const matchesPayment =
-        paymentFilter === "all" ? true : order.paymentStatus === paymentFilter;
-
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            order.orderNumber,
-            order.customerName,
-            order.customerPhone,
-            order.productName,
-            order.providerName,
-            order.agentName,
-            order.contractCode,
-            order.invoiceNumber,
-            order.status,
-            order.paymentStatus,
-            order.fulfillmentStatus,
-            orderStatusLabel(order.status, locale),
-            paymentStatusLabel(order.paymentStatus, locale),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
-
-      return matchesStatus && matchesPayment && matchesQuery;
-    });
-  }, [locale, orders, paymentFilter, query, statusFilter]);
-
-  const latestOrders = useMemo(
-    () =>
-      [...filteredOrders]
-        .sort((a, b) => {
-          const first = new Date(a.createdAt || a.updatedAt || 0).getTime();
-          const second = new Date(b.createdAt || b.updatedAt || 0).getTime();
-
-          return second - first;
-        })
-        .slice(0, 8),
-    [filteredOrders],
+  const activeSummary = useMemo(
+    () => buildSummary(filteredRows),
+    [filteredRows],
   );
 
-  const hasSearchOrFilter =
-    query.trim().length > 0 ||
-    statusFilter !== "all" ||
-    paymentFilter !== "all";
-
-  const statusFilters = useMemo(
-    () => [
-      { value: "all" as StatusFilter, label: t.allStatuses, count: orders.length },
-      { value: "pending" as StatusFilter, label: t.pending, count: stats.pending },
-      {
-        value: "confirmed" as StatusFilter,
-        label: t.confirmed,
-        count: stats.confirmed,
-      },
-      {
-        value: "processing" as StatusFilter,
-        label: t.processing,
-        count: stats.processing,
-      },
-      {
-        value: "completed" as StatusFilter,
-        label: t.completed,
-        count: stats.completed,
-      },
-      {
-        value: "cancelled" as StatusFilter,
-        label: t.cancelled,
-        count: stats.cancelled,
-      },
-    ],
-    [orders.length, stats, t],
-  );
-
-  const paymentFilters = useMemo(
-    () => [
-      { value: "all" as PaymentFilter, label: t.allPayments, count: orders.length },
-      { value: "paid" as PaymentFilter, label: t.paid, count: stats.paid },
-      { value: "partial" as PaymentFilter, label: t.partial, count: stats.partial },
-      { value: "unpaid" as PaymentFilter, label: t.unpaid, count: stats.unpaid },
-      {
-        value: "refunded" as PaymentFilter,
-        label: t.refunded,
-        count: orders.filter((item) => item.paymentStatus === "refunded").length,
-      },
-    ],
-    [orders, stats, t],
-  );
-
-  const summaryCards = useMemo(
-    () => [
-      {
-        title: t.totalOrders,
-        value: stats.total,
-        icon: ShoppingCart,
-        helper: t.completedOrders,
-        helperValue: formatNumber(stats.completed),
-        percent: stats.total > 0 ? 100 : 0,
-        isMoney: false,
-      },
-      {
-        title: t.completedOrders,
-        value: stats.completed,
-        icon: BadgeCheck,
-        helper: t.totalOrders,
-        helperValue: `${percent(stats.completed, stats.total)}%`,
-        percent: percent(stats.completed, stats.total),
-        isMoney: false,
-      },
-      {
-        title: t.totalRevenue,
-        value: stats.totalRevenue,
-        icon: Wallet,
-        helper: t.paid,
-        helperValue: formatMoney(stats.paidAmount),
-        percent: stats.totalRevenue
-          ? percent(stats.paidAmount, stats.totalRevenue)
-          : 0,
-        isMoney: true,
-      },
-      {
-        title: t.unpaidBalance,
-        value: stats.unpaidBalance,
-        icon: CreditCard,
-        helper: t.unpaid,
-        helperValue: formatNumber(stats.unpaid),
-        percent: stats.totalRevenue
-          ? percent(stats.unpaidBalance, stats.totalRevenue)
-          : 0,
-        isMoney: true,
-      },
-    ],
-    [stats, t],
-  );
-
-  const lifecycleCards = useMemo(
-    () => [
-      {
-        title: t.pending,
-        value: stats.pending,
-        icon: CalendarClock,
-        percent: percent(stats.pending, stats.total),
-        filter: "pending" as StatusFilter,
-      },
-      {
-        title: t.confirmed,
-        value: stats.confirmed,
-        icon: ShieldCheck,
-        percent: percent(stats.confirmed, stats.total),
-        filter: "confirmed" as StatusFilter,
-      },
-      {
-        title: t.processing,
-        value: stats.processing,
-        icon: RotateCcw,
-        percent: percent(stats.processing, stats.total),
-        filter: "processing" as StatusFilter,
-      },
-      {
-        title: t.completed,
-        value: stats.completed,
-        icon: BadgeCheck,
-        percent: percent(stats.completed, stats.total),
-        filter: "completed" as StatusFilter,
-      },
-      {
-        title: t.cancelled,
-        value: stats.cancelled,
-        icon: XCircle,
-        percent: percent(stats.cancelled, stats.total),
-        filter: "cancelled" as StatusFilter,
-      },
-      {
-        title: t.refunded,
-        value: stats.refunded,
-        icon: CreditCard,
-        percent: percent(stats.refunded, stats.total),
-        filter: "refunded" as StatusFilter,
-      },
-    ],
-    [stats, t],
-  );
-
-  const moduleActions = useMemo(
-    () =>
-      [
-        canViewOrders
-          ? {
-              title: t.actionListTitle,
-              description: t.actionListDesc,
-              href: "/system/orders/list",
-              icon: ListChecks,
-              badge: `${formatNumber(stats.total)}`,
-              cta: t.manage,
-            }
-          : null,
-        canCreateOrders
-          ? {
-              title: t.actionCreateTitle,
-              description: t.actionCreateDesc,
-              href: "/system/orders/create",
-              icon: Plus,
-              badge: isArabic ? "جديد" : "New",
-              cta: t.open,
-            }
-          : null,
-      ].filter(Boolean) as Array<{
-        title: string;
-        description: string;
-        href: string;
-        icon: LucideIcon;
-        badge: string;
-        cta: string;
-      }>,
-    [canCreateOrders, canViewOrders, isArabic, stats.total, t],
-  );
+  const displaySummary = query.trim() ? activeSummary : summary;
+  const hasData = rows.length > 0;
+  const hasSearch = query.trim().length > 0;
 
   const loadOrders = useCallback(
     async (showToast = false) => {
-      if (!canViewOrders) {
+      if (!canView) {
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
         setIsLoading(false);
-        setOrders([]);
         return;
       }
 
@@ -1670,118 +1314,59 @@ export default function SystemOrdersPage() {
         setIsLoading(true);
         setErrorMessage("");
 
-        const response = await fetch(apiUrl("/api/orders/?page_size=100"), {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-          },
-        });
+        const payload = await loadFirstAvailable([
+          "/api/orders/list/?page_size=500",
+          "/api/orders/?page_size=500",
+        ]);
 
-        const payload = (await response.json().catch(() => null)) as
-          | OrdersApiResponse
-          | null;
-
-        if (!response.ok || payload?.ok === false) {
-          throw new Error(payload?.message || `HTTP ${response.status}`);
+        if (!payload) {
+          throw new Error(t.loadError);
         }
 
-        setOrders(extractOrders(payload).map(normalizeOrder));
+        const normalizedRows = extractRows(payload, "orders")
+          .map(normalizeOrder)
+          .filter((item) => item.id || item.order_number);
 
-        if (showToast) {
-          toast.success(t.refreshSuccess);
-        }
+        setRows(normalizedRows);
+        setSummary(buildSummary(normalizedRows, extractSummary(payload)));
+
+        if (showToast) toast.success(t.loadSuccess);
       } catch (error) {
-        console.error("Failed to load orders:", error);
-        setOrders([]);
-        setErrorMessage(t.apiError);
-        toast.error(t.apiError);
+        console.error("Orders overview load error:", error);
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
+        setErrorMessage(t.loadError);
+        toast.error(t.loadError);
       } finally {
         setIsLoading(false);
       }
     },
-    [canViewOrders, t.apiError, t.refreshSuccess],
+    [canView, t.loadError, t.loadSuccess],
   );
 
-  function clearFilters() {
-    setQuery("");
-    setStatusFilter("all");
-    setPaymentFilter("all");
-  }
+  function exportExcel() {
+    if (!canExport) return;
 
-  function exportOrders() {
-    if (!canExportOrders) return;
-
-    if (filteredOrders.length === 0) {
+    if (!hasData) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    const generatedAt = new Date();
-
-    const statusFilterLabel =
-      statusFilters.find((item) => item.value === statusFilter)?.label || t.all;
-
-    const paymentFilterLabel =
-      paymentFilters.find((item) => item.value === paymentFilter)?.label || t.all;
-
     downloadExcel({
-      filename: `primey-care-orders-dashboard-${generatedAt
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "لوحة الطلبات" : "Orders Dashboard",
-      title: t.pageTitle,
+      filename: `primey-care-orders-${new Date().toISOString().slice(0, 10)}.xls`,
+      title: t.title,
       locale,
-      summaryRows: [
-        [t.export.generatedAt, generatedAt.toLocaleString("en-US")],
-        [t.export.scope, t.export.currentData],
-        [
-          t.table.order,
-          `${formatNumber(filteredOrders.length)} / ${formatNumber(
-            orders.length,
-          )}`,
-        ],
-        [t.totalOrders, stats.total],
-        [t.completedOrders, stats.completed],
-        [t.totalRevenue, formatMoney(stats.totalRevenue)],
-        [t.unpaidBalance, formatMoney(stats.unpaidBalance)],
-      ],
-      filterRows: [
-        [t.export.search, query || t.all],
-        [t.export.status, statusFilterLabel],
-        [t.export.payment, paymentFilterLabel],
-      ],
-      headers: [
-        t.table.order,
-        t.table.customer,
-        t.table.product,
-        t.table.provider,
-        t.table.agent,
-        t.table.amount,
-        t.table.payment,
-        t.table.status,
-        t.table.createdAt,
-      ],
-      rows: filteredOrders.map((order) => [
-        order.orderNumber || "-",
-        order.customerName || "-",
-        order.productName || "-",
-        order.providerName || "-",
-        order.agentName || "-",
-        formatMoney(order.totalAmount),
-        paymentStatusLabel(order.paymentStatus, locale),
-        orderStatusLabel(order.status, locale),
-        formatDate(order.createdAt),
-      ]),
+      summary: displaySummary,
+      rows: hasSearch ? filteredRows : rows,
     });
 
     toast.success(t.exportSuccess);
   }
 
-  function printOrders() {
-    if (!canPrintOrders) return;
+  function printPage() {
+    if (!canPrint) return;
 
-    if (filteredOrders.length === 0) {
+    if (!hasData) {
       toast.error(t.exportEmpty);
       return;
     }
@@ -1797,9 +1382,9 @@ export default function SystemOrdersPage() {
     printWindow.document.write(
       buildPrintHtml({
         locale,
-        title: t.printTitle,
-        rows: filteredOrders,
-        t,
+        title: t.title,
+        summary: displaySummary,
+        rows: hasSearch ? filteredRows : rows,
       }),
     );
     printWindow.document.close();
@@ -1817,10 +1402,7 @@ export default function SystemOrdersPage() {
 
     const syncAfterPaint = () => {
       syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
+      window.setTimeout(syncLocale, 0);
     };
 
     syncAfterPaint();
@@ -1839,7 +1421,7 @@ export default function SystemOrdersPage() {
     loadOrders(false);
   }, [authResolving, loadOrders]);
 
-  if (!authResolving && !canViewOrders) {
+  if (!authResolving && !canView) {
     return (
       <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
         <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
@@ -1864,15 +1446,14 @@ export default function SystemOrdersPage() {
 
   return (
     <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.pageTitle}
+            {t.title}
           </h1>
 
           <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.pageSubtitle}
+            {t.subtitle}
           </p>
         </div>
 
@@ -1891,59 +1472,31 @@ export default function SystemOrdersPage() {
             <span>{t.refresh}</span>
           </Button>
 
-          {canExportOrders ? (
+          {canExport ? (
             <Button
-              variant="outline"
               className="h-10 rounded-xl"
-              onClick={exportOrders}
-              disabled={
-                isLoading ||
-                filteredOrders.length === 0 ||
-                Boolean(errorMessage)
-              }
+              onClick={exportExcel}
+              disabled={isLoading || !hasData || Boolean(errorMessage)}
             >
               <Download className="h-4 w-4" />
               <span>{t.exportExcel}</span>
             </Button>
           ) : null}
 
-          {canPrintOrders ? (
+          {canPrint ? (
             <Button
               variant="outline"
               className="h-10 rounded-xl"
-              onClick={printOrders}
-              disabled={
-                isLoading ||
-                filteredOrders.length === 0 ||
-                Boolean(errorMessage)
-              }
+              onClick={printPage}
+              disabled={isLoading || !hasData || Boolean(errorMessage)}
             >
               <Printer className="h-4 w-4" />
               <span>{t.print}</span>
             </Button>
           ) : null}
-
-          {canViewOrders ? (
-            <Link href="/system/orders/list">
-              <Button variant="outline" className="h-10 w-full rounded-xl sm:w-auto">
-                <ListChecks className="h-4 w-4" />
-                <span>{t.ordersList}</span>
-              </Button>
-            </Link>
-          ) : null}
-
-          {canCreateOrders ? (
-            <Link href="/system/orders/create">
-              <Button className="h-10 w-full rounded-xl sm:w-auto">
-                <Plus className="h-4 w-4" />
-                <span>{t.createOrder}</span>
-              </Button>
-            </Link>
-          ) : null}
         </div>
       </div>
 
-      {/* Error State */}
       {!isLoading && errorMessage ? (
         <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -1953,11 +1506,9 @@ export default function SystemOrdersPage() {
               </div>
 
               <div>
-                <p className="font-semibold text-destructive">
-                  {errorMessage}
-                </p>
+                <p className="font-semibold text-destructive">{errorMessage}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {t.apiErrorHint}
+                  {t.loadErrorHint}
                 </p>
               </div>
             </div>
@@ -1974,143 +1525,98 @@ export default function SystemOrdersPage() {
         </Card>
       ) : null}
 
-      {!errorMessage ? (
+      {isLoading ? (
+        <PageSkeleton />
+      ) : (
         <>
-          {/* Summary */}
-          {isLoading ? (
-            <SummaryCardsSkeleton />
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {summaryCards.map((item) => {
-                const Icon = item.icon;
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              title={t.totalOrders}
+              value={formatNumber(displaySummary.total_orders)}
+              icon={<ShoppingCart className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.completedOrders}
+              value={formatNumber(displaySummary.completed_orders)}
+              icon={<BadgeCheck className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.paidAmount}
+              value={<MoneyText value={displaySummary.paid_amount} />}
+              icon={<WalletCards className="h-5 w-5" />}
+            />
+            <KpiCard
+              title={t.remainingAmount}
+              value={<MoneyText value={displaySummary.remaining_amount} />}
+              icon={<TimerReset className="h-5 w-5" />}
+            />
+          </div>
 
-                return (
-                  <Card
-                    key={item.title}
-                    className="rounded-2xl border bg-card shadow-sm"
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-2xl font-bold">
-                            {item.isMoney ? (
-                              <SarAmount value={item.value} />
-                            ) : (
-                              formatNumber(item.value)
-                            )}
-                          </p>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {item.title}
-                          </p>
-                        </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MiniStat title={t.pendingOrders} value={displaySummary.pending_orders} />
+            <MiniStat
+              title={t.processingOrders}
+              value={displaySummary.processing_orders}
+            />
+            <MiniStat title={t.paidOrders} value={displaySummary.paid_orders} />
+            <MiniStat title={t.fulfilledOrders} value={displaySummary.fulfilled_orders} />
+          </div>
 
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                          <Icon className="h-5 w-5" />
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-2">
-                        <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                          {formatNumber(item.percent)}%
-                        </span>
-                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-primary transition-all"
-                            style={{ width: `${item.percent}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        {item.helper}: {item.helperValue}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Lifecycle */}
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
+            <CardHeader>
               <CardTitle className="text-base font-bold">
-                {t.lifecycleTitle}
+                {t.shortcutsTitle}
               </CardTitle>
-              <CardDescription>{t.lifecycleDesc}</CardDescription>
+              <CardDescription>{t.shortcutsDesc}</CardDescription>
             </CardHeader>
 
             <CardContent>
-              {isLoading ? (
-                <StatusCardsSkeleton />
-              ) : (
-                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-                  {lifecycleCards.map((card) => {
-                    const Icon = card.icon;
+              <div className="grid gap-3 md:grid-cols-2">
+                <Link href="/system/orders/list">
+                  <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
+                    <CardContent className="flex h-full items-start gap-3 p-4">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                        <FileText className="h-5 w-5" />
+                      </div>
 
-                    return (
-                      <button
-                        key={card.title}
-                        type="button"
-                        className="space-y-2 rounded-xl border bg-background/70 p-3 text-start transition hover:bg-muted/40"
-                        onClick={() => setStatusFilter(card.filter)}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-2xl font-bold">
-                            {formatNumber(card.value)}
+                      <div className="min-w-0">
+                        <p className="font-semibold">{t.ordersList}</p>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {isArabic
+                            ? "عرض الطلبات مع البحث والفلاتر والإجراءات."
+                            : "Open orders with search, filters, and actions."}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+
+                {canCreate ? (
+                  <Link href="/system/orders/create">
+                    <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
+                      <CardContent className="flex h-full items-start gap-3 p-4">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                          <PlusCircle className="h-5 w-5" />
+                        </div>
+
+                        <div className="min-w-0">
+                          <p className="font-semibold">{t.createOrder}</p>
+                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                            {isArabic
+                              ? "إنشاء طلب جديد وربطه بالعميل والمنتج."
+                              : "Create a new order and link it to customer and product."}
                           </p>
-                          <Icon className="h-4 w-4 text-muted-foreground" />
                         </div>
-
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm text-muted-foreground">
-                              {card.title}
-                            </p>
-                            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                              {formatNumber(card.percent)}%
-                            </span>
-                          </div>
-
-                          <div className="h-2 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full bg-primary transition-all"
-                              style={{ width: `${card.percent}%` }}
-                            />
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                      </CardContent>
+                    </Card>
+                  </Link>
+                ) : null}
+              </div>
             </CardContent>
           </Card>
 
-          {/* Orders Table */}
           <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <CardTitle className="text-base font-bold">
-                  {t.latestOrders}
-                </CardTitle>
-                <CardDescription className="mt-1 text-sm leading-6">
-                  {t.latestOrdersDesc}
-                </CardDescription>
-              </div>
-
-              {canViewOrders ? (
-                <Link href="/system/orders/list">
-                  <Button variant="outline" className="h-9 rounded-xl">
-                    <ListChecks className="h-4 w-4" />
-                    <span>{t.viewFullList}</span>
-                  </Button>
-                </Link>
-              ) : null}
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              {/* Search Row */}
+            <CardContent className="p-4">
               <div className="relative w-full">
                 <Search
                   className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
@@ -2124,305 +1630,261 @@ export default function SystemOrdersPage() {
                   className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
                 />
               </div>
+            </CardContent>
+          </Card>
 
-              {/* Filters Row */}
-              <div className="grid gap-3">
-                <div className="flex flex-wrap gap-2">
-                  {statusFilters.map((item) => {
-                    const isSelected = statusFilter === item.value;
+          {!hasData ? (
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+                <ShoppingCart className="h-12 w-12 text-muted-foreground/40" />
+                <p className="text-lg font-semibold">{t.emptyTitle}</p>
+                <p className="max-w-md text-sm text-muted-foreground">
+                  {t.emptyText}
+                </p>
 
-                    return (
-                      <Button
-                        key={item.value}
-                        type="button"
-                        variant={isSelected ? "default" : "outline"}
-                        className="h-10 rounded-xl"
-                        onClick={() => setStatusFilter(item.value)}
-                      >
-                        <span>{item.label}</span>
-                        <Badge
-                          variant={isSelected ? "secondary" : "outline"}
-                          className="ms-1 rounded-full"
-                        >
-                          {formatNumber(item.count)}
-                        </Badge>
-                      </Button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap gap-2">
-                    {paymentFilters.map((item) => {
-                      const isSelected = paymentFilter === item.value;
-
-                      return (
-                        <Button
-                          key={item.value}
-                          type="button"
-                          variant={isSelected ? "default" : "outline"}
-                          className="h-10 rounded-xl"
-                          onClick={() => setPaymentFilter(item.value)}
-                        >
-                          <span>{item.label}</span>
-                          <Badge
-                            variant={isSelected ? "secondary" : "outline"}
-                            className="ms-1 rounded-full"
-                          >
-                            {formatNumber(item.count)}
-                          </Badge>
-                        </Button>
-                      );
-                    })}
-                  </div>
-
-                  {hasSearchOrFilter ? (
-                    <Button
-                      variant="outline"
-                      className="h-10 rounded-xl"
-                      onClick={clearFilters}
-                    >
-                      {t.clearFilters}
+                {canCreate ? (
+                  <Link href="/system/orders/create">
+                    <Button className="mt-2 rounded-xl">
+                      <PlusCircle className="h-4 w-4" />
+                      {t.createOrder}
                     </Button>
-                  ) : null}
-                </div>
-              </div>
+                  </Link>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
 
+          {hasData && hasSearch && filteredRows.length === 0 ? (
+            <Card className="rounded-2xl border bg-card shadow-sm">
+              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+                <Search className="h-12 w-12 text-muted-foreground/40" />
+                <p className="text-lg font-semibold">{t.noResultsTitle}</p>
+                <p className="max-w-md text-sm text-muted-foreground">
+                  {t.noResultsText}
+                </p>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.latestTitle}
+                  </CardTitle>
+                  <CardDescription>{t.latestDesc}</CardDescription>
+                </div>
+
+                <Link href="/system/orders/list">
+                  <Button variant="outline" className="h-10 rounded-xl">
+                    <ArrowUpRight className="h-4 w-4" />
+                    {t.ordersList}
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+
+            <CardContent>
               <div className="overflow-hidden rounded-xl border">
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>{t.table.order}</TableHead>
-                        <TableHead>{t.table.customer}</TableHead>
-                        <TableHead>{t.table.product}</TableHead>
-                        <TableHead>{t.table.provider}</TableHead>
-                        <TableHead>{t.table.amount}</TableHead>
-                        <TableHead>{t.table.payment}</TableHead>
-                        <TableHead>{t.table.status}</TableHead>
-                        <TableHead>{t.table.createdAt}</TableHead>
-                        {canViewOrderDetails ? (
-                          <TableHead>{t.table.action}</TableHead>
+                        <TableHead className="min-w-[150px]">
+                          {t.table.order}
+                        </TableHead>
+                        <TableHead className="min-w-[220px]">
+                          {t.table.customer}
+                        </TableHead>
+                        <TableHead className="min-w-[180px]">
+                          {t.table.product}
+                        </TableHead>
+                        <TableHead className="min-w-[160px]">
+                          {t.table.provider}
+                        </TableHead>
+                        <TableHead className="min-w-[130px]">
+                          {t.table.status}
+                        </TableHead>
+                        <TableHead className="min-w-[120px]">
+                          {t.table.payment}
+                        </TableHead>
+                        <TableHead className="min-w-[130px]">
+                          {t.table.fulfillment}
+                        </TableHead>
+                        <TableHead className="min-w-[130px]">
+                          {t.table.total}
+                        </TableHead>
+                        <TableHead className="min-w-[120px]">
+                          {t.table.createdAt}
+                        </TableHead>
+                        {canViewDetails ? (
+                          <TableHead className="min-w-[90px]">
+                            {t.table.action}
+                          </TableHead>
                         ) : null}
                       </TableRow>
                     </TableHeader>
 
                     <TableBody>
-                      {isLoading ? (
-                        <TableRowsSkeleton
-                          columnsCount={canViewOrderDetails ? 9 : 8}
-                        />
-                      ) : latestOrders.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={canViewOrderDetails ? 9 : 8}
-                            className="h-36 text-center"
-                          >
-                            <div className="mx-auto max-w-md space-y-2">
-                              <p className="font-semibold">
-                                {hasSearchOrFilter
-                                  ? t.noResultsTitle
-                                  : t.emptyTitle}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {hasSearchOrFilter ? t.noResultsText : t.emptyText}
-                              </p>
-
-                              {hasSearchOrFilter ? (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="mt-2 rounded-xl"
-                                  onClick={clearFilters}
-                                >
-                                  {t.clearFilters}
-                                </Button>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        latestOrders.map((order) => (
-                          <TableRow key={`${order.id}-${order.orderNumber}`}>
-                            <TableCell className="font-medium">
-                              <div className="min-w-[140px]">
-                                <p>{order.orderNumber || `#${order.id}`}</p>
-                                {order.invoiceNumber ? (
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    {order.invoiceNumber}
-                                  </p>
-                                ) : null}
-                              </div>
+                      {filteredRows.length > 0 ? (
+                        filteredRows.map((item) => (
+                          <TableRow key={`${item.id}-${item.order_number}`}>
+                            <TableCell className="font-semibold" dir="ltr">
+                              {item.order_number}
                             </TableCell>
 
                             <TableCell>
-                              <div className="flex min-w-[180px] items-center gap-3">
-                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                                  <UserRound className="h-4 w-4" />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="truncate font-medium">
-                                    {order.customerName || "-"}
-                                  </p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {order.customerPhone || "-"}
-                                  </p>
-                                </div>
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              <div className="flex min-w-[180px] items-center gap-3">
-                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                                  <Package className="h-4 w-4" />
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="truncate font-medium">
-                                    {order.productName || "-"}
-                                  </p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {order.agentName || "-"}
-                                  </p>
-                                </div>
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              <div className="min-w-[150px]">
-                                <p className="truncate">{order.providerName || "-"}</p>
-                                {order.contractCode ? (
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    {order.contractCode}
-                                  </p>
-                                ) : null}
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              <div className="space-y-1">
-                                <p className="font-semibold">
-                                  <SarAmount value={order.totalAmount} />
+                              <div className="min-w-[200px]">
+                                <p className="font-semibold">{item.customer_name}</p>
+                                <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
+                                  {item.customer_phone || "-"}
                                 </p>
-                                {order.remainingAmount > 0 ? (
-                                  <p className="text-xs text-muted-foreground">
-                                    <SarAmount value={order.remainingAmount} />
+                              </div>
+                            </TableCell>
+
+                            <TableCell>
+                              <div className="min-w-[160px]">
+                                <p className="font-medium">{item.product_name}</p>
+                                {item.invoice_number ? (
+                                  <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
+                                    {item.invoice_number}
                                   </p>
                                 ) : null}
                               </div>
                             </TableCell>
 
+                            <TableCell>{item.provider_name || "-"}</TableCell>
+                            <TableCell>{orderStatusBadge(item.status, locale)}</TableCell>
+                            <TableCell>{paymentStatusBadge(item.payment_status, locale)}</TableCell>
                             <TableCell>
-                              {paymentStatusBadge(order.paymentStatus, locale)}
+                              <Badge variant="outline" className="rounded-full">
+                                {fulfillmentStatusLabel(item.fulfillment_status, locale)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <MoneyText value={item.total_amount} />
+                            </TableCell>
+                            <TableCell>
+                              {formatDate(item.created_at, locale)}
                             </TableCell>
 
-                            <TableCell>
-                              {orderStatusBadge(order.status, locale)}
-                            </TableCell>
-
-                            <TableCell>{formatDate(order.createdAt)}</TableCell>
-
-                            {canViewOrderDetails ? (
+                            {canViewDetails ? (
                               <TableCell>
-                                {isValidOrderId(order.id) ? (
-                                  <Link href={`/system/orders/${order.id}`}>
+                                {isValidId(item.id) ? (
+                                  <Link href={`/system/orders/${item.id}`}>
                                     <Button
                                       variant="outline"
                                       size="sm"
                                       className="h-8 rounded-lg"
                                     >
                                       <Eye className="h-4 w-4" />
+                                      <span className="sr-only">{t.view}</span>
                                     </Button>
                                   </Link>
-                                ) : null}
+                                ) : (
+                                  <span className="text-sm text-muted-foreground">
+                                    -
+                                  </span>
+                                )}
                               </TableCell>
                             ) : null}
                           </TableRow>
                         ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={canViewDetails ? 10 : 9}
+                            className="h-32 text-center"
+                          >
+                            <p className="text-sm text-muted-foreground">
+                              {hasSearch ? t.noResultsText : t.emptyText}
+                            </p>
+                          </TableCell>
+                        </TableRow>
                       )}
                     </TableBody>
                   </Table>
                 </div>
               </div>
-
-              <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                <p>
-                  {t.showing} {formatNumber(latestOrders.length)} {t.from}{" "}
-                  {formatNumber(filteredOrders.length)} · {t.latestRecords}
-                </p>
-
-                {canViewOrders ? (
-                  <Link href="/system/orders/list">
-                    <Button variant="outline" size="sm" className="rounded-xl">
-                      <ListChecks className="h-4 w-4" />
-                      {t.viewFullList}
-                    </Button>
-                  </Link>
-                ) : null}
-              </div>
             </CardContent>
           </Card>
-
-          {/* Action Cards */}
-          {moduleActions.length > 0 ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base font-bold">
-                  {t.quickAccessTitle}
-                </CardTitle>
-                <CardDescription className="leading-6">
-                  {t.quickAccessSubtitle}
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-2">
-                  {moduleActions.map((item) => {
-                    const Icon = item.icon;
-
-                    return (
-                      <Link key={item.href} href={item.href} className="block">
-                        <Card className="h-full rounded-2xl border bg-background shadow-none transition hover:bg-muted/40 hover:shadow-sm">
-                          <CardContent className="flex h-full items-start justify-between gap-4 p-4">
-                            <div className="min-w-0 space-y-3">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-                                  <Icon className="h-5 w-5" />
-                                </div>
-
-                                <Badge
-                                  variant="secondary"
-                                  className="rounded-full"
-                                >
-                                  {item.badge}
-                                </Badge>
-                              </div>
-
-                              <div>
-                                <p className="font-semibold">{item.title}</p>
-                                <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
-                                  {item.description}
-                                </p>
-                              </div>
-
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-xl"
-                              >
-                                {item.cta}
-                              </Button>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
         </>
-      ) : null}
+      )}
     </div>
+  );
+}
+
+/* ============================================================
+   Small Components
+============================================================ */
+
+async function loadFirstAvailable(endpoints: string[]) {
+  let lastError = "";
+
+  for (const endpoint of endpoints) {
+    const response = await fetch(apiUrl(endpoint), {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | ApiEnvelope<unknown>
+      | null;
+
+    if (response.ok && payload?.ok !== false && payload?.success !== false) {
+      return payload;
+    }
+
+    lastError =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `HTTP ${response.status}`;
+  }
+
+  console.warn("Orders endpoint fallback failed:", lastError);
+  return null;
+}
+
+function KpiCard({
+  title,
+  value,
+  icon,
+}: {
+  title: string;
+  value: ReactNode;
+  icon: ReactNode;
+}) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-2xl font-bold">{value}</div>
+            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
+          </div>
+
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            {icon}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MiniStat({ title, value }: { title: string; value: number }) {
+  return (
+    <Card className="rounded-2xl border bg-card shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="text-muted-foreground">{title}</span>
+          <span className="text-lg font-bold">{formatNumber(value)}</span>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -2,44 +2,34 @@
 
 /* ============================================================
    📂 app/system/products/page.tsx
-   🧠 Primey Care | Products Dashboard Page
+   🧠 Primey Care | Products Overview
    ------------------------------------------------------------
-   ✅ المسار: /system/products
-   ✅ الإصدار: v2.0.0 - Centers Pattern + Safe Permissions
-
-   ✅ العمل:
-      لوحة مختصرة لإدارة المنتجات والبطاقات والبرامج والخدمات.
-
-   ✅ المعيار:
-      - مبني بصريًا على نمط المراكز والعملاء المعتمد.
-      - دمج UX Refinement مع حماية المرحلة 2.
-      - لا يتم إظهار مسارات تقنية أو API داخل الواجهة.
-      - لا توجد روابط تقارير داخل الوحدة.
-      - لا توجد أزرار وهمية.
-      - إخفاء الأزرار غير المصرح بها بدل تعطيلها.
-      - عدم كسر تحميل البيانات للمستخدم system_admin / superadmin.
-      - منع طلب البيانات فقط عند وجود منع صريح لصلاحية العرض.
-      - Error State مستقل عن Empty State.
-      - Skeleton Loading.
-      - Empty State ذكي.
-      - Excel بصيغة .xls HTML Workbook.
-      - Web PDF Print.
-      - استخدام /currency/sar.svg.
-      - الأرقام بالإنجليزية.
-      - بدون localhost hardcoded.
+   ✅ لوحة المنتجات والبرامج والعروض الطبية
+   ✅ KPIs خفيفة من Server Pagination
+   ✅ دعم مقدم الخدمة + الصور + الهبوط + التطبيق + العروض
+   ✅ Excel .xls HTML Workbook
+   ✅ Web PDF Print
+   ✅ Centers/Customers Pattern + Phase 2 Permissions
 ============================================================ */
 
 import Image from "next/image";
 import Link from "next/link";
+import type { ComponentType } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
+  ArrowUpRight,
   BadgeCheck,
   Boxes,
+  CheckCircle2,
+  CircleDollarSign,
   CreditCard,
-  Download,
   Eye,
+  FileImage,
+  FileSpreadsheet,
+  Globe2,
+  ImageIcon,
   Layers3,
-  ListChecks,
   Loader2,
   Package,
   Plus,
@@ -47,10 +37,10 @@ import {
   RefreshCcw,
   Search,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   Stethoscope,
   Tag,
-  type LucideIcon,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -80,114 +70,90 @@ import {
 ============================================================ */
 
 type AppLocale = "ar" | "en";
-
 type AuthRecord = Record<string, unknown>;
 
-type ProductStatus =
-  | "draft"
-  | "active"
-  | "inactive"
-  | "archived"
-  | "UNKNOWN";
+type ProductStatus = "draft" | "active" | "inactive" | "archived" | "UNKNOWN";
+type ProductType = "membership" | "card" | "program" | "service" | "other" | "UNKNOWN";
 
-type ProductType =
-  | "membership"
-  | "card"
-  | "program"
-  | "service"
-  | "other"
-  | "UNKNOWN";
-
-type BillingType = "one_time" | "recurring" | "UNKNOWN";
-
-type FulfillmentType =
-  | "digital"
-  | "physical"
-  | "both"
-  | "service_based"
-  | "none"
-  | "UNKNOWN";
-
-type StatusFilter = "all" | ProductStatus;
-type ProductTypeFilter = "all" | ProductType;
-
-type ProductCategory = {
-  id?: number | string | null;
+type ProviderSummary = {
+  id?: string | number | null;
   code?: string | null;
   name?: string | null;
-  category_type?: string | null;
-  status?: string | null;
+  name_ar?: string | null;
+  name_en?: string | null;
+  city?: string | null;
+  region?: string | null;
+  logo_url?: string | null;
 };
 
-type Product = {
-  id: number | string;
+type ProductRow = {
+  id: string | number;
   code: string;
   name: string;
-  slug: string;
   productType: ProductType;
   categoryName: string;
+  provider: ProviderSummary | null;
   status: ProductStatus;
-  billingType: BillingType;
-  fulfillmentType: FulfillmentType;
   shortDescription: string;
-  description: string;
-  tags: string;
   price: number;
   salePrice: number;
   effectivePrice: number;
-  taxAmount: number;
-  totalPriceWithTax: number;
-  hasDiscount: boolean;
-  isTaxable: boolean;
-  taxRate: number;
-  durationValue: number;
-  durationUnit: string;
+  isOffer: boolean;
+  offerTitle: string;
+  offerStartDate: string;
+  offerEndDate: string;
+  showOnLanding: boolean;
+  showOnMobile: boolean;
+  showOnOffers: boolean;
   isPublic: boolean;
   isFeatured: boolean;
-  requiresApproval: boolean;
-  allowOnlinePurchase: boolean;
-  allowAgentSale: boolean;
-  allowProviderSale: boolean;
   canBeOrdered: boolean;
   canBeUsedInContracts: boolean;
-  requiresProvider: boolean;
-  maxDiscountRate: number;
-  defaultAgentCommissionRate: number;
-  serviceItemsCount: number;
+  thumbnailImageUrl: string;
+  marketingImageUrl: string;
+  hasMarketingImage: boolean;
   createdAt: string;
   updatedAt: string;
-  raw: Record<string, unknown>;
+};
+
+type Pagination = {
+  page: number;
+  page_size: number;
+  total_pages: number;
+  total_items: number;
+  has_next: boolean;
+  has_previous: boolean;
 };
 
 type ProductsApiResponse = {
   ok?: boolean;
   message?: string;
-  count?: number;
   results?: unknown[];
-  products?: unknown[];
+  data?: unknown[] | { results?: unknown[]; items?: unknown[] };
   items?: unknown[];
-  data?:
-    | unknown[]
-    | {
-        results?: unknown[];
-        products?: unknown[];
-        items?: unknown[];
-      };
-  stats?: Record<string, unknown>;
+  pagination?: Partial<Pagination>;
 };
 
-type ExcelSheetOptions = {
-  filename: string;
-  worksheetName: string;
-  title: string;
-  locale: AppLocale;
-  summaryRows: Array<[string, string | number]>;
-  filterRows: Array<[string, string | number]>;
-  headers: string[];
-  rows: Array<Array<string | number>>;
+type SummaryState = {
+  total: number;
+  active: number;
+  offers: number;
+  landing: number;
+  mobile: number;
+  marketingImages: number;
 };
 
 const SAR_ICON_PATH = "/currency/sar.svg";
+const PAGE_SIZE = 12;
+
+const DEFAULT_SUMMARY: SummaryState = {
+  total: 0,
+  active: 0,
+  offers: 0,
+  landing: 0,
+  mobile: 0,
+  marketingImages: 0,
+};
 
 /* ============================================================
    Locale Helpers
@@ -222,7 +188,7 @@ function applyDocumentLocale(locale: AppLocale) {
 }
 
 /* ============================================================
-   API Helper
+   API Helpers
 ============================================================ */
 
 function apiUrl(path: string) {
@@ -236,8 +202,27 @@ function apiUrl(path: string) {
   return `${base.replace(/\/$/, "")}${path}`;
 }
 
+function extractRows(payload: ProductsApiResponse | null): unknown[] {
+  if (!payload) return [];
+
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.data)) return payload.data;
+
+  if (payload.data && typeof payload.data === "object") {
+    if (Array.isArray(payload.data.results)) return payload.data.results;
+    if (Array.isArray(payload.data.items)) return payload.data.items;
+  }
+
+  return [];
+}
+
+function extractTotal(payload: ProductsApiResponse | null) {
+  return Number(payload?.pagination?.total_items || extractRows(payload).length || 0);
+}
+
 /* ============================================================
-   Permission Helpers
+   Permissions
 ============================================================ */
 
 function asRecord(value: unknown): AuthRecord {
@@ -469,98 +454,29 @@ function hasSafePermission(
 function toNumber(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
 
-  const clean = String(value ?? "")
-    .replace(/,/g, "")
-    .replace(/[^\d.-]/g, "");
-
-  const parsed = Number(clean);
+  const parsed = Number(
+    String(value ?? "")
+      .replace(/,/g, "")
+      .replace(/[^\d.-]/g, ""),
+  );
 
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function normalizeStatus(status: unknown): ProductStatus {
-  const value = String(status || "").toLowerCase();
-
-  if (value === "draft") return "draft";
-  if (value === "active") return "active";
-  if (value === "inactive") return "inactive";
-  if (value === "archived") return "archived";
-
-  if (status === true) return "active";
-  if (status === false) return "inactive";
-
-  return "UNKNOWN";
-}
-
-function normalizeType(type: unknown): ProductType {
-  const value = String(type || "").toLowerCase();
-
-  if (value === "membership") return "membership";
-  if (value === "card") return "card";
-  if (value === "program") return "program";
-  if (value === "service") return "service";
-  if (value === "other") return "other";
-
-  return "UNKNOWN";
-}
-
-function normalizeBillingType(type: unknown): BillingType {
-  const value = String(type || "").toLowerCase();
-
-  if (value === "one_time") return "one_time";
-  if (value === "recurring") return "recurring";
-
-  return "UNKNOWN";
-}
-
-function normalizeFulfillmentType(type: unknown): FulfillmentType {
-  const value = String(type || "").toLowerCase();
-
-  if (value === "digital") return "digital";
-  if (value === "physical") return "physical";
-  if (value === "both") return "both";
-  if (value === "service_based") return "service_based";
-  if (value === "none") return "none";
-
-  return "UNKNOWN";
-}
-
-function extractProducts(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-
-  if (!payload || typeof payload !== "object") return [];
-
-  const response = payload as ProductsApiResponse;
-
-  if (Array.isArray(response.results)) return response.results;
-  if (Array.isArray(response.products)) return response.products;
-  if (Array.isArray(response.items)) return response.items;
-  if (Array.isArray(response.data)) return response.data;
-
-  if (response.data && typeof response.data === "object") {
-    if (Array.isArray(response.data.results)) return response.data.results;
-    if (Array.isArray(response.data.products)) return response.data.products;
-    if (Array.isArray(response.data.items)) return response.data.items;
-  }
-
-  return [];
-}
-
-function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
+function getValue(obj: Record<string, unknown>, key: string): unknown {
   const direct = obj[key];
 
   if (direct !== undefined && direct !== null && direct !== "") {
     return direct;
   }
 
-  const containers = ["product", "pricing", "stats", "summary"];
+  const containers = ["product", "pricing", "summary", "stats"];
 
   for (const container of containers) {
     const nested = obj[container];
 
     if (nested && typeof nested === "object") {
-      const nestedObj = nested as Record<string, unknown>;
-      const value = nestedObj[key];
+      const value = (nested as Record<string, unknown>)[key];
 
       if (value !== undefined && value !== null && value !== "") {
         return value;
@@ -571,89 +487,99 @@ function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
   return undefined;
 }
 
-function normalizeProduct(item: unknown): Product {
+function normalizeStatus(value: unknown): ProductStatus {
+  const status = String(value || "").toLowerCase();
+
+  if (status === "draft") return "draft";
+  if (status === "active") return "active";
+  if (status === "inactive") return "inactive";
+  if (status === "archived") return "archived";
+
+  if (value === true) return "active";
+  if (value === false) return "inactive";
+
+  return "UNKNOWN";
+}
+
+function normalizeType(value: unknown): ProductType {
+  const type = String(value || "").toLowerCase();
+
+  if (type === "membership") return "membership";
+  if (type === "card") return "card";
+  if (type === "program") return "program";
+  if (type === "service") return "service";
+  if (type === "other") return "other";
+
+  return "UNKNOWN";
+}
+
+function normalizeProvider(value: unknown): ProviderSummary | null {
+  if (!value || typeof value !== "object") return null;
+
+  const obj = value as Record<string, unknown>;
+
+  return {
+    id: (obj.id as string | number | null) || null,
+    code: String(obj.code || ""),
+    name: String(obj.name || ""),
+    name_ar: String(obj.name_ar || ""),
+    name_en: String(obj.name_en || ""),
+    city: String(obj.city || ""),
+    region: String(obj.region || ""),
+    logo_url: String(obj.logo_url || ""),
+  };
+}
+
+function normalizeProduct(item: unknown): ProductRow {
   const obj = (item || {}) as Record<string, unknown>;
-  const category = obj.category as ProductCategory | null | undefined;
+  const category = obj.category as Record<string, unknown> | null | undefined;
+  const provider = normalizeProvider(obj.provider);
 
-  const id = getObjectValue(obj, "id") ?? "";
-  const name =
-    getObjectValue(obj, "name") ??
-    getObjectValue(obj, "title") ??
-    getObjectValue(obj, "product_name") ??
-    "-";
+  const id = getValue(obj, "id") ?? "";
+  const price = toNumber(getValue(obj, "price"));
+  const salePrice = toNumber(getValue(obj, "sale_price"));
+  const effectivePrice = toNumber(getValue(obj, "effective_price") || salePrice || price);
 
-  const code =
-    getObjectValue(obj, "code") ??
-    getObjectValue(obj, "product_code") ??
-    (id ? `PRD-${id}` : "-");
-
-  const price = toNumber(
-    getObjectValue(obj, "price") ??
-      getObjectValue(obj, "base_price") ??
-      getObjectValue(obj, "amount") ??
-      0,
+  const thumbnailImageUrl = String(
+    getValue(obj, "thumbnail_image_url") ||
+      getValue(obj, "thumbnail_image_drive_view_url") ||
+      "",
   );
 
-  const salePrice = toNumber(getObjectValue(obj, "sale_price"));
-  const effectivePrice = toNumber(
-    getObjectValue(obj, "effective_price") || salePrice || price,
+  const marketingImageUrl = String(
+    getValue(obj, "marketing_image_url") ||
+      getValue(obj, "marketing_image_drive_view_url") ||
+      "",
   );
 
   return {
-    id: id as number | string,
-    code: String(code || "-"),
-    name: String(name || "-"),
-    slug: String(getObjectValue(obj, "slug") ?? ""),
-    productType: normalizeType(
-      getObjectValue(obj, "product_type") ?? getObjectValue(obj, "type"),
-    ),
-    categoryName: String(
-      category?.name ||
-        getObjectValue(obj, "category_name") ||
-        getObjectValue(obj, "category") ||
-        "",
-    ),
-    status: normalizeStatus(getObjectValue(obj, "status")),
-    billingType: normalizeBillingType(getObjectValue(obj, "billing_type")),
-    fulfillmentType: normalizeFulfillmentType(
-      getObjectValue(obj, "fulfillment_type"),
-    ),
-    shortDescription: String(getObjectValue(obj, "short_description") ?? ""),
-    description: String(getObjectValue(obj, "description") ?? ""),
-    tags: String(getObjectValue(obj, "tags") ?? ""),
+    id: id as string | number,
+    code: String(getValue(obj, "code") || "-"),
+    name: String(getValue(obj, "name") || getValue(obj, "title") || "-"),
+    productType: normalizeType(getValue(obj, "product_type")),
+    categoryName: String(category?.name || getValue(obj, "category_name") || ""),
+    provider,
+    status: normalizeStatus(getValue(obj, "status")),
+    shortDescription: String(getValue(obj, "short_description") || ""),
     price,
     salePrice,
     effectivePrice,
-    taxAmount: toNumber(getObjectValue(obj, "tax_amount")),
-    totalPriceWithTax: toNumber(
-      getObjectValue(obj, "total_price_with_tax") || effectivePrice,
-    ),
-    hasDiscount: Boolean(getObjectValue(obj, "has_discount") ?? salePrice > 0),
-    isTaxable: Boolean(getObjectValue(obj, "is_taxable")),
-    taxRate: toNumber(getObjectValue(obj, "tax_rate")),
-    durationValue: toNumber(getObjectValue(obj, "duration_value")),
-    durationUnit: String(getObjectValue(obj, "duration_unit") ?? ""),
-    isPublic: Boolean(getObjectValue(obj, "is_public")),
-    isFeatured: Boolean(getObjectValue(obj, "is_featured")),
-    requiresApproval: Boolean(getObjectValue(obj, "requires_approval")),
-    allowOnlinePurchase: Boolean(getObjectValue(obj, "allow_online_purchase")),
-    allowAgentSale: Boolean(getObjectValue(obj, "allow_agent_sale")),
-    allowProviderSale: Boolean(getObjectValue(obj, "allow_provider_sale")),
-    canBeOrdered: Boolean(getObjectValue(obj, "can_be_ordered")),
-    canBeUsedInContracts: Boolean(
-      getObjectValue(obj, "can_be_used_in_contracts"),
-    ),
-    requiresProvider: Boolean(getObjectValue(obj, "requires_provider")),
-    maxDiscountRate: toNumber(getObjectValue(obj, "max_discount_rate")),
-    defaultAgentCommissionRate: toNumber(
-      getObjectValue(obj, "default_agent_commission_rate"),
-    ),
-    serviceItemsCount: Array.isArray(obj.service_items)
-      ? obj.service_items.length
-      : toNumber(getObjectValue(obj, "service_items_count")),
-    createdAt: String(getObjectValue(obj, "created_at") ?? ""),
-    updatedAt: String(getObjectValue(obj, "updated_at") ?? ""),
-    raw: obj,
+    isOffer: Boolean(getValue(obj, "is_offer")),
+    offerTitle: String(getValue(obj, "offer_title") || ""),
+    offerStartDate: String(getValue(obj, "offer_start_date") || ""),
+    offerEndDate: String(getValue(obj, "offer_end_date") || ""),
+    showOnLanding: Boolean(getValue(obj, "show_on_landing")),
+    showOnMobile: Boolean(getValue(obj, "show_on_mobile")),
+    showOnOffers: Boolean(getValue(obj, "show_on_offers")),
+    isPublic: Boolean(getValue(obj, "is_public")),
+    isFeatured: Boolean(getValue(obj, "is_featured")),
+    canBeOrdered: Boolean(getValue(obj, "can_be_ordered")),
+    canBeUsedInContracts: Boolean(getValue(obj, "can_be_used_in_contracts")),
+    thumbnailImageUrl,
+    marketingImageUrl,
+    hasMarketingImage: Boolean(getValue(obj, "has_marketing_image") || marketingImageUrl),
+    createdAt: String(getValue(obj, "created_at") || ""),
+    updatedAt: String(getValue(obj, "updated_at") || getValue(obj, "created_at") || ""),
   };
 }
 
@@ -665,145 +591,113 @@ function dictionary(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
-    pageTitle: isArabic ? "إدارة المنتجات" : "Products Management",
-    pageSubtitle: isArabic
-      ? "متابعة المنتجات والبطاقات والبرامج والخدمات، الأسعار، جاهزية الطلبات، وربط العقود."
-      : "Monitor products, cards, programs, services, pricing, order readiness, and contracts linkage.",
+    title: isArabic ? "المنتجات والبرامج" : "Products & Programs",
+    subtitle: isArabic
+      ? "لوحة متابعة المنتجات والبرامج والعروض الطبية والصور التسويقية."
+      : "Overview for products, programs, medical offers, and marketing images.",
 
-    createProduct: isArabic ? "إنشاء منتج" : "Create Product",
-    productsList: isArabic ? "قائمة المنتجات" : "Products List",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
     refresh: isArabic ? "تحديث" : "Refresh",
     retry: isArabic ? "إعادة المحاولة" : "Retry",
+    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
+    productsList: isArabic ? "قائمة المنتجات" : "Products List",
+    createProduct: isArabic ? "إنشاء منتج" : "Create Product",
+    view: isArabic ? "عرض" : "View",
 
-    featuredProducts: isArabic ? "المنتجات المميزة" : "Featured Products",
-    featuredSubtitle: isArabic
-      ? "عرض مختصر لأهم المنتجات حسب التمييز أو السعر أو الجاهزية."
-      : "A compact view of key products based on featured status, price, or readiness.",
-
-    trackStatus: isArabic
-      ? "حالة المنتجات والجاهزية"
-      : "Products & Readiness Status",
-    trackSubtitle: isArabic
-      ? "تحليل سريع لحالة المنتجات والبيع والربط مع العقود."
-      : "Quick analysis of products status, sales channels, and contracts readiness.",
-
-    filterPlaceholder: isArabic
-      ? "ابحث في المنتجات..."
-      : "Filter products...",
-
-    all: isArabic ? "الكل" : "All",
-    total: isArabic ? "الإجمالي" : "Total",
-    active: isArabic ? "نشط" : "Active",
-    draft: isArabic ? "مسودة" : "Draft",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    archived: isArabic ? "مؤرشف" : "Archived",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    membership: isArabic ? "عضوية" : "Membership",
-    card: isArabic ? "بطاقة" : "Card",
-    program: isArabic ? "برنامج" : "Program",
-    service: isArabic ? "خدمة" : "Service",
-    other: isArabic ? "أخرى" : "Other",
-
-    loaded: isArabic ? "محمّلة" : "Loaded",
-    operational: isArabic ? "تشغيلي" : "Operational",
-    orderReady: isArabic ? "جاهز للطلبات" : "Order Ready",
-    contractReady: isArabic ? "جاهز للعقود" : "Contract Ready",
-
-    productsValue: isArabic ? "قيمة المنتجات" : "Products Value",
+    totalProducts: isArabic ? "إجمالي المنتجات" : "Total Products",
     activeProducts: isArabic ? "المنتجات النشطة" : "Active Products",
-    orderReadyProducts: isArabic ? "جاهزة للطلبات" : "Order Ready",
-    contractReadyProducts: isArabic ? "جاهزة للعقود" : "Contract Ready",
-    onlineProducts: isArabic ? "شراء إلكتروني" : "Online Purchase",
-    agentSaleProducts: isArabic ? "بيع المندوب" : "Agent Sale",
-    providerSaleProducts: isArabic ? "بيع مقدم الخدمة" : "Provider Sale",
+    offersProducts: isArabic ? "العروض الطبية" : "Medical Offers",
+    landingProducts: isArabic ? "تظهر في الهبوط" : "Landing Visible",
+    mobileProducts: isArabic ? "تظهر في التطبيق" : "Mobile Visible",
+    marketingImages: isArabic ? "لديها صورة تسويقية" : "Marketing Images",
 
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    latestRecords: isArabic ? "آخر السجلات" : "Latest records",
-    viewFullList: isArabic ? "عرض القائمة الكاملة" : "View Full List",
+    shortcutsTitle: isArabic ? "اختصارات المنتجات" : "Product Shortcuts",
+    shortcutsDesc: isArabic
+      ? "انتقل لقائمة المنتجات أو أضف منتجًا أو عرضًا طبيًا جديدًا."
+      : "Open the products list or add a new product or medical offer.",
+
+    latestTitle: isArabic ? "أحدث المنتجات والعروض" : "Latest Products & Offers",
+    latestDesc: isArabic
+      ? "آخر المنتجات والبرامج والعروض مع مقدم الخدمة والصورة التسويقية."
+      : "Latest products, programs, and offers with provider and marketing image.",
+
+    searchPlaceholder: isArabic
+      ? "ابحث باسم المنتج أو الكود أو مقدم الخدمة..."
+      : "Search by product, code, or provider...",
+
+    accessDeniedTitle: isArabic ? "غير مصرح بعرض المنتجات" : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية عرض المنتجات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to view products. Contact your system administrator if you need access.",
+
+    loadError: isArabic ? "تعذر تحميل بيانات المنتجات." : "Unable to load products.",
+    loadErrorHint: isArabic
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
+    loadSuccess: isArabic ? "تم تحديث بيانات المنتجات." : "Products refreshed.",
+
+    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
+    exportEmpty: isArabic ? "لا توجد بيانات قابلة للتصدير." : "No data available to export.",
+    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
+    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
+
+    emptyTitle: isArabic ? "لا توجد منتجات بعد" : "No products yet",
+    emptyText: isArabic
+      ? "ابدأ بإنشاء منتج أو برنامج أو عرض طبي جديد."
+      : "Start by creating a product, program, or medical offer.",
+    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
+    noResultsText: isArabic
+      ? "غيّر كلمات البحث لعرض نتائج أخرى."
+      : "Change your search terms to see other results.",
+
+    noProvider: isArabic ? "بدون مقدم خدمة" : "No Provider",
+    yes: isArabic ? "نعم" : "Yes",
+    no: isArabic ? "لا" : "No",
 
     table: {
-      code: isArabic ? "الكود" : "Code",
+      image: isArabic ? "الصورة" : "Image",
       product: isArabic ? "المنتج" : "Product",
+      code: isArabic ? "الكود" : "Code",
+      provider: isArabic ? "مقدم الخدمة" : "Provider",
       type: isArabic ? "النوع" : "Type",
       category: isArabic ? "التصنيف" : "Category",
       price: isArabic ? "السعر" : "Price",
-      readiness: isArabic ? "الجاهزية" : "Readiness",
+      offer: isArabic ? "العرض" : "Offer",
+      visibility: isArabic ? "الظهور" : "Visibility",
       status: isArabic ? "الحالة" : "Status",
       action: isArabic ? "الإجراء" : "Action",
     },
 
-    emptyTitle: isArabic ? "لا توجد منتجات بعد" : "No products yet",
-    emptyText: isArabic
-      ? "عند إضافة منتجات أو برامج جديدة ستظهر بياناتها هنا مباشرة."
-      : "New products or programs will appear here once they are added.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو فلتر الحالة أو النوع لعرض نتائج أكثر."
-      : "Try changing search keywords, status filter, or type filter to show more results.",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض بيانات المنتجات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view products data. Contact your system administrator if you need access.",
-
-    apiError: isArabic
-      ? "تعذر تحميل بيانات المنتجات."
-      : "Unable to load products data.",
-    apiErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    refreshSuccess: isArabic
-      ? "تم تحديث بيانات المنتجات بنجاح"
-      : "Products data refreshed successfully",
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح"
-      : "Excel file prepared successfully",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير"
-      : "No data available to export",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة"
-      : "Print window prepared",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة"
-      : "Unable to open print window",
-
-    quickAccessTitle: isArabic
-      ? "إجراءات وحدة المنتجات"
-      : "Products Module Actions",
-    quickAccessSubtitle: isArabic
-      ? "اختصارات منظمة للوصول إلى أهم صفحات وحدة المنتجات."
-      : "Organized shortcuts to the key products module pages.",
-
-    open: isArabic ? "فتح" : "Open",
-    manage: isArabic ? "إدارة" : "Manage",
-
-    actionListTitle: isArabic ? "قائمة المنتجات" : "Products List",
-    actionListDesc: isArabic
-      ? "استعراض جميع المنتجات، البحث، التصفية، وإدارة السجلات."
-      : "Browse all products, search, filter, and manage records.",
-
-    actionCreateTitle: isArabic ? "إنشاء منتج" : "Create Product",
-    actionCreateDesc: isArabic
-      ? "إضافة منتج أو بطاقة أو برنامج أو خدمة جديدة."
-      : "Add a new product, card, program, or service.",
-
-    export: {
-      generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-      scope: isArabic ? "نطاق التقرير" : "Report Scope",
-      currentData: isArabic ? "البيانات الظاهرة" : "Visible Data",
-      search: isArabic ? "البحث" : "Search",
-      status: isArabic ? "فلتر الحالة" : "Status Filter",
-      type: isArabic ? "فلتر النوع" : "Type Filter",
+    status: {
+      active: isArabic ? "نشط" : "Active",
+      draft: isArabic ? "مسودة" : "Draft",
+      inactive: isArabic ? "غير نشط" : "Inactive",
+      archived: isArabic ? "مؤرشف" : "Archived",
+      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
     },
 
-    printTitle: isArabic ? "لوحة المنتجات" : "Products Dashboard",
+    type: {
+      membership: isArabic ? "عضوية" : "Membership",
+      card: isArabic ? "بطاقة" : "Card",
+      program: isArabic ? "برنامج" : "Program",
+      service: isArabic ? "خدمة" : "Service",
+      other: isArabic ? "أخرى" : "Other",
+      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
+    },
+
+    flags: {
+      public: isArabic ? "عام" : "Public",
+      featured: isArabic ? "مميز" : "Featured",
+      order: isArabic ? "طلب" : "Order",
+      contract: isArabic ? "عقود" : "Contracts",
+      landing: isArabic ? "هبوط" : "Landing",
+      mobile: isArabic ? "تطبيق" : "Mobile",
+      offers: isArabic ? "عروض" : "Offers",
+      image: isArabic ? "صورة" : "Image",
+    },
+
+    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
     printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
   };
 }
 
@@ -811,25 +705,39 @@ function dictionary(locale: AppLocale) {
    UI Helpers
 ============================================================ */
 
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
+function formatNumber(value: unknown): string {
+  const number = Number(value);
 
-  if (!Number.isFinite(numericValue)) return "0";
+  if (!Number.isFinite(number)) return "0";
 
-  return new Intl.NumberFormat("en-US", {
+  return number.toLocaleString("en-US", {
     maximumFractionDigits: 0,
-  }).format(numericValue);
+  });
 }
 
-function formatMoney(value: number | string): string {
-  const numericValue = Number(value);
+function formatMoney(value: unknown): string {
+  const number = Number(value);
 
-  if (!Number.isFinite(numericValue)) return "0.00";
+  if (!Number.isFinite(number)) return "0.00";
 
-  return numericValue.toLocaleString("en-US", {
+  return number.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function formatDate(value: string): string {
+  if (!value) return "-";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  }).format(date);
 }
 
 function escapeHtml(value: string | number) {
@@ -841,95 +749,53 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function percent(value: number, total: number) {
-  if (!total) return 0;
-  return Math.min(100, Math.max(0, Math.round((value / total) * 100)));
-}
-
-function isValidProductId(id: Product["id"]) {
-  const value = String(id || "").trim();
-
-  return value.length > 0 && value !== "-" && value !== "undefined";
-}
-
-function statusLabel(status: ProductStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<ProductStatus, string> = {
-    active: t.active,
-    draft: t.draft,
-    inactive: t.inactive,
-    archived: t.archived,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function typeLabel(type: ProductType, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<ProductType, string> = {
-    membership: t.membership,
-    card: t.card,
-    program: t.program,
-    service: t.service,
-    other: t.other,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[type];
-}
-
-function statusBadge(status: ProductStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "active") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "draft") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "archived") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "inactive") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
-  );
-}
-
-function productIcon(type: ProductType): LucideIcon {
+function productTypeIcon(type: ProductType): ComponentType<{ className?: string }> {
   if (type === "card") return CreditCard;
   if (type === "membership") return BadgeCheck;
   if (type === "program") return Boxes;
   if (type === "service") return Stethoscope;
 
   return Package;
+}
+
+function statusBadge(status: ProductStatus, t: ReturnType<typeof dictionary>) {
+  if (status === "active") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
+        {t.status.active}
+      </Badge>
+    );
+  }
+
+  if (status === "draft") {
+    return (
+      <Badge className="rounded-full border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50">
+        {t.status.draft}
+      </Badge>
+    );
+  }
+
+  if (status === "archived") {
+    return (
+      <Badge className="rounded-full border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-50">
+        {t.status.archived}
+      </Badge>
+    );
+  }
+
+  if (status === "inactive") {
+    return (
+      <Badge variant="outline" className="rounded-full">
+        {t.status.inactive}
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="secondary" className="rounded-full">
+      {t.status.UNKNOWN}
+    </Badge>
+  );
 }
 
 function SarAmount({ value }: { value: number | string }) {
@@ -947,106 +813,64 @@ function SarAmount({ value }: { value: number | string }) {
   );
 }
 
-/* ============================================================
-   Skeleton
-============================================================ */
+function providerLabel(provider: ProviderSummary | null, locale: AppLocale) {
+  if (!provider) return "";
+
+  const primary =
+    locale === "ar"
+      ? provider.name_ar || provider.name || provider.name_en
+      : provider.name_en || provider.name || provider.name_ar;
+
+  const code = provider.code ? ` - ${provider.code}` : "";
+
+  return `${primary || provider.id || ""}${code}`;
+}
+
+function flagBadge(active: boolean, label: string) {
+  return (
+    <Badge variant={active ? "secondary" : "outline"} className="rounded-full">
+      {active ? (
+        <CheckCircle2 className="h-3.5 w-3.5" />
+      ) : (
+        <XCircle className="h-3.5 w-3.5" />
+      )}
+      {label}
+    </Badge>
+  );
+}
 
 function SkeletonLine({ className = "" }: { className?: string }) {
   return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
 }
 
-function SummaryCardsSkeleton() {
+function PageSkeleton() {
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      {Array.from({ length: 3 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="flex items-start justify-between gap-4 p-5">
-            <div className="space-y-3">
-              <SkeletonLine className="h-11 w-11 rounded-2xl" />
-              <div className="space-y-2">
-                <SkeletonLine className="h-4 w-28" />
-                <SkeletonLine className="h-7 w-32" />
-              </div>
-            </div>
+    <div className="w-full space-y-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <Card key={index}>
+            <CardContent className="p-4">
+              <SkeletonLine className="h-7 w-16" />
+              <SkeletonLine className="mt-3 h-4 w-28" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
-            <div className="space-y-2 rounded-2xl border bg-background px-3 py-2">
-              <SkeletonLine className="h-3 w-20" />
-              <SkeletonLine className="h-4 w-16" />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
-}
+      <Card>
+        <CardContent className="p-5">
+          <SkeletonLine className="h-10 w-full rounded-xl" />
+        </CardContent>
+      </Card>
 
-function FeaturedProductsSkeleton() {
-  return (
-    <div className="space-y-3">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <div
-          key={index}
-          className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3"
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            <SkeletonLine className="h-11 w-11 shrink-0 rounded-xl" />
-            <div className="space-y-2">
-              <SkeletonLine className="h-3 w-28" />
-              <SkeletonLine className="h-3 w-20" />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <SkeletonLine className="h-3 w-16" />
-            <SkeletonLine className="h-3 w-12" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function StatusCardsSkeleton() {
-  return (
-    <div className="grid gap-3 md:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <div
-          key={index}
-          className="space-y-3 rounded-xl border bg-background/70 p-3"
-        >
-          <div className="flex items-center gap-2">
-            <SkeletonLine className="h-4 w-4" />
-            <SkeletonLine className="h-7 w-14" />
-          </div>
-          <div className="space-y-2">
-            <SkeletonLine className="h-3 w-20" />
-            <SkeletonLine className="h-2 w-full" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
-  return (
-    <>
-      {Array.from({ length: 6 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 1
-                    ? "h-9 w-52 rounded-lg"
-                    : "h-4 w-24 rounded-lg"
-                }
-              />
-            </TableCell>
+      <Card>
+        <CardContent className="space-y-3 p-5">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
           ))}
-        </TableRow>
-      ))}
-    </>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -1054,40 +878,39 @@ function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
    Export / Print
 ============================================================ */
 
-function downloadExcel(options: ExcelSheetOptions) {
-  const dir = options.locale === "ar" ? "rtl" : "ltr";
-  const align = options.locale === "ar" ? "right" : "left";
-  const colspan = Math.max(options.headers.length, 2);
+function downloadExcel({
+  filename,
+  title,
+  locale,
+  summary,
+  rows,
+}: {
+  filename: string;
+  title: string;
+  locale: AppLocale;
+  summary: SummaryState;
+  rows: ProductRow[];
+}) {
+  const isArabic = locale === "ar";
+  const dir = isArabic ? "rtl" : "ltr";
+  const align = isArabic ? "right" : "left";
+  const t = dictionary(locale);
 
-  const summaryHtml = options.summaryRows
+  const rowsHtml = rows
     .map(
-      ([label, value]) => `
+      (item) => `
         <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const filterHtml = options.filterRows
-    .map(
-      ([label, value]) => `
-        <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const headerHtml = options.headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
-    .join("");
-
-  const rowsHtml = options.rows
-    .map(
-      (row) => `
-        <tr>
-          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
+          <td>${escapeHtml(item.code)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(providerLabel(item.provider, locale) || t.noProvider)}</td>
+          <td>${escapeHtml(t.type[item.productType])}</td>
+          <td>${escapeHtml(item.categoryName || "-")}</td>
+          <td>${escapeHtml(formatMoney(item.effectivePrice))}</td>
+          <td>${escapeHtml(item.isOffer ? t.yes : t.no)}</td>
+          <td>${escapeHtml(item.showOnLanding ? t.yes : t.no)}</td>
+          <td>${escapeHtml(item.showOnMobile ? t.yes : t.no)}</td>
+          <td>${escapeHtml(item.showOnOffers ? t.yes : t.no)}</td>
+          <td>${escapeHtml(t.status[item.status])}</td>
         </tr>`,
     )
     .join("");
@@ -1098,87 +921,53 @@ function downloadExcel(options: ExcelSheetOptions) {
           xmlns="http://www.w3.org/TR/REC-html40">
       <head>
         <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(options.worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${options.locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
         <style>
-          body {
-            direction: ${dir};
-            font-family: Arial, sans-serif;
-          }
-          table {
-            border-collapse: collapse;
-            width: 100%;
-          }
-          th,
-          td {
+          body { direction: ${dir}; font-family: Arial, Tahoma, sans-serif; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td {
             border: 1px solid #d9e2ef;
             padding: 8px;
             text-align: ${align};
             vertical-align: top;
             mso-number-format: "\\@";
           }
-          th {
-            background: #d8ecfb;
-            color: #000000;
-            font-weight: 700;
-          }
-          .title {
-            font-size: 20px;
-            font-weight: 700;
-            text-align: center;
-            background: #ffffff;
-          }
-          .section {
-            font-weight: 700;
-            background: #eef6ff;
-          }
-          .summary-label {
-            font-weight: 700;
-            background: #f8fafc;
-            width: 240px;
-          }
-          .summary-value {
-            font-weight: 700;
-          }
+          th { background: #d8ecfb; font-weight: 700; }
+          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
+          .section { font-weight: 700; background: #eef6ff; }
+          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
         </style>
       </head>
       <body dir="${dir}">
         <table>
+          <tr><td class="title" colspan="11">${escapeHtml(title)}</td></tr>
+          <tr><td colspan="11"></td></tr>
+          <tr><td class="section" colspan="11">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalProducts)}</td><td colspan="10">${escapeHtml(formatNumber(summary.total))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.activeProducts)}</td><td colspan="10">${escapeHtml(formatNumber(summary.active))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.offersProducts)}</td><td colspan="10">${escapeHtml(formatNumber(summary.offers))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.landingProducts)}</td><td colspan="10">${escapeHtml(formatNumber(summary.landing))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.mobileProducts)}</td><td colspan="10">${escapeHtml(formatNumber(summary.mobile))}</td></tr>
+
+          <tr><td colspan="11"></td></tr>
           <tr>
-            <td class="title" colspan="${colspan}">
-              ${escapeHtml(options.title)}
-            </td>
+            <th>${escapeHtml(t.table.code)}</th>
+            <th>${escapeHtml(t.table.product)}</th>
+            <th>${escapeHtml(t.table.provider)}</th>
+            <th>${escapeHtml(t.table.type)}</th>
+            <th>${escapeHtml(t.table.category)}</th>
+            <th>${escapeHtml(t.table.price)}</th>
+            <th>${escapeHtml(t.table.offer)}</th>
+            <th>${escapeHtml(t.flags.landing)}</th>
+            <th>${escapeHtml(t.flags.mobile)}</th>
+            <th>${escapeHtml(t.flags.offers)}</th>
+            <th>${escapeHtml(t.table.status)}</th>
           </tr>
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "ملخص القائمة" : "List Summary"}
-          </td></tr>
-          ${summaryHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "الفلاتر المستخدمة" : "Applied Filters"}
-          </td></tr>
-          ${filterHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr>${headerHtml}</tr>
           ${rowsHtml}
         </table>
       </body>
     </html>`;
 
-  const blob = new Blob([workbook], {
+  const blob = new Blob(["\ufeff", workbook], {
     type: "application/vnd.ms-excel;charset=utf-8;",
   });
 
@@ -1186,7 +975,7 @@ function downloadExcel(options: ExcelSheetOptions) {
   const anchor = document.createElement("a");
 
   anchor.href = url;
-  anchor.download = options.filename;
+  anchor.download = filename;
   anchor.click();
 
   URL.revokeObjectURL(url);
@@ -1195,32 +984,30 @@ function downloadExcel(options: ExcelSheetOptions) {
 function buildPrintHtml({
   locale,
   title,
+  summary,
   rows,
-  t,
 }: {
   locale: AppLocale;
   title: string;
-  rows: Product[];
-  t: ReturnType<typeof dictionary>;
+  summary: SummaryState;
+  rows: ProductRow[];
 }) {
   const isArabic = locale === "ar";
-  const now = new Date().toLocaleString("en-US");
+  const t = dictionary(locale);
 
   const tableRows = rows
+    .slice(0, 40)
     .map(
-      (product, index) => `
+      (item) => `
         <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(product.code || "-")}</td>
-          <td>${escapeHtml(product.name || "-")}</td>
-          <td>${escapeHtml(typeLabel(product.productType, locale))}</td>
-          <td>${escapeHtml(product.categoryName || "-")}</td>
-          <td>${escapeHtml(formatMoney(product.effectivePrice))}</td>
-          <td>${escapeHtml(product.canBeOrdered ? t.orderReady : "-")}</td>
-          <td>${escapeHtml(product.canBeUsedInContracts ? t.contractReady : "-")}</td>
-          <td>${escapeHtml(statusLabel(product.status, locale))}</td>
-        </tr>
-      `,
+          <td>${escapeHtml(item.code)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(providerLabel(item.provider, locale) || t.noProvider)}</td>
+          <td>${escapeHtml(t.type[item.productType])}</td>
+          <td>${escapeHtml(formatMoney(item.effectivePrice))}</td>
+          <td>${escapeHtml(item.isOffer ? t.yes : t.no)}</td>
+          <td>${escapeHtml(t.status[item.status])}</td>
+        </tr>`,
     )
     .join("");
 
@@ -1237,100 +1024,80 @@ function buildPrintHtml({
             padding: 24px;
             font-family: Arial, Tahoma, sans-serif;
             color: #111827;
-            background: #ffffff;
+            background: #fff;
             direction: ${isArabic ? "rtl" : "ltr"};
             text-align: ${isArabic ? "right" : "left"};
           }
-          .print-header {
+          .header {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
             gap: 16px;
-            margin-bottom: 18px;
             border-bottom: 1px solid #e5e7eb;
             padding-bottom: 14px;
+            margin-bottom: 18px;
           }
-          h1 {
-            margin: 0;
-            font-size: 22px;
-            font-weight: 800;
-          }
-          .meta {
-            margin-top: 8px;
-            color: #6b7280;
-            font-size: 12px;
-            line-height: 1.8;
-          }
+          h1 { margin: 0; font-size: 22px; font-weight: 800; }
+          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
           .badge {
-            display: inline-block;
             border: 1px solid #d1d5db;
             border-radius: 999px;
-            padding: 4px 10px;
+            padding: 5px 12px;
             font-size: 12px;
-            color: #374151;
+            height: fit-content;
           }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 18px;
           }
-          th {
-            background: #f3f4f6;
-            color: #111827;
-            font-weight: 700;
-          }
-          th,
-          td {
+          .box {
             border: 1px solid #e5e7eb;
-            padding: 9px 8px;
+            border-radius: 12px;
+            padding: 10px;
+          }
+          .box span { color: #6b7280; display: block; font-size: 11px; }
+          .box strong { display: block; margin-top: 6px; font-size: 16px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+          th { background: #f3f4f6; font-weight: 700; }
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 8px;
             text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
           }
-          tr:nth-child(even) td {
-            background: #fafafa;
-          }
-          @page {
-            size: A4 landscape;
-            margin: 12mm;
-          }
-          @media print {
-            body { padding: 0; }
-          }
+          @page { size: A4 landscape; margin: 12mm; }
+          @media print { body { padding: 0; } }
         </style>
       </head>
-
       <body>
-        <div class="print-header">
+        <div class="header">
           <div>
             <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
+            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
           </div>
           <div class="badge">Primey Care</div>
+        </div>
+
+        <div class="grid">
+          <div class="box"><span>${escapeHtml(t.totalProducts)}</span><strong>${escapeHtml(formatNumber(summary.total))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.activeProducts)}</span><strong>${escapeHtml(formatNumber(summary.active))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.offersProducts)}</span><strong>${escapeHtml(formatNumber(summary.offers))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.marketingImages)}</span><strong>${escapeHtml(formatNumber(summary.marketingImages))}</strong></div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th>#</th>
               <th>${escapeHtml(t.table.code)}</th>
               <th>${escapeHtml(t.table.product)}</th>
+              <th>${escapeHtml(t.table.provider)}</th>
               <th>${escapeHtml(t.table.type)}</th>
-              <th>${escapeHtml(t.table.category)}</th>
               <th>${escapeHtml(t.table.price)}</th>
-              <th>${escapeHtml(t.orderReady)}</th>
-              <th>${escapeHtml(t.contractReady)}</th>
+              <th>${escapeHtml(t.table.offer)}</th>
               <th>${escapeHtml(t.table.status)}</th>
             </tr>
           </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="9" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
+          <tbody>${tableRows || `<tr><td colspan="7">${escapeHtml(t.emptyTitle)}</td></tr>`}</tbody>
         </table>
 
         <script>
@@ -1352,321 +1119,98 @@ export default function SystemProductsPage() {
   const auth = useAuth() as unknown;
 
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [products, setProducts] = useState<Product[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [rows, setRows] = useState<ProductRow[]>([]);
+  const [summary, setSummary] = useState<SummaryState>(DEFAULT_SUMMARY);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [typeFilter, setTypeFilter] = useState<ProductTypeFilter>("all");
+  const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
-
   const authResolving = isAuthResolving(auth);
 
-  const canViewProducts = hasSafePermission(
+  const canView = hasSafePermission(
     auth,
     ["products.view", "products.list"],
     "view",
   );
 
-  const canCreateProducts = hasSafePermission(
-    auth,
-    ["products.create"],
-    "action",
-  );
+  const canCreate = hasSafePermission(auth, ["products.create"], "action");
 
-  const canExportProducts = hasSafePermission(
+  const canExport = hasSafePermission(
     auth,
     ["products.export", "reports.export"],
     "action",
   );
 
-  const canPrintProducts = hasSafePermission(
+  const canPrint = hasSafePermission(
     auth,
     ["products.print", "reports.print"],
     "action",
   );
 
-  const canViewProductDetails = hasSafePermission(
+  const canViewDetails = hasSafePermission(
     auth,
     ["products.view", "products.detail"],
     "view",
   );
 
-  const filteredProducts = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
+  const filteredRows = useMemo(() => {
+    const clean = query.trim().toLowerCase();
 
-    return products.filter((product) => {
-      const matchesStatus =
-        statusFilter === "all" ? true : product.status === statusFilter;
-
-      const matchesType =
-        typeFilter === "all" ? true : product.productType === typeFilter;
-
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            product.name,
-            product.code,
-            product.slug,
-            product.categoryName,
-            product.shortDescription,
-            product.description,
-            product.tags,
-            product.status,
-            product.productType,
-            typeLabel(product.productType, locale),
-            statusLabel(product.status, locale),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
-
-      return matchesStatus && matchesType && matchesQuery;
-    });
-  }, [locale, products, query, statusFilter, typeFilter]);
-
-  const stats = useMemo(() => {
-    const total = products.length;
-    const active = products.filter((item) => item.status === "active").length;
-    const draft = products.filter((item) => item.status === "draft").length;
-    const inactive = products.filter((item) => item.status === "inactive").length;
-    const archived = products.filter((item) => item.status === "archived").length;
-
-    const totalValue = products.reduce(
-      (sum, item) => sum + item.effectivePrice,
-      0,
+    const sorted = [...rows].sort((a, b) =>
+      String(b.createdAt || b.updatedAt).localeCompare(String(a.createdAt || a.updatedAt)),
     );
 
-    const orderReady = products.filter((item) => item.canBeOrdered).length;
-    const contractReady = products.filter(
-      (item) => item.canBeUsedInContracts,
-    ).length;
-    const online = products.filter((item) => item.allowOnlinePurchase).length;
-    const agentSale = products.filter((item) => item.allowAgentSale).length;
-    const providerSale = products.filter((item) => item.allowProviderSale).length;
+    if (!clean) return sorted;
 
-    const byType = {
-      membership: products.filter((item) => item.productType === "membership")
-        .length,
-      card: products.filter((item) => item.productType === "card").length,
-      program: products.filter((item) => item.productType === "program").length,
-      service: products.filter((item) => item.productType === "service").length,
-      other: products.filter((item) => item.productType === "other").length,
-    };
+    return sorted.filter((item) =>
+      [
+        item.code,
+        item.name,
+        item.categoryName,
+        providerLabel(item.provider, locale),
+        item.offerTitle,
+        item.shortDescription,
+        t.type[item.productType],
+        t.status[item.status],
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(clean),
+    );
+  }, [locale, query, rows, t]);
 
-    return {
-      total,
-      active,
-      draft,
-      inactive,
-      archived,
-      totalValue,
-      orderReady,
-      contractReady,
-      online,
-      agentSale,
-      providerSale,
-      byType,
-    };
-  }, [products]);
+  const displayRows = filteredRows.slice(0, PAGE_SIZE);
+  const hasData = rows.length > 0;
+  const hasSearch = query.trim().length > 0;
 
-  const featuredProducts = useMemo(() => {
-    const featured = products.filter((item) => item.isFeatured);
+  const loadCount = useCallback(async (params: string) => {
+    const response = await fetch(
+      apiUrl(`/api/products/?page=1&page_size=1&include_children=false${params}`),
+      {
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
+      },
+    );
 
-    if (featured.length > 0) {
-      return featured.slice(0, 6);
+    const payload = (await response.json().catch(() => null)) as ProductsApiResponse | null;
+
+    if (!response.ok || payload?.ok === false) {
+      return 0;
     }
 
-    return [...products]
-      .sort((a, b) => b.effectivePrice - a.effectivePrice)
-      .slice(0, 6);
-  }, [products]);
-
-  const tableRows = useMemo(
-    () => filteredProducts.slice(0, 8),
-    [filteredProducts],
-  );
-
-  const statusCards = useMemo(
-    () => [
-      {
-        title: t.total,
-        value: stats.total,
-        helper: t.loaded,
-        helperValue: stats.total > 0 ? "100%" : "0%",
-        icon: Package,
-        percent: stats.total > 0 ? 100 : 0,
-        filter: "all" as StatusFilter,
-      },
-      {
-        title: t.active,
-        value: stats.active,
-        helper: t.operational,
-        helperValue: `${percent(stats.active, stats.total)}%`,
-        icon: BadgeCheck,
-        percent: percent(stats.active, stats.total),
-        filter: "active" as StatusFilter,
-      },
-      {
-        title: t.draft,
-        value: stats.draft,
-        helper: t.orderReady,
-        helperValue: `${percent(stats.orderReady, stats.total)}%`,
-        icon: ShieldCheck,
-        percent: percent(stats.orderReady, stats.total),
-        filter: "draft" as StatusFilter,
-      },
-      {
-        title: t.archived,
-        value: stats.archived + stats.inactive,
-        helper: t.contractReady,
-        helperValue: `${percent(stats.contractReady, stats.total)}%`,
-        icon: Layers3,
-        percent: percent(stats.contractReady, stats.total),
-        filter: "archived" as StatusFilter,
-      },
-    ],
-    [stats, t],
-  );
-
-  const statusFilters = useMemo(
-    () =>
-      [
-        {
-          value: "all" as StatusFilter,
-          label: t.all,
-          count: products.length,
-        },
-        {
-          value: "active" as StatusFilter,
-          label: t.active,
-          count: stats.active,
-        },
-        {
-          value: "draft" as StatusFilter,
-          label: t.draft,
-          count: stats.draft,
-        },
-        {
-          value: "inactive" as StatusFilter,
-          label: t.inactive,
-          count: stats.inactive,
-        },
-        {
-          value: "archived" as StatusFilter,
-          label: t.archived,
-          count: stats.archived,
-        },
-      ],
-    [products.length, stats, t],
-  );
-
-  const typeFilters = useMemo(
-    () =>
-      [
-        {
-          value: "all" as ProductTypeFilter,
-          label: t.all,
-          count: products.length,
-        },
-        {
-          value: "membership" as ProductTypeFilter,
-          label: t.membership,
-          count: stats.byType.membership,
-        },
-        {
-          value: "card" as ProductTypeFilter,
-          label: t.card,
-          count: stats.byType.card,
-        },
-        {
-          value: "program" as ProductTypeFilter,
-          label: t.program,
-          count: stats.byType.program,
-        },
-        {
-          value: "service" as ProductTypeFilter,
-          label: t.service,
-          count: stats.byType.service,
-        },
-      ],
-    [products.length, stats.byType, t],
-  );
-
-  const summaryCards = useMemo(
-    () => [
-      {
-        title: t.productsValue,
-        value: stats.totalValue,
-        icon: Sparkles,
-        helper: t.activeProducts,
-        helperValue: formatNumber(stats.active),
-        isMoney: true,
-      },
-      {
-        title: t.orderReadyProducts,
-        value: stats.orderReady,
-        icon: ShieldCheck,
-        helper: t.onlineProducts,
-        helperValue: formatNumber(stats.online),
-        isMoney: false,
-      },
-      {
-        title: t.contractReadyProducts,
-        value: stats.contractReady,
-        icon: Layers3,
-        helper: t.agentSaleProducts,
-        helperValue: formatNumber(stats.agentSale),
-        isMoney: false,
-      },
-    ],
-    [stats, t],
-  );
-
-  const moduleActions = useMemo(
-    () =>
-      [
-        canViewProducts
-          ? {
-              title: t.actionListTitle,
-              description: t.actionListDesc,
-              href: "/system/products/list",
-              icon: ListChecks,
-              badge: `${formatNumber(stats.total)}`,
-              cta: t.manage,
-            }
-          : null,
-        canCreateProducts
-          ? {
-              title: t.actionCreateTitle,
-              description: t.actionCreateDesc,
-              href: "/system/products/create",
-              icon: Plus,
-              badge: isArabic ? "جديد" : "New",
-              cta: t.open,
-            }
-          : null,
-      ].filter(Boolean) as Array<{
-        title: string;
-        description: string;
-        href: string;
-        icon: LucideIcon;
-        badge: string;
-        cta: string;
-      }>,
-    [canCreateProducts, canViewProducts, isArabic, stats.total, t],
-  );
-
-  const hasSearchOrFilter =
-    query.trim().length > 0 || statusFilter !== "all" || typeFilter !== "all";
+    return extractTotal(payload);
+  }, []);
 
   const loadProducts = useCallback(
     async (showToast = false) => {
-      if (!canViewProducts) {
+      if (!canView) {
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
         setIsLoading(false);
-        setProducts([]);
         return;
       }
 
@@ -1674,120 +1218,96 @@ export default function SystemProductsPage() {
         setIsLoading(true);
         setErrorMessage("");
 
-        const response = await fetch(
-          apiUrl("/api/products/?page_size=100&include_children=true"),
-          {
-            method: "GET",
-            credentials: "include",
-            headers: {
-              Accept: "application/json",
+        const [
+          productsResponse,
+          totalCount,
+          activeCount,
+          offersCount,
+          landingCount,
+          mobileCount,
+          marketingCount,
+        ] = await Promise.all([
+          fetch(
+            apiUrl(
+              `/api/products/?page=1&page_size=${PAGE_SIZE}&include_children=false&ordering=-created_at`,
+            ),
+            {
+              credentials: "include",
+              headers: {
+                Accept: "application/json",
+              },
             },
-          },
-        );
+          ),
+          loadCount(""),
+          loadCount("&status=active"),
+          loadCount("&is_offer=true"),
+          loadCount("&show_on_landing=true"),
+          loadCount("&show_on_mobile=true"),
+          loadCount("&has_marketing_image=true"),
+        ]);
 
-        const payload = (await response.json().catch(() => null)) as
-          | ProductsApiResponse
-          | null;
+        const productsPayload =
+          (await productsResponse.json().catch(() => null)) as ProductsApiResponse | null;
 
-        if (!response.ok || payload?.ok === false) {
-          throw new Error(payload?.message || `HTTP ${response.status}`);
+        if (!productsResponse.ok || productsPayload?.ok === false) {
+          throw new Error(productsPayload?.message || `HTTP ${productsResponse.status}`);
         }
 
-        setProducts(extractProducts(payload).map(normalizeProduct));
+        const normalizedRows = extractRows(productsPayload)
+          .map(normalizeProduct)
+          .filter((item) => item.id || item.name);
+
+        setRows(normalizedRows);
+        setSummary({
+          total: totalCount,
+          active: activeCount,
+          offers: offersCount,
+          landing: landingCount,
+          mobile: mobileCount,
+          marketingImages: marketingCount,
+        });
 
         if (showToast) {
-          toast.success(t.refreshSuccess);
+          toast.success(t.loadSuccess);
         }
       } catch (error) {
-        console.error("Failed to load products:", error);
-        setProducts([]);
-        setErrorMessage(t.apiError);
-        toast.error(t.apiError);
+        console.error("Products overview load error:", error);
+        setRows([]);
+        setSummary(DEFAULT_SUMMARY);
+        setErrorMessage(t.loadError);
+        toast.error(t.loadError);
       } finally {
         setIsLoading(false);
       }
     },
-    [canViewProducts, t.apiError, t.refreshSuccess],
+    [canView, loadCount, t.loadError, t.loadSuccess],
   );
 
-  function exportProducts() {
-    if (!canExportProducts) return;
+  function exportExcel() {
+    if (!canExport) return;
 
-    if (filteredProducts.length === 0) {
+    if (!hasData) {
       toast.error(t.exportEmpty);
       return;
     }
 
     const generatedAt = new Date();
 
-    const statusFilterLabel =
-      statusFilters.find((item) => item.value === statusFilter)?.label || t.all;
-
-    const typeFilterLabel =
-      typeFilters.find((item) => item.value === typeFilter)?.label || t.all;
-
     downloadExcel({
-      filename: `primey-care-products-dashboard-${generatedAt
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "لوحة المنتجات" : "Products Dashboard",
-      title: t.pageTitle,
+      filename: `primey-care-products-overview-${generatedAt.toISOString().slice(0, 10)}.xls`,
+      title: t.title,
       locale,
-      summaryRows: [
-        [t.export.generatedAt, generatedAt.toLocaleString("en-US")],
-        [t.export.scope, t.export.currentData],
-        [
-          t.showing,
-          `${formatNumber(filteredProducts.length)} / ${formatNumber(
-            products.length,
-          )}`,
-        ],
-        [t.total, stats.total],
-        [t.active, stats.active],
-        [t.orderReadyProducts, stats.orderReady],
-        [t.contractReadyProducts, stats.contractReady],
-        [t.productsValue, formatMoney(stats.totalValue)],
-      ],
-      filterRows: [
-        [t.export.search, query || t.all],
-        [t.export.status, statusFilterLabel],
-        [t.export.type, typeFilterLabel],
-      ],
-      headers: [
-        t.table.code,
-        t.table.product,
-        t.table.type,
-        t.table.category,
-        t.table.price,
-        t.orderReadyProducts,
-        t.contractReadyProducts,
-        t.onlineProducts,
-        t.agentSaleProducts,
-        t.providerSaleProducts,
-        t.table.status,
-      ],
-      rows: filteredProducts.map((product) => [
-        product.code || "-",
-        product.name || "-",
-        typeLabel(product.productType, locale),
-        product.categoryName || "-",
-        formatMoney(product.effectivePrice),
-        product.canBeOrdered ? t.orderReady : "-",
-        product.canBeUsedInContracts ? t.contractReady : "-",
-        product.allowOnlinePurchase ? t.onlineProducts : "-",
-        product.allowAgentSale ? t.agentSaleProducts : "-",
-        product.allowProviderSale ? t.providerSaleProducts : "-",
-        statusLabel(product.status, locale),
-      ]),
+      summary,
+      rows: filteredRows,
     });
 
     toast.success(t.exportSuccess);
   }
 
-  function printProducts() {
-    if (!canPrintProducts) return;
+  function printReport() {
+    if (!canPrint) return;
 
-    if (filteredProducts.length === 0) {
+    if (!hasData) {
       toast.error(t.exportEmpty);
       return;
     }
@@ -1803,9 +1323,9 @@ export default function SystemProductsPage() {
     printWindow.document.write(
       buildPrintHtml({
         locale,
-        title: t.printTitle,
-        rows: filteredProducts,
-        t,
+        title: t.title,
+        summary,
+        rows: filteredRows,
       }),
     );
     printWindow.document.close();
@@ -1813,107 +1333,33 @@ export default function SystemProductsPage() {
     toast.success(t.printSuccess);
   }
 
-  function renderFeaturedProduct(product: Product) {
-    const Icon = productIcon(product.productType);
-
-    const content = (
-      <div className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3 transition hover:bg-muted/50">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-            <Icon className="h-5 w-5" />
-          </div>
-
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="truncate text-sm font-semibold">{product.name}</p>
-
-              {product.isFeatured ? (
-                <Sparkles className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-500" />
-              ) : null}
-            </div>
-
-            <p className="mt-1 truncate text-xs text-muted-foreground">
-              {product.code}
-            </p>
-          </div>
-        </div>
-
-        <div className="shrink-0 text-end">
-          <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-            {typeLabel(product.productType, locale)}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {formatMoney(product.effectivePrice)}
-          </p>
-        </div>
-      </div>
-    );
-
-    if (!canViewProductDetails || !isValidProductId(product.id)) {
-      return (
-        <div key={`${product.code}-${product.name}`} className="block">
-          {content}
-        </div>
-      );
-    }
-
-    return (
-      <Link
-        key={product.id}
-        href={`/system/products/${product.id}`}
-        className="block"
-      >
-        {content}
-      </Link>
-    );
-  }
-
   useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
+    const nextLocale = readLocale();
 
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
+    setLocale(nextLocale);
+    applyDocumentLocale(nextLocale);
   }, []);
 
   useEffect(() => {
-    if (authResolving) return;
-    loadProducts(false);
-  }, [authResolving, loadProducts]);
+    loadProducts();
+  }, [loadProducts]);
 
-  if (!authResolving && !canViewProducts) {
+  if (authResolving || isLoading) {
+    return <PageSkeleton />;
+  }
+
+  if (!canView) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
+      <div className="w-full space-y-4">
+        <Card className="border-destructive/20">
+          <CardContent className="flex flex-col items-center justify-center gap-4 p-10 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
+              <ShieldCheck className="h-7 w-7 text-destructive" />
             </div>
 
             <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <h2 className="text-lg font-semibold">{t.accessDeniedTitle}</h2>
+              <p className="mt-2 max-w-xl text-sm text-muted-foreground">
                 {t.accessDeniedText}
               </p>
             </div>
@@ -1923,576 +1369,377 @@ export default function SystemProductsPage() {
     );
   }
 
+  const statCards = [
+    {
+      label: t.totalProducts,
+      value: summary.total,
+      icon: Package,
+    },
+    {
+      label: t.activeProducts,
+      value: summary.active,
+      icon: CheckCircle2,
+    },
+    {
+      label: t.offersProducts,
+      value: summary.offers,
+      icon: Sparkles,
+    },
+    {
+      label: t.landingProducts,
+      value: summary.landing,
+      icon: Globe2,
+    },
+    {
+      label: t.mobileProducts,
+      value: summary.mobile,
+      icon: Smartphone,
+    },
+    {
+      label: t.marketingImages,
+      value: summary.marketingImages,
+      icon: FileImage,
+    },
+  ];
+
+  const shortcuts = [
+    {
+      title: t.productsList,
+      description: t.latestDesc,
+      href: "/system/products/list",
+      icon: Layers3,
+      show: canView,
+    },
+    {
+      title: t.createProduct,
+      description: t.subtitle,
+      href: "/system/products/create",
+      icon: Plus,
+      show: canCreate,
+    },
+  ];
+
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.pageTitle}
-          </h1>
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.pageSubtitle}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="rounded-full">
+              <Package className="me-1 h-3.5 w-3.5" />
+              {t.title}
+            </Badge>
+
+            <Badge variant="outline" className="rounded-full">
+              <Sparkles className="me-1 h-3.5 w-3.5" />
+              {t.offersProducts}
+            </Badge>
+          </div>
+
+          <h1 className="mt-3 text-2xl font-bold tracking-tight">{t.title}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadProducts(true)}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            <span>{t.refresh}</span>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" onClick={() => loadProducts(true)}>
+            <RefreshCcw className="me-2 h-4 w-4" />
+            {t.refresh}
           </Button>
 
-          {canExportProducts ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={exportProducts}
-              disabled={
-                isLoading ||
-                filteredProducts.length === 0 ||
-                Boolean(errorMessage)
-              }
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
+          {canExport ? (
+            <Button type="button" variant="outline" onClick={exportExcel}>
+              <FileSpreadsheet className="me-2 h-4 w-4" />
+              {t.exportExcel}
             </Button>
           ) : null}
 
-          {canPrintProducts ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printProducts}
-              disabled={
-                isLoading ||
-                filteredProducts.length === 0 ||
-                Boolean(errorMessage)
-              }
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
+          {canPrint ? (
+            <Button type="button" variant="outline" onClick={printReport}>
+              <Printer className="me-2 h-4 w-4" />
+              {t.print}
             </Button>
           ) : null}
 
-          {canCreateProducts ? (
-            <Link href="/system/products/create">
-              <Button className="h-10 w-full rounded-xl sm:w-auto">
-                <Plus className="h-4 w-4" />
-                <span>{t.createProduct}</span>
-              </Button>
-            </Link>
+          {canCreate ? (
+            <Button asChild>
+              <Link href="/system/products/create">
+                <Plus className="me-2 h-4 w-4" />
+                {t.createProduct}
+              </Link>
+            </Button>
           ) : null}
         </div>
       </div>
 
-      {/* Error State */}
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        {statCards.map((card) => {
+          const Icon = card.icon;
 
-              <div>
-                <p className="font-semibold text-destructive">
-                  {errorMessage}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.apiErrorHint}
-                </p>
-              </div>
+          return (
+            <Card key={card.label}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-2xl font-bold">{formatNumber(card.value)}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{card.label}</p>
+                  </div>
+
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Layers3 className="h-5 w-5" />
+            {t.shortcutsTitle}
+          </CardTitle>
+          <CardDescription>{t.shortcutsDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          {shortcuts
+            .filter((item) => item.show)
+            .map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="group rounded-2xl border bg-background p-4 transition hover:bg-muted/50"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
+                        <Icon className="h-5 w-5" />
+                      </div>
+
+                      <div>
+                        <p className="font-semibold">{item.title}</p>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {item.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:text-foreground" />
+                  </div>
+                </Link>
+              );
+            })}
+        </CardContent>
+      </Card>
+
+      {errorMessage ? (
+        <Card className="border-destructive/20">
+          <CardContent className="flex flex-col items-center justify-center gap-4 p-10 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
+              <AlertTriangle className="h-7 w-7 text-destructive" />
             </div>
 
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadProducts(true)}
-            >
-              <RefreshCcw className="h-4 w-4" />
+            <div>
+              <h2 className="text-lg font-semibold">{errorMessage}</h2>
+              <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+                {t.loadErrorHint}
+              </p>
+            </div>
+
+            <Button type="button" onClick={() => loadProducts(true)}>
+              <RefreshCcw className="me-2 h-4 w-4" />
               {t.retry}
             </Button>
           </CardContent>
         </Card>
-      ) : null}
+      ) : (
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5" />
+                  {t.latestTitle}
+                </CardTitle>
+                <CardDescription>{t.latestDesc}</CardDescription>
+              </div>
 
-      {!errorMessage ? (
-        <>
-          {/* Summary */}
-          {isLoading ? (
-            <SummaryCardsSkeleton />
-          ) : (
-            <div className="grid gap-4 md:grid-cols-3">
-              {summaryCards.map((item) => {
-                const Icon = item.icon;
-
-                return (
-                  <Card
-                    key={item.title}
-                    className="rounded-2xl border bg-card shadow-sm"
-                  >
-                    <CardContent className="flex items-start justify-between gap-4 p-5">
-                      <div className="space-y-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-muted">
-                          <Icon className="h-5 w-5" />
-                        </div>
-
-                        <div>
-                          <p className="text-sm text-muted-foreground">
-                            {item.title}
-                          </p>
-                          <p className="mt-1 text-2xl font-bold">
-                            {item.isMoney ? (
-                              <SarAmount value={item.value} />
-                            ) : (
-                              formatNumber(item.value)
-                            )}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border bg-background px-3 py-2 text-end">
-                        <p className="text-xs text-muted-foreground">
-                          {item.helper}
-                        </p>
-                        <p className="mt-1 text-sm font-semibold">
-                          {item.helperValue}
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+              <div className="relative w-full lg:w-[360px]">
+                <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  placeholder={t.searchPlaceholder}
+                  className="ps-10"
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </div>
             </div>
-          )}
+          </CardHeader>
 
-          {/* Main Layout */}
-          <div className="grid gap-4 xl:grid-cols-3">
-            {/* Featured Products */}
-            <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
-              <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-                <div>
-                  <CardTitle className="text-base font-bold">
-                    {t.featuredProducts}
-                  </CardTitle>
-                  <CardDescription className="mt-1 text-sm leading-6">
-                    {t.featuredSubtitle}
-                  </CardDescription>
+          <CardContent className="p-0">
+            {displayRows.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-4 p-10 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+                  <Package className="h-7 w-7 text-muted-foreground" />
                 </div>
 
-                {canViewProducts ? (
-                  <Link href="/system/products/list">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-9 w-9 rounded-xl"
-                    >
-                      <ListChecks className="h-4 w-4" />
-                    </Button>
-                  </Link>
-                ) : null}
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                {isLoading ? (
-                  <FeaturedProductsSkeleton />
-                ) : featuredProducts.length === 0 ? (
-                  <div className="rounded-xl border border-dashed p-5 text-center">
-                    <p className="font-semibold">{t.emptyTitle}</p>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      {t.emptyText}
-                    </p>
-                  </div>
-                ) : (
-                  featuredProducts.map((product) =>
-                    renderFeaturedProduct(product),
-                  )
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Status + Table */}
-            <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-2">
-              <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <CardTitle className="text-base font-bold">
-                    {t.trackStatus}
-                  </CardTitle>
-                  <CardDescription className="mt-1 text-sm leading-6">
-                    {t.trackSubtitle}
-                  </CardDescription>
+                  <h2 className="text-lg font-semibold">
+                    {hasSearch ? t.noResultsTitle : t.emptyTitle}
+                  </h2>
+                  <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+                    {hasSearch ? t.noResultsText : t.emptyText}
+                  </p>
                 </div>
 
-                {canViewProducts ? (
-                  <Link href="/system/products/list">
-                    <Button variant="outline" className="h-9 rounded-xl">
-                      <ListChecks className="h-4 w-4" />
-                      <span>{t.viewFullList}</span>
-                    </Button>
-                  </Link>
+                {canCreate && !hasSearch ? (
+                  <Button asChild>
+                    <Link href="/system/products/create">
+                      <Plus className="me-2 h-4 w-4" />
+                      {t.createProduct}
+                    </Link>
+                  </Button>
                 ) : null}
-              </CardHeader>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t.table.image}</TableHead>
+                      <TableHead>{t.table.product}</TableHead>
+                      <TableHead>{t.table.provider}</TableHead>
+                      <TableHead>{t.table.type}</TableHead>
+                      <TableHead>{t.table.price}</TableHead>
+                      <TableHead>{t.table.offer}</TableHead>
+                      <TableHead>{t.table.visibility}</TableHead>
+                      <TableHead>{t.table.status}</TableHead>
+                      {canViewDetails ? <TableHead>{t.table.action}</TableHead> : null}
+                    </TableRow>
+                  </TableHeader>
 
-              <CardContent className="space-y-4">
-                {/* Status Cards */}
-                {isLoading ? (
-                  <StatusCardsSkeleton />
-                ) : (
-                  <div className="grid gap-3 md:grid-cols-4">
-                    {statusCards.map((card) => {
-                      const Icon = card.icon;
+                  <TableBody>
+                    {displayRows.map((product) => {
+                      const Icon = productTypeIcon(product.productType);
+                      const imageSrc = product.thumbnailImageUrl || product.marketingImageUrl;
 
                       return (
-                        <button
-                          key={card.title}
-                          type="button"
-                          className="space-y-2 rounded-xl border bg-background/70 p-3 text-start transition hover:bg-muted/40"
-                          onClick={() => setStatusFilter(card.filter)}
-                        >
-                          <div className="flex items-center gap-2">
-                            <Icon className="h-4 w-4 text-muted-foreground" />
-                            <p className="text-2xl font-bold">
-                              {formatNumber(card.value)}
-                            </p>
-                          </div>
+                        <TableRow key={product.id}>
+                          <TableCell>
+                            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border bg-muted">
+                              {imageSrc ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={imageSrc}
+                                  alt={product.name}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                              )}
+                            </div>
+                          </TableCell>
 
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-sm text-muted-foreground">
-                                {card.title}
+                          <TableCell>
+                            <div className="min-w-[220px]">
+                              <div className="flex items-center gap-2">
+                                <Icon className="h-4 w-4 text-muted-foreground" />
+                                <span className="font-semibold">{product.name}</span>
+                              </div>
+
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                <Badge variant="outline" className="rounded-full">
+                                  {product.code}
+                                </Badge>
+
+                                {product.isFeatured ? (
+                                  <Badge variant="secondary" className="rounded-full">
+                                    {t.flags.featured}
+                                  </Badge>
+                                ) : null}
+                              </div>
+
+                              {product.shortDescription ? (
+                                <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
+                                  {product.shortDescription}
+                                </p>
+                              ) : null}
+                            </div>
+                          </TableCell>
+
+                          <TableCell>
+                            <span className="text-sm">
+                              {providerLabel(product.provider, locale) || t.noProvider}
+                            </span>
+                          </TableCell>
+
+                          <TableCell>
+                            <Badge variant="secondary" className="rounded-full">
+                              {t.type[product.productType]}
+                            </Badge>
+                          </TableCell>
+
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-semibold">
+                                <SarAmount value={product.effectivePrice} />
                               </p>
-                              <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                                {card.helperValue}
-                              </span>
+
+                              {product.salePrice > 0 ? (
+                                <p className="text-xs text-muted-foreground">
+                                  <SarAmount value={product.price} />
+                                </p>
+                              ) : null}
                             </div>
+                          </TableCell>
 
-                            <div className="h-2 overflow-hidden rounded-full bg-muted">
-                              <div
-                                className="h-full rounded-full bg-primary transition-all"
-                                style={{ width: `${card.percent}%` }}
-                              />
+                          <TableCell>
+                            <div className="space-y-1">
+                              {flagBadge(product.isOffer, t.table.offer)}
+
+                              {product.offerTitle ? (
+                                <p className="line-clamp-1 text-xs text-muted-foreground">
+                                  {product.offerTitle}
+                                </p>
+                              ) : null}
                             </div>
+                          </TableCell>
 
-                            <p className="pt-1 text-xs text-muted-foreground">
-                              {card.helper}
-                            </p>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              {flagBadge(product.showOnLanding, t.flags.landing)}
+                              {flagBadge(product.showOnMobile, t.flags.mobile)}
+                              {flagBadge(product.showOnOffers, t.flags.offers)}
+                              {flagBadge(product.hasMarketingImage, t.flags.image)}
+                            </div>
+                          </TableCell>
 
-                {/* Search + Filters */}
-                <div className="grid gap-3">
-                  <div className="relative">
-                    <Search
-                      className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                        isArabic ? "right-3" : "left-3"
-                      }`}
-                    />
-                    <Input
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder={t.filterPlaceholder}
-                      className={`h-10 rounded-xl ${
-                        isArabic ? "pr-10" : "pl-10"
-                      }`}
-                    />
-                  </div>
+                          <TableCell>{statusBadge(product.status, t)}</TableCell>
 
-                  <div className="flex flex-wrap gap-2">
-                    {statusFilters.map((item) => {
-                      const isSelected = statusFilter === item.value;
-
-                      return (
-                        <Button
-                          key={item.value}
-                          type="button"
-                          variant={isSelected ? "default" : "outline"}
-                          size="sm"
-                          className="rounded-xl"
-                          onClick={() => setStatusFilter(item.value)}
-                        >
-                          <span>{item.label}</span>
-                          <Badge
-                            variant={isSelected ? "secondary" : "outline"}
-                            className="ms-1 rounded-full"
-                          >
-                            {formatNumber(item.count)}
-                          </Badge>
-                        </Button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {typeFilters.map((item) => {
-                      const isSelected = typeFilter === item.value;
-
-                      return (
-                        <Button
-                          key={item.value}
-                          type="button"
-                          variant={isSelected ? "default" : "outline"}
-                          size="sm"
-                          className="rounded-xl"
-                          onClick={() => setTypeFilter(item.value)}
-                        >
-                          <span>{item.label}</span>
-                          <Badge
-                            variant={isSelected ? "secondary" : "outline"}
-                            className="ms-1 rounded-full"
-                          >
-                            {formatNumber(item.count)}
-                          </Badge>
-                        </Button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Table */}
-                <div className="overflow-hidden rounded-xl border">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t.table.code}</TableHead>
-                          <TableHead>{t.table.product}</TableHead>
-                          <TableHead>{t.table.type}</TableHead>
-                          <TableHead>{t.table.category}</TableHead>
-                          <TableHead>{t.table.price}</TableHead>
-                          <TableHead>{t.table.readiness}</TableHead>
-                          <TableHead>{t.table.status}</TableHead>
-                          {canViewProductDetails ? (
-                            <TableHead>{t.table.action}</TableHead>
+                          {canViewDetails ? (
+                            <TableCell>
+                              <Button asChild variant="outline" size="sm">
+                                <Link href={`/system/products/${product.id}`}>
+                                  <Eye className="me-2 h-4 w-4" />
+                                  {t.view}
+                                </Link>
+                              </Button>
+                            </TableCell>
                           ) : null}
                         </TableRow>
-                      </TableHeader>
-
-                      <TableBody>
-                        {isLoading ? (
-                          <TableRowsSkeleton
-                            columnsCount={canViewProductDetails ? 8 : 7}
-                          />
-                        ) : tableRows.length === 0 ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={canViewProductDetails ? 8 : 7}
-                            >
-                              <div className="py-12 text-center">
-                                <p className="font-semibold">
-                                  {hasSearchOrFilter
-                                    ? t.noResultsTitle
-                                    : t.emptyTitle}
-                                </p>
-                                <p className="mt-2 text-sm text-muted-foreground">
-                                  {hasSearchOrFilter
-                                    ? t.noResultsText
-                                    : t.emptyText}
-                                </p>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          tableRows.map((product) => {
-                            const Icon = productIcon(product.productType);
-
-                            return (
-                              <TableRow key={`${product.id}-${product.code}`}>
-                                <TableCell className="font-medium">
-                                  {product.code || `#${product.id}`}
-                                </TableCell>
-
-                                <TableCell>
-                                  <div className="flex min-w-[220px] items-center gap-2">
-                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                                      <Icon className="h-4 w-4" />
-                                    </div>
-
-                                    <div className="min-w-0">
-                                      <p className="truncate font-medium">
-                                        {product.name}
-                                      </p>
-                                      <p className="truncate text-xs text-muted-foreground">
-                                        {product.shortDescription ||
-                                          product.slug ||
-                                          "-"}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </TableCell>
-
-                                <TableCell>
-                                  <Badge
-                                    variant="secondary"
-                                    className="rounded-full"
-                                  >
-                                    {typeLabel(product.productType, locale)}
-                                  </Badge>
-                                </TableCell>
-
-                                <TableCell>
-                                  <div className="flex min-w-[120px] items-center gap-2">
-                                    <Tag className="h-3.5 w-3.5 text-muted-foreground" />
-                                    <span>{product.categoryName || "-"}</span>
-                                  </div>
-                                </TableCell>
-
-                                <TableCell>
-                                  <SarAmount value={product.effectivePrice} />
-                                </TableCell>
-
-                                <TableCell>
-                                  <div className="flex min-w-[160px] flex-wrap gap-1">
-                                    {product.canBeOrdered ? (
-                                      <Badge
-                                        variant="outline"
-                                        className="rounded-full"
-                                      >
-                                        {t.orderReady}
-                                      </Badge>
-                                    ) : null}
-
-                                    {product.canBeUsedInContracts ? (
-                                      <Badge
-                                        variant="outline"
-                                        className="rounded-full"
-                                      >
-                                        {t.contractReady}
-                                      </Badge>
-                                    ) : null}
-
-                                    {!product.canBeOrdered &&
-                                    !product.canBeUsedInContracts ? (
-                                      <span className="text-sm text-muted-foreground">
-                                        -
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                </TableCell>
-
-                                <TableCell>
-                                  {statusBadge(product.status, locale)}
-                                </TableCell>
-
-                                {canViewProductDetails ? (
-                                  <TableCell>
-                                    {isValidProductId(product.id) ? (
-                                      <Link
-                                        href={`/system/products/${product.id}`}
-                                      >
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-8 rounded-lg"
-                                        >
-                                          <Eye className="h-4 w-4" />
-                                        </Button>
-                                      </Link>
-                                    ) : null}
-                                  </TableCell>
-                                ) : null}
-                              </TableRow>
-                            );
-                          })
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                  <p>
-                    {t.showing} {formatNumber(tableRows.length)} {t.from}{" "}
-                    {formatNumber(filteredProducts.length)} · {t.latestRecords}
-                  </p>
-
-                  {canViewProducts ? (
-                    <Link href="/system/products/list">
-                      <Button variant="outline" size="sm" className="rounded-xl">
-                        <ListChecks className="h-4 w-4" />
-                        {t.viewFullList}
-                      </Button>
-                    </Link>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Action Cards */}
-          {moduleActions.length > 0 ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base font-bold">
-                  {t.quickAccessTitle}
-                </CardTitle>
-                <CardDescription className="leading-6">
-                  {t.quickAccessSubtitle}
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-2">
-                  {moduleActions.map((item) => {
-                    const Icon = item.icon;
-
-                    return (
-                      <Link key={item.href} href={item.href} className="block">
-                        <Card className="h-full rounded-2xl border bg-background shadow-none transition hover:bg-muted/40 hover:shadow-sm">
-                          <CardContent className="flex h-full items-start justify-between gap-4 p-4">
-                            <div className="min-w-0 space-y-3">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-                                  <Icon className="h-5 w-5" />
-                                </div>
-
-                                <Badge
-                                  variant="secondary"
-                                  className="rounded-full"
-                                >
-                                  {item.badge}
-                                </Badge>
-                              </div>
-
-                              <div>
-                                <p className="font-semibold">{item.title}</p>
-                                <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
-                                  {item.description}
-                                </p>
-                              </div>
-
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-xl"
-                              >
-                                {item.cta}
-                              </Button>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
-        </>
-      ) : null}
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

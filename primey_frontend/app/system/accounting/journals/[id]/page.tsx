@@ -1,32 +1,91 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/accounting/journals/[id]/page.tsx
+   🧠 Primey Care | Journal Entry Detail
+
+   ✅ المسار:
+      app/system/accounting/journals/[id]/page.tsx
+
+   ✅ العمل:
+      صفحة تفاصيل قيد اليومية داخل مديول المحاسبة.
+      تعرض بيانات القيد، حالة الترحيل، مصدر القيد، المدين والدائن، وسطور القيد.
+
+   ✅ الإصدار:
+      Phase 17 UX Refinement + Accounting Journal Detail Fix
+
+   ✅ يعتمد على:
+      - /api/accounting/journals/{id}/
+      - /api/accounting/journal-entries/{id}/ كـ fallback آمن
+      - primey-locale
+      - AuthProvider
+      - sonner
+      - /currency/sar.svg
+
+   ✅ متوافق مع:
+      - Accounting module approved pattern
+      - Accounting journals list page
+      - Centers approved UX pattern
+      - Customers approved UX pattern
+
+   ✅ الوظائف:
+      - عرض تفاصيل قيد اليومية.
+      - عرض ملخص المدين والدائن وفرق التوازن.
+      - عرض بيانات القيد الأساسية.
+      - عرض سطور القيد.
+      - دعم مراكز التكلفة في السطور.
+      - البحث داخل سطور القيد.
+      - التحكم بالأعمدة المرئية.
+      - Excel export بصيغة .xls HTML Workbook.
+      - Web PDF Print.
+      - Skeleton Loading.
+      - Error State مستقل.
+      - Not Found State مستقل.
+      - إخفاء الإجراءات حسب الصلاحيات قدر الإمكان.
+
+   ------------------------------------------------------------
+   تحسينات هذا الإصدار:
+      - إصلاح تكرار مفتاح notBalanced داخل القاموس.
+      - الحفاظ على نمط النظام: w-full space-y-4 بدون main/min-h-screen.
+      - تحسين fallback للتحميل عند 400 / 404 / 405.
+      - دعم مصادر الترحيل الجديدة: خزينة، عمولة، رصيد افتتاحي، نظام.
+      - دعم مراكز التكلفة داخل جدول السطور.
+      - استخدام الرقم ثم رمز SAR عند عرض القيم المالية.
+      - منع عرض أي عبارات تقنية أو مسارات داخل واجهة المستخدم.
+============================================================ */
+
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownUp,
   ArrowLeft,
-  BarChart3,
-  BookOpenCheck,
+  Calculator,
+  CheckCircle2,
   ColumnsIcon,
   Download,
   FileText,
-  Filter,
   Layers3,
   Loader2,
-  ReceiptText,
+  Printer,
   RefreshCcw,
   Search,
   ShieldCheck,
-  TrendingDown,
-  TrendingUp,
-  WalletCards,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -37,13 +96,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Table,
   TableBody,
   TableCell,
@@ -53,13 +105,18 @@ import {
 } from "@/components/ui/table";
 
 /* ============================================================
-   📂 app/system/accounting/journals/[id]/page.tsx
-   🧠 Primey Care | Journal Entry Detail
+   Types
 ============================================================ */
 
 type AppLocale = "ar" | "en";
+type Dict = Record<string, unknown>;
 
-type JournalStatus = "DRAFT" | "POSTED" | "CANCELLED" | "UNKNOWN";
+type JournalStatus =
+  | "DRAFT"
+  | "POSTED"
+  | "CANCELLED"
+  | "REVERSED"
+  | "UNKNOWN";
 
 type PostingSource =
   | "MANUAL"
@@ -68,6 +125,10 @@ type PostingSource =
   | "INVOICE"
   | "REFUND"
   | "ADJUSTMENT"
+  | "TREASURY"
+  | "COMMISSION"
+  | "OPENING"
+  | "SYSTEM"
   | "OTHER"
   | "UNKNOWN";
 
@@ -83,74 +144,91 @@ type SortKey =
 type SortDirection = "asc" | "desc";
 
 type JournalLine = {
-  id: number;
-  account_id: number | null;
-  account_code: string | null;
-  account_name: string | null;
-  account_type: string | null;
-  normal_balance: string | null;
-  description: string | null;
-  debit_amount: string;
-  credit_amount: string;
+  id: string;
+  account_id: string;
+  account_code: string;
+  account_name: string;
+  account_type: string;
+  normal_balance: string;
+  cost_center_id: string;
+  cost_center_code: string;
+  cost_center_name: string;
+  description: string;
+  debit_amount: number;
+  credit_amount: number;
   sort_order: number;
 };
 
-type JournalDetailPayload = {
-  id: number;
+type JournalDetail = {
+  id: string;
   entry_number: string;
-  entry_date: string | null;
+  entry_date: string;
   status: JournalStatus;
   posting_source: PostingSource;
-  reference: string | null;
-  external_reference: string | null;
-  description: string | null;
-  notes: string | null;
+  reference: string;
+  external_reference: string;
+  description: string;
+  notes: string;
   currency: string;
-  total_debit: string;
-  total_credit: string;
+  total_debit: number;
+  total_credit: number;
   is_balanced: boolean;
-  posted_at: string | null;
-  created_at: string | null;
-  updated_at: string | null;
+  posted_at: string;
+  created_at: string;
+  updated_at: string;
   lines: JournalLine[];
 };
 
 type ApiEnvelope<T> = {
   ok?: boolean;
-  data?: T;
+  success?: boolean;
   message?: string;
+  detail?: string;
+  error?: string;
+  data?: T;
 };
 
 type VisibleColumns = {
-  sort_order: boolean;
-  account_code: boolean;
-  account_name: boolean;
-  account_type: boolean;
-  normal_balance: boolean;
+  sortOrder: boolean;
+  accountCode: boolean;
+  accountName: boolean;
+  accountType: boolean;
+  normalBalance: boolean;
+  costCenter: boolean;
   description: boolean;
-  debit_amount: boolean;
-  credit_amount: boolean;
-  actions: boolean;
+  debitAmount: boolean;
+  creditAmount: boolean;
 };
 
-const CURRENCY_ICON_PATH = "/currency/sar.svg";
+const SAR_ICON_PATH = "/currency/sar.svg";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://127.0.0.1:8000";
+const DEFAULT_COLUMNS: VisibleColumns = {
+  sortOrder: true,
+  accountCode: true,
+  accountName: true,
+  accountType: true,
+  normalBalance: false,
+  costCenter: true,
+  description: true,
+  debitAmount: true,
+  creditAmount: true,
+};
 
 /* ============================================================
-   Locale
+   Locale / API
 ============================================================ */
 
 function readLocale(): AppLocale {
   try {
     if (typeof window === "undefined") return "ar";
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
+
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
     return document.documentElement.lang === "en" ? "en" : "ar";
   } catch {
@@ -165,34 +243,388 @@ function applyDocumentLocale(locale: AppLocale) {
     document.documentElement.lang = locale;
     document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
     document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch {
-    // ignore
+  } catch (error) {
+    console.error("Apply locale error:", error);
   }
+}
+
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
+
+  if (!base) return path;
+
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
+/* ============================================================
+   Auth / Permissions
+============================================================ */
+
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
+}
+
+function getNested(source: Dict, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+
+    if (value && typeof value === "object") {
+      return value as Dict;
+    }
+  }
+
+  return {};
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
+
+          if (typeof value === "string") return [value];
+
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
+
+              if (item && typeof item === "object") {
+                const obj = item as Dict;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as Dict;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return getNested(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
+}
+
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
+  );
+}
+
+function isSystemAdmin(authValue: unknown) {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
+
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
+}
+
+function hasSafePermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const permissions = getAuthPermissionCodes(authValue);
+
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "accountant",
+          "support",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
+    );
+  }
+
+  return true;
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
+
+function dictionary(locale: AppLocale) {
+  const isArabic = locale === "ar";
+
+  return {
+    title: isArabic ? "تفاصيل قيد اليومية" : "Journal Entry Details",
+    subtitle: isArabic
+      ? "مراجعة بيانات القيد وسطور الحسابات ومراكز التكلفة والتوازن بين المدين والدائن."
+      : "Review entry details, account lines, cost centers, and debit-credit balance.",
+
+    back: isArabic ? "القيود اليومية" : "Journal Entries",
+    refresh: isArabic ? "تحديث" : "Refresh",
+    retry: isArabic ? "إعادة المحاولة" : "Retry",
+    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
+    print: isArabic ? "طباعة PDF" : "Print PDF",
+    columns: isArabic ? "الأعمدة" : "Columns",
+    clearSearch: isArabic ? "مسح البحث" : "Clear Search",
+
+    entryInfo: isArabic ? "بيانات القيد" : "Entry Information",
+    entryInfoDesc: isArabic
+      ? "المعلومات الأساسية للقيد ومصدر الترحيل."
+      : "Basic information and posting source.",
+    financialSummary: isArabic ? "ملخص مالي" : "Financial Summary",
+    financialSummaryDesc: isArabic
+      ? "إجمالي المدين والدائن وفرق التوازن."
+      : "Total debit, total credit, and balance difference.",
+    linesTitle: isArabic ? "سطور القيد" : "Journal Lines",
+    linesDesc: isArabic
+      ? "تفاصيل الحسابات ومراكز التكلفة والمبالغ."
+      : "Account, cost center, and amount details.",
+
+    entryNumber: isArabic ? "رقم القيد" : "Entry Number",
+    entryDate: isArabic ? "تاريخ القيد" : "Entry Date",
+    status: isArabic ? "الحالة" : "Status",
+    postingSource: isArabic ? "مصدر الترحيل" : "Posting Source",
+    reference: isArabic ? "المرجع" : "Reference",
+    externalReference: isArabic ? "مرجع خارجي" : "External Reference",
+    description: isArabic ? "الوصف" : "Description",
+    notes: isArabic ? "ملاحظات" : "Notes",
+    postedAt: isArabic ? "تاريخ الترحيل" : "Posted At",
+    createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
+    updatedAt: isArabic ? "آخر تحديث" : "Updated At",
+
+    totalDebit: isArabic ? "إجمالي المدين" : "Total Debit",
+    totalCredit: isArabic ? "إجمالي الدائن" : "Total Credit",
+    difference: isArabic ? "فرق التوازن" : "Difference",
+    linesCount: isArabic ? "عدد السطور" : "Lines Count",
+    balanced: isArabic ? "متوازن" : "Balanced",
+    notBalanced: isArabic ? "غير متوازن" : "Not Balanced",
+
+    draft: isArabic ? "مسودة" : "Draft",
+    posted: isArabic ? "مرحّل" : "Posted",
+    cancelled: isArabic ? "ملغي" : "Cancelled",
+    reversed: isArabic ? "معكوس" : "Reversed",
+    unknown: isArabic ? "غير محدد" : "Unknown",
+
+    manual: isArabic ? "يدوي" : "Manual",
+    order: isArabic ? "طلب" : "Order",
+    payment: isArabic ? "دفعة" : "Payment",
+    invoice: isArabic ? "فاتورة" : "Invoice",
+    refund: isArabic ? "استرداد" : "Refund",
+    adjustment: isArabic ? "تسوية" : "Adjustment",
+    treasury: isArabic ? "خزينة" : "Treasury",
+    commission: isArabic ? "عمولة" : "Commission",
+    opening: isArabic ? "رصيد افتتاحي" : "Opening Balance",
+    system: isArabic ? "النظام" : "System",
+    other: isArabic ? "أخرى" : "Other",
+
+    searchPlaceholder: isArabic
+      ? "ابحث في الحساب أو الوصف أو مركز التكلفة..."
+      : "Search account, description, or cost center...",
+
+    table: {
+      sortOrder: isArabic ? "الترتيب" : "Order",
+      accountCode: isArabic ? "رمز الحساب" : "Account Code",
+      accountName: isArabic ? "اسم الحساب" : "Account Name",
+      accountType: isArabic ? "نوع الحساب" : "Account Type",
+      normalBalance: isArabic ? "الطبيعة" : "Normal Balance",
+      costCenter: isArabic ? "مركز التكلفة" : "Cost Center",
+      description: isArabic ? "الوصف" : "Description",
+      debit: isArabic ? "مدين" : "Debit",
+      credit: isArabic ? "دائن" : "Credit",
+    },
+
+    emptyTitle: isArabic ? "لا توجد سطور للقيد" : "No journal lines",
+    emptyText: isArabic
+      ? "لا توجد سطور محاسبية مرتبطة بهذا القيد."
+      : "There are no accounting lines linked to this entry.",
+    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
+    noResultsText: isArabic
+      ? "جرّب تغيير كلمات البحث داخل سطور القيد."
+      : "Try changing the search keywords inside entry lines.",
+
+    accessDeniedTitle: isArabic ? "غير مصرح بعرض القيد" : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية عرض تفاصيل القيود اليومية. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to view journal entry details. Contact your system administrator if you need access.",
+
+    notFoundTitle: isArabic ? "القيد غير موجود" : "Entry not found",
+    notFoundText: isArabic
+      ? "لم يتم العثور على قيد اليومية المطلوب."
+      : "The requested journal entry could not be found.",
+
+    apiError: isArabic
+      ? "تعذر تحميل تفاصيل القيد."
+      : "Unable to load journal entry details.",
+    apiErrorHint: isArabic
+      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
+      : "Check the connection or permissions, then try again.",
+    refreshSuccess: isArabic
+      ? "تم تحديث تفاصيل القيد بنجاح."
+      : "Journal entry details refreshed successfully.",
+    exportSuccess: isArabic
+      ? "تم تجهيز ملف Excel بنجاح."
+      : "Excel file prepared successfully.",
+    exportEmpty: isArabic
+      ? "لا توجد سطور قابلة للتصدير."
+      : "No lines available to export.",
+    printSuccess: isArabic
+      ? "تم تجهيز نافذة الطباعة."
+      : "Print window prepared.",
+    printError: isArabic
+      ? "تعذر فتح نافذة الطباعة."
+      : "Unable to open print window.",
+
+    showing: isArabic ? "عرض" : "Showing",
+    from: isArabic ? "من" : "of",
+    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
+    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
+    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
+  };
 }
 
 /* ============================================================
    Helpers
 ============================================================ */
 
-function toNumber(value: string | number | null | undefined): number {
+function toNumber(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatNumber(value: string | number | null | undefined): string {
+function formatNumber(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(toNumber(value));
 }
 
-function formatMoney(value: string | number | null | undefined): string {
+function formatMoney(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function formatDate(value: string | null | undefined, locale: AppLocale): string {
+function formatDate(value: string, locale: AppLocale): string {
   if (!value) return locale === "ar" ? "غير محدد" : "Not set";
 
   const date = new Date(value);
@@ -205,10 +637,7 @@ function formatDate(value: string | null | undefined, locale: AppLocale): string
   }).format(date);
 }
 
-function formatDateTime(
-  value: string | null | undefined,
-  locale: AppLocale,
-): string {
+function formatDateTime(value: string, locale: AppLocale): string {
   if (!value) return locale === "ar" ? "غير محدد" : "Not set";
 
   const date = new Date(value);
@@ -223,18 +652,54 @@ function formatDateTime(
   }).format(date);
 }
 
-function getApiUrl(path: string): string {
-  const cleanBase = API_BASE_URL.replace(/\/$/, "");
-  const cleanPath = path.startsWith("/") ? path : `/${path}`;
-  return `${cleanBase}${cleanPath}`;
+function escapeHtml(value: string | number) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function getValue(obj: Dict, key: string): unknown {
+  const direct = obj[key];
+
+  if (direct !== undefined && direct !== null && direct !== "") {
+    return direct;
+  }
+
+  for (const container of [
+    "entry",
+    "journal",
+    "journal_entry",
+    "account",
+    "chart_account",
+    "cost_center",
+    "costCenter",
+    "data",
+    "item",
+  ]) {
+    const nested = obj[container];
+
+    if (nested && typeof nested === "object") {
+      const value = (nested as Dict)[key];
+
+      if (value !== undefined && value !== null && value !== "") {
+        return value;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function normalizeStatus(value: unknown): JournalStatus {
   const status = String(value || "").toUpperCase();
 
   if (status === "DRAFT") return "DRAFT";
-  if (status === "POSTED") return "POSTED";
-  if (status === "CANCELLED") return "CANCELLED";
+  if (status === "POSTED" || status === "CONFIRMED") return "POSTED";
+  if (status === "CANCELLED" || status === "CANCELED") return "CANCELLED";
+  if (status === "REVERSED") return "REVERSED";
 
   return "UNKNOWN";
 }
@@ -242,320 +707,166 @@ function normalizeStatus(value: unknown): JournalStatus {
 function normalizePostingSource(value: unknown): PostingSource {
   const source = String(value || "").toUpperCase();
 
-  if (source === "MANUAL") return "MANUAL";
-  if (source === "ORDER") return "ORDER";
-  if (source === "PAYMENT") return "PAYMENT";
-  if (source === "INVOICE") return "INVOICE";
-  if (source === "REFUND") return "REFUND";
-  if (source === "ADJUSTMENT") return "ADJUSTMENT";
-  if (source === "OTHER") return "OTHER";
+  if (source.includes("COMMISSION")) return "COMMISSION";
+  if (source.includes("PAYMENT")) return "PAYMENT";
+  if (source.includes("INVOICE")) return "INVOICE";
+  if (source.includes("ORDER")) return "ORDER";
+  if (source.includes("TREASURY")) return "TREASURY";
+  if (source.includes("OPENING")) return "OPENING";
+  if (source.includes("ADJUSTMENT") || source.includes("SETTLEMENT")) {
+    return "ADJUSTMENT";
+  }
+  if (source.includes("REFUND")) return "REFUND";
+  if (source.includes("SYSTEM") || source.includes("AUTO")) return "SYSTEM";
+  if (source.includes("MANUAL") || source.includes("USER")) return "MANUAL";
+  if (source.includes("OTHER")) return "OTHER";
 
   return "UNKNOWN";
 }
 
-function normalizeLine(item: unknown): JournalLine {
-  const row = (item || {}) as Record<string, unknown>;
+function toBoolean(value: unknown, fallback: boolean) {
+  if (typeof value === "boolean") return value;
+
+  if (value === undefined || value === null || value === "") return fallback;
+
+  const clean = String(value).toLowerCase();
+
+  if (["true", "1", "yes", "balanced"].includes(clean)) return true;
+  if (["false", "0", "no", "unbalanced"].includes(clean)) return false;
+
+  return fallback;
+}
+
+function normalizeLine(item: unknown, index: number): JournalLine {
+  const obj = asDict(item);
+  const account = asDict(obj.account || obj.chart_account);
+  const costCenter = asDict(obj.cost_center || obj.costCenter);
 
   return {
-    id: Number(row.id || 0),
-    account_id: row.account_id ? Number(row.account_id) : null,
-    account_code: row.account_code ? String(row.account_code) : null,
-    account_name: row.account_name ? String(row.account_name) : null,
-    account_type: row.account_type ? String(row.account_type) : null,
-    normal_balance: row.normal_balance ? String(row.normal_balance) : null,
-    description: row.description ? String(row.description) : null,
-    debit_amount: String(row.debit_amount || "0.00"),
-    credit_amount: String(row.credit_amount || "0.00"),
-    sort_order: Number(row.sort_order || 0),
+    id: String(getValue(obj, "id") || `${index}`),
+    account_id: String(account.id || getValue(obj, "account_id") || ""),
+    account_code: String(account.code || getValue(obj, "account_code") || ""),
+    account_name: String(account.name || getValue(obj, "account_name") || ""),
+    account_type: String(
+      account.type || account.account_type || getValue(obj, "account_type") || "",
+    ),
+    normal_balance: String(
+      account.normal_balance || getValue(obj, "normal_balance") || "",
+    ),
+    cost_center_id: String(costCenter.id || getValue(obj, "cost_center_id") || ""),
+    cost_center_code: String(
+      costCenter.code || getValue(obj, "cost_center_code") || "",
+    ),
+    cost_center_name: String(
+      costCenter.name || getValue(obj, "cost_center_name") || "",
+    ),
+    description: String(
+      getValue(obj, "description") ||
+        getValue(obj, "memo") ||
+        getValue(obj, "notes") ||
+        "",
+    ),
+    debit_amount: toNumber(
+      getValue(obj, "debit_amount") || getValue(obj, "debit") || 0,
+    ),
+    credit_amount: toNumber(
+      getValue(obj, "credit_amount") || getValue(obj, "credit") || 0,
+    ),
+    sort_order: toNumber(getValue(obj, "sort_order") ?? index + 1),
   };
 }
 
-function normalizeJournal(payload: unknown): JournalDetailPayload {
-  const item = (payload || {}) as Record<string, unknown>;
+function normalizeJournalDetail(payload: unknown): JournalDetail | null {
+  const envelope = asDict(payload);
+  const source =
+    envelope.data && typeof envelope.data === "object"
+      ? asDict(envelope.data)
+      : envelope;
+
+  if (!source || Object.keys(source).length === 0) return null;
+
+  const linesSource =
+    source.lines ||
+    source.items ||
+    source.entries ||
+    source.details ||
+    asDict(source.data).lines ||
+    [];
+
+  const lines = Array.isArray(linesSource)
+    ? linesSource.map((line, index) => normalizeLine(line, index))
+    : [];
+
+  const totalDebit =
+    getValue(source, "total_debit") ||
+    lines.reduce((sum, line) => sum + line.debit_amount, 0);
+
+  const totalCredit =
+    getValue(source, "total_credit") ||
+    lines.reduce((sum, line) => sum + line.credit_amount, 0);
+
+  const debitNumber = toNumber(totalDebit);
+  const creditNumber = toNumber(totalCredit);
 
   return {
-    id: Number(item.id || 0),
-    entry_number: String(item.entry_number || "-"),
-    entry_date: item.entry_date ? String(item.entry_date) : null,
-    status: normalizeStatus(item.status),
-    posting_source: normalizePostingSource(item.posting_source),
-    reference: item.reference ? String(item.reference) : null,
-    external_reference: item.external_reference
-      ? String(item.external_reference)
-      : null,
-    description: item.description ? String(item.description) : null,
-    notes: item.notes ? String(item.notes) : null,
-    currency: String(item.currency || "SAR"),
-    total_debit: String(item.total_debit || "0.00"),
-    total_credit: String(item.total_credit || "0.00"),
-    is_balanced: Boolean(item.is_balanced),
-    posted_at: item.posted_at ? String(item.posted_at) : null,
-    created_at: item.created_at ? String(item.created_at) : null,
-    updated_at: item.updated_at ? String(item.updated_at) : null,
-    lines: Array.isArray(item.lines) ? item.lines.map(normalizeLine) : [],
+    id: String(getValue(source, "id") || ""),
+    entry_number: String(
+      getValue(source, "entry_number") ||
+        getValue(source, "journal_number") ||
+        getValue(source, "number") ||
+        "-",
+    ),
+    entry_date: String(
+      getValue(source, "entry_date") ||
+        getValue(source, "journal_date") ||
+        getValue(source, "date") ||
+        "",
+    ),
+    status: normalizeStatus(getValue(source, "status")),
+    posting_source: normalizePostingSource(
+      getValue(source, "posting_source") ||
+        getValue(source, "source") ||
+        getValue(source, "source_type"),
+    ),
+    reference: String(getValue(source, "reference") || ""),
+    external_reference: String(
+      getValue(source, "external_reference") ||
+        getValue(source, "source_reference") ||
+        "",
+    ),
+    description: String(
+      getValue(source, "description") ||
+        getValue(source, "memo") ||
+        getValue(source, "notes") ||
+        "",
+    ),
+    notes: String(getValue(source, "notes") || ""),
+    currency: String(getValue(source, "currency") || "SAR"),
+    total_debit: debitNumber,
+    total_credit: creditNumber,
+    is_balanced: toBoolean(
+      getValue(source, "is_balanced"),
+      Math.abs(debitNumber - creditNumber) < 0.005,
+    ),
+    posted_at: String(getValue(source, "posted_at") || ""),
+    created_at: String(getValue(source, "created_at") || ""),
+    updated_at: String(getValue(source, "updated_at") || ""),
+    lines,
   };
-}
-
-async function fetchJournalDetail(
-  journalId: string,
-): Promise<JournalDetailPayload> {
-  const response = await fetch(
-    getApiUrl(`/api/accounting/journals/${journalId}/`),
-    {
-      method: "GET",
-      credentials: "include",
-      headers: {
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  const payload = (await response.json()) as ApiEnvelope<unknown>;
-
-  if (payload.ok === false) {
-    throw new Error(payload.message || "Journal detail request failed");
-  }
-
-  if (!payload.data) {
-    throw new Error("Journal detail response does not contain data");
-  }
-
-  return normalizeJournal(payload.data);
-}
-
-function compareValues(
-  a: JournalLine,
-  b: JournalLine,
-  key: SortKey,
-  direction: SortDirection,
-) {
-  const multiplier = direction === "asc" ? 1 : -1;
-
-  if (
-    key === "debit_amount" ||
-    key === "credit_amount" ||
-    key === "sort_order"
-  ) {
-    return (toNumber(a[key]) - toNumber(b[key])) * multiplier;
-  }
-
-  return String(a[key] || "").localeCompare(String(b[key] || "")) * multiplier;
-}
-
-function printPage() {
-  if (typeof window === "undefined") return;
-  window.print();
-}
-
-function exportCsv(payload: JournalDetailPayload | null) {
-  if (typeof window === "undefined" || !payload) return;
-
-  const rows = [
-    [
-      "Journal No.",
-      "Date",
-      "Status",
-      "Source",
-      "Reference",
-      "Account Code",
-      "Account Name",
-      "Account Type",
-      "Description",
-      "Debit",
-      "Credit",
-    ],
-    ...payload.lines.map((line) => [
-      payload.entry_number,
-      payload.entry_date || "",
-      payload.status,
-      payload.posting_source,
-      payload.reference || payload.external_reference || "",
-      line.account_code || "",
-      line.account_name || "",
-      line.account_type || "",
-      line.description || "",
-      line.debit_amount,
-      line.credit_amount,
-    ]),
-  ];
-
-  const csvContent = rows
-    .map((row) =>
-      row
-        .map((cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`)
-        .join(","),
-    )
-    .join("\n");
-
-  const blob = new Blob([csvContent], {
-    type: "text/csv;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-
-  link.href = url;
-  link.download = `journal_${payload.entry_number || payload.id}.csv`;
-  link.click();
-
-  URL.revokeObjectURL(url);
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "تفاصيل القيد اليومي" : "Journal Entry Detail",
-    subtitle: isArabic
-      ? "عرض بيانات القيد، حالة التوازن، وسطور الحسابات المدينة والدائنة."
-      : "View journal information, balance status, and debit/credit account lines.",
-
-    back: isArabic ? "القيود اليومية" : "Journal Entries",
-    accounting: isArabic ? "لوحة المحاسبة" : "Accounting Overview",
-    ledger: isArabic ? "دفتر الأستاذ" : "General Ledger",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    export: isArabic ? "تصدير CSV" : "Export CSV",
-    print: isArabic ? "طباعة" : "Print",
-
-    statusTitle: isArabic ? "حالة القيد" : "Journal Status",
-    statusDesc: isArabic
-      ? "تحليل سريع لإجمالي المدين والدائن وعدد السطور وحالة التوازن."
-      : "Quick analysis of total debit, total credit, line count, and balance status.",
-
-    summaryTitle: isArabic ? "ملخص القيد" : "Journal Summary",
-    summaryDesc: isArabic
-      ? "بيانات القيد الأساسية ومصدر الترحيل والحالة الحالية."
-      : "Basic journal information, posting source, and current status.",
-
-    entryNumber: isArabic ? "رقم القيد" : "Entry No.",
-    entryDate: isArabic ? "تاريخ القيد" : "Entry Date",
-    status: isArabic ? "الحالة" : "Status",
-    source: isArabic ? "المصدر" : "Source",
-    reference: isArabic ? "المرجع" : "Reference",
-    externalReference: isArabic ? "المرجع الخارجي" : "External Reference",
-    description: isArabic ? "الوصف" : "Description",
-    notes: isArabic ? "ملاحظات" : "Notes",
-    postedAt: isArabic ? "تاريخ الترحيل" : "Posted At",
-    createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-    updatedAt: isArabic ? "آخر تحديث" : "Updated At",
-
-    totalDebit: isArabic ? "إجمالي المدين" : "Total Debit",
-    totalCredit: isArabic ? "إجمالي الدائن" : "Total Credit",
-    difference: isArabic ? "الفرق" : "Difference",
-    linesCount: isArabic ? "عدد السطور" : "Lines",
-    balanceStatus: isArabic ? "حالة التوازن" : "Balance Status",
-    balanced: isArabic ? "متوازن" : "Balanced",
-    unbalanced: isArabic ? "غير متوازن" : "Unbalanced",
-
-    posted: isArabic ? "مرحل" : "Posted",
-    draft: isArabic ? "مسودة" : "Draft",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    manual: isArabic ? "يدوي" : "Manual",
-    order: isArabic ? "طلب" : "Order",
-    payment: isArabic ? "دفعة" : "Payment",
-    invoice: isArabic ? "فاتورة" : "Invoice",
-    refund: isArabic ? "استرداد" : "Refund",
-    adjustment: isArabic ? "تسوية" : "Adjustment",
-    other: isArabic ? "أخرى" : "Other",
-
-    searchPlaceholder: isArabic
-      ? "ابحث في سطور القيد..."
-      : "Search journal lines...",
-
-    columns: isArabic ? "الأعمدة" : "Columns",
-    filters: isArabic ? "الفلاتر" : "Filters",
-
-    sortOrder: isArabic ? "الترتيب" : "Sort",
-    accountCode: isArabic ? "كود الحساب" : "Account Code",
-    accountName: isArabic ? "اسم الحساب" : "Account Name",
-    accountType: isArabic ? "نوع الحساب" : "Account Type",
-    normalBalance: isArabic ? "طبيعة الحساب" : "Normal Balance",
-    debit: isArabic ? "مدين" : "Debit",
-    credit: isArabic ? "دائن" : "Credit",
-    action: isArabic ? "الإجراء" : "Action",
-
-    noRows: isArabic ? "لا توجد سطور" : "No lines found",
-    noRowsDesc: isArabic
-      ? "لا توجد سطور مرتبطة بهذا القيد أو أن البحث الحالي لا يعرض نتائج."
-      : "No lines are linked to this journal or the current search returned no results.",
-
-    viewAccount: isArabic ? "عرض الحساب" : "View Account",
-    previous: isArabic ? "السابق" : "Previous",
-    next: isArabic ? "التالي" : "Next",
-    all: isArabic ? "الكل" : "All",
-
-    loadSuccess: isArabic ? "تم تحديث تفاصيل القيد" : "Journal detail refreshed",
-    loadError: isArabic
-      ? "تعذر تحميل تفاصيل القيد"
-      : "Unable to load journal detail",
-    invalidJournal: isArabic ? "معرّف القيد غير صحيح" : "Invalid journal ID",
-    exportSuccess: isArabic ? "تم تجهيز ملف التصدير" : "Export file prepared",
-  };
-}
-
-/* ============================================================
-   UI Helpers
-============================================================ */
-
-function MoneyValue({
-  value,
-  className = "",
-}: {
-  value: string | number | null | undefined;
-  className?: string;
-}) {
-  return (
-    <span className={`inline-flex items-center gap-1 ${className}`} dir="ltr">
-      <span>{formatMoney(value)}</span>
-      <Image
-        src={CURRENCY_ICON_PATH}
-        alt="SAR"
-        width={15}
-        height={15}
-        className="shrink-0"
-      />
-    </span>
-  );
 }
 
 function statusLabel(status: JournalStatus, locale: AppLocale) {
   const t = dictionary(locale);
 
   const labels: Record<JournalStatus, string> = {
-    POSTED: t.posted,
     DRAFT: t.draft,
+    POSTED: t.posted,
     CANCELLED: t.cancelled,
+    REVERSED: t.reversed,
     UNKNOWN: t.unknown,
   };
 
-  return labels[status] || labels.UNKNOWN;
-}
-
-function statusBadgeClass(status: JournalStatus) {
-  if (status === "POSTED") {
-    return "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700";
-  }
-
-  if (status === "DRAFT") {
-    return "rounded-full border-amber-200 bg-amber-50 text-amber-700";
-  }
-
-  if (status === "CANCELLED") {
-    return "rounded-full border-red-200 bg-red-50 text-red-700";
-  }
-
-  return "rounded-full border-slate-200 bg-slate-50 text-slate-700";
+  return labels[status];
 }
 
 function sourceLabel(source: PostingSource, locale: AppLocale) {
@@ -568,82 +879,662 @@ function sourceLabel(source: PostingSource, locale: AppLocale) {
     INVOICE: t.invoice,
     REFUND: t.refund,
     ADJUSTMENT: t.adjustment,
+    TREASURY: t.treasury,
+    COMMISSION: t.commission,
+    OPENING: t.opening,
+    SYSTEM: t.system,
     OTHER: t.other,
     UNKNOWN: t.unknown,
   };
 
-  return labels[source] || labels.UNKNOWN;
+  return labels[source];
+}
+
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
+}
+
+function MoneyText({ value }: { value: unknown }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span>{formatMoney(value)}</span>
+      <SarIcon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function statusBadge(status: JournalStatus, locale: AppLocale) {
+  const label = statusLabel(status, locale);
+
+  if (status === "POSTED") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "DRAFT") {
+    return (
+      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (status === "CANCELLED" || status === "REVERSED") {
+    return (
+      <Badge variant="destructive" className="rounded-full px-3 py-1">
+        {label}
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="secondary" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
+  );
+}
+
+function sourceBadge(source: PostingSource, locale: AppLocale) {
+  const label = sourceLabel(source, locale);
+
+  if (source === "PAYMENT" || source === "TREASURY") {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (source === "INVOICE" || source === "ORDER") {
+    return (
+      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  if (source === "COMMISSION" || source === "OPENING") {
+    return (
+      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+        {label}
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="secondary" className="rounded-full px-3 py-1">
+      {label}
+    </Badge>
+  );
+}
+
+function balanceBadge(isBalanced: boolean, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  if (isBalanced) {
+    return (
+      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+        {t.balanced}
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant="destructive" className="rounded-full px-3 py-1">
+      {t.notBalanced}
+    </Badge>
+  );
+}
+
+function sortValue(row: JournalLine, key: SortKey): string | number {
+  if (key === "debit_amount") return row.debit_amount;
+  if (key === "credit_amount") return row.credit_amount;
+  if (key === "sort_order") return row.sort_order;
+
+  return String(row[key] || "");
+}
+
+/* ============================================================
+   Skeleton
+============================================================ */
+
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+}
+
+function SummaryCardsSkeleton() {
+  return (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-2">
+                <SkeletonLine className="h-7 w-20" />
+                <SkeletonLine className="h-4 w-32" />
+              </div>
+              <SkeletonLine className="h-10 w-10 rounded-xl" />
+            </div>
+
+            <div className="mt-4 flex items-center gap-2">
+              <SkeletonLine className="h-3 w-8" />
+              <SkeletonLine className="h-2 flex-1" />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
+  return (
+    <>
+      {Array.from({ length: 6 }).map((_, rowIndex) => (
+        <TableRow key={rowIndex}>
+          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
+            <TableCell key={columnIndex}>
+              <SkeletonLine
+                className={
+                  columnIndex === 2
+                    ? "h-8 w-44 rounded-lg"
+                    : "h-4 w-24 rounded-lg"
+                }
+              />
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
+/* ============================================================
+   Export / Print
+============================================================ */
+
+function downloadExcel({
+  filename,
+  worksheetName,
+  title,
+  locale,
+  summaryRows,
+  headers,
+  rows,
+}: {
+  filename: string;
+  worksheetName: string;
+  title: string;
+  locale: AppLocale;
+  summaryRows: Array<[string, string | number]>;
+  headers: string[];
+  rows: Array<Array<string | number>>;
+}) {
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const align = locale === "ar" ? "right" : "left";
+  const colspan = Math.max(headers.length, 2);
+
+  const summaryHtml = summaryRows
+    .map(
+      ([label, value]) => `
+        <tr>
+          <td class="summary-label">${escapeHtml(label)}</td>
+          <td class="summary-value">${escapeHtml(value)}</td>
+        </tr>`,
+    )
+    .join("");
+
+  const headerHtml = headers
+    .map((header) => `<th>${escapeHtml(header)}</th>`)
+    .join("");
+
+  const rowsHtml = rows
+    .map(
+      (row) => `
+        <tr>
+          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
+        </tr>`,
+    )
+    .join("");
+
+  const workbook = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office"
+          xmlns:x="urn:schemas-microsoft-com:office:excel"
+          xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="UTF-8" />
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>${escapeHtml(worksheetName)}</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayRightToLeft>${locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <style>
+          body { direction: ${dir}; font-family: Arial, sans-serif; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td {
+            border: 1px solid #d9e2ef;
+            padding: 8px;
+            text-align: ${align};
+            vertical-align: top;
+            mso-number-format: "\\@";
+          }
+          th { background: #d8ecfb; color: #000; font-weight: 700; }
+          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
+          .section { font-weight: 700; background: #eef6ff; }
+          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
+          .summary-value { font-weight: 700; }
+        </style>
+      </head>
+
+      <body dir="${dir}">
+        <table>
+          <tr><td class="title" colspan="${colspan}">${escapeHtml(title)}</td></tr>
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr><td class="section" colspan="${colspan}">
+            ${locale === "ar" ? "ملخص القيد" : "Entry Summary"}
+          </td></tr>
+          ${summaryHtml}
+          <tr><td colspan="${colspan}"></td></tr>
+          <tr>${headerHtml}</tr>
+          ${rowsHtml}
+        </table>
+      </body>
+    </html>`;
+
+  const blob = new Blob([workbook], {
+    type: "application/vnd.ms-excel;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+
+  URL.revokeObjectURL(url);
+}
+
+function buildPrintHtml({
+  locale,
+  title,
+  entry,
+  rows,
+  t,
+}: {
+  locale: AppLocale;
+  title: string;
+  entry: JournalDetail;
+  rows: JournalLine[];
+  t: ReturnType<typeof dictionary>;
+}) {
+  const isArabic = locale === "ar";
+  const now = new Date().toLocaleString("en-US");
+  const difference = entry.total_debit - entry.total_credit;
+
+  const tableRows = rows
+    .map(
+      (item, index) => `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(item.account_code || "-")}</td>
+          <td>${escapeHtml(item.account_name || "-")}</td>
+          <td>${escapeHtml(item.cost_center_name || "-")}</td>
+          <td>${escapeHtml(item.description || "-")}</td>
+          <td>${escapeHtml(formatMoney(item.debit_amount))}</td>
+          <td>${escapeHtml(formatMoney(item.credit_amount))}</td>
+        </tr>
+      `,
+    )
+    .join("");
+
+  return `
+    <!doctype html>
+    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            padding: 24px;
+            font-family: Arial, Tahoma, sans-serif;
+            color: #111827;
+            background: #ffffff;
+            direction: ${isArabic ? "rtl" : "ltr"};
+            text-align: ${isArabic ? "right" : "left"};
+          }
+          .print-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 18px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 14px;
+          }
+          h1 { margin: 0; font-size: 22px; font-weight: 800; }
+          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
+          .badge {
+            display: inline-block;
+            border: 1px solid #d1d5db;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: #374151;
+          }
+          .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 18px;
+          }
+          .summary-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 10px;
+          }
+          .summary-card span {
+            display: block;
+            color: #6b7280;
+            font-size: 11px;
+            margin-bottom: 5px;
+          }
+          .summary-card strong { font-size: 16px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th { background: #f3f4f6; color: #111827; font-weight: 700; }
+          th, td {
+            border: 1px solid #e5e7eb;
+            padding: 9px 8px;
+            text-align: ${isArabic ? "right" : "left"};
+            vertical-align: top;
+          }
+          tr:nth-child(even) td { background: #fafafa; }
+          @page { size: A4 landscape; margin: 12mm; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+
+      <body>
+        <div class="print-header">
+          <div>
+            <h1>${escapeHtml(title)}</h1>
+            <div class="meta">
+              <div>${escapeHtml(t.entryNumber)}: ${escapeHtml(entry.entry_number)}</div>
+              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
+              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
+            </div>
+          </div>
+          <div class="badge">Primey Care</div>
+        </div>
+
+        <div class="summary-grid">
+          <div class="summary-card"><span>${escapeHtml(t.totalDebit)}</span><strong>${formatMoney(entry.total_debit)}</strong></div>
+          <div class="summary-card"><span>${escapeHtml(t.totalCredit)}</span><strong>${formatMoney(entry.total_credit)}</strong></div>
+          <div class="summary-card"><span>${escapeHtml(t.difference)}</span><strong>${formatMoney(difference)}</strong></div>
+          <div class="summary-card"><span>${escapeHtml(t.linesCount)}</span><strong>${formatNumber(entry.lines.length)}</strong></div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>${escapeHtml(t.table.accountCode)}</th>
+              <th>${escapeHtml(t.table.accountName)}</th>
+              <th>${escapeHtml(t.table.costCenter)}</th>
+              <th>${escapeHtml(t.table.description)}</th>
+              <th>${escapeHtml(t.table.debit)}</th>
+              <th>${escapeHtml(t.table.credit)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              tableRows ||
+              `<tr><td colspan="7" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
+            }
+          </tbody>
+        </table>
+
+        <script>
+          window.addEventListener("load", () => {
+            window.focus();
+            window.print();
+          });
+        </script>
+      </body>
+    </html>
+  `;
 }
 
 /* ============================================================
    Page
 ============================================================ */
 
-export default function JournalDetailPage() {
-  const params = useParams<{ id: string }>();
+export default function JournalEntryDetailPage() {
+  const params = useParams<{ id?: string }>();
+  const auth = useAuth() as unknown;
+
   const journalId = String(params?.id || "");
 
   const [locale, setLocale] = useState<AppLocale>("ar");
-  const [loading, setLoading] = useState(true);
-
-  const [payload, setPayload] = useState<JournalDetailPayload | null>(null);
-
-  const [searchTerm, setSearchTerm] = useState("");
+  const [entry, setEntry] = useState<JournalDetail | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [notFound, setNotFound] = useState(false);
+  const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("sort_order");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [visibleColumns, setVisibleColumns] =
+    useState<VisibleColumns>(DEFAULT_COLUMNS);
 
-  const [page, setPage] = useState(1);
-  const pageSize = 12;
-
-  const [visibleColumns, setVisibleColumns] = useState<VisibleColumns>({
-    sort_order: true,
-    account_code: true,
-    account_name: true,
-    account_type: true,
-    normal_balance: true,
-    description: true,
-    debit_amount: true,
-    credit_amount: true,
-    actions: true,
-  });
-
-  const t = dictionary(locale);
+  const t = useMemo(() => dictionary(locale), [locale]);
   const isArabic = locale === "ar";
+  const authResolving = isAuthResolving(auth);
 
-  function validateInputs() {
-    if (!journalId || !Number.isInteger(Number(journalId))) {
-      toast.error(t.invalidJournal);
-      return false;
-    }
+  const canView = hasSafePermission(
+    auth,
+    ["accounting.view", "accounting.journals.view", "accounting.detail"],
+    "view",
+  );
 
-    return true;
-  }
+  const canExport = hasSafePermission(
+    auth,
+    ["accounting.export", "reports.accounting.export"],
+    "action",
+  );
 
-  async function loadJournal(showToast = false) {
-    try {
-      if (!validateInputs()) return;
+  const canPrint = hasSafePermission(
+    auth,
+    ["accounting.print", "reports.accounting.print"],
+    "action",
+  );
 
-      setLoading(true);
+  const filteredLines = useMemo(() => {
+    const cleanQuery = query.trim().toLowerCase();
 
-      const data = await fetchJournalDetail(journalId);
-      setPayload(data);
+    const lines = (entry?.lines || []).filter((line) => {
+      if (!cleanQuery) return true;
 
-      if (showToast) {
-        toast.success(t.loadSuccess);
+      return [
+        line.account_code,
+        line.account_name,
+        line.account_type,
+        line.normal_balance,
+        line.cost_center_code,
+        line.cost_center_name,
+        line.description,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(cleanQuery);
+    });
+
+    return [...lines].sort((a, b) => {
+      const first = sortValue(a, sortKey);
+      const second = sortValue(b, sortKey);
+
+      if (typeof first === "number" && typeof second === "number") {
+        return sortDirection === "asc" ? first - second : second - first;
       }
-    } catch (error) {
-      console.error("Journal detail load error:", error);
-      toast.error(t.loadError);
-      setPayload(null);
-    } finally {
-      setLoading(false);
-    }
-  }
 
-  function handleExport() {
-    exportCsv(payload);
-    toast.success(t.exportSuccess);
-  }
+      return sortDirection === "asc"
+        ? String(first).localeCompare(String(second))
+        : String(second).localeCompare(String(first));
+    });
+  }, [entry?.lines, query, sortDirection, sortKey]);
+
+  const visibleColumnCount = Object.values(visibleColumns).filter(Boolean).length;
+  const difference = entry ? entry.total_debit - entry.total_credit : 0;
+
+  const summaryCards = useMemo(
+    () => [
+      {
+        title: t.totalDebit,
+        value: entry?.total_debit || 0,
+        icon: Calculator,
+        helper: t.financialSummary,
+        isMoney: true,
+      },
+      {
+        title: t.totalCredit,
+        value: entry?.total_credit || 0,
+        icon: CheckCircle2,
+        helper: t.financialSummary,
+        isMoney: true,
+      },
+      {
+        title: t.difference,
+        value: difference,
+        icon: ShieldCheck,
+        helper: entry?.is_balanced ? t.balanced : t.notBalanced,
+        isMoney: true,
+      },
+      {
+        title: t.linesCount,
+        value: entry?.lines.length || 0,
+        icon: Layers3,
+        helper: t.linesTitle,
+        isMoney: false,
+      },
+    ],
+    [difference, entry, t],
+  );
+
+  const loadEntry = useCallback(
+    async (showToast = false) => {
+      if (!canView) {
+        setIsLoading(false);
+        return;
+      }
+
+      if (!journalId) {
+        setIsLoading(false);
+        setNotFound(true);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setErrorMessage("");
+        setNotFound(false);
+
+        const endpoints = [
+          `/api/accounting/journals/${journalId}/`,
+          `/api/accounting/journal-entries/${journalId}/`,
+        ];
+
+        let loadedPayload: unknown = null;
+        let loaded = false;
+
+        for (const endpoint of endpoints) {
+          const response = await fetch(apiUrl(endpoint), {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+          });
+
+          const payload = (await response.json().catch(() => null)) as
+            | ApiEnvelope<unknown>
+            | unknown
+            | null;
+
+          if ([400, 404, 405].includes(response.status)) {
+            loadedPayload = payload;
+            continue;
+          }
+
+          const envelope = payload as ApiEnvelope<unknown> | null;
+
+          if (
+            !response.ok ||
+            envelope?.ok === false ||
+            envelope?.success === false
+          ) {
+            throw new Error(
+              envelope?.message ||
+                envelope?.detail ||
+                envelope?.error ||
+                `HTTP ${response.status}`,
+            );
+          }
+
+          loadedPayload = payload;
+          loaded = true;
+          break;
+        }
+
+        if (!loaded) {
+          setEntry(null);
+          setNotFound(true);
+          return;
+        }
+
+        const normalized = normalizeJournalDetail(loadedPayload);
+
+        if (!normalized || !normalized.id) {
+          setEntry(null);
+          setNotFound(true);
+          return;
+        }
+
+        setEntry(normalized);
+
+        if (showToast) {
+          toast.success(t.refreshSuccess);
+        }
+      } catch (error) {
+        console.error("Journal detail load error:", error);
+        setEntry(null);
+        setErrorMessage(t.apiError);
+        toast.error(t.apiError);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [canView, journalId, t.apiError, t.refreshSuccess],
+  );
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -655,706 +1546,763 @@ export default function JournalDetailPage() {
     setSortDirection("asc");
   }
 
+  function exportExcel() {
+    if (!canExport || !entry) return;
+
+    if (filteredLines.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
+    const generatedAt = new Date();
+
+    downloadExcel({
+      filename: `primey-care-journal-entry-${entry.entry_number || journalId}-${generatedAt
+        .toISOString()
+        .slice(0, 10)}.xls`,
+      worksheetName: isArabic ? "تفاصيل القيد" : "Journal Entry",
+      title: t.title,
+      locale,
+      summaryRows: [
+        [t.generatedAt, generatedAt.toLocaleString("en-US")],
+        [t.entryNumber, entry.entry_number],
+        [t.entryDate, formatDate(entry.entry_date, locale)],
+        [t.status, statusLabel(entry.status, locale)],
+        [t.postingSource, sourceLabel(entry.posting_source, locale)],
+        [t.reference, entry.reference || "-"],
+        [t.totalDebit, formatMoney(entry.total_debit)],
+        [t.totalCredit, formatMoney(entry.total_credit)],
+        [t.difference, formatMoney(difference)],
+        [t.linesCount, entry.lines.length],
+      ],
+      headers: [
+        t.table.sortOrder,
+        t.table.accountCode,
+        t.table.accountName,
+        t.table.accountType,
+        t.table.normalBalance,
+        t.table.costCenter,
+        t.table.description,
+        t.table.debit,
+        t.table.credit,
+      ],
+      rows: filteredLines.map((line) => [
+        line.sort_order || "-",
+        line.account_code || "-",
+        line.account_name || "-",
+        line.account_type || "-",
+        line.normal_balance || "-",
+        [line.cost_center_code, line.cost_center_name].filter(Boolean).join(" - ") ||
+          "-",
+        line.description || "-",
+        formatMoney(line.debit_amount),
+        formatMoney(line.credit_amount),
+      ]),
+    });
+
+    toast.success(t.exportSuccess);
+  }
+
+  function printPage() {
+    if (!canPrint || !entry) return;
+
+    if (filteredLines.length === 0) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(t.printError);
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(
+      buildPrintHtml({
+        locale,
+        title: t.title,
+        entry,
+        rows: filteredLines,
+        t,
+      }),
+    );
+    printWindow.document.close();
+
+    toast.success(t.printSuccess);
+  }
+
   useEffect(() => {
-    const currentLocale = readLocale();
-    setLocale(currentLocale);
-    applyDocumentLocale(currentLocale);
+    const syncLocale = () => {
+      const nextLocale = readLocale();
+
+      applyDocumentLocale(nextLocale);
+      setLocale(nextLocale);
+    };
+
+    const syncAfterPaint = () => {
+      syncLocale();
+      window.setTimeout(syncLocale, 0);
+    };
+
+    syncAfterPaint();
+
+    window.addEventListener("primey-locale-changed", syncAfterPaint);
+    window.addEventListener("storage", syncAfterPaint);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", syncAfterPaint);
+      window.removeEventListener("storage", syncAfterPaint);
+    };
   }, []);
 
   useEffect(() => {
-    loadJournal(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [journalId]);
+    if (authResolving) return;
+    loadEntry(false);
+  }, [authResolving, loadEntry]);
 
-  useEffect(() => {
-    setPage(1);
-  }, [searchTerm]);
+  if (!authResolving && !canView) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
 
-  const lines = payload?.lines || [];
-
-  const summary = useMemo(() => {
-    const totalDebit = payload?.total_debit || "0.00";
-    const totalCredit = payload?.total_credit || "0.00";
-    const difference = Math.abs(toNumber(totalDebit) - toNumber(totalCredit));
-    const isBalanced = Boolean(payload?.is_balanced) || difference === 0;
-
-    return {
-      totalDebit,
-      totalCredit,
-      difference,
-      isBalanced,
-      linesCount: lines.length,
-      debitLines: lines.filter((line) => toNumber(line.debit_amount) > 0)
-        .length,
-      creditLines: lines.filter((line) => toNumber(line.credit_amount) > 0)
-        .length,
-    };
-  }, [payload, lines]);
-
-  const filteredRows = useMemo(() => {
-    const keyword = searchTerm.trim().toLowerCase();
-
-    return lines
-      .filter((line) => {
-        if (!keyword) return true;
-
-        return [
-          line.account_code,
-          line.account_name,
-          line.account_type,
-          line.normal_balance,
-          line.description,
-          line.debit_amount,
-          line.credit_amount,
-          line.sort_order,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(keyword);
-      })
-      .sort((a, b) => compareValues(a, b, sortKey, sortDirection));
-  }, [lines, searchTerm, sortKey, sortDirection]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-
-  const paginatedRows = useMemo(() => {
-    const safePage = Math.min(page, totalPages);
-    const startIndex = (safePage - 1) * pageSize;
-
-    return filteredRows.slice(startIndex, startIndex + pageSize);
-  }, [filteredRows, page, totalPages]);
-
-  const statusCards = [
-    {
-      label: t.totalDebit,
-      value: summary.totalDebit,
-      icon: TrendingUp,
-      percent: summary.linesCount > 0 ? 100 : 0,
-      money: true,
-    },
-    {
-      label: t.totalCredit,
-      value: summary.totalCredit,
-      icon: TrendingDown,
-      percent: summary.linesCount > 0 ? 100 : 0,
-      money: true,
-    },
-    {
-      label: t.difference,
-      value: summary.difference,
-      icon: ShieldCheck,
-      percent: summary.isBalanced ? 100 : 50,
-      money: true,
-    },
-    {
-      label: t.linesCount,
-      value: formatNumber(summary.linesCount),
-      icon: Layers3,
-      percent: 100,
-      money: false,
-    },
-  ];
-
-  const summaryCards = [
-    {
-      title: t.totalDebit,
-      value: summary.totalDebit,
-      icon: TrendingUp,
-      bg: "bg-emerald-50",
-      money: true,
-    },
-    {
-      title: t.totalCredit,
-      value: summary.totalCredit,
-      icon: TrendingDown,
-      bg: "bg-sky-50",
-      money: true,
-    },
-    {
-      title: t.balanceStatus,
-      value: summary.isBalanced ? t.balanced : t.unbalanced,
-      icon: ShieldCheck,
-      bg: "bg-violet-50",
-      money: false,
-    },
-    {
-      title: t.linesCount,
-      value: formatNumber(summary.linesCount),
-      icon: WalletCards,
-      bg: "bg-teal-50",
-      money: false,
-    },
-  ];
-
-  const columnOptions: Array<{
-    key: keyof VisibleColumns;
-    label: string;
-  }> = [
-    { key: "sort_order", label: t.sortOrder },
-    { key: "account_code", label: t.accountCode },
-    { key: "account_name", label: t.accountName },
-    { key: "account_type", label: t.accountType },
-    { key: "normal_balance", label: t.normalBalance },
-    { key: "description", label: t.description },
-    { key: "debit_amount", label: t.debit },
-    { key: "credit_amount", label: t.credit },
-    { key: "actions", label: t.action },
-  ];
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4 p-4 md:p-6 print:p-0" dir="ltr">
-      <div className="flex flex-col gap-4 print:hidden lg:flex-row lg:items-start lg:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline" className="h-10 gap-2 rounded-xl bg-white px-4">
-            <Link href="/system/accounting/journals">
-              <ArrowLeft className="h-4 w-4" />
-              {t.back}
-            </Link>
-          </Button>
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+            {t.title}
+          </h1>
 
-          <Button asChild variant="outline" className="h-10 gap-2 rounded-xl bg-white px-4">
-            <Link href="/system/accounting">
-              <BarChart3 className="h-4 w-4" />
-              {t.accounting}
-            </Link>
-          </Button>
-
-          <Button asChild variant="outline" className="h-10 gap-2 rounded-xl bg-white px-4">
-            <Link href="/system/accounting/ledger">
-              <BookOpenCheck className="h-4 w-4" />
-              {t.ledger}
-            </Link>
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-            onClick={() => loadJournal(true)}
-            disabled={loading}
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-            {t.refresh}
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 gap-2 rounded-xl bg-white px-4"
-            onClick={printPage}
-          >
-            <FileText className="h-4 w-4" />
-            {t.print}
-          </Button>
-
-          <Button
-            type="button"
-            className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
-            onClick={handleExport}
-            disabled={!payload}
-          >
-            <Download className="h-4 w-4" />
-            {t.export}
-          </Button>
-        </div>
-
-        <div className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`} dir={isArabic ? "rtl" : "ltr"}>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-950">{t.title}</h1>
-          <p className="text-sm leading-6 text-slate-500">
-            {payload?.entry_number
-              ? `${payload.entry_number} - ${formatDate(payload.entry_date, locale)}`
-              : t.subtitle}
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
           </p>
         </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Link href="/system/accounting/journals">
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>{t.back}</span>
+            </Button>
+          </Link>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={() => loadEntry(true)}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+            <span>{t.refresh}</span>
+          </Button>
+
+          {canExport ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl"
+              onClick={exportExcel}
+              disabled={isLoading || !entry || filteredLines.length === 0}
+            >
+              <Download className="h-4 w-4" />
+              <span>{t.exportExcel}</span>
+            </Button>
+          ) : null}
+
+          {canPrint ? (
+            <Button
+              variant="outline"
+              className="h-10 rounded-xl"
+              onClick={printPage}
+              disabled={isLoading || !entry || filteredLines.length === 0}
+            >
+              <Printer className="h-4 w-4" />
+              <span>{t.print}</span>
+            </Button>
+          ) : null}
+        </div>
       </div>
 
-      <div className="hidden border-b pb-4 print:block" dir={isArabic ? "rtl" : "ltr"}>
-        <h1 className="text-xl font-bold">{t.title}</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          {payload?.entry_number || "-"} / {formatDate(payload?.entry_date, locale)}
-        </p>
-      </div>
+      {!isLoading && errorMessage ? (
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+                <XCircle className="h-5 w-5" />
+              </div>
 
-      <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
-        <Card className="rounded-2xl border-slate-200 bg-white shadow-sm print:shadow-none" dir={isArabic ? "rtl" : "ltr"}>
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
-            <div>
-              <CardTitle className="text-lg font-bold text-slate-950">{t.statusTitle}</CardTitle>
-              <CardDescription className="mt-1">{t.statusDesc}</CardDescription>
+              <div>
+                <p className="font-semibold text-destructive">
+                  {errorMessage}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t.apiErrorHint}
+                </p>
+              </div>
             </div>
 
             <Button
-              type="button"
               variant="outline"
-              size="sm"
-              className="h-9 gap-2 rounded-xl bg-white print:hidden"
-              onClick={handleExport}
-              disabled={!payload}
+              className="rounded-xl"
+              onClick={() => loadEntry(true)}
             >
-              <Download className="h-4 w-4" />
-              {t.export}
+              <RefreshCcw className="h-4 w-4" />
+              {t.retry}
             </Button>
-          </CardHeader>
+          </CardContent>
+        </Card>
+      ) : null}
 
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-4">
-              {statusCards.map((card) => {
-                const Icon = card.icon;
+      {!isLoading && notFound ? (
+        <Card className="rounded-2xl border bg-card shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
+              <FileText className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold">{t.notFoundTitle}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.notFoundText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!errorMessage && !notFound ? (
+        <>
+          {isLoading ? (
+            <SummaryCardsSkeleton />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {summaryCards.map((item) => {
+                const Icon = item.icon;
 
                 return (
-                  <div key={card.label} className="space-y-2">
-                    <div className="flex items-center justify-between text-sm text-slate-500">
-                      <span>{card.label}</span>
-                      <Icon className="h-4 w-4 text-slate-400" />
-                    </div>
+                  <Card
+                    key={item.title}
+                    className="rounded-2xl border bg-card shadow-sm"
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-2xl font-bold">
+                            {item.isMoney ? (
+                              <MoneyText value={item.value} />
+                            ) : (
+                              formatNumber(item.value)
+                            )}
+                          </div>
 
-                    <p className="text-2xl font-bold text-slate-950">
-                      {card.money ? <MoneyValue value={card.value} /> : card.value}
-                    </p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {item.title}
+                          </p>
+                        </div>
 
-                    <div className="h-2 rounded-full bg-slate-100">
-                      <div
-                        className={`h-2 rounded-full ${
-                          card.label === t.totalCredit
-                            ? "bg-sky-500"
-                            : card.label === t.difference && !summary.isBalanced
-                              ? "bg-amber-500"
-                              : "bg-slate-950"
-                        }`}
-                        style={{ width: `${Math.min(card.percent, 100)}%` }}
-                      />
-                    </div>
-                  </div>
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                      </div>
+
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        {item.helper}
+                      </div>
+                    </CardContent>
+                  </Card>
                 );
               })}
             </div>
+          )}
 
-            <div className="grid gap-3 print:hidden md:grid-cols-[1fr_auto_auto]">
-              <div className="relative">
-                <Search className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${isArabic ? "right-3" : "left-3"}`} />
-                <Input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl border-slate-200 bg-white ${isArabic ? "pr-10" : "pl-10"}`}
-                />
-              </div>
+          {entry ? (
+            <>
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <Card className="rounded-2xl border bg-card shadow-sm">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base font-bold">
+                      <FileText className="h-4 w-4" />
+                      {t.entryInfo}
+                    </CardTitle>
+                    <CardDescription>{t.entryInfoDesc}</CardDescription>
+                  </CardHeader>
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="outline" className="h-11 gap-2 rounded-xl bg-white">
-                    <Filter className="h-4 w-4" />
-                    {t.filters}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent align={isArabic ? "start" : "end"} className="w-64 rounded-2xl">
-                  <div dir={isArabic ? "rtl" : "ltr"}>
-                    <DropdownMenuLabel>{t.filters}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    <div className="space-y-2 p-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-10 w-full justify-between rounded-xl bg-white"
-                        onClick={() => {
-                          setSearchTerm("");
-                          setPage(1);
-                        }}
-                      >
-                        <span>{t.all}</span>
-                        <Layers3 className="h-4 w-4" />
-                      </Button>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-10 w-full justify-between rounded-xl bg-white"
-                        onClick={() => setSearchTerm("debit")}
-                      >
-                        <span>{t.debit}</span>
-                        <TrendingUp className="h-4 w-4" />
-                      </Button>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-10 w-full justify-between rounded-xl bg-white"
-                        onClick={() => setSearchTerm("credit")}
-                      >
-                        <span>{t.credit}</span>
-                        <TrendingDown className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="outline" className="h-11 gap-2 rounded-xl bg-white">
-                    <ColumnsIcon className="h-4 w-4" />
-                    {t.columns}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent align={isArabic ? "start" : "end"} className="w-56 rounded-2xl">
-                  <div dir={isArabic ? "rtl" : "ltr"}>
-                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    {columnOptions.map((column) => (
-                      <DropdownMenuCheckboxItem
-                        key={column.key}
-                        checked={visibleColumns[column.key]}
-                        onCheckedChange={(checked) =>
-                          setVisibleColumns((current) => ({
-                            ...current,
-                            [column.key]: Boolean(checked),
-                          }))
-                        }
-                      >
-                        {column.label}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50 hover:bg-slate-50">
-                    {visibleColumns.sort_order ? (
-                      <TableHead>
-                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort("sort_order")}>
-                          {t.sortOrder}
-                          <ArrowDownUp className="h-3.5 w-3.5 print:hidden" />
-                        </button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.account_code ? (
-                      <TableHead>
-                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort("account_code")}>
-                          {t.accountCode}
-                          <ArrowDownUp className="h-3.5 w-3.5 print:hidden" />
-                        </button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.account_name ? (
-                      <TableHead>
-                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort("account_name")}>
-                          {t.accountName}
-                          <ArrowDownUp className="h-3.5 w-3.5 print:hidden" />
-                        </button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.account_type ? <TableHead>{t.accountType}</TableHead> : null}
-                    {visibleColumns.normal_balance ? <TableHead>{t.normalBalance}</TableHead> : null}
-                    {visibleColumns.description ? <TableHead>{t.description}</TableHead> : null}
-
-                    {visibleColumns.debit_amount ? (
-                      <TableHead>
-                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort("debit_amount")}>
-                          {t.debit}
-                          <ArrowDownUp className="h-3.5 w-3.5 print:hidden" />
-                        </button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.credit_amount ? (
-                      <TableHead>
-                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort("credit_amount")}>
-                          {t.credit}
-                          <ArrowDownUp className="h-3.5 w-3.5 print:hidden" />
-                        </button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.actions ? <TableHead className="print:hidden">{t.action}</TableHead> : null}
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={9} className="h-40 text-center">
-                        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          {t.refresh}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : paginatedRows.length > 0 ? (
-                    paginatedRows.map((line) => (
-                      <TableRow key={line.id}>
-                        {visibleColumns.sort_order ? (
-                          <TableCell className="font-semibold text-slate-950">
-                            {formatNumber(line.sort_order)}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.account_code ? (
-                          <TableCell className="font-semibold text-slate-950">
-                            {line.account_code || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.account_name ? (
-                          <TableCell className="min-w-[220px] text-slate-700">
-                            {line.account_name || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.account_type ? (
-                          <TableCell>
-                            <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 text-slate-700">
-                              {line.account_type || "-"}
-                            </Badge>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.normal_balance ? (
-                          <TableCell className="text-slate-600">
-                            {line.normal_balance || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.description ? (
-                          <TableCell className="max-w-[260px] truncate text-slate-600">
-                            {line.description || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.debit_amount ? (
-                          <TableCell className="font-semibold text-slate-950">
-                            <MoneyValue value={line.debit_amount} />
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.credit_amount ? (
-                          <TableCell className="font-semibold text-slate-950">
-                            <MoneyValue value={line.credit_amount} />
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.actions ? (
-                          <TableCell className="print:hidden">
-                            {line.account_id ? (
-                              <Button asChild variant="ghost" size="sm" className="h-8 rounded-lg px-2">
-                                <Link href={`/system/accounting/accounts/${line.account_id}`}>
-                                  {t.viewAccount}
-                                </Link>
-                              </Button>
-                            ) : (
-                              "-"
-                            )}
-                          </TableCell>
-                        ) : null}
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={9} className="h-48 text-center">
-                        <div className="space-y-2">
-                          <p className="font-semibold text-slate-950">{t.noRows}</p>
-                          <p className="text-sm text-slate-500">{t.noRowsDesc}</p>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            <div className="flex flex-col gap-3 print:hidden md:flex-row md:items-center md:justify-between">
-              <div className="text-sm text-slate-500">
-                {formatNumber(filteredRows.length)} / {formatNumber(lines.length)}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl bg-white"
-                  disabled={page <= 1 || loading}
-                  onClick={() => setPage((current) => Math.max(1, current - 1))}
-                >
-                  {t.previous}
-                </Button>
-
-                <Badge variant="outline" className="rounded-xl bg-white px-3">
-                  {formatNumber(page)} / {formatNumber(totalPages)}
-                </Badge>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl bg-white"
-                  disabled={page >= totalPages || loading}
-                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                >
-                  {t.next}
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border-slate-200 bg-white shadow-sm print:shadow-none" dir={isArabic ? "rtl" : "ltr"}>
-          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
-            <div>
-              <CardTitle className="text-lg font-bold text-slate-950">{t.summaryTitle}</CardTitle>
-              <CardDescription className="mt-1">{t.summaryDesc}</CardDescription>
-            </div>
-
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white">
-              <ReceiptText className="h-5 w-5 text-slate-700" />
-            </div>
-          </CardHeader>
-
-          <CardContent className="space-y-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-bold text-slate-950">
-                    {summary.isBalanced ? t.balanced : t.unbalanced}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-500">{t.balanceStatus}</p>
-                </div>
-
-                <div className={`flex h-12 w-12 items-center justify-center rounded-xl text-white ${summary.isBalanced ? "bg-slate-950" : "bg-amber-500"}`}>
-                  <ShieldCheck className="h-5 w-5" />
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="space-y-2">
-                <div>
-                  <p className="text-xs text-slate-500">{t.entryNumber}</p>
-                  <p className="mt-1 font-bold text-slate-950">
-                    {payload?.entry_number || journalId}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-slate-500">{t.entryDate}</p>
-                  <p className="mt-1 font-bold text-slate-950">
-                    {formatDate(payload?.entry_date, locale)}
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-2 pt-2">
-                  <Badge variant="outline" className={statusBadgeClass(payload?.status || "UNKNOWN")}>
-                    {statusLabel(payload?.status || "UNKNOWN", locale)}
-                  </Badge>
-
-                  <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-slate-700">
-                    {sourceLabel(payload?.posting_source || "UNKNOWN", locale)}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-dashed border-slate-200 p-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.totalDebit}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    <MoneyValue value={summary.totalDebit} />
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.totalCredit}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    <MoneyValue value={summary.totalCredit} />
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.linesCount}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    {formatNumber(summary.linesCount)}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">{t.difference}</p>
-                  <p className="mt-1 text-lg font-bold text-slate-950">
-                    <MoneyValue value={summary.difference} />
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2 rounded-2xl border border-slate-200 p-4">
-              <div>
-                <p className="text-xs text-slate-500">{t.reference}</p>
-                <p className="mt-1 text-sm font-semibold text-slate-950">
-                  {payload?.reference || "-"}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs text-slate-500">{t.externalReference}</p>
-                <p className="mt-1 text-sm font-semibold text-slate-950">
-                  {payload?.external_reference || "-"}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs text-slate-500">{t.description}</p>
-                <p className="mt-1 text-sm font-semibold text-slate-950">
-                  {payload?.description || "-"}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs text-slate-500">{t.postedAt}</p>
-                <p className="mt-1 text-sm font-semibold text-slate-950">
-                  {formatDateTime(payload?.posted_at, locale)}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 print:hidden md:grid-cols-2 xl:grid-cols-4">
-        {summaryCards.map((card) => {
-          const Icon = card.icon;
-
-          return (
-            <Card key={card.title} className="rounded-2xl border-slate-200 bg-white shadow-sm" dir={isArabic ? "rtl" : "ltr"}>
-              <CardContent className="p-5">
-                <div className={`rounded-2xl ${card.bg} p-4`}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-slate-500">{card.title}</p>
-                      <p className="mt-2 text-2xl font-bold text-slate-950">
-                        {card.money ? <MoneyValue value={card.value} /> : card.value}
+                  <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="rounded-2xl border bg-background p-4">
+                      <p className="text-xs text-muted-foreground">
+                        {t.entryNumber}
+                      </p>
+                      <p className="mt-2 font-semibold">
+                        {entry.entry_number || "-"}
                       </p>
                     </div>
 
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-950 shadow-sm">
-                      <Icon className="h-5 w-5" />
+                    <div className="rounded-2xl border bg-background p-4">
+                      <p className="text-xs text-muted-foreground">
+                        {t.entryDate}
+                      </p>
+                      <p className="mt-2 font-semibold">
+                        {formatDate(entry.entry_date, locale)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border bg-background p-4">
+                      <p className="text-xs text-muted-foreground">
+                        {t.status}
+                      </p>
+                      <div className="mt-2">
+                        {statusBadge(entry.status, locale)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border bg-background p-4">
+                      <p className="text-xs text-muted-foreground">
+                        {t.postingSource}
+                      </p>
+                      <div className="mt-2">
+                        {sourceBadge(entry.posting_source, locale)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border bg-background p-4">
+                      <p className="text-xs text-muted-foreground">
+                        {t.reference}
+                      </p>
+                      <p className="mt-2 font-semibold">
+                        {entry.reference || "-"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border bg-background p-4">
+                      <p className="text-xs text-muted-foreground">
+                        {t.externalReference}
+                      </p>
+                      <p className="mt-2 font-semibold">
+                        {entry.external_reference || "-"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border bg-background p-4 md:col-span-2 xl:col-span-3">
+                      <p className="text-xs text-muted-foreground">
+                        {t.description}
+                      </p>
+                      <p className="mt-2 text-sm leading-6">
+                        {entry.description || "-"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border bg-background p-4 md:col-span-2 xl:col-span-3">
+                      <p className="text-xs text-muted-foreground">
+                        {t.notes}
+                      </p>
+                      <p className="mt-2 text-sm leading-6">
+                        {entry.notes || "-"}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <aside className="space-y-4">
+                  <Card className="rounded-2xl border bg-card shadow-sm">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2 text-base font-bold">
+                        <Calculator className="h-4 w-4" />
+                        {t.financialSummary}
+                      </CardTitle>
+                      <CardDescription>{t.financialSummaryDesc}</CardDescription>
+                    </CardHeader>
+
+                    <CardContent className="space-y-4">
+                      <div className="rounded-2xl border bg-background p-4">
+                        <p className="text-xs text-muted-foreground">
+                          {t.totalDebit}
+                        </p>
+                        <div className="mt-2 text-xl font-bold">
+                          <MoneyText value={entry.total_debit} />
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border bg-background p-4">
+                        <p className="text-xs text-muted-foreground">
+                          {t.totalCredit}
+                        </p>
+                        <div className="mt-2 text-xl font-bold">
+                          <MoneyText value={entry.total_credit} />
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border bg-background p-4">
+                        <p className="text-xs text-muted-foreground">
+                          {t.difference}
+                        </p>
+                        <div className="mt-2 text-xl font-bold">
+                          <MoneyText value={difference} />
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border bg-background p-4">
+                        <p className="text-xs text-muted-foreground">
+                          {t.linesCount}
+                        </p>
+                        <div className="mt-2 text-2xl font-bold">
+                          {formatNumber(entry.lines.length)}
+                        </div>
+                      </div>
+
+                      {balanceBadge(entry.is_balanced, locale)}
+                    </CardContent>
+                  </Card>
+
+                  <Card className="rounded-2xl border bg-card shadow-sm">
+                    <CardContent className="space-y-3 p-5">
+                      <div className="grid gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            {t.postedAt}
+                          </p>
+                          <p className="mt-1">
+                            {formatDateTime(entry.posted_at, locale)}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            {t.createdAt}
+                          </p>
+                          <p className="mt-1">
+                            {formatDateTime(entry.created_at, locale)}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            {t.updatedAt}
+                          </p>
+                          <p className="mt-1">
+                            {formatDateTime(entry.updated_at, locale)}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </aside>
+              </div>
+
+              <Card className="rounded-2xl border bg-card shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base font-bold">
+                    <Layers3 className="h-4 w-4" />
+                    {t.linesTitle}
+                  </CardTitle>
+                  <CardDescription>{t.linesDesc}</CardDescription>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  <div className="relative w-full">
+                    <Search
+                      className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+                        isArabic ? "right-3" : "left-3"
+                      }`}
+                    />
+                    <Input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder={t.searchPlaceholder}
+                      className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {query.trim() ? (
+                      <Button
+                        variant="outline"
+                        className="h-10 rounded-xl"
+                        onClick={() => setQuery("")}
+                      >
+                        {t.clearSearch}
+                      </Button>
+                    ) : (
+                      <div />
+                    )}
+
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" className="h-10 rounded-xl">
+                          <ColumnsIcon className="h-4 w-4" />
+                          {t.columns}
+                        </Button>
+                      </DropdownMenuTrigger>
+
+                      <DropdownMenuContent align={isArabic ? "start" : "end"}>
+                        <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+
+                        {Object.entries(visibleColumns).map(([key, value]) => (
+                          <DropdownMenuCheckboxItem
+                            key={key}
+                            checked={value}
+                            onCheckedChange={(checked) =>
+                              setVisibleColumns((current) => ({
+                                ...current,
+                                [key]: Boolean(checked),
+                              }))
+                            }
+                          >
+                            {key === "sortOrder"
+                              ? t.table.sortOrder
+                              : key === "accountCode"
+                                ? t.table.accountCode
+                                : key === "accountName"
+                                  ? t.table.accountName
+                                  : key === "accountType"
+                                    ? t.table.accountType
+                                    : key === "normalBalance"
+                                      ? t.table.normalBalance
+                                      : key === "costCenter"
+                                        ? t.table.costCenter
+                                        : key === "description"
+                                          ? t.table.description
+                                          : key === "debitAmount"
+                                            ? t.table.debit
+                                            : t.table.credit}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            {visibleColumns.sortOrder ? (
+                              <TableHead>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSort("sort_order")}
+                                  className="inline-flex items-center gap-1 font-medium"
+                                >
+                                  {t.table.sortOrder}
+                                  <ArrowDownUp className="h-3.5 w-3.5" />
+                                </button>
+                              </TableHead>
+                            ) : null}
+
+                            {visibleColumns.accountCode ? (
+                              <TableHead>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSort("account_code")}
+                                  className="inline-flex items-center gap-1 font-medium"
+                                >
+                                  {t.table.accountCode}
+                                  <ArrowDownUp className="h-3.5 w-3.5" />
+                                </button>
+                              </TableHead>
+                            ) : null}
+
+                            {visibleColumns.accountName ? (
+                              <TableHead>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSort("account_name")}
+                                  className="inline-flex items-center gap-1 font-medium"
+                                >
+                                  {t.table.accountName}
+                                  <ArrowDownUp className="h-3.5 w-3.5" />
+                                </button>
+                              </TableHead>
+                            ) : null}
+
+                            {visibleColumns.accountType ? (
+                              <TableHead>{t.table.accountType}</TableHead>
+                            ) : null}
+
+                            {visibleColumns.normalBalance ? (
+                              <TableHead>{t.table.normalBalance}</TableHead>
+                            ) : null}
+
+                            {visibleColumns.costCenter ? (
+                              <TableHead>{t.table.costCenter}</TableHead>
+                            ) : null}
+
+                            {visibleColumns.description ? (
+                              <TableHead>{t.table.description}</TableHead>
+                            ) : null}
+
+                            {visibleColumns.debitAmount ? (
+                              <TableHead>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSort("debit_amount")}
+                                  className="inline-flex items-center gap-1 font-medium"
+                                >
+                                  {t.table.debit}
+                                  <ArrowDownUp className="h-3.5 w-3.5" />
+                                </button>
+                              </TableHead>
+                            ) : null}
+
+                            {visibleColumns.creditAmount ? (
+                              <TableHead>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSort("credit_amount")}
+                                  className="inline-flex items-center gap-1 font-medium"
+                                >
+                                  {t.table.credit}
+                                  <ArrowDownUp className="h-3.5 w-3.5" />
+                                </button>
+                              </TableHead>
+                            ) : null}
+                          </TableRow>
+                        </TableHeader>
+
+                        <TableBody>
+                          {isLoading ? (
+                            <TableRowsSkeleton columnsCount={visibleColumnCount} />
+                          ) : filteredLines.length > 0 ? (
+                            filteredLines.map((line) => (
+                              <TableRow key={`${line.id}-${line.sort_order}`}>
+                                {visibleColumns.sortOrder ? (
+                                  <TableCell>
+                                    {formatNumber(line.sort_order)}
+                                  </TableCell>
+                                ) : null}
+
+                                {visibleColumns.accountCode ? (
+                                  <TableCell>{line.account_code || "-"}</TableCell>
+                                ) : null}
+
+                                {visibleColumns.accountName ? (
+                                  <TableCell>
+                                    <div className="min-w-[180px]">
+                                      <p className="font-medium">
+                                        {line.account_name || "-"}
+                                      </p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {line.account_id || "-"}
+                                      </p>
+                                    </div>
+                                  </TableCell>
+                                ) : null}
+
+                                {visibleColumns.accountType ? (
+                                  <TableCell>{line.account_type || "-"}</TableCell>
+                                ) : null}
+
+                                {visibleColumns.normalBalance ? (
+                                  <TableCell>
+                                    {line.normal_balance || "-"}
+                                  </TableCell>
+                                ) : null}
+
+                                {visibleColumns.costCenter ? (
+                                  <TableCell>
+                                    <div className="min-w-[160px]">
+                                      <p>{line.cost_center_name || "-"}</p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {line.cost_center_code || "-"}
+                                      </p>
+                                    </div>
+                                  </TableCell>
+                                ) : null}
+
+                                {visibleColumns.description ? (
+                                  <TableCell>
+                                    <span className="line-clamp-2 min-w-[180px] text-sm">
+                                      {line.description || "-"}
+                                    </span>
+                                  </TableCell>
+                                ) : null}
+
+                                {visibleColumns.debitAmount ? (
+                                  <TableCell>
+                                    <MoneyText value={line.debit_amount} />
+                                  </TableCell>
+                                ) : null}
+
+                                {visibleColumns.creditAmount ? (
+                                  <TableCell>
+                                    <MoneyText value={line.credit_amount} />
+                                  </TableCell>
+                                ) : null}
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell
+                                colSpan={visibleColumnCount || 1}
+                                className="h-36 text-center"
+                              >
+                                <div className="mx-auto max-w-md space-y-2">
+                                  <p className="font-semibold">
+                                    {query.trim()
+                                      ? t.noResultsTitle
+                                      : t.emptyTitle}
+                                  </p>
+                                  <p className="text-sm text-muted-foreground">
+                                    {query.trim()
+                                      ? t.noResultsText
+                                      : t.emptyText}
+                                  </p>
+
+                                  {query.trim() ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="mt-2 rounded-xl"
+                                      onClick={() => setQuery("")}
+                                    >
+                                      {t.clearSearch}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
                     </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+
+                  <p className="text-sm text-muted-foreground">
+                    {t.showing} {formatNumber(filteredLines.length)} {t.from}{" "}
+                    {formatNumber(entry.lines.length)}
+                  </p>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }

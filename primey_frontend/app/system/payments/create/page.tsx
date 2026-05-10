@@ -1,29 +1,87 @@
 "use client";
 
+/* ============================================================
+   📂 app/system/payments/create/page.tsx
+   🧠 Primey Care | Create Payment
+
+   ✅ المسار:
+      app/system/payments/create/page.tsx
+
+   ✅ العمل:
+      صفحة تسجيل دفعة داخل النظام.
+      تدعم إنشاء دفعة من فاتورة أو طلب أو عميل أو تسجيل يدوي.
+
+   ✅ الإصدار:
+      Phase 17 UX Refinement + Phase 2 Permissions
+
+   ✅ يعتمد على:
+      - /api/payments/create/
+      - /api/payments/
+      - /api/invoices/list/
+      - /api/orders/list/
+      - /api/customers/list/
+      - primey-locale
+      - AuthProvider
+      - sonner
+      - /currency/sar.svg
+
+   ✅ متوافق مع:
+      - Payments dashboard page
+      - Payments list page
+      - Payments detail page
+      - Invoices pages
+      - Orders pages
+      - Customers pages
+      - Centers / Customers approved UX standard
+
+   ✅ الوظائف:
+      - تسجيل دفعة من فاتورة.
+      - تسجيل دفعة من طلب.
+      - تسجيل دفعة لعميل.
+      - تسجيل دفعة يدوية.
+      - تعبئة بيانات العميل والمبلغ تلقائيًا عند اختيار فاتورة/طلب.
+      - Main Form + Sidebar Summary.
+      - Error Alert داخلي.
+      - Field-level validation.
+      - beforeunload protection.
+      - حفظ واستعادة مسودة محلية.
+      - تأكيد مسح النموذج.
+      - تعطيل الحقول أثناء الحفظ.
+      - تنظيف البيانات قبل الإرسال.
+      - قراءة invoice/order/customer من query params عند توفرها.
+      - صلاحيات آمنة بدون كسر system_admin/superuser.
+      - إخفاء الإنشاء عند عدم وجود صلاحية.
+      - أرقام إنجليزية دائمًا.
+      - رمز SAR من /currency/sar.svg بعد الرقم.
+      - استخدام sonner للتنبيهات.
+      - بدون localhost hardcoded.
+      - بدون إظهار مسارات أو عبارات تقنية داخل الواجهة.
+============================================================ */
+
 import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
-  BadgeCheck,
-  Banknote,
-  BarChart3,
+  CalendarDays,
   CheckCircle2,
   CreditCard,
   FileText,
   Loader2,
-  ReceiptText,
   RefreshCcw,
   Save,
   Search,
-  ShieldCheck,
-  ShoppingCart,
-  Sparkles,
-  Wallet,
-  type LucideIcon,
+  Trash2,
+  UserRound,
+  WalletCards,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/components/providers/AuthProvider";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,1604 +93,2071 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
-/* =====================================================
-   TYPES
-===================================================== */
+/* ============================================================
+   Types
+============================================================ */
 
 type AppLocale = "ar" | "en";
+type Dict = Record<string, unknown>;
 
-type SourceType = "invoice" | "order";
+type PaymentSource = "INVOICE" | "ORDER" | "CUSTOMER" | "MANUAL";
+
+type PaymentStatus = "PENDING" | "CONFIRMED";
 
 type PaymentMethod =
   | "CASH"
   | "BANK_TRANSFER"
-  | "CREDIT_CARD"
-  | "DEBIT_CARD"
-  | "WALLET"
-  | "APPLE_PAY"
-  | "STC_PAY"
-  | "TAMARA"
-  | "TABBY"
   | "GATEWAY"
-  | "OTHER";
-
-type PaymentProvider =
-  | "INTERNAL"
-  | "TAP"
+  | "CARD"
+  | "WALLET"
   | "TAMARA"
-  | "TABBY"
-  | "MANUAL"
-  | "BANK"
-  | "OTHER";
+  | "TABBY";
 
-type ApiOrder = {
-  id: number;
-  number?: string | null;
-  order_number?: string | null;
-  reference?: string | null;
-  status?: string | null;
-  customer_id?: number | null;
-  customer_name?: string | null;
-  customer?: {
-    id?: number;
-    name?: string | null;
-    full_name?: string | null;
-  } | null;
-  total_amount?: string | number | null;
-  paid_amount?: string | number | null;
-  due_amount?: string | number | null;
-  remaining_amount?: string | number | null;
-  subtotal?: string | number | null;
-  tax_amount?: string | number | null;
-  created_at?: string | null;
-  order_date?: string | null;
-};
-
-type ApiInvoice = {
-  id: number;
-  invoice_number?: string | null;
-  number?: string | null;
-  reference?: string | null;
-  status?: string | null;
-  order_id?: number | null;
-  customer_id?: number | null;
-  customer_name?: string | null;
-  customer?: {
-    id?: number;
-    name?: string | null;
-    full_name?: string | null;
-  } | null;
-  total_amount?: string | number | null;
-  grand_total?: string | number | null;
-  amount?: string | number | null;
-  paid_amount?: string | number | null;
-  amount_paid?: string | number | null;
-  remaining_amount?: string | number | null;
-  due_amount?: string | number | null;
-  created_at?: string | null;
-  issued_at?: string | null;
-  invoice_date?: string | null;
-};
-
-type OrdersApiResponse = {
+type ApiEnvelope<T> = {
   ok?: boolean;
-  count?: number;
-  results?: ApiOrder[];
-  orders?: ApiOrder[];
+  success?: boolean;
   message?: string;
+  detail?: string;
+  error?: string;
+  data?: T;
+  results?: unknown[];
+  items?: unknown[];
+  rows?: unknown[];
+  invoices?: unknown[];
+  orders?: unknown[];
+  customers?: unknown[];
 };
 
-type InvoicesApiResponse = {
-  ok?: boolean;
-  count?: number;
-  results?: ApiInvoice[];
-  invoices?: ApiInvoice[];
-  message?: string;
+type InvoiceOption = {
+  id: string;
+  invoice_number: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_id: string;
+  order_id: string;
+  order_number: string;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  status: string;
 };
 
-type CreatePaymentPayload = {
-  invoice_id?: number;
-  order_id?: number;
-  customer_id: number | null;
+type OrderOption = {
+  id: string;
+  order_number: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_id: string;
+  total_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  status: string;
+};
+
+type CustomerOption = {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+};
+
+type FormState = {
+  source: PaymentSource;
+  invoice_id: string;
+  order_id: string;
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
   payment_method: PaymentMethod;
-  provider: PaymentProvider;
+  status: PaymentStatus;
   amount: string;
-  paid_amount: string;
-  currency: "SAR";
-  external_reference: string;
-  transaction_id: string;
-  gateway_response_code: string;
-  gateway_message: string;
+  payment_date: string;
+  reference: string;
   notes: string;
-  confirm: boolean;
-  auto_create_treasury_movement: boolean;
-  auto_post_accounting: boolean;
 };
 
-type CreatePaymentResponse = {
-  ok?: boolean;
-  message?: string;
-  payment?: {
-    id?: number;
-    reference?: string;
-    payment_number?: string;
-    status?: string;
-  };
-};
-
-/* =====================================================
-   CONSTANTS
-===================================================== */
+type FormErrors = Partial<Record<keyof FormState, string>>;
 
 const SAR_ICON_PATH = "/currency/sar.svg";
+const DRAFT_KEY = "primey-care-payment-create-draft-v1";
 
-const PAYMENT_METHODS: Array<{
-  value: PaymentMethod;
-  labelAr: string;
-  labelEn: string;
-  descriptionAr: string;
-  descriptionEn: string;
-}> = [
-  {
-    value: "CASH",
-    labelAr: "نقدي",
-    labelEn: "Cash",
-    descriptionAr: "تحصيل نقدي مباشر من العميل أو المندوب.",
-    descriptionEn: "Direct cash collection from customer or agent.",
-  },
-  {
-    value: "BANK_TRANSFER",
-    labelAr: "تحويل بنكي",
-    labelEn: "Bank Transfer",
-    descriptionAr: "تحويل بنكي يحتاج مرجع عملية أو إيصال.",
-    descriptionEn: "Bank transfer requiring a transaction reference or receipt.",
-  },
-  {
-    value: "GATEWAY",
-    labelAr: "بوابة دفع",
-    labelEn: "Gateway",
-    descriptionAr: "دفع عبر بوابة دفع إلكترونية.",
-    descriptionEn: "Payment through an online gateway.",
-  },
-  {
-    value: "CREDIT_CARD",
-    labelAr: "بطاقة ائتمانية",
-    labelEn: "Credit Card",
-    descriptionAr: "دفع بالبطاقة الائتمانية.",
-    descriptionEn: "Payment by credit card.",
-  },
-  {
-    value: "DEBIT_CARD",
-    labelAr: "بطاقة مدى / خصم",
-    labelEn: "Debit Card",
-    descriptionAr: "دفع ببطاقة الخصم أو مدى.",
-    descriptionEn: "Payment by debit card or Mada.",
-  },
-  {
-    value: "WALLET",
-    labelAr: "محفظة",
-    labelEn: "Wallet",
-    descriptionAr: "دفع من محفظة رقمية.",
-    descriptionEn: "Payment from a digital wallet.",
-  },
-  {
-    value: "APPLE_PAY",
-    labelAr: "Apple Pay",
-    labelEn: "Apple Pay",
-    descriptionAr: "دفع عبر Apple Pay.",
-    descriptionEn: "Payment through Apple Pay.",
-  },
-  {
-    value: "STC_PAY",
-    labelAr: "STC Pay",
-    labelEn: "STC Pay",
-    descriptionAr: "دفع عبر STC Pay.",
-    descriptionEn: "Payment through STC Pay.",
-  },
-  {
-    value: "TAMARA",
-    labelAr: "تمارا",
-    labelEn: "Tamara",
-    descriptionAr: "دفع عبر تمارا.",
-    descriptionEn: "Payment through Tamara.",
-  },
-  {
-    value: "TABBY",
-    labelAr: "تابي",
-    labelEn: "Tabby",
-    descriptionAr: "دفع عبر تابي.",
-    descriptionEn: "Payment through Tabby.",
-  },
-  {
-    value: "OTHER",
-    labelAr: "أخرى",
-    labelEn: "Other",
-    descriptionAr: "طريقة دفع أخرى.",
-    descriptionEn: "Other payment method.",
-  },
-];
+/* ============================================================
+   Locale / API
+============================================================ */
 
-const PAYMENT_PROVIDERS: Array<{
-  value: PaymentProvider;
-  labelAr: string;
-  labelEn: string;
-}> = [
-  { value: "INTERNAL", labelAr: "داخلي", labelEn: "Internal" },
-  { value: "MANUAL", labelAr: "يدوي", labelEn: "Manual" },
-  { value: "BANK", labelAr: "بنك", labelEn: "Bank" },
-  { value: "TAP", labelAr: "Tap", labelEn: "Tap" },
-  { value: "TAMARA", labelAr: "Tamara", labelEn: "Tamara" },
-  { value: "TABBY", labelAr: "Tabby", labelEn: "Tabby" },
-  { value: "OTHER", labelAr: "أخرى", labelEn: "Other" },
-];
+function readLocale(): AppLocale {
+  try {
+    if (typeof window === "undefined") return "ar";
 
-/* =====================================================
-   LOCALE HELPERS
-===================================================== */
+    const saved =
+      window.localStorage.getItem("primey-locale") ||
+      window.localStorage.getItem("locale") ||
+      window.localStorage.getItem("lang");
 
-function getInitialLocale(): AppLocale {
-  if (typeof window === "undefined") return "ar";
+    if (saved === "en") return "en";
+    if (saved === "ar") return "ar";
 
-  const stored = window.localStorage.getItem("primey-locale");
-  if (stored === "ar" || stored === "en") return stored;
-
-  const htmlLang = document.documentElement.lang;
-  if (htmlLang === "en") return "en";
-
-  return "ar";
+    return document.documentElement.lang === "en" ? "en" : "ar";
+  } catch {
+    return "ar";
+  }
 }
 
-function applyLocaleToDocument(locale: AppLocale) {
-  if (typeof document === "undefined") return;
+function applyDocumentLocale(locale: AppLocale) {
+  try {
+    if (typeof document === "undefined") return;
 
-  document.documentElement.lang = locale;
-  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-  document.body.dir = locale === "ar" ? "rtl" : "ltr";
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+    document.body.dir = locale === "ar" ? "rtl" : "ltr";
+  } catch (error) {
+    console.error("Apply locale error:", error);
+  }
 }
 
-/* =====================================================
-   FORMAT HELPERS
-===================================================== */
+function apiUrl(path: string) {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
 
-function toNumber(value: string | number | null | undefined): number {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  if (!value) return 0;
+  if (!base) return path;
 
-  const parsed = Number(String(value).replace(/,/g, ""));
+  return `${base.replace(/\/$/, "")}${path}`;
+}
+
+function getCookie(name: string) {
+  try {
+    if (typeof document === "undefined") return "";
+
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+
+    if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
+
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/* ============================================================
+   Auth / Permissions
+============================================================ */
+
+function asDict(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
+}
+
+function getNested(source: Dict, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+
+    if (value && typeof value === "object") return value as Dict;
+  }
+
+  return {};
+}
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => {
+          if (!value) return [];
+
+          if (typeof value === "string") return [value];
+
+          if (Array.isArray(value)) {
+            return value.flatMap((item) => {
+              if (typeof item === "string") return [item];
+
+              if (item && typeof item === "object") {
+                const obj = item as Dict;
+
+                return [
+                  obj.code,
+                  obj.codename,
+                  obj.permission,
+                  obj.name,
+                  obj.role,
+                ].filter(Boolean) as string[];
+              }
+
+              return [];
+            });
+          }
+
+          if (value && typeof value === "object") {
+            const obj = value as Dict;
+
+            return [
+              obj.code,
+              obj.codename,
+              obj.permission,
+              obj.name,
+              obj.role,
+            ].filter(Boolean) as string[];
+          }
+
+          return [];
+        })
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getAuthUser(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return getNested(auth, [
+    "user",
+    "currentUser",
+    "profile",
+    "account",
+    "session",
+    "data",
+  ]);
+}
+
+function getAuthRoles(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  return uniqueStrings([
+    auth.role,
+    auth.roles,
+    auth.user_role,
+    auth.userType,
+    auth.user_type,
+    auth.workspace,
+    auth.workspaces,
+    auth.type,
+    user.role,
+    user.roles,
+    user.user_role,
+    user.userType,
+    user.user_type,
+    user.workspace,
+    user.workspaces,
+    user.type,
+  ]).map((item) => item.toLowerCase());
+}
+
+function getAuthPermissionCodes(authValue: unknown): string[] {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+
+  const authPermissions = asDict(auth.permissions);
+  const userPermissions = asDict(user.permissions);
+  const authProfilePermissions = asDict(auth.profile_permissions);
+  const userProfilePermissions = asDict(user.profile_permissions);
+
+  return uniqueStrings([
+    auth.permission_codes,
+    auth.permissions,
+    auth.codes,
+    auth.profile_permissions,
+    authPermissions.codes,
+    authProfilePermissions.codes,
+    user.permission_codes,
+    user.permissions,
+    user.codes,
+    user.profile_permissions,
+    userPermissions.codes,
+    userProfilePermissions.codes,
+  ]);
+}
+
+function isAuthResolving(authValue: unknown) {
+  const auth = asDict(authValue);
+
+  return Boolean(
+    auth.isLoading ||
+      auth.loading ||
+      auth.isInitializing ||
+      auth.initializing ||
+      auth.pending,
+  );
+}
+
+function isSystemAdmin(authValue: unknown) {
+  const auth = asDict(authValue);
+  const user = getAuthUser(authValue);
+  const roles = getAuthRoles(authValue);
+
+  return (
+    Boolean(auth.is_superuser) ||
+    Boolean(auth.isSuperuser) ||
+    Boolean(auth.is_system_admin) ||
+    Boolean(auth.isSystemAdmin) ||
+    Boolean(user.is_superuser) ||
+    Boolean(user.isSuperuser) ||
+    Boolean(user.is_system_admin) ||
+    Boolean(user.isSystemAdmin) ||
+    roles.some((role) =>
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "superadmin",
+        "admin",
+        "administrator",
+      ].includes(role),
+    )
+  );
+}
+
+function hasSafePermission(
+  authValue: unknown,
+  codes: string[],
+  mode: "view" | "action",
+) {
+  if (isSystemAdmin(authValue)) return true;
+
+  const permissions = getAuthPermissionCodes(authValue);
+
+  if (permissions.length > 0) {
+    return codes.some((code) => permissions.includes(code));
+  }
+
+  const roles = getAuthRoles(authValue);
+
+  if (roles.length > 0) {
+    if (mode === "view") {
+      return roles.some((role) =>
+        [
+          "system_admin",
+          "superuser",
+          "super_admin",
+          "accountant",
+          "support",
+          "viewer",
+        ].includes(role),
+      );
+    }
+
+    return roles.some((role) =>
+      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
+    );
+  }
+
+  return true;
+}
+
+/* ============================================================
+   Dictionary
+============================================================ */
+
+function dictionary(locale: AppLocale) {
+  const isArabic = locale === "ar";
+
+  return {
+    title: isArabic ? "تسجيل دفعة" : "Create Payment",
+    subtitle: isArabic
+      ? "سجل دفعة مرتبطة بفاتورة أو طلب أو عميل مع بيانات التحصيل والترحيل."
+      : "Record a payment linked to an invoice, order, or customer with collection details.",
+
+    back: isArabic ? "قائمة المدفوعات" : "Payments List",
+    dashboard: isArabic ? "المدفوعات" : "Payments",
+    refreshData: isArabic ? "تحديث البيانات" : "Refresh Data",
+    save: isArabic ? "حفظ الدفعة" : "Save Payment",
+    saving: isArabic ? "جار الحفظ..." : "Saving...",
+    clear: isArabic ? "مسح النموذج" : "Clear Form",
+
+    accessDeniedTitle: isArabic ? "غير مصرح بتسجيل المدفوعات" : "Access denied",
+    accessDeniedText: isArabic
+      ? "لا تملك صلاحية تسجيل المدفوعات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
+      : "You do not have permission to create payments. Contact your system administrator if you need access.",
+
+    formTitle: isArabic ? "بيانات الدفعة" : "Payment Information",
+    formDesc: isArabic
+      ? "اختر مصدر الدفعة وأدخل طريقة الدفع والمبلغ والمرجع."
+      : "Choose the payment source and enter method, amount, and reference.",
+
+    source: isArabic ? "مصدر الدفعة" : "Payment Source",
+    fromInvoice: isArabic ? "من فاتورة" : "From Invoice",
+    fromOrder: isArabic ? "من طلب" : "From Order",
+    fromCustomer: isArabic ? "من عميل" : "From Customer",
+    manual: isArabic ? "يدوية" : "Manual",
+
+    invoice: isArabic ? "الفاتورة" : "Invoice",
+    order: isArabic ? "الطلب" : "Order",
+    customer: isArabic ? "العميل" : "Customer",
+    searchInvoice: isArabic ? "ابحث داخل الفواتير..." : "Search invoices...",
+    searchOrder: isArabic ? "ابحث داخل الطلبات..." : "Search orders...",
+    searchCustomer: isArabic ? "ابحث داخل العملاء..." : "Search customers...",
+
+    customerName: isArabic ? "اسم العميل" : "Customer Name",
+    customerPhone: isArabic ? "جوال العميل" : "Customer Phone",
+    customerEmail: isArabic ? "البريد الإلكتروني" : "Email",
+    paymentMethod: isArabic ? "طريقة الدفع" : "Payment Method",
+    status: isArabic ? "حالة الدفعة" : "Payment Status",
+    paymentDate: isArabic ? "تاريخ الدفع" : "Payment Date",
+    amount: isArabic ? "المبلغ" : "Amount",
+    reference: isArabic ? "مرجع العملية" : "Reference",
+    notes: isArabic ? "ملاحظات" : "Notes",
+
+    pending: isArabic ? "بانتظار التأكيد" : "Pending",
+    confirmed: isArabic ? "مؤكدة" : "Confirmed",
+
+    cash: isArabic ? "نقدًا" : "Cash",
+    bankTransfer: isArabic ? "تحويل بنكي" : "Bank Transfer",
+    gateway: isArabic ? "بوابة دفع" : "Gateway",
+    card: isArabic ? "بطاقة" : "Card",
+    wallet: isArabic ? "محفظة" : "Wallet",
+    tamara: isArabic ? "تمارا" : "Tamara",
+    tabby: isArabic ? "تابي" : "Tabby",
+
+    summaryTitle: isArabic ? "ملخص الدفعة" : "Payment Summary",
+    summaryDesc: isArabic
+      ? "ملخص المبلغ والربط قبل الحفظ."
+      : "Summary of amount and linkage before saving.",
+    selectedSource: isArabic ? "المصدر المختار" : "Selected Source",
+    selectedBalance: isArabic ? "المتبقي على المصدر" : "Source Balance",
+    totalAmount: isArabic ? "إجمالي المصدر" : "Source Total",
+    paidAmount: isArabic ? "المدفوع سابقًا" : "Already Paid",
+    remainingAmount: isArabic ? "المتبقي" : "Remaining",
+    paymentAmount: isArabic ? "مبلغ الدفعة" : "Payment Amount",
+
+    draftSaved: isArabic ? "تم حفظ المسودة محليًا." : "Draft saved locally.",
+    draftRestored: isArabic ? "تم استعادة المسودة." : "Draft restored.",
+    draftCleared: isArabic ? "تم مسح النموذج." : "Form cleared.",
+    confirmClear: isArabic
+      ? "هل تريد مسح النموذج الحالي؟"
+      : "Clear the current form?",
+    leaveConfirm: isArabic
+      ? "لديك تغييرات غير محفوظة."
+      : "You have unsaved changes.",
+
+    loadError: isArabic ? "تعذر تحميل البيانات." : "Unable to load data.",
+    paymentCreated: isArabic
+      ? "تم تسجيل الدفعة بنجاح."
+      : "Payment created successfully.",
+    submitError: isArabic
+      ? "تعذر تسجيل الدفعة."
+      : "Unable to create payment.",
+
+    required: isArabic ? "هذا الحقل مطلوب." : "This field is required.",
+    sourceRequired: isArabic ? "اختر مصدر الدفعة." : "Select payment source.",
+    customerRequired: isArabic ? "أدخل بيانات العميل." : "Enter customer data.",
+    invalidAmount: isArabic ? "أدخل مبلغًا صحيحًا." : "Enter a valid amount.",
+    amountExceeds: isArabic
+      ? "المبلغ أكبر من المتبقي على المصدر."
+      : "Amount exceeds the remaining source balance.",
+
+    noInvoices: isArabic ? "لا توجد فواتير متاحة" : "No invoices available",
+    noOrders: isArabic ? "لا توجد طلبات متاحة" : "No orders available",
+    noCustomers: isArabic ? "لا يوجد عملاء متاحون" : "No customers available",
+    notSelected: isArabic ? "غير محدد" : "Not selected",
+  };
+}
+
+/* ============================================================
+   Helpers
+============================================================ */
+
+function todayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function toNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatMoney(value: number): string {
+function toMoneyInput(value: unknown) {
+  const number = toNumber(value);
+
+  if (number <= 0) return "";
+
+  return String(number.toFixed(2));
+}
+
+function formatNumber(value: unknown): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(toNumber(value));
+}
+
+function formatMoney(value: unknown): string {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value || 0);
+  }).format(toNumber(value));
 }
 
-function formatDate(value: string | null | undefined, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+function getNestedValue(obj: Dict, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = obj[key];
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return locale === "ar" ? "غير محدد" : "Not set";
-
-  return new Intl.DateTimeFormat("en-GB", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}
-
-function normalizeDecimalInput(value: string): string {
-  const normalized = value.replace(/[^\d.]/g, "");
-  const parts = normalized.split(".");
-
-  if (parts.length <= 2) return normalized;
-
-  return `${parts[0]}.${parts.slice(1).join("")}`;
-}
-
-function getCookie(name: string): string {
-  if (typeof document === "undefined") return "";
-
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
-
-  return "";
-}
-
-function resolveOrderNumber(order: ApiOrder): string {
-  return order.number || order.order_number || order.reference || `ORD-${order.id}`;
-}
-
-function resolveInvoiceNumber(invoice: ApiInvoice): string {
-  return (
-    invoice.invoice_number ||
-    invoice.number ||
-    invoice.reference ||
-    `INV-${invoice.id}`
-  );
-}
-
-function resolveOrderCustomerName(order: ApiOrder, fallback: string): string {
-  return (
-    order.customer_name ||
-    order.customer?.name ||
-    order.customer?.full_name ||
-    (order.customer_id ? `#${order.customer_id}` : fallback)
-  );
-}
-
-function resolveInvoiceCustomerName(invoice: ApiInvoice, fallback: string): string {
-  return (
-    invoice.customer_name ||
-    invoice.customer?.name ||
-    invoice.customer?.full_name ||
-    (invoice.customer_id ? `#${invoice.customer_id}` : fallback)
-  );
-}
-
-function resolveOrderTotal(order: ApiOrder): number {
-  return toNumber(order.total_amount);
-}
-
-function resolveOrderPaid(order: ApiOrder): number {
-  return toNumber(order.paid_amount);
-}
-
-function resolveOrderDue(order: ApiOrder): number {
-  const explicitDue = toNumber(order.due_amount ?? order.remaining_amount);
-
-  if (explicitDue > 0) return explicitDue;
-
-  const total = resolveOrderTotal(order);
-  const paid = resolveOrderPaid(order);
-
-  return Math.max(total - paid, 0);
-}
-
-function resolveInvoiceTotal(invoice: ApiInvoice): number {
-  return toNumber(
-    invoice.total_amount ||
-      invoice.grand_total ||
-      invoice.amount
-  );
-}
-
-function resolveInvoicePaid(invoice: ApiInvoice): number {
-  return toNumber(invoice.paid_amount || invoice.amount_paid);
-}
-
-function resolveInvoiceDue(invoice: ApiInvoice): number {
-  const explicitDue = toNumber(invoice.remaining_amount || invoice.due_amount);
-
-  if (explicitDue > 0) return explicitDue;
-
-  const total = resolveInvoiceTotal(invoice);
-  const paid = resolveInvoicePaid(invoice);
-
-  return Math.max(total - paid, 0);
-}
-
-function getMethodLabel(method: PaymentMethod, locale: AppLocale): string {
-  const item = PAYMENT_METHODS.find((option) => option.value === method);
-  if (!item) return method;
-
-  return locale === "ar" ? item.labelAr : item.labelEn;
-}
-
-function getProviderLabel(provider: PaymentProvider, locale: AppLocale): string {
-  const item = PAYMENT_PROVIDERS.find((option) => option.value === provider);
-  if (!item) return provider;
-
-  return locale === "ar" ? item.labelAr : item.labelEn;
-}
-
-/* =====================================================
-   API HELPERS
-===================================================== */
-
-async function fetchOrders(): Promise<ApiOrder[]> {
-  const response = await fetch("/api/orders/?limit=200", {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
-
-  const data = (await response.json().catch(() => null)) as OrdersApiResponse | null;
-
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.message || "Failed to load orders.");
+    if (value !== undefined && value !== null && value !== "") return value;
   }
 
-  if (Array.isArray(data.results)) return data.results;
-  if (Array.isArray(data.orders)) return data.orders;
+  for (const container of [
+    "customer",
+    "client",
+    "invoice",
+    "order",
+    "payment",
+    "item",
+    "data",
+  ]) {
+    const nested = obj[container];
+
+    if (nested && typeof nested === "object") {
+      const value = getNestedValue(nested as Dict, keys);
+
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+  }
+
+  return undefined;
+}
+
+function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
+  if (!payload) return [];
+
+  const data = asDict(payload.data);
+  const directValue = (payload as Dict)[key];
+
+  if (Array.isArray(directValue)) return directValue;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.rows)) return payload.rows;
+
+  if (Array.isArray(data[key])) return data[key] as unknown[];
+  if (Array.isArray(data.results)) return data.results as unknown[];
+  if (Array.isArray(data.items)) return data.items as unknown[];
+  if (Array.isArray(data.rows)) return data.rows as unknown[];
+
+  if (Array.isArray(payload.data)) return payload.data;
 
   return [];
 }
 
-async function fetchInvoices(): Promise<ApiInvoice[]> {
-  const response = await fetch("/api/invoices/?limit=200", {
-    method: "GET",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-    },
-    cache: "no-store",
-  });
+function normalizeInvoice(item: unknown, index: number): InvoiceOption {
+  const obj = asDict(item);
+  const customerObj = asDict(obj.customer || obj.client);
+  const orderObj = asDict(obj.order);
 
-  const data = (await response.json().catch(() => null)) as InvoicesApiResponse | null;
+  const totalAmount = toNumber(
+    getNestedValue(obj, [
+      "total_amount",
+      "grand_total",
+      "net_amount",
+      "amount",
+      "total",
+    ]),
+  );
 
-  if (!response.ok || !data?.ok) {
-    return [];
-  }
+  const paidAmount = toNumber(
+    getNestedValue(obj, ["paid_amount", "amount_paid", "collected_amount"]),
+  );
 
-  if (Array.isArray(data.results)) return data.results;
-  if (Array.isArray(data.invoices)) return data.invoices;
+  const remainingValue = getNestedValue(obj, [
+    "remaining_amount",
+    "balance_due",
+    "due_amount",
+  ]);
 
-  return [];
+  return {
+    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
+    invoice_number: String(
+      getNestedValue(obj, ["invoice_number", "number", "code", "reference"]) ||
+        "-",
+    ),
+    customer_name: String(
+      customerObj.name ||
+        customerObj.full_name ||
+        getNestedValue(obj, [
+          "customer_name",
+          "client_name",
+          "beneficiary_name",
+          "name",
+        ]) ||
+        "-",
+    ),
+    customer_phone: String(
+      customerObj.phone ||
+        customerObj.mobile ||
+        getNestedValue(obj, ["customer_phone", "phone", "mobile"]) ||
+        "",
+    ),
+    customer_id: String(
+      customerObj.id || getNestedValue(obj, ["customer_id", "client_id"]) || "",
+    ),
+    order_id: String(orderObj.id || getNestedValue(obj, ["order_id"]) || ""),
+    order_number: String(
+      orderObj.order_number ||
+        orderObj.number ||
+        getNestedValue(obj, ["order_number", "order_reference"]) ||
+        "-",
+    ),
+    total_amount: totalAmount,
+    paid_amount: paidAmount,
+    remaining_amount:
+      remainingValue !== undefined && remainingValue !== null
+        ? toNumber(remainingValue)
+        : Math.max(totalAmount - paidAmount, 0),
+    status: String(getNestedValue(obj, ["status", "state"]) || ""),
+  };
 }
 
-async function createPayment(
-  payload: CreatePaymentPayload
-): Promise<CreatePaymentResponse> {
-  const csrfToken = getCookie("csrftoken");
+function normalizeOrder(item: unknown, index: number): OrderOption {
+  const obj = asDict(item);
+  const customerObj = asDict(obj.customer || obj.client);
 
-  const response = await fetch("/api/payments/create/", {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
+  const totalAmount = toNumber(
+    getNestedValue(obj, [
+      "total_amount",
+      "grand_total",
+      "net_amount",
+      "amount",
+      "total",
+    ]),
+  );
 
-  const data = (await response.json().catch(() => null)) as CreatePaymentResponse | null;
+  const paidAmount = toNumber(
+    getNestedValue(obj, ["paid_amount", "amount_paid", "collected_amount"]),
+  );
 
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.message || "Payment create API failed.");
-  }
+  const remainingValue = getNestedValue(obj, [
+    "remaining_amount",
+    "balance_due",
+    "due_amount",
+  ]);
 
-  return data;
+  return {
+    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
+    order_number: String(
+      getNestedValue(obj, ["order_number", "number", "code", "reference"]) ||
+        "-",
+    ),
+    customer_name: String(
+      customerObj.name ||
+        customerObj.full_name ||
+        getNestedValue(obj, [
+          "customer_name",
+          "client_name",
+          "beneficiary_name",
+          "name",
+        ]) ||
+        "-",
+    ),
+    customer_phone: String(
+      customerObj.phone ||
+        customerObj.mobile ||
+        getNestedValue(obj, ["customer_phone", "phone", "mobile"]) ||
+        "",
+    ),
+    customer_id: String(
+      customerObj.id || getNestedValue(obj, ["customer_id", "client_id"]) || "",
+    ),
+    total_amount: totalAmount,
+    paid_amount: paidAmount,
+    remaining_amount:
+      remainingValue !== undefined && remainingValue !== null
+        ? toNumber(remainingValue)
+        : Math.max(totalAmount - paidAmount, 0),
+    status: String(getNestedValue(obj, ["status", "state"]) || ""),
+  };
 }
 
-/* =====================================================
-   PAGE
-===================================================== */
+function normalizeCustomer(item: unknown, index: number): CustomerOption {
+  const obj = asDict(item);
 
-export default function SystemPaymentCreatePage() {
+  return {
+    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
+    name: String(
+      getNestedValue(obj, ["name", "full_name", "customer_name"]) || "-",
+    ),
+    phone: String(getNestedValue(obj, ["phone", "mobile", "customer_phone"]) || ""),
+    email: String(getNestedValue(obj, ["email", "customer_email"]) || ""),
+  };
+}
+
+function makeDefaultForm(): FormState {
+  return {
+    source: "INVOICE",
+    invoice_id: "",
+    order_id: "",
+    customer_id: "",
+    customer_name: "",
+    customer_phone: "",
+    customer_email: "",
+    payment_method: "CASH",
+    status: "PENDING",
+    amount: "",
+    payment_date: todayDate(),
+    reference: "",
+    notes: "",
+  };
+}
+
+function paymentMethodLabel(method: PaymentMethod, locale: AppLocale) {
+  const t = dictionary(locale);
+
+  const labels: Record<PaymentMethod, string> = {
+    CASH: t.cash,
+    BANK_TRANSFER: t.bankTransfer,
+    GATEWAY: t.gateway,
+    CARD: t.card,
+    WALLET: t.wallet,
+    TAMARA: t.tamara,
+    TABBY: t.tabby,
+  };
+
+  return labels[method];
+}
+
+function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON_PATH}
+      alt=""
+      width={16}
+      height={16}
+      className={className}
+    />
+  );
+}
+
+function MoneyText({ value }: { value: unknown }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span>{formatMoney(value)}</span>
+      <SarIcon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function SkeletonLine({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+}
+
+/* ============================================================
+   Page
+============================================================ */
+
+export default function SystemCreatePaymentPage() {
+  const auth = useAuth() as unknown;
+  const searchParams = useSearchParams();
+
   const [locale, setLocale] = useState<AppLocale>("ar");
+  const [form, setForm] = useState<FormState>(() => makeDefaultForm());
 
-  const [orders, setOrders] = useState<ApiOrder[]>([]);
-  const [invoices, setInvoices] = useState<ApiInvoice[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
+  const [orders, setOrders] = useState<OrderOption[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
 
-  const [loadingSources, setLoadingSources] = useState(true);
-  const [refreshingSources, setRefreshingSources] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [orderSearch, setOrderSearch] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
 
-  const [sourceType, setSourceType] = useState<SourceType>("invoice");
-  const [search, setSearch] = useState("");
-  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [submitError, setSubmitError] = useState("");
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [didApplyQueryParams, setDidApplyQueryParams] = useState(false);
 
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
-  const [provider, setProvider] = useState<PaymentProvider>("MANUAL");
-  const [amount, setAmount] = useState("");
-  const [externalReference, setExternalReference] = useState("");
-  const [transactionId, setTransactionId] = useState("");
-  const [gatewayResponseCode, setGatewayResponseCode] = useState("");
-  const [gatewayMessage, setGatewayMessage] = useState("");
-  const [notes, setNotes] = useState("");
+  const t = useMemo(() => dictionary(locale), [locale]);
+  const isArabic = locale === "ar";
+  const authResolving = isAuthResolving(auth);
 
-  const [autoConfirm, setAutoConfirm] = useState(true);
-  const [autoCreateTreasuryMovement, setAutoCreateTreasuryMovement] = useState(true);
-  const [autoPostAccounting, setAutoPostAccounting] = useState(true);
-
-  const isAr = locale === "ar";
-
-  const t = useMemo(
-    () => ({
-      badge: isAr ? "تسجيل دفعة" : "Create Payment",
-      title: isAr ? "تسجيل دفعة جديدة" : "Create New Payment",
-      subtitle: isAr
-        ? "اختر الفاتورة أو الطلب، حدد طريقة الدفع والمبلغ، ثم سجل الدفعة مع خيارات التأكيد والخزينة والمحاسبة."
-        : "Select an invoice or order, set payment method and amount, then register the payment with confirmation, treasury, and accounting options.",
-      back: isAr ? "قائمة المدفوعات" : "Payments List",
-      dashboard: isAr ? "لوحة المدفوعات" : "Payments Dashboard",
-      reports: isAr ? "التقارير" : "Reports",
-      save: isAr ? "حفظ الدفعة" : "Save Payment",
-      saving: isAr ? "جاري الحفظ..." : "Saving...",
-      refresh: isAr ? "تحديث البيانات" : "Refresh Data",
-      selectSource: isAr ? "اختيار مصدر الدفع" : "Select Payment Source",
-      selectSourceDesc: isAr
-        ? "الأفضل اختيار فاتورة حتى يتم الربط المباشر مع الفواتير والخزينة والمحاسبة."
-        : "Selecting an invoice is preferred for direct invoice, treasury, and accounting linkage.",
-      sourceInvoice: isAr ? "من فاتورة" : "From Invoice",
-      sourceOrder: isAr ? "من طلب" : "From Order",
-      searchSource: isAr
-        ? "ابحث برقم الفاتورة أو الطلب أو العميل أو الحالة..."
-        : "Search by invoice, order, customer, or status...",
-      paymentData: isAr ? "بيانات الدفعة" : "Payment Data",
-      paymentDataDesc: isAr
-        ? "حدد طريقة الدفع والمبلغ والمراجع التشغيلية."
-        : "Set payment method, amount, and operational references.",
-      paymentMethod: isAr ? "طريقة الدفع" : "Payment Method",
-      provider: isAr ? "مزود الدفع" : "Payment Provider",
-      amount: isAr ? "المبلغ" : "Amount",
-      externalReference: isAr ? "المرجع الخارجي" : "External Reference",
-      transactionId: isAr ? "رقم العملية" : "Transaction ID",
-      gatewayResponseCode: isAr ? "كود البوابة" : "Gateway Code",
-      gatewayMessage: isAr ? "رسالة البوابة" : "Gateway Message",
-      notes: isAr ? "ملاحظات" : "Notes",
-      externalReferencePlaceholder: isAr
-        ? "رقم التحويل أو مرجع مزود الدفع..."
-        : "Transfer number or payment provider reference...",
-      transactionIdPlaceholder: isAr
-        ? "Transaction ID إن وجد..."
-        : "Transaction ID if available...",
-      gatewayCodePlaceholder: isAr
-        ? "كود استجابة البوابة إن وجد..."
-        : "Gateway response code if available...",
-      gatewayMessagePlaceholder: isAr
-        ? "رسالة البوابة أو البنك..."
-        : "Gateway or bank message...",
-      notesPlaceholder: isAr
-        ? "ملاحظات داخلية عن عملية الدفع..."
-        : "Internal notes about this payment...",
-      autoConfirm: isAr ? "تأكيد الدفعة مباشرة" : "Confirm payment immediately",
-      autoTreasury: isAr ? "إنشاء حركة خزينة تلقائيًا" : "Create treasury movement automatically",
-      autoAccounting: isAr ? "ترحيل محاسبي تلقائي" : "Automatic accounting posting",
-      sourceSummary: isAr ? "ملخص الدفع" : "Payment Summary",
-      customer: isAr ? "العميل" : "Customer",
-      order: isAr ? "الطلب" : "Order",
-      invoice: isAr ? "الفاتورة" : "Invoice",
-      status: isAr ? "الحالة" : "Status",
-      date: isAr ? "التاريخ" : "Date",
-      total: isAr ? "الإجمالي" : "Total",
-      paid: isAr ? "مدفوع سابقًا" : "Already Paid",
-      due: isAr ? "المتبقي" : "Due Amount",
-      newDue: isAr ? "المتبقي بعد الدفعة" : "Due After Payment",
-      notAvailable: isAr ? "غير متاح" : "N/A",
-      noSources: isAr ? "لا توجد بيانات مطابقة حاليًا." : "No matching records found.",
-      loadingSources: isAr ? "جاري تحميل الفواتير والطلبات..." : "Loading invoices and orders...",
-      loadError: isAr ? "تعذر تحميل البيانات" : "Failed to load data",
-      refreshSuccess: isAr ? "تم تحديث البيانات بنجاح" : "Data refreshed successfully",
-      selectSourceError: isAr ? "اختر فاتورة أو طلبًا أولًا قبل تسجيل الدفعة" : "Select an invoice or order first",
-      missingOrderError: isAr
-        ? "الفاتورة المحددة لا تحتوي على طلب مرتبط. اختر طلبًا أو فاتورة مرتبطة بطلب."
-        : "Selected invoice has no linked order. Select an order or an invoice linked to an order.",
-      missingCustomerError: isAr
-        ? "لا يوجد عميل مرتبط بهذا السجل"
-        : "No customer is linked to this record",
-      amountError: isAr ? "أدخل مبلغًا صحيحًا أكبر من صفر" : "Enter a valid amount greater than zero",
-      amountMoreThanDueWarning: isAr
-        ? "المبلغ أكبر من المتبقي"
-        : "Amount is greater than due amount",
-      createSuccess: isAr ? "تم تسجيل الدفعة بنجاح" : "Payment created successfully",
-      createError: isAr ? "تعذر تسجيل الدفعة" : "Failed to create payment",
-      sar: isAr ? "ريال" : "SAR",
-    }),
-    [isAr]
+  const canCreate = hasSafePermission(
+    auth,
+    ["payments.create", "billing.payments.create"],
+    "action",
   );
 
-  const selectedOrder = useMemo(
-    () => orders.find((order) => order.id === selectedOrderId) || null,
-    [orders, selectedOrderId]
+  const canViewInvoices = hasSafePermission(
+    auth,
+    ["invoices.view", "billing.invoices.view", "payments.create"],
+    "view",
+  );
+
+  const canViewOrders = hasSafePermission(
+    auth,
+    ["orders.view", "payments.create"],
+    "view",
+  );
+
+  const canViewCustomers = hasSafePermission(
+    auth,
+    ["customers.view", "payments.create"],
+    "view",
   );
 
   const selectedInvoice = useMemo(
-    () => invoices.find((invoice) => invoice.id === selectedInvoiceId) || null,
-    [invoices, selectedInvoiceId]
+    () => invoices.find((item) => item.id === form.invoice_id) || null,
+    [form.invoice_id, invoices],
   );
 
-  const selectedMethod = useMemo(
-    () =>
-      PAYMENT_METHODS.find((item) => item.value === paymentMethod) ||
-      PAYMENT_METHODS[0],
-    [paymentMethod]
+  const selectedOrder = useMemo(
+    () => orders.find((item) => item.id === form.order_id) || null,
+    [form.order_id, orders],
   );
 
-  const filteredOrders = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
+  const selectedCustomer = useMemo(
+    () => customers.find((item) => item.id === form.customer_id) || null,
+    [form.customer_id, customers],
+  );
 
-    if (sourceType !== "order") return [];
-    if (!keyword) return orders;
+  const sourceBalance = useMemo(() => {
+    if (form.source === "INVOICE" && selectedInvoice) {
+      return selectedInvoice.remaining_amount;
+    }
 
-    return orders.filter((order) => {
-      const haystack = [
-        order.id,
-        resolveOrderNumber(order),
-        order.status,
-        order.customer_id,
-        order.customer_name,
-        order.customer?.name,
-        order.customer?.full_name,
-        order.total_amount,
-        order.due_amount,
-        order.remaining_amount,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
+    if (form.source === "ORDER" && selectedOrder) {
+      return selectedOrder.remaining_amount;
+    }
 
-      return haystack.includes(keyword);
-    });
-  }, [orders, search, sourceType]);
+    return 0;
+  }, [form.source, selectedInvoice, selectedOrder]);
+
+  const sourceTotal = useMemo(() => {
+    if (form.source === "INVOICE" && selectedInvoice) {
+      return selectedInvoice.total_amount;
+    }
+
+    if (form.source === "ORDER" && selectedOrder) {
+      return selectedOrder.total_amount;
+    }
+
+    return 0;
+  }, [form.source, selectedInvoice, selectedOrder]);
+
+  const sourcePaid = useMemo(() => {
+    if (form.source === "INVOICE" && selectedInvoice) {
+      return selectedInvoice.paid_amount;
+    }
+
+    if (form.source === "ORDER" && selectedOrder) {
+      return selectedOrder.paid_amount;
+    }
+
+    return 0;
+  }, [form.source, selectedInvoice, selectedOrder]);
 
   const filteredInvoices = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
+    const clean = invoiceSearch.trim().toLowerCase();
 
-    if (sourceType !== "invoice") return [];
-    if (!keyword) return invoices;
+    const base = invoices.filter((item) => item.remaining_amount > 0);
 
-    return invoices.filter((invoice) => {
-      const haystack = [
-        invoice.id,
-        resolveInvoiceNumber(invoice),
-        invoice.status,
-        invoice.order_id,
-        invoice.customer_id,
-        invoice.customer_name,
-        invoice.customer?.name,
-        invoice.customer?.full_name,
-        invoice.total_amount,
-        invoice.grand_total,
-        invoice.amount,
-        invoice.remaining_amount,
-        invoice.due_amount,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
+    if (!clean) return base.slice(0, 60);
 
-      return haystack.includes(keyword);
+    return base
+      .filter((item) =>
+        [
+          item.invoice_number,
+          item.customer_name,
+          item.customer_phone,
+          item.order_number,
+          String(item.remaining_amount),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(clean),
+      )
+      .slice(0, 60);
+  }, [invoiceSearch, invoices]);
+
+  const filteredOrders = useMemo(() => {
+    const clean = orderSearch.trim().toLowerCase();
+
+    const base = orders.filter((item) => item.remaining_amount > 0);
+
+    if (!clean) return base.slice(0, 60);
+
+    return base
+      .filter((item) =>
+        [
+          item.order_number,
+          item.customer_name,
+          item.customer_phone,
+          String(item.remaining_amount),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(clean),
+      )
+      .slice(0, 60);
+  }, [orderSearch, orders]);
+
+  const filteredCustomers = useMemo(() => {
+    const clean = customerSearch.trim().toLowerCase();
+
+    if (!clean) return customers.slice(0, 60);
+
+    return customers
+      .filter((item) =>
+        [item.name, item.phone, item.email]
+          .join(" ")
+          .toLowerCase()
+          .includes(clean),
+      )
+      .slice(0, 60);
+  }, [customerSearch, customers]);
+
+  const canSubmit =
+    canCreate &&
+    !authResolving &&
+    !isSaving &&
+    toNumber(form.amount) > 0 &&
+    Boolean(form.payment_date);
+
+  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+    setIsDirty(true);
+
+    setErrors((current) => {
+      const next = { ...current };
+      delete next[key];
+
+      return next;
     });
-  }, [invoices, search, sourceType]);
+  }
 
-  const summary = useMemo(() => {
-    if (sourceType === "invoice" && selectedInvoice) {
-      const total = resolveInvoiceTotal(selectedInvoice);
-      const paid = resolveInvoicePaid(selectedInvoice);
-      const due = resolveInvoiceDue(selectedInvoice);
-      const paymentAmount = toNumber(amount);
-      const newDue = Math.max(due - paymentAmount, 0);
+  function changeSource(source: PaymentSource) {
+    setForm((current) => ({
+      ...current,
+      source,
+      invoice_id: source === "INVOICE" ? current.invoice_id : "",
+      order_id: source === "ORDER" ? current.order_id : "",
+      customer_id: source === "CUSTOMER" ? current.customer_id : "",
+      customer_name: source === "MANUAL" ? current.customer_name : "",
+      customer_phone: source === "MANUAL" ? current.customer_phone : "",
+      customer_email: source === "MANUAL" ? current.customer_email : "",
+      amount: "",
+    }));
 
-      return {
-        total,
-        paid,
-        due,
-        paymentAmount,
-        newDue,
-      };
+    setErrors({});
+    setSubmitError("");
+    setIsDirty(true);
+  }
+
+  function applyInvoice(invoiceId: string) {
+    const invoice = invoices.find((item) => item.id === invoiceId) || null;
+
+    setForm((current) => ({
+      ...current,
+      source: "INVOICE",
+      invoice_id: invoiceId,
+      order_id: invoice?.order_id || "",
+      customer_id: invoice?.customer_id || "",
+      customer_name: invoice?.customer_name || current.customer_name,
+      customer_phone: invoice?.customer_phone || current.customer_phone,
+      customer_email: current.customer_email,
+      amount: toMoneyInput(invoice?.remaining_amount),
+      notes:
+        invoice && locale === "ar"
+          ? `دفعة على الفاتورة ${invoice.invoice_number}`
+          : invoice
+            ? `Payment for invoice ${invoice.invoice_number}`
+            : current.notes,
+    }));
+
+    setErrors({});
+    setSubmitError("");
+    setIsDirty(true);
+  }
+
+  function applyOrder(orderId: string) {
+    const order = orders.find((item) => item.id === orderId) || null;
+
+    setForm((current) => ({
+      ...current,
+      source: "ORDER",
+      order_id: orderId,
+      invoice_id: "",
+      customer_id: order?.customer_id || "",
+      customer_name: order?.customer_name || current.customer_name,
+      customer_phone: order?.customer_phone || current.customer_phone,
+      customer_email: current.customer_email,
+      amount: toMoneyInput(order?.remaining_amount),
+      notes:
+        order && locale === "ar"
+          ? `دفعة على الطلب ${order.order_number}`
+          : order
+            ? `Payment for order ${order.order_number}`
+            : current.notes,
+    }));
+
+    setErrors({});
+    setSubmitError("");
+    setIsDirty(true);
+  }
+
+  function applyCustomer(customerId: string) {
+    const customer = customers.find((item) => item.id === customerId) || null;
+
+    setForm((current) => ({
+      ...current,
+      source: "CUSTOMER",
+      customer_id: customerId,
+      invoice_id: "",
+      order_id: "",
+      customer_name: customer?.name || current.customer_name,
+      customer_phone: customer?.phone || current.customer_phone,
+      customer_email: customer?.email || current.customer_email,
+    }));
+
+    setErrors({});
+    setSubmitError("");
+    setIsDirty(true);
+  }
+
+  function validateForm() {
+    const nextErrors: FormErrors = {};
+
+    if (form.source === "INVOICE" && !form.invoice_id) {
+      nextErrors.invoice_id = t.sourceRequired;
     }
 
-    if (sourceType === "order" && selectedOrder) {
-      const total = resolveOrderTotal(selectedOrder);
-      const paid = resolveOrderPaid(selectedOrder);
-      const due = resolveOrderDue(selectedOrder);
-      const paymentAmount = toNumber(amount);
-      const newDue = Math.max(due - paymentAmount, 0);
-
-      return {
-        total,
-        paid,
-        due,
-        paymentAmount,
-        newDue,
-      };
+    if (form.source === "ORDER" && !form.order_id) {
+      nextErrors.order_id = t.sourceRequired;
     }
 
+    if (form.source === "CUSTOMER" && !form.customer_id) {
+      nextErrors.customer_id = t.sourceRequired;
+    }
+
+    if (form.source === "MANUAL" && !form.customer_name.trim()) {
+      nextErrors.customer_name = t.customerRequired;
+    }
+
+    if (!form.payment_date) nextErrors.payment_date = t.required;
+
+    const amount = toNumber(form.amount);
+
+    if (amount <= 0) {
+      nextErrors.amount = t.invalidAmount;
+    }
+
+    if (
+      ["INVOICE", "ORDER"].includes(form.source) &&
+      sourceBalance > 0 &&
+      amount > sourceBalance
+    ) {
+      nextErrors.amount = t.amountExceeds;
+    }
+
+    setErrors(nextErrors);
+
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  function buildPayload() {
     return {
-      total: 0,
-      paid: 0,
-      due: 0,
-      paymentAmount: toNumber(amount),
-      newDue: 0,
+      source: form.source.toLowerCase(),
+      invoice_id: form.source === "INVOICE" ? form.invoice_id || null : null,
+      order_id:
+        form.source === "ORDER" || form.source === "INVOICE"
+          ? form.order_id || null
+          : null,
+      customer_id:
+        form.source !== "MANUAL" ? form.customer_id || null : null,
+      customer_name: form.customer_name.trim(),
+      customer_phone: form.customer_phone.trim(),
+      customer_email: form.customer_email.trim(),
+      payment_method: form.payment_method.toLowerCase(),
+      status: form.status.toLowerCase(),
+      amount: toNumber(form.amount),
+      payment_date: form.payment_date,
+      reference: form.reference.trim(),
+      source_reference: form.reference.trim(),
+      notes: form.notes.trim(),
     };
-  }, [amount, selectedInvoice, selectedOrder, sourceType]);
+  }
 
-  const activeRecordSelected =
-    (sourceType === "invoice" && selectedInvoice) ||
-    (sourceType === "order" && selectedOrder);
+  const loadData = useCallback(
+    async (showToast = false) => {
+      try {
+        setIsLoadingData(true);
 
-  const loadSources = async (mode: "initial" | "refresh" = "initial") => {
-    try {
-      if (mode === "initial") setLoadingSources(true);
-      if (mode === "refresh") setRefreshingSources(true);
+        const requests: Array<Promise<void>> = [];
 
-      const [ordersData, invoicesData] = await Promise.all([
-        fetchOrders(),
-        fetchInvoices(),
-      ]);
+        if (canViewInvoices) {
+          requests.push(
+            loadCollection<InvoiceOption>({
+              endpoints: [
+                "/api/invoices/list/?page_size=500",
+                "/api/invoices/?page_size=500",
+              ],
+              key: "invoices",
+              normalize: normalizeInvoice,
+              setRows: setInvoices,
+            }),
+          );
+        } else {
+          setInvoices([]);
+        }
 
-      setOrders(ordersData);
-      setInvoices(invoicesData);
+        if (canViewOrders) {
+          requests.push(
+            loadCollection<OrderOption>({
+              endpoints: [
+                "/api/orders/list/?page_size=500",
+                "/api/orders/?page_size=500",
+              ],
+              key: "orders",
+              normalize: normalizeOrder,
+              setRows: setOrders,
+            }),
+          );
+        } else {
+          setOrders([]);
+        }
 
-      if (mode === "refresh") {
-        toast.success(t.refreshSuccess);
+        if (canViewCustomers) {
+          requests.push(
+            loadCollection<CustomerOption>({
+              endpoints: [
+                "/api/customers/list/?page_size=500",
+                "/api/customers/?page_size=500",
+              ],
+              key: "customers",
+              normalize: normalizeCustomer,
+              setRows: setCustomers,
+            }),
+          );
+        } else {
+          setCustomers([]);
+        }
+
+        await Promise.all(requests);
+
+        if (showToast) {
+          toast.success(locale === "ar" ? "تم تحديث البيانات." : "Data refreshed.");
+        }
+      } catch (error) {
+        console.error("Payment create load data error:", error);
+        toast.error(t.loadError);
+      } finally {
+        setIsLoadingData(false);
       }
-    } catch (error) {
-      console.error(error);
-      toast.error(t.loadError);
-    } finally {
-      setLoadingSources(false);
-      setRefreshingSources(false);
+    },
+    [canViewCustomers, canViewInvoices, canViewOrders, locale, t.loadError],
+  );
+
+  async function submitForm() {
+    if (!canCreate || isSaving) return;
+
+    const isValid = validateForm();
+
+    if (!isValid) {
+      setSubmitError(t.submitError);
+      return;
     }
-  };
+
+    try {
+      setIsSaving(true);
+      setSubmitError("");
+
+      const payload = buildPayload();
+      const csrfToken = getCookie("csrftoken");
+      const endpoints = ["/api/payments/create/", "/api/payments/"];
+
+      let createdId = "";
+      let lastError = "";
+
+      for (const endpoint of endpoints) {
+        const response = await fetch(apiUrl(endpoint), {
+          method: "POST",
+          credentials: "include",
+          cache: "no-store",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+          },
+          body: JSON.stringify(payload),
+        });
+
+        const responsePayload = (await response.json().catch(() => null)) as
+          | ApiEnvelope<unknown>
+          | null;
+
+        if (
+          response.ok &&
+          responsePayload?.ok !== false &&
+          responsePayload?.success !== false
+        ) {
+          const data = asDict(responsePayload?.data);
+          const payment = asDict(data.payment || data.item || responsePayload);
+
+          createdId = String(
+            payment.id ||
+              data.id ||
+              getNestedValue(asDict(responsePayload), ["id", "uuid", "pk"]) ||
+              "",
+          );
+
+          break;
+        }
+
+        lastError =
+          responsePayload?.message ||
+          responsePayload?.detail ||
+          responsePayload?.error ||
+          `HTTP ${response.status}`;
+      }
+
+      if (!createdId && lastError) {
+        throw new Error(lastError);
+      }
+
+      toast.success(t.paymentCreated);
+
+      try {
+        window.localStorage.removeItem(DRAFT_KEY);
+      } catch {
+        // ignore local storage failures
+      }
+
+      setIsDirty(false);
+
+      if (createdId) {
+        window.location.href = `/system/payments/${createdId}`;
+        return;
+      }
+
+      window.location.href = "/system/payments/list";
+    } catch (error) {
+      console.error("Payment create submit error:", error);
+
+      const message =
+        error instanceof Error && error.message ? error.message : t.submitError;
+
+      setSubmitError(message);
+      toast.error(t.submitError);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function saveDraft() {
+    try {
+      window.localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+      toast.success(t.draftSaved);
+    } catch (error) {
+      console.error("Payment draft save error:", error);
+    }
+  }
+
+  function clearForm() {
+    const confirmed = window.confirm(t.confirmClear);
+
+    if (!confirmed) return;
+
+    setForm(makeDefaultForm());
+    setErrors({});
+    setSubmitError("");
+    setInvoiceSearch("");
+    setOrderSearch("");
+    setCustomerSearch("");
+    setIsDirty(false);
+
+    try {
+      window.localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // ignore local storage failures
+    }
+
+    toast.success(t.draftCleared);
+  }
 
   useEffect(() => {
-    const currentLocale = getInitialLocale();
-    setLocale(currentLocale);
-    applyLocaleToDocument(currentLocale);
-
     const syncLocale = () => {
-      const nextLocale = getInitialLocale();
+      const nextLocale = readLocale();
+
+      applyDocumentLocale(nextLocale);
       setLocale(nextLocale);
-      applyLocaleToDocument(nextLocale);
     };
 
-    window.addEventListener("primey-locale-changed", syncLocale);
-    window.addEventListener("storage", syncLocale);
+    const syncAfterPaint = () => {
+      syncLocale();
+      window.setTimeout(syncLocale, 0);
+    };
 
-    const timeout = window.setTimeout(syncLocale, 50);
+    syncAfterPaint();
+
+    window.addEventListener("primey-locale-changed", syncAfterPaint);
+    window.addEventListener("storage", syncAfterPaint);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncLocale);
-      window.removeEventListener("storage", syncLocale);
-      window.clearTimeout(timeout);
+      window.removeEventListener("primey-locale-changed", syncAfterPaint);
+      window.removeEventListener("storage", syncAfterPaint);
     };
   }, []);
 
   useEffect(() => {
-    loadSources("initial");
+    try {
+      const saved = window.localStorage.getItem(DRAFT_KEY);
+
+      if (!saved) return;
+
+      const parsed = JSON.parse(saved) as Partial<FormState>;
+
+      if (!parsed || typeof parsed !== "object") return;
+
+      setForm({
+        ...makeDefaultForm(),
+        ...parsed,
+      });
+      setIsDirty(true);
+      toast.success(t.draftRestored);
+    } catch (error) {
+      console.error("Payment draft restore error:", error);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!activeRecordSelected) return;
-
-    if (amount) return;
-
-    if (summary.due > 0) {
-      setAmount(summary.due.toFixed(2));
-    }
-  }, [activeRecordSelected, amount, summary.due]);
+    if (authResolving) return;
+    loadData(false);
+  }, [authResolving, loadData]);
 
   useEffect(() => {
-    if (paymentMethod === "CASH" || paymentMethod === "OTHER") {
-      setProvider("MANUAL");
-      return;
-    }
+    if (didApplyQueryParams || isLoadingData) return;
 
-    if (paymentMethod === "BANK_TRANSFER") {
-      setProvider("BANK");
-      return;
-    }
-
-    if (paymentMethod === "TAMARA") {
-      setProvider("TAMARA");
-      return;
-    }
-
-    if (paymentMethod === "TABBY") {
-      setProvider("TABBY");
-      return;
-    }
-
-    if (
-      paymentMethod === "GATEWAY" ||
-      paymentMethod === "CREDIT_CARD" ||
-      paymentMethod === "DEBIT_CARD" ||
-      paymentMethod === "APPLE_PAY" ||
-      paymentMethod === "STC_PAY"
-    ) {
-      setProvider("TAP");
-    }
-  }, [paymentMethod]);
-
-  const handleSourceTypeChange = (nextType: SourceType) => {
-    setSourceType(nextType);
-    setSelectedOrderId(null);
-    setSelectedInvoiceId(null);
-    setAmount("");
-    setSearch("");
-  };
-
-  const validateForm = () => {
-    if (!activeRecordSelected) {
-      toast.error(t.selectSourceError);
-      return false;
-    }
-
-    if (sourceType === "invoice" && selectedInvoice && !selectedInvoice.order_id) {
-      toast.error(t.missingOrderError);
-      return false;
-    }
-
+    const invoiceId = searchParams.get("invoice") || searchParams.get("invoice_id");
+    const orderId = searchParams.get("order") || searchParams.get("order_id");
     const customerId =
-      sourceType === "invoice"
-        ? selectedInvoice?.customer_id || selectedInvoice?.customer?.id
-        : selectedOrder?.customer_id || selectedOrder?.customer?.id;
+      searchParams.get("customer") || searchParams.get("customer_id");
 
-    if (!customerId) {
-      toast.error(t.missingCustomerError);
-      return false;
+    if (invoiceId && invoices.some((item) => item.id === invoiceId)) {
+      applyInvoice(invoiceId);
+      setDidApplyQueryParams(true);
+      return;
     }
 
-    const paymentAmount = toNumber(amount);
-    if (paymentAmount <= 0) {
-      toast.error(t.amountError);
-      return false;
+    if (orderId && orders.some((item) => item.id === orderId)) {
+      applyOrder(orderId);
+      setDidApplyQueryParams(true);
+      return;
     }
 
-    if (summary.due > 0 && paymentAmount > summary.due) {
-      toast.warning(t.amountMoreThanDueWarning);
+    if (customerId && customers.some((item) => item.id === customerId)) {
+      applyCustomer(customerId);
+      setDidApplyQueryParams(true);
+      return;
     }
 
-    return true;
-  };
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!validateForm()) return;
-
-    try {
-      setSaving(true);
-
-      const paymentAmount = toNumber(amount).toFixed(2);
-
-      const invoiceId =
-        sourceType === "invoice" && selectedInvoice ? selectedInvoice.id : undefined;
-
-      const orderId =
-        sourceType === "invoice" && selectedInvoice
-          ? selectedInvoice.order_id || undefined
-          : selectedOrder?.id || undefined;
-
-      const customerId =
-        sourceType === "invoice"
-          ? selectedInvoice?.customer_id || selectedInvoice?.customer?.id || null
-          : selectedOrder?.customer_id || selectedOrder?.customer?.id || null;
-
-      const payload: CreatePaymentPayload = {
-        ...(invoiceId ? { invoice_id: invoiceId } : {}),
-        ...(orderId ? { order_id: orderId } : {}),
-        customer_id: customerId,
-        payment_method: paymentMethod,
-        provider,
-        amount: paymentAmount,
-        paid_amount: autoConfirm ? paymentAmount : "0.00",
-        currency: "SAR",
-        external_reference: externalReference.trim(),
-        transaction_id: transactionId.trim(),
-        gateway_response_code: gatewayResponseCode.trim(),
-        gateway_message: gatewayMessage.trim(),
-        notes: notes.trim(),
-        confirm: autoConfirm,
-        auto_create_treasury_movement: autoCreateTreasuryMovement,
-        auto_post_accounting: autoPostAccounting,
-      };
-
-      const result = await createPayment(payload);
-
-      toast.success(result.message || t.createSuccess);
-
-      const paymentId = result.payment?.id;
-      if (paymentId) {
-        window.location.href = `/system/payments/${paymentId}`;
-      } else {
-        window.location.href = "/system/payments/list";
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error(t.createError);
-    } finally {
-      setSaving(false);
+    if (invoiceId || orderId || customerId) {
+      setDidApplyQueryParams(true);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customers, didApplyQueryParams, invoices, isLoadingData, orders, searchParams]);
+
+  useEffect(() => {
+    const handler = (event: BeforeUnloadEvent) => {
+      if (!isDirty || isSaving) return;
+
+      event.preventDefault();
+      event.returnValue = t.leaveConfirm;
+    };
+
+    window.addEventListener("beforeunload", handler);
+
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty, isSaving, t.leaveConfirm]);
+
+  if (!authResolving && !canCreate) {
+    return (
+      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <CardContent className="flex items-start gap-3 p-5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+              <XCircle className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="font-semibold text-destructive">
+                {t.accessDeniedTitle}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t.accessDeniedText}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-background">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <section className="relative overflow-hidden rounded-[2rem] border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm">
-          <div className="pointer-events-none absolute -top-24 end-12 h-56 w-56 rounded-full bg-primary/10 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-28 start-0 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
+    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+            {t.title}
+          </h1>
 
-          <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-4">
-              <Badge
-                variant="outline"
-                className="w-fit rounded-full border-primary/20 bg-primary/5 px-3 py-1 text-primary"
-              >
-                <Sparkles className="me-2 h-3.5 w-3.5" />
-                {t.badge}
-              </Badge>
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Link href="/system/payments/list">
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>{t.back}</span>
+            </Button>
+          </Link>
+
+          <Link href="/system/payments">
+            <Button
+              variant="outline"
+              className="h-10 w-full rounded-xl sm:w-auto"
+            >
+              <CreditCard className="h-4 w-4" />
+              <span>{t.dashboard}</span>
+            </Button>
+          </Link>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={() => loadData(true)}
+            disabled={isLoadingData || isSaving}
+          >
+            {isLoadingData ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-4 w-4" />
+            )}
+            <span>{t.refreshData}</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={saveDraft}
+            disabled={isSaving}
+          >
+            <Save className="h-4 w-4" />
+            <span>{locale === "ar" ? "حفظ مسودة" : "Save Draft"}</span>
+          </Button>
+
+          <Button
+            className="h-10 rounded-xl"
+            onClick={submitForm}
+            disabled={!canSubmit}
+          >
+            {isSaving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            <span>{isSaving ? t.saving : t.save}</span>
+          </Button>
+        </div>
+      </div>
+
+      {submitError ? (
+        <Alert className="rounded-2xl border-destructive/20 bg-destructive/5 text-destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>{t.submitError}</AlertTitle>
+          <AlertDescription>{submitError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-4">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base font-bold">
+                {t.formTitle}
+              </CardTitle>
+              <CardDescription>{t.formDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-2">
+                  <Label>{t.source}</Label>
+                  <select
+                    value={form.source}
+                    onChange={(event) =>
+                      changeSource(event.target.value as PaymentSource)
+                    }
+                    disabled={isSaving}
+                    className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="INVOICE">{t.fromInvoice}</option>
+                    <option value="ORDER">{t.fromOrder}</option>
+                    <option value="CUSTOMER">{t.fromCustomer}</option>
+                    <option value="MANUAL">{t.manual}</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{t.paymentMethod}</Label>
+                  <select
+                    value={form.payment_method}
+                    onChange={(event) =>
+                      updateForm(
+                        "payment_method",
+                        event.target.value as PaymentMethod,
+                      )
+                    }
+                    disabled={isSaving}
+                    className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="CASH">{t.cash}</option>
+                    <option value="BANK_TRANSFER">{t.bankTransfer}</option>
+                    <option value="GATEWAY">{t.gateway}</option>
+                    <option value="CARD">{t.card}</option>
+                    <option value="WALLET">{t.wallet}</option>
+                    <option value="TAMARA">{t.tamara}</option>
+                    <option value="TABBY">{t.tabby}</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{t.status}</Label>
+                  <select
+                    value={form.status}
+                    onChange={(event) =>
+                      updateForm("status", event.target.value as PaymentStatus)
+                    }
+                    disabled={isSaving}
+                    className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="PENDING">{t.pending}</option>
+                    <option value="CONFIRMED">{t.confirmed}</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{t.paymentDate}</Label>
+                  <div className="relative">
+                    <CalendarDays
+                      className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
+                        isArabic ? "right-3" : "left-3"
+                      }`}
+                    />
+                    <Input
+                      type="date"
+                      value={form.payment_date}
+                      onChange={(event) =>
+                        updateForm("payment_date", event.target.value)
+                      }
+                      disabled={isSaving}
+                      dir="ltr"
+                      className={`h-11 rounded-xl ${
+                        isArabic ? "pr-10" : "pl-10"
+                      }`}
+                    />
+                  </div>
+                  {errors.payment_date ? (
+                    <p className="text-xs text-destructive">
+                      {errors.payment_date}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              {form.source === "INVOICE" ? (
+                <SourcePicker
+                  title={t.invoice}
+                  searchValue={invoiceSearch}
+                  onSearchChange={setInvoiceSearch}
+                  searchPlaceholder={t.searchInvoice}
+                  isLoading={isLoadingData}
+                  emptyText={t.noInvoices}
+                  error={errors.invoice_id}
+                  items={filteredInvoices.map((invoice) => ({
+                    id: invoice.id,
+                    title: invoice.invoice_number,
+                    subtitle: invoice.customer_name,
+                    meta: invoice.customer_phone || "-",
+                    amount: invoice.remaining_amount,
+                    isSelected: form.invoice_id === invoice.id,
+                    onClick: () => applyInvoice(invoice.id),
+                  }))}
+                />
+              ) : null}
+
+              {form.source === "ORDER" ? (
+                <SourcePicker
+                  title={t.order}
+                  searchValue={orderSearch}
+                  onSearchChange={setOrderSearch}
+                  searchPlaceholder={t.searchOrder}
+                  isLoading={isLoadingData}
+                  emptyText={t.noOrders}
+                  error={errors.order_id}
+                  items={filteredOrders.map((order) => ({
+                    id: order.id,
+                    title: order.order_number,
+                    subtitle: order.customer_name,
+                    meta: order.customer_phone || "-",
+                    amount: order.remaining_amount,
+                    isSelected: form.order_id === order.id,
+                    onClick: () => applyOrder(order.id),
+                  }))}
+                />
+              ) : null}
+
+              {form.source === "CUSTOMER" ? (
+                <CustomerPicker
+                  title={t.customer}
+                  searchValue={customerSearch}
+                  onSearchChange={setCustomerSearch}
+                  searchPlaceholder={t.searchCustomer}
+                  isLoading={isLoadingData}
+                  emptyText={t.noCustomers}
+                  error={errors.customer_id}
+                  customers={filteredCustomers}
+                  selectedId={form.customer_id}
+                  onSelect={applyCustomer}
+                />
+              ) : null}
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>{t.customerName}</Label>
+                  <Input
+                    value={form.customer_name}
+                    onChange={(event) =>
+                      updateForm("customer_name", event.target.value)
+                    }
+                    disabled={isSaving || form.source !== "MANUAL"}
+                    className="h-11 rounded-xl"
+                  />
+                  {errors.customer_name ? (
+                    <p className="text-xs text-destructive">
+                      {errors.customer_name}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{t.customerPhone}</Label>
+                  <Input
+                    value={form.customer_phone}
+                    onChange={(event) =>
+                      updateForm("customer_phone", event.target.value)
+                    }
+                    disabled={isSaving || form.source !== "MANUAL"}
+                    dir="ltr"
+                    className="h-11 rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{t.customerEmail}</Label>
+                  <Input
+                    value={form.customer_email}
+                    onChange={(event) =>
+                      updateForm("customer_email", event.target.value)
+                    }
+                    disabled={isSaving || form.source !== "MANUAL"}
+                    dir="ltr"
+                    className="h-11 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>{t.amount}</Label>
+                  <div className="relative">
+                    <Input
+                      value={form.amount}
+                      onChange={(event) =>
+                        updateForm("amount", event.target.value)
+                      }
+                      disabled={isSaving}
+                      inputMode="decimal"
+                      dir="ltr"
+                      className="h-11 rounded-xl pe-10"
+                    />
+                    <SarIcon
+                      className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
+                        isArabic ? "left-3" : "right-3"
+                      }`}
+                    />
+                  </div>
+                  {errors.amount ? (
+                    <p className="text-xs text-destructive">{errors.amount}</p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{t.reference}</Label>
+                  <Input
+                    value={form.reference}
+                    onChange={(event) =>
+                      updateForm("reference", event.target.value)
+                    }
+                    disabled={isSaving}
+                    dir="ltr"
+                    className="h-11 rounded-xl"
+                  />
+                </div>
+              </div>
 
               <div className="space-y-2">
-                <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
-                  {t.title}
-                </h1>
-                <p className="max-w-3xl text-sm leading-7 text-muted-foreground md:text-base">
-                  {t.subtitle}
+                <Label>{t.notes}</Label>
+                <Textarea
+                  value={form.notes}
+                  onChange={(event) => updateForm("notes", event.target.value)}
+                  disabled={isSaving}
+                  className="min-h-[110px] rounded-xl"
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <aside className="space-y-4">
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base font-bold">
+                {t.summaryTitle}
+              </CardTitle>
+              <CardDescription>{t.summaryDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="flex h-14 items-center justify-between rounded-2xl bg-muted/40 px-4">
+                <span className="text-sm text-muted-foreground">
+                  {t.paymentMethod}
+                </span>
+                <span className="font-semibold">
+                  {paymentMethodLabel(form.payment_method, locale)}
+                </span>
+              </div>
+
+              <div className="space-y-3 rounded-2xl border p-4">
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted-foreground">
+                    {t.selectedSource}
+                  </span>
+                  <span className="font-semibold">{sourceLabel(form, t)}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted-foreground">{t.totalAmount}</span>
+                  <MoneyText value={sourceTotal} />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted-foreground">{t.paidAmount}</span>
+                  <MoneyText value={sourcePaid} />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-muted-foreground">
+                    {t.remainingAmount}
+                  </span>
+                  <MoneyText value={sourceBalance} />
+                </div>
+
+                <div className="border-t pt-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-semibold">{t.paymentAmount}</span>
+                    <span className="text-lg font-bold">
+                      <MoneyText value={form.amount} />
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-muted/20 p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <UserRound className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-semibold">{t.customer}</span>
+                </div>
+
+                <p className="font-semibold">
+                  {form.customer_name || t.notSelected}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground" dir="ltr">
+                  {form.customer_phone || "-"}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground" dir="ltr">
+                  {form.customer_email || "-"}
                 </p>
               </div>
-            </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <Button asChild variant="outline" className="rounded-2xl">
-                <Link href="/system/payments/list">
-                  {isAr ? (
-                    <ArrowLeft className="me-2 h-4 w-4" />
+              <div className="flex flex-col gap-2">
+                <Button
+                  className="h-11 rounded-xl"
+                  onClick={submitForm}
+                  disabled={!canSubmit}
+                >
+                  {isSaving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <ArrowLeft className="me-2 h-4 w-4 rotate-180" />
+                    <CheckCircle2 className="h-4 w-4" />
                   )}
-                  {t.back}
-                </Link>
-              </Button>
-
-              <Button asChild variant="secondary" className="rounded-2xl">
-                <Link href="/system/payments">
-                  <CreditCard className="me-2 h-4 w-4" />
-                  {t.dashboard}
-                </Link>
-              </Button>
-
-              <Button asChild variant="ghost" className="rounded-2xl">
-                <Link href="/system/payments/reports">
-                  <BarChart3 className="me-2 h-4 w-4" />
-                  {t.reports}
-                </Link>
-              </Button>
-            </div>
-          </div>
-        </section>
-
-        <form onSubmit={handleSubmit} className="grid gap-6 xl:grid-cols-[1.35fr_0.85fr]">
-          <div className="space-y-6">
-            <Card className="rounded-[1.5rem]">
-              <CardHeader className="gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <ReceiptText className="h-5 w-5 text-primary" />
-                    {t.selectSource}
-                  </CardTitle>
-                  <CardDescription>{t.selectSourceDesc}</CardDescription>
-                </div>
+                  {isSaving ? t.saving : t.save}
+                </Button>
 
                 <Button
-                  type="button"
                   variant="outline"
-                  className="rounded-2xl"
-                  onClick={() => loadSources("refresh")}
-                  disabled={refreshingSources}
+                  className="h-11 rounded-xl"
+                  onClick={clearForm}
+                  disabled={isSaving}
                 >
-                  {refreshingSources ? (
-                    <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="me-2 h-4 w-4" />
-                  )}
-                  {t.refresh}
+                  <Trash2 className="h-4 w-4" />
+                  {t.clear}
                 </Button>
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSourceTypeChange("invoice")}
-                    className={`rounded-3xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-sm ${
-                      sourceType === "invoice"
-                        ? "border-primary bg-primary/5"
-                        : "bg-card hover:bg-muted/30"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
-                          sourceType === "invoice"
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-primary/10 text-primary"
-                        }`}
-                      >
-                        <FileText className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="font-semibold">{t.sourceInvoice}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {isAr
-                            ? "ربط مباشر بالفاتورة"
-                            : "Direct invoice linkage"}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleSourceTypeChange("order")}
-                    className={`rounded-3xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-sm ${
-                      sourceType === "order"
-                        ? "border-primary bg-primary/5"
-                        : "bg-card hover:bg-muted/30"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
-                          sourceType === "order"
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-primary/10 text-primary"
-                        }`}
-                      >
-                        <ShoppingCart className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="font-semibold">{t.sourceOrder}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {isAr ? "ربط بالطلب فقط" : "Order-only linkage"}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-
-                <div className="relative">
-                  <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder={t.searchSource}
-                    className="rounded-2xl ps-9"
-                  />
-                </div>
-
-                {loadingSources ? (
-                  <div className="flex min-h-72 flex-col items-center justify-center gap-3 text-muted-foreground">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <p className="text-sm">{t.loadingSources}</p>
-                  </div>
-                ) : sourceType === "invoice" ? (
-                  filteredInvoices.length === 0 ? (
-                    <EmptyState message={t.noSources} />
-                  ) : (
-                    <div className="grid max-h-[520px] gap-3 overflow-y-auto pe-1">
-                      {filteredInvoices.map((invoice) => {
-                        const isSelected = selectedInvoiceId === invoice.id;
-                        const due = resolveInvoiceDue(invoice);
-
-                        return (
-                          <button
-                            key={invoice.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedInvoiceId(invoice.id);
-                              setSelectedOrderId(null);
-                              setAmount(due > 0 ? due.toFixed(2) : "");
-                            }}
-                            className={`w-full rounded-3xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-sm ${
-                              isSelected
-                                ? "border-primary bg-primary/5 shadow-sm"
-                                : "bg-card hover:bg-muted/30"
-                            }`}
-                          >
-                            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                              <div className="flex items-start gap-3">
-                                <div
-                                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
-                                    isSelected
-                                      ? "bg-primary text-primary-foreground"
-                                      : "bg-primary/10 text-primary"
-                                  }`}
-                                >
-                                  {isSelected ? (
-                                    <CheckCircle2 className="h-5 w-5" />
-                                  ) : (
-                                    <ReceiptText className="h-5 w-5" />
-                                  )}
-                                </div>
-
-                                <div className="space-y-1">
-                                  <p className="font-semibold">
-                                    {resolveInvoiceNumber(invoice)}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {t.customer}:{" "}
-                                    {resolveInvoiceCustomerName(invoice, t.notAvailable)}
-                                  </p>
-                                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                                    <Badge variant="secondary" className="rounded-full">
-                                      ID: {invoice.id}
-                                    </Badge>
-
-                                    {invoice.order_id ? (
-                                      <Badge variant="outline" className="rounded-full">
-                                        {t.order}: #{invoice.order_id}
-                                      </Badge>
-                                    ) : null}
-
-                                    {invoice.status ? (
-                                      <Badge variant="outline" className="rounded-full">
-                                        {invoice.status}
-                                      </Badge>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="grid gap-1 text-end">
-                                <div className="flex items-center justify-end gap-2 font-bold">
-                                  <Image src={SAR_ICON_PATH} alt="SAR" width={16} height={16} />
-                                  {formatMoney(resolveInvoiceTotal(invoice))}
-                                </div>
-                                <p className="text-xs text-muted-foreground">
-                                  {t.due}: {formatMoney(due)}
-                                </p>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )
-                ) : filteredOrders.length === 0 ? (
-                  <EmptyState message={t.noSources} />
-                ) : (
-                  <div className="grid max-h-[520px] gap-3 overflow-y-auto pe-1">
-                    {filteredOrders.map((order) => {
-                      const isSelected = selectedOrderId === order.id;
-                      const due = resolveOrderDue(order);
-
-                      return (
-                        <button
-                          key={order.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedOrderId(order.id);
-                            setSelectedInvoiceId(null);
-                            setAmount(due > 0 ? due.toFixed(2) : "");
-                          }}
-                          className={`w-full rounded-3xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-sm ${
-                            isSelected
-                              ? "border-primary bg-primary/5 shadow-sm"
-                              : "bg-card hover:bg-muted/30"
-                          }`}
-                        >
-                          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                            <div className="flex items-start gap-3">
-                              <div
-                                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${
-                                  isSelected
-                                    ? "bg-primary text-primary-foreground"
-                                    : "bg-primary/10 text-primary"
-                                }`}
-                              >
-                                {isSelected ? (
-                                  <CheckCircle2 className="h-5 w-5" />
-                                ) : (
-                                  <ShoppingCart className="h-5 w-5" />
-                                )}
-                              </div>
-
-                              <div className="space-y-1">
-                                <p className="font-semibold">{resolveOrderNumber(order)}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {t.customer}: {resolveOrderCustomerName(order, t.notAvailable)}
-                                </p>
-                                <div className="flex flex-wrap items-center gap-2 pt-1">
-                                  <Badge variant="secondary" className="rounded-full">
-                                    ID: {order.id}
-                                  </Badge>
-
-                                  {order.status ? (
-                                    <Badge variant="outline" className="rounded-full">
-                                      {order.status}
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="grid gap-1 text-end">
-                              <div className="flex items-center justify-end gap-2 font-bold">
-                                <Image src={SAR_ICON_PATH} alt="SAR" width={16} height={16} />
-                                {formatMoney(resolveOrderTotal(order))}
-                              </div>
-                              <p className="text-xs text-muted-foreground">
-                                {t.due}: {formatMoney(due)}
-                              </p>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CreditCard className="h-5 w-5 text-primary" />
-                  {t.paymentData}
-                </CardTitle>
-                <CardDescription>{t.paymentDataDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-5">
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="grid gap-2">
-                    <Label htmlFor="payment_method">{t.paymentMethod}</Label>
-                    <select
-                      id="payment_method"
-                      value={paymentMethod}
-                      onChange={(event) =>
-                        setPaymentMethod(event.target.value as PaymentMethod)
-                      }
-                      className="h-11 rounded-2xl border border-input bg-background px-3 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                    >
-                      {PAYMENT_METHODS.map((item) => (
-                        <option key={item.value} value={item.value}>
-                          {isAr ? item.labelAr : item.labelEn}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="provider">{t.provider}</Label>
-                    <select
-                      id="provider"
-                      value={provider}
-                      onChange={(event) =>
-                        setProvider(event.target.value as PaymentProvider)
-                      }
-                      className="h-11 rounded-2xl border border-input bg-background px-3 text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                    >
-                      {PAYMENT_PROVIDERS.map((item) => (
-                        <option key={item.value} value={item.value}>
-                          {isAr ? item.labelAr : item.labelEn}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="amount">{t.amount}</Label>
-                    <Input
-                      id="amount"
-                      value={amount}
-                      onChange={(event) =>
-                        setAmount(normalizeDecimalInput(event.target.value))
-                      }
-                      inputMode="decimal"
-                      className="rounded-2xl"
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border bg-muted/20 p-4">
-                  <div className="flex items-start gap-3">
-                    <BadgeCheck className="mt-0.5 h-5 w-5 text-primary" />
-                    <div>
-                      <p className="text-sm font-semibold">
-                        {isAr ? selectedMethod.labelAr : selectedMethod.labelEn}
-                      </p>
-                      <p className="mt-1 text-xs leading-6 text-muted-foreground">
-                        {isAr
-                          ? selectedMethod.descriptionAr
-                          : selectedMethod.descriptionEn}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t.provider}: {getProviderLabel(provider, locale)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="external_reference">{t.externalReference}</Label>
-                    <Input
-                      id="external_reference"
-                      value={externalReference}
-                      onChange={(event) => setExternalReference(event.target.value)}
-                      placeholder={t.externalReferencePlaceholder}
-                      className="rounded-2xl"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="transaction_id">{t.transactionId}</Label>
-                    <Input
-                      id="transaction_id"
-                      value={transactionId}
-                      onChange={(event) => setTransactionId(event.target.value)}
-                      placeholder={t.transactionIdPlaceholder}
-                      className="rounded-2xl"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="gateway_response_code">
-                      {t.gatewayResponseCode}
-                    </Label>
-                    <Input
-                      id="gateway_response_code"
-                      value={gatewayResponseCode}
-                      onChange={(event) =>
-                        setGatewayResponseCode(event.target.value)
-                      }
-                      placeholder={t.gatewayCodePlaceholder}
-                      className="rounded-2xl"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="gateway_message">{t.gatewayMessage}</Label>
-                    <Input
-                      id="gateway_message"
-                      value={gatewayMessage}
-                      onChange={(event) => setGatewayMessage(event.target.value)}
-                      placeholder={t.gatewayMessagePlaceholder}
-                      className="rounded-2xl"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="notes">{t.notes}</Label>
-                  <textarea
-                    id="notes"
-                    value={notes}
-                    onChange={(event) => setNotes(event.target.value)}
-                    placeholder={t.notesPlaceholder}
-                    className="min-h-32 rounded-2xl border border-input bg-background px-3 py-3 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                  />
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-3">
-                  <ToggleCard
-                    checked={autoConfirm}
-                    onChange={setAutoConfirm}
-                    title={t.autoConfirm}
-                    description={
-                      isAr
-                        ? "يتم اعتماد الدفعة كمدفوعة مباشرة عند الحفظ."
-                        : "Marks the payment as paid immediately on save."
-                    }
-                    icon={CheckCircle2}
-                  />
-
-                  <ToggleCard
-                    checked={autoCreateTreasuryMovement}
-                    onChange={setAutoCreateTreasuryMovement}
-                    title={t.autoTreasury}
-                    description={
-                      isAr
-                        ? "يتم إنشاء حركة خزينة بعد نجاح الحفظ."
-                        : "Creates treasury movement after successful save."
-                    }
-                    icon={Wallet}
-                  />
-
-                  <ToggleCard
-                    checked={autoPostAccounting}
-                    onChange={setAutoPostAccounting}
-                    title={t.autoAccounting}
-                    description={
-                      isAr
-                        ? "يتم جدولة الترحيل المحاسبي بعد نجاح الحفظ."
-                        : "Schedules accounting posting after successful save."
-                    }
-                    icon={ShieldCheck}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <aside className="space-y-6">
-            <Card className="sticky top-6 rounded-[1.5rem]">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Banknote className="h-5 w-5 text-primary" />
-                  {t.sourceSummary}
-                </CardTitle>
-                <CardDescription>
-                  {sourceType === "invoice" && selectedInvoice
-                    ? resolveInvoiceNumber(selectedInvoice)
-                    : sourceType === "order" && selectedOrder
-                      ? resolveOrderNumber(selectedOrder)
-                      : isAr
-                        ? "اختر سجلًا لعرض ملخص الدفع"
-                        : "Select a record to view payment summary"}
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                {activeRecordSelected ? (
-                  <>
-                    <div className="rounded-3xl border bg-muted/20 p-4">
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                          {sourceType === "invoice" ? (
-                            <ReceiptText className="h-5 w-5" />
-                          ) : (
-                            <ShoppingCart className="h-5 w-5" />
-                          )}
-                        </div>
-
-                        <div className="min-w-0 space-y-1">
-                          <p className="truncate font-semibold">
-                            {sourceType === "invoice" && selectedInvoice
-                              ? resolveInvoiceNumber(selectedInvoice)
-                              : selectedOrder
-                                ? resolveOrderNumber(selectedOrder)
-                                : t.notAvailable}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {t.customer}:{" "}
-                            {sourceType === "invoice" && selectedInvoice
-                              ? resolveInvoiceCustomerName(selectedInvoice, t.notAvailable)
-                              : selectedOrder
-                                ? resolveOrderCustomerName(selectedOrder, t.notAvailable)
-                                : t.notAvailable}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {t.date}:{" "}
-                            {sourceType === "invoice" && selectedInvoice
-                              ? formatDate(
-                                  selectedInvoice.invoice_date ||
-                                    selectedInvoice.issued_at ||
-                                    selectedInvoice.created_at,
-                                  locale
-                                )
-                              : selectedOrder
-                                ? formatDate(
-                                    selectedOrder.order_date || selectedOrder.created_at,
-                                    locale
-                                  )
-                                : t.notAvailable}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <SummaryLine label={t.total} value={summary.total} />
-                    <SummaryLine label={t.paid} value={summary.paid} />
-                    <SummaryLine label={t.due} value={summary.due} />
-
-                    <div className="rounded-3xl border border-primary/20 bg-primary/5 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold">{t.amount}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {getMethodLabel(paymentMethod, locale)}
-                          </p>
-                        </div>
-
-                        <div className="flex items-center gap-2 text-2xl font-bold">
-                          <Image src={SAR_ICON_PATH} alt="SAR" width={20} height={20} />
-                          {formatMoney(summary.paymentAmount)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <SummaryLine label={t.newDue} value={summary.newDue} strong />
-
-                    <Button
-                      type="submit"
-                      className="h-11 w-full rounded-2xl"
-                      disabled={saving}
-                    >
-                      {saving ? (
-                        <Loader2 className="me-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Save className="me-2 h-4 w-4" />
-                      )}
-                      {saving ? t.saving : t.save}
-                    </Button>
-                  </>
-                ) : (
-                  <div className="flex min-h-80 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
-                    <ReceiptText className="h-12 w-12 text-muted-foreground" />
-                    <p className="max-w-xs text-sm leading-7 text-muted-foreground">
-                      {isAr
-                        ? "اختر فاتورة أو طلبًا من القائمة حتى يتم تجهيز ملخص الدفع قبل الحفظ."
-                        : "Select an invoice or order from the list to prepare the payment summary before saving."}
-                    </p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </aside>
-        </form>
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
       </div>
-    </main>
-  );
-}
-
-/* =====================================================
-   SMALL COMPONENTS
-===================================================== */
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed bg-muted/20 text-center">
-      <CreditCard className="h-10 w-10 text-muted-foreground" />
-      <p className="text-sm text-muted-foreground">{message}</p>
     </div>
   );
 }
 
-function SummaryLine({
-  label,
-  value,
-  strong = false,
+/* ============================================================
+   Small Components / Helpers
+============================================================ */
+
+async function loadCollection<T>({
+  endpoints,
+  key,
+  normalize,
+  setRows,
 }: {
-  label: string;
-  value: number;
-  strong?: boolean;
+  endpoints: string[];
+  key: string;
+  normalize: (item: unknown, index: number) => T;
+  setRows: (rows: T[]) => void;
 }) {
-  return (
-    <div
-      className={`flex items-center justify-between gap-3 rounded-2xl border p-3 ${
-        strong ? "border-primary/20 bg-primary/5" : "bg-card"
-      }`}
-    >
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <div className={`flex items-center gap-1.5 ${strong ? "font-bold" : "font-semibold"}`}>
-        <Image src={SAR_ICON_PATH} alt="SAR" width={14} height={14} />
-        {formatMoney(value)}
-      </div>
-    </div>
-  );
+  let payload: ApiEnvelope<unknown> | null = null;
+
+  for (const endpoint of endpoints) {
+    const response = await fetch(apiUrl(endpoint), {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+
+    const responsePayload = (await response.json().catch(() => null)) as
+      | ApiEnvelope<unknown>
+      | null;
+
+    if (
+      response.ok &&
+      responsePayload?.ok !== false &&
+      responsePayload?.success !== false
+    ) {
+      payload = responsePayload;
+      break;
+    }
+  }
+
+  const normalizedRows = extractRows(payload, key)
+    .map(normalize)
+    .filter(Boolean);
+
+  setRows(normalizedRows);
 }
 
-function ToggleCard({
-  checked,
-  onChange,
+function sourceLabel(form: FormState, t: ReturnType<typeof dictionary>) {
+  if (form.source === "INVOICE") return t.fromInvoice;
+  if (form.source === "ORDER") return t.fromOrder;
+  if (form.source === "CUSTOMER") return t.fromCustomer;
+
+  return t.manual;
+}
+
+function SourcePicker({
   title,
-  description,
-  icon: Icon,
+  searchValue,
+  onSearchChange,
+  searchPlaceholder,
+  isLoading,
+  emptyText,
+  error,
+  items,
 }: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
   title: string;
-  description: string;
-  icon: LucideIcon;
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+  searchPlaceholder: string;
+  isLoading: boolean;
+  emptyText: string;
+  error?: string;
+  items: Array<{
+    id: string;
+    title: string;
+    subtitle: string;
+    meta: string;
+    amount: number;
+    isSelected: boolean;
+    onClick: () => void;
+  }>;
 }) {
   return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className={`rounded-3xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-sm ${
-        checked ? "border-primary bg-primary/5" : "bg-card hover:bg-muted/30"
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
-            checked ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary"
-          }`}
-        >
-          {checked ? <CheckCircle2 className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
+    <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <Label>{title}</Label>
         </div>
 
-        <div>
-          <p className="text-sm font-semibold">{title}</p>
-          <p className="mt-1 text-xs leading-6 text-muted-foreground">{description}</p>
-        </div>
+        <Badge variant="outline" className="rounded-full">
+          {formatNumber(items.length)}
+        </Badge>
       </div>
-    </button>
+
+      <div className="relative">
+        <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ltr:left-3 ltr:right-auto" />
+        <Input
+          value={searchValue}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={searchPlaceholder}
+          className="h-11 rounded-xl pr-10 ltr:pl-10 ltr:pr-3"
+        />
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-14 rounded-xl" />
+          ))}
+        </div>
+      ) : items.length > 0 ? (
+        <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={item.onClick}
+              className={`rounded-xl border p-3 text-start transition hover:bg-muted/50 ${
+                item.isSelected ? "border-primary bg-primary/5" : "bg-background"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold" dir="ltr">
+                    {item.title}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {item.subtitle}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
+                    {item.meta}
+                  </p>
+                </div>
+
+                <div className="text-end text-sm font-semibold">
+                  <MoneyText value={item.amount} />
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+          {emptyText}
+        </div>
+      )}
+
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+function CustomerPicker({
+  title,
+  searchValue,
+  onSearchChange,
+  searchPlaceholder,
+  isLoading,
+  emptyText,
+  error,
+  customers,
+  selectedId,
+  onSelect,
+}: {
+  title: string;
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+  searchPlaceholder: string;
+  isLoading: boolean;
+  emptyText: string;
+  error?: string;
+  customers: CustomerOption[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <Label>{title}</Label>
+        <Badge variant="outline" className="rounded-full">
+          {formatNumber(customers.length)}
+        </Badge>
+      </div>
+
+      <div className="relative">
+        <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ltr:left-3 ltr:right-auto" />
+        <Input
+          value={searchValue}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={searchPlaceholder}
+          className="h-11 rounded-xl pr-10 ltr:pl-10 ltr:pr-3"
+        />
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-14 rounded-xl" />
+          ))}
+        </div>
+      ) : customers.length > 0 ? (
+        <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
+          {customers.map((customer) => (
+            <button
+              key={customer.id}
+              type="button"
+              onClick={() => onSelect(customer.id)}
+              className={`rounded-xl border p-3 text-start transition hover:bg-muted/50 ${
+                selectedId === customer.id
+                  ? "border-primary bg-primary/5"
+                  : "bg-background"
+              }`}
+            >
+              <p className="font-semibold">{customer.name}</p>
+              <p className="mt-1 text-sm text-muted-foreground" dir="ltr">
+                {customer.phone || "-"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
+                {customer.email || "-"}
+              </p>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+          {emptyText}
+        </div>
+      )}
+
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
   );
 }
