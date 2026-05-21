@@ -1,2163 +1,1570 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/payments/create/page.tsx
-   🧠 Primey Care | Create Payment
-
-   ✅ المسار:
-      app/system/payments/create/page.tsx
-
-   ✅ العمل:
-      صفحة تسجيل دفعة داخل النظام.
-      تدعم إنشاء دفعة من فاتورة أو طلب أو عميل أو تسجيل يدوي.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Phase 2 Permissions
-
-   ✅ يعتمد على:
-      - /api/payments/create/
-      - /api/payments/
-      - /api/invoices/list/
-      - /api/orders/list/
-      - /api/customers/list/
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Payments dashboard page
-      - Payments list page
-      - Payments detail page
-      - Invoices pages
-      - Orders pages
-      - Customers pages
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - تسجيل دفعة من فاتورة.
-      - تسجيل دفعة من طلب.
-      - تسجيل دفعة لعميل.
-      - تسجيل دفعة يدوية.
-      - تعبئة بيانات العميل والمبلغ تلقائيًا عند اختيار فاتورة/طلب.
-      - Main Form + Sidebar Summary.
-      - Error Alert داخلي.
-      - Field-level validation.
-      - beforeunload protection.
-      - حفظ واستعادة مسودة محلية.
-      - تأكيد مسح النموذج.
-      - تعطيل الحقول أثناء الحفظ.
-      - تنظيف البيانات قبل الإرسال.
-      - قراءة invoice/order/customer من query params عند توفرها.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - إخفاء الإنشاء عند عدم وجود صلاحية.
-      - أرقام إنجليزية دائمًا.
-      - رمز SAR من /currency/sar.svg بعد الرقم.
-      - استخدام sonner للتنبيهات.
-      - بدون localhost hardcoded.
-      - بدون إظهار مسارات أو عبارات تقنية داخل الواجهة.
+   📂 primey_frontend/app/system/payments/create/page.tsx
+   💳 Primey Care — Create Payment
+   ------------------------------------------------------------
+   ✅ Same approved Customers / Invoices / Payments visual pattern
+   ✅ Main form + sidebar summary
+   ✅ Create payment from invoice / order / customer / manual
+   ✅ Real API only
+   ✅ No localhost
+   ✅ No fake data
+   ✅ Local draft protection
+   ✅ Field validation
+   ✅ sonner toast
+   ✅ SAR icon from /currency/sar.svg
+   ✅ RTL/LTR via primey-locale
 ============================================================ */
 
+import * as React from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
-  AlertTriangle,
   ArrowLeft,
+  ArrowRight,
+  Banknote,
   CalendarDays,
   CheckCircle2,
-  CreditCard,
   FileText,
   Loader2,
-  RefreshCcw,
+  ReceiptText,
+  RefreshCw,
+  RotateCcw,
   Save,
-  Search,
-  Trash2,
-  UserRound,
+  ShieldCheck,
+  ShoppingCart,
+  TriangleAlert,
+  User,
   WalletCards,
-  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type PaymentSource = "INVOICE" | "ORDER" | "CUSTOMER" | "MANUAL";
-
-type PaymentStatus = "PENDING" | "CONFIRMED";
-
+type PaymentSource = "invoice" | "order" | "customer" | "manual";
+type PaymentStatus = "pending" | "paid";
 type PaymentMethod =
-  | "CASH"
-  | "BANK_TRANSFER"
-  | "GATEWAY"
-  | "CARD"
-  | "WALLET"
-  | "TAMARA"
-  | "TABBY";
+  | "cash"
+  | "bank_transfer"
+  | "gateway"
+  | "credit_card"
+  | "debit_card"
+  | "apple_pay"
+  | "stc_pay"
+  | "tamara"
+  | "tabby"
+  | "wallet";
 
-type ApiEnvelope<T> = {
-  ok?: boolean;
-  success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
-  results?: unknown[];
-  items?: unknown[];
-  rows?: unknown[];
-  invoices?: unknown[];
-  orders?: unknown[];
-  customers?: unknown[];
+type CustomerOption = {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  code: string;
 };
 
 type InvoiceOption = {
-  id: string;
+  id: number;
   invoice_number: string;
+  customer_id: number | null;
   customer_name: string;
   customer_phone: string;
-  customer_id: string;
-  order_id: string;
-  order_number: string;
   total_amount: number;
   paid_amount: number;
-  remaining_amount: number;
+  due_amount: number;
   status: string;
 };
 
 type OrderOption = {
-  id: string;
+  id: number;
   order_number: string;
+  customer_id: number | null;
   customer_name: string;
   customer_phone: string;
-  customer_id: string;
   total_amount: number;
-  paid_amount: number;
+  amount_paid: number;
   remaining_amount: number;
   status: string;
-};
-
-type CustomerOption = {
-  id: string;
-  name: string;
-  phone: string;
-  email: string;
+  payment_status: string;
+  product_name: string;
 };
 
 type FormState = {
   source: PaymentSource;
+  status: PaymentStatus;
+  payment_method: PaymentMethod;
+  customer_id: string;
   invoice_id: string;
   order_id: string;
-  customer_id: string;
-  customer_name: string;
-  customer_phone: string;
-  customer_email: string;
-  payment_method: PaymentMethod;
-  status: PaymentStatus;
   amount: string;
+  paid_amount: string;
+  external_reference: string;
+  transaction_id: string;
   payment_date: string;
-  reference: string;
   notes: string;
 };
 
-type FormErrors = Partial<Record<keyof FormState, string>>;
+type ApiResponse = {
+  ok?: boolean;
+  success?: boolean;
+  message?: string;
+  data?: unknown;
+  item?: unknown;
+  payment?: unknown;
+  id?: number;
+};
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-const DRAFT_KEY = "primey-care-payment-create-draft-v1";
+const SAR_ICON = "/currency/sar.svg";
+const DRAFT_KEY = "primey-care.payment-create.draft";
 
-/* ============================================================
-   Locale / API
-============================================================ */
+const translations = {
+  ar: {
+    title: "إضافة دفعة",
+    subtitle: "تسجيل دفعة مرتبطة بفاتورة أو طلب أو عميل مع دعم الترحيل لاحقًا.",
+    back: "رجوع",
+    refresh: "تحديث",
+    saveDraft: "حفظ مسودة",
+    clear: "مسح",
+    submit: "حفظ الدفعة",
+    submitAndConfirm: "حفظ وتأكيد",
+    saving: "جاري الحفظ",
+    source: "مصدر الدفعة",
+    fromInvoice: "من فاتورة",
+    fromOrder: "من طلب",
+    fromCustomer: "من عميل",
+    manual: "يدوي",
+    basicInfo: "البيانات الأساسية",
+    paymentInfo: "بيانات الدفع",
+    customer: "العميل",
+    invoice: "الفاتورة",
+    order: "الطلب",
+    paymentMethod: "طريقة الدفع",
+    paymentStatus: "حالة الدفعة",
+    pending: "بانتظار",
+    paid: "مدفوعة",
+    amount: "المبلغ",
+    paidAmount: "المبلغ المحصل",
+    paymentDate: "تاريخ الدفع",
+    externalReference: "مرجع خارجي",
+    transactionId: "رقم العملية",
+    notes: "ملاحظات",
+    chooseCustomer: "اختر العميل",
+    chooseInvoice: "اختر الفاتورة",
+    chooseOrder: "اختر الطلب",
+    chooseMethod: "اختر طريقة الدفع",
+    cash: "نقدي",
+    bankTransfer: "تحويل بنكي",
+    gateway: "بوابة دفع",
+    creditCard: "بطاقة ائتمان",
+    debitCard: "مدى / بطاقة",
+    applePay: "Apple Pay",
+    stcPay: "STC Pay",
+    tamara: "تمارا",
+    tabby: "تابي",
+    wallet: "محفظة",
+    searchCustomer: "بحث في العملاء",
+    searchInvoice: "بحث في الفواتير",
+    searchOrder: "بحث في الطلبات",
+    noCustomers: "لا يوجد عملاء",
+    noInvoices: "لا توجد فواتير",
+    noOrders: "لا توجد طلبات",
+    summary: "ملخص الدفعة",
+    selectedCustomer: "العميل المحدد",
+    selectedInvoice: "الفاتورة المحددة",
+    selectedOrder: "الطلب المحدد",
+    noCustomer: "لم يتم اختيار عميل",
+    noInvoice: "لم يتم اختيار فاتورة",
+    noOrder: "لم يتم اختيار طلب",
+    invoiceDue: "متبقي الفاتورة",
+    orderRemaining: "متبقي الطلب",
+    expectedAmount: "المبلغ المتوقع",
+    netCollected: "صافي التحصيل",
+    statusAfterSave: "الحالة بعد الحفظ",
+    requiredCustomer: "اختر العميل.",
+    requiredInvoice: "اختر الفاتورة.",
+    requiredOrder: "اختر الطلب.",
+    requiredAmount: "أدخل مبلغًا صحيحًا أكبر من صفر.",
+    saved: "تم إنشاء الدفعة بنجاح.",
+    draftSaved: "تم حفظ المسودة محليًا.",
+    draftLoaded: "تم استعادة المسودة.",
+    cleared: "تم مسح النموذج.",
+    errorTitle: "تعذر تنفيذ العملية",
+    loadError: "تعذر تحميل البيانات.",
+    submitError: "تعذر إنشاء الدفعة.",
+    confirmClear: "هل تريد مسح النموذج الحالي؟",
+    unsaved: "لديك تغييرات غير محفوظة.",
+    viewPayment: "فتح الدفعة",
+    createAnother: "إنشاء دفعة أخرى",
+  },
+  en: {
+    title: "Add Payment",
+    subtitle: "Record a payment linked to an invoice, order, customer, or manual entry.",
+    back: "Back",
+    refresh: "Refresh",
+    saveDraft: "Save draft",
+    clear: "Clear",
+    submit: "Save payment",
+    submitAndConfirm: "Save & Confirm",
+    saving: "Saving",
+    source: "Payment source",
+    fromInvoice: "From invoice",
+    fromOrder: "From order",
+    fromCustomer: "From customer",
+    manual: "Manual",
+    basicInfo: "Basic info",
+    paymentInfo: "Payment info",
+    customer: "Customer",
+    invoice: "Invoice",
+    order: "Order",
+    paymentMethod: "Payment method",
+    paymentStatus: "Payment status",
+    pending: "Pending",
+    paid: "Paid",
+    amount: "Amount",
+    paidAmount: "Collected amount",
+    paymentDate: "Payment date",
+    externalReference: "External reference",
+    transactionId: "Transaction ID",
+    notes: "Notes",
+    chooseCustomer: "Choose customer",
+    chooseInvoice: "Choose invoice",
+    chooseOrder: "Choose order",
+    chooseMethod: "Choose payment method",
+    cash: "Cash",
+    bankTransfer: "Bank transfer",
+    gateway: "Gateway",
+    creditCard: "Credit card",
+    debitCard: "Debit card",
+    applePay: "Apple Pay",
+    stcPay: "STC Pay",
+    tamara: "Tamara",
+    tabby: "Tabby",
+    wallet: "Wallet",
+    searchCustomer: "Search customers",
+    searchInvoice: "Search invoices",
+    searchOrder: "Search orders",
+    noCustomers: "No customers",
+    noInvoices: "No invoices",
+    noOrders: "No orders",
+    summary: "Payment summary",
+    selectedCustomer: "Selected customer",
+    selectedInvoice: "Selected invoice",
+    selectedOrder: "Selected order",
+    noCustomer: "No customer selected",
+    noInvoice: "No invoice selected",
+    noOrder: "No order selected",
+    invoiceDue: "Invoice due",
+    orderRemaining: "Order remaining",
+    expectedAmount: "Expected amount",
+    netCollected: "Net collected",
+    statusAfterSave: "Status after save",
+    requiredCustomer: "Choose a customer.",
+    requiredInvoice: "Choose an invoice.",
+    requiredOrder: "Choose an order.",
+    requiredAmount: "Enter a valid amount greater than zero.",
+    saved: "Payment created successfully.",
+    draftSaved: "Draft saved locally.",
+    draftLoaded: "Draft restored.",
+    cleared: "Form cleared.",
+    errorTitle: "Unable to complete operation",
+    loadError: "Unable to load data.",
+    submitError: "Unable to create payment.",
+    confirmClear: "Do you want to clear the current form?",
+    unsaved: "You have unsaved changes.",
+    viewPayment: "Open payment",
+    createAnother: "Create another payment",
+  },
+} as const;
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
-
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-function getCookie(name: string) {
-  try {
-    if (typeof document === "undefined") return "";
-
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-
-    if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
-
-    return "";
-  } catch {
-    return "";
-  }
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
 }
 
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
+function toEnglishDigits(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "";
 
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
+  return String(value)
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
 }
 
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
 
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
+  if (typeof value === "string") {
+    const parsed = Number(toEnglishDigits(value).replace(/[^\d.-]/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
-  }
-
-  return true;
+  return fallback;
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "تسجيل دفعة" : "Create Payment",
-    subtitle: isArabic
-      ? "سجل دفعة مرتبطة بفاتورة أو طلب أو عميل مع بيانات التحصيل والترحيل."
-      : "Record a payment linked to an invoice, order, or customer with collection details.",
-
-    back: isArabic ? "قائمة المدفوعات" : "Payments List",
-    dashboard: isArabic ? "المدفوعات" : "Payments",
-    refreshData: isArabic ? "تحديث البيانات" : "Refresh Data",
-    save: isArabic ? "حفظ الدفعة" : "Save Payment",
-    saving: isArabic ? "جار الحفظ..." : "Saving...",
-    clear: isArabic ? "مسح النموذج" : "Clear Form",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بتسجيل المدفوعات" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية تسجيل المدفوعات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to create payments. Contact your system administrator if you need access.",
-
-    formTitle: isArabic ? "بيانات الدفعة" : "Payment Information",
-    formDesc: isArabic
-      ? "اختر مصدر الدفعة وأدخل طريقة الدفع والمبلغ والمرجع."
-      : "Choose the payment source and enter method, amount, and reference.",
-
-    source: isArabic ? "مصدر الدفعة" : "Payment Source",
-    fromInvoice: isArabic ? "من فاتورة" : "From Invoice",
-    fromOrder: isArabic ? "من طلب" : "From Order",
-    fromCustomer: isArabic ? "من عميل" : "From Customer",
-    manual: isArabic ? "يدوية" : "Manual",
-
-    invoice: isArabic ? "الفاتورة" : "Invoice",
-    order: isArabic ? "الطلب" : "Order",
-    customer: isArabic ? "العميل" : "Customer",
-    searchInvoice: isArabic ? "ابحث داخل الفواتير..." : "Search invoices...",
-    searchOrder: isArabic ? "ابحث داخل الطلبات..." : "Search orders...",
-    searchCustomer: isArabic ? "ابحث داخل العملاء..." : "Search customers...",
-
-    customerName: isArabic ? "اسم العميل" : "Customer Name",
-    customerPhone: isArabic ? "جوال العميل" : "Customer Phone",
-    customerEmail: isArabic ? "البريد الإلكتروني" : "Email",
-    paymentMethod: isArabic ? "طريقة الدفع" : "Payment Method",
-    status: isArabic ? "حالة الدفعة" : "Payment Status",
-    paymentDate: isArabic ? "تاريخ الدفع" : "Payment Date",
-    amount: isArabic ? "المبلغ" : "Amount",
-    reference: isArabic ? "مرجع العملية" : "Reference",
-    notes: isArabic ? "ملاحظات" : "Notes",
-
-    pending: isArabic ? "بانتظار التأكيد" : "Pending",
-    confirmed: isArabic ? "مؤكدة" : "Confirmed",
-
-    cash: isArabic ? "نقدًا" : "Cash",
-    bankTransfer: isArabic ? "تحويل بنكي" : "Bank Transfer",
-    gateway: isArabic ? "بوابة دفع" : "Gateway",
-    card: isArabic ? "بطاقة" : "Card",
-    wallet: isArabic ? "محفظة" : "Wallet",
-    tamara: isArabic ? "تمارا" : "Tamara",
-    tabby: isArabic ? "تابي" : "Tabby",
-
-    summaryTitle: isArabic ? "ملخص الدفعة" : "Payment Summary",
-    summaryDesc: isArabic
-      ? "ملخص المبلغ والربط قبل الحفظ."
-      : "Summary of amount and linkage before saving.",
-    selectedSource: isArabic ? "المصدر المختار" : "Selected Source",
-    selectedBalance: isArabic ? "المتبقي على المصدر" : "Source Balance",
-    totalAmount: isArabic ? "إجمالي المصدر" : "Source Total",
-    paidAmount: isArabic ? "المدفوع سابقًا" : "Already Paid",
-    remainingAmount: isArabic ? "المتبقي" : "Remaining",
-    paymentAmount: isArabic ? "مبلغ الدفعة" : "Payment Amount",
-
-    draftSaved: isArabic ? "تم حفظ المسودة محليًا." : "Draft saved locally.",
-    draftRestored: isArabic ? "تم استعادة المسودة." : "Draft restored.",
-    draftCleared: isArabic ? "تم مسح النموذج." : "Form cleared.",
-    confirmClear: isArabic
-      ? "هل تريد مسح النموذج الحالي؟"
-      : "Clear the current form?",
-    leaveConfirm: isArabic
-      ? "لديك تغييرات غير محفوظة."
-      : "You have unsaved changes.",
-
-    loadError: isArabic ? "تعذر تحميل البيانات." : "Unable to load data.",
-    paymentCreated: isArabic
-      ? "تم تسجيل الدفعة بنجاح."
-      : "Payment created successfully.",
-    submitError: isArabic
-      ? "تعذر تسجيل الدفعة."
-      : "Unable to create payment.",
-
-    required: isArabic ? "هذا الحقل مطلوب." : "This field is required.",
-    sourceRequired: isArabic ? "اختر مصدر الدفعة." : "Select payment source.",
-    customerRequired: isArabic ? "أدخل بيانات العميل." : "Enter customer data.",
-    invalidAmount: isArabic ? "أدخل مبلغًا صحيحًا." : "Enter a valid amount.",
-    amountExceeds: isArabic
-      ? "المبلغ أكبر من المتبقي على المصدر."
-      : "Amount exceeds the remaining source balance.",
-
-    noInvoices: isArabic ? "لا توجد فواتير متاحة" : "No invoices available",
-    noOrders: isArabic ? "لا توجد طلبات متاحة" : "No orders available",
-    noCustomers: isArabic ? "لا يوجد عملاء متاحون" : "No customers available",
-    notSelected: isArabic ? "غير محدد" : "Not selected",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function todayDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function toMoneyInput(value: unknown) {
-  const number = toNumber(value);
-
-  if (number <= 0) return "";
-
-  return String(number.toFixed(2));
-}
-
-function formatNumber(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
-}
-
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
 
-    if (value !== undefined && value !== null && value !== "") return value;
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
   }
 
-  for (const container of [
-    "customer",
-    "client",
-    "invoice",
-    "order",
-    "payment",
-    "item",
-    "data",
-  ]) {
-    const nested = obj[container];
+  return envBase;
+}
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const base = getApiBaseUrl();
+  const query = params?.toString();
 
-      if (value !== undefined && value !== null && value !== "") return value;
+  return `${base}${path}${query ? `?${query}` : ""}`;
+}
+
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const found = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${name}=`));
+
+  return found ? decodeURIComponent(found.split("=").slice(1).join("=")) : "";
+}
+
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
+
+async function fetchJson<T>(
+  url: string,
+  options?: {
+    signal?: AbortSignal;
+    method?: "GET" | "POST";
+    body?: unknown;
+  },
+): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
+
+  const response = await fetch(url, {
+    method: options?.method || "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal: options?.signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options?.method === "POST" ? { "Content-Type": "application/json" } : {}),
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body:
+      options?.method === "POST"
+        ? JSON.stringify(options.body || {})
+        : undefined,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
 }
 
-function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
-  if (!payload) return [];
+function extractList(payload: unknown): unknown[] {
+  const root = asRecord(payload);
+  const data = asRecord(root.data);
 
-  const data = asDict(payload.data);
-  const directValue = (payload as Dict)[key];
+  const candidates = [
+    data.items,
+    data.results,
+    root.items,
+    root.results,
+    data.invoices,
+    root.invoices,
+    data.orders,
+    root.orders,
+    data.customers,
+    root.customers,
+  ];
 
-  if (Array.isArray(directValue)) return directValue;
-  if (Array.isArray(payload.results)) return payload.results;
-  if (Array.isArray(payload.items)) return payload.items;
-  if (Array.isArray(payload.rows)) return payload.rows;
-
-  if (Array.isArray(data[key])) return data[key] as unknown[];
-  if (Array.isArray(data.results)) return data.results as unknown[];
-  if (Array.isArray(data.items)) return data.items as unknown[];
-  if (Array.isArray(data.rows)) return data.rows as unknown[];
-
-  if (Array.isArray(payload.data)) return payload.data;
+  for (const candidate of candidates) {
+    const list = asArray(candidate);
+    if (list.length) return list;
+  }
 
   return [];
 }
 
-function normalizeInvoice(item: unknown, index: number): InvoiceOption {
-  const obj = asDict(item);
-  const customerObj = asDict(obj.customer || obj.client);
-  const orderObj = asDict(obj.order);
+function extractCreatedId(payload: unknown): number | null {
+  const root = asRecord(payload);
+  const data = asRecord(root.data);
 
-  const totalAmount = toNumber(
-    getNestedValue(obj, [
-      "total_amount",
-      "grand_total",
-      "net_amount",
-      "amount",
-      "total",
-    ]),
-  );
+  const candidates = [
+    data.id,
+    asRecord(data.payment).id,
+    asRecord(data.item).id,
+    root.id,
+    asRecord(root.payment).id,
+    asRecord(root.item).id,
+  ];
 
-  const paidAmount = toNumber(
-    getNestedValue(obj, ["paid_amount", "amount_paid", "collected_amount"]),
-  );
+  for (const candidate of candidates) {
+    const id = toNumber(candidate);
+    if (id > 0) return id;
+  }
 
-  const remainingValue = getNestedValue(obj, [
-    "remaining_amount",
-    "balance_due",
-    "due_amount",
-  ]);
+  return null;
+}
+
+function normalizeCustomer(value: unknown): CustomerOption {
+  const item = asRecord(value);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    invoice_number: String(
-      getNestedValue(obj, ["invoice_number", "number", "code", "reference"]) ||
-        "-",
+    id: toNumber(item.id),
+    name: normalizeText(
+      item.name || item.display_name || item.full_name || item.customer_name,
+      `#${normalizeText(item.id)}`,
     ),
-    customer_name: String(
-      customerObj.name ||
-        customerObj.full_name ||
-        getNestedValue(obj, [
-          "customer_name",
-          "client_name",
-          "beneficiary_name",
-          "name",
-        ]) ||
-        "-",
+    phone: normalizeText(
+      item.phone ||
+        item.phone_number ||
+        item.mobile ||
+        item.whatsapp_number ||
+        item.primary_contact_number,
     ),
-    customer_phone: String(
-      customerObj.phone ||
-        customerObj.mobile ||
-        getNestedValue(obj, ["customer_phone", "phone", "mobile"]) ||
-        "",
-    ),
-    customer_id: String(
-      customerObj.id || getNestedValue(obj, ["customer_id", "client_id"]) || "",
-    ),
-    order_id: String(orderObj.id || getNestedValue(obj, ["order_id"]) || ""),
-    order_number: String(
-      orderObj.order_number ||
-        orderObj.number ||
-        getNestedValue(obj, ["order_number", "order_reference"]) ||
-        "-",
-    ),
-    total_amount: totalAmount,
-    paid_amount: paidAmount,
-    remaining_amount:
-      remainingValue !== undefined && remainingValue !== null
-        ? toNumber(remainingValue)
-        : Math.max(totalAmount - paidAmount, 0),
-    status: String(getNestedValue(obj, ["status", "state"]) || ""),
+    email: normalizeText(item.email),
+    code: normalizeText(item.customer_code || item.code),
   };
 }
 
-function normalizeOrder(item: unknown, index: number): OrderOption {
-  const obj = asDict(item);
-  const customerObj = asDict(obj.customer || obj.client);
-
-  const totalAmount = toNumber(
-    getNestedValue(obj, [
-      "total_amount",
-      "grand_total",
-      "net_amount",
-      "amount",
-      "total",
-    ]),
-  );
-
-  const paidAmount = toNumber(
-    getNestedValue(obj, ["paid_amount", "amount_paid", "collected_amount"]),
-  );
-
-  const remainingValue = getNestedValue(obj, [
-    "remaining_amount",
-    "balance_due",
-    "due_amount",
-  ]);
+function normalizeInvoice(value: unknown): InvoiceOption {
+  const item = asRecord(value);
+  const customer = asRecord(item.customer);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    order_number: String(
-      getNestedValue(obj, ["order_number", "number", "code", "reference"]) ||
-        "-",
+    id: toNumber(item.id),
+    invoice_number: normalizeText(
+      item.invoice_number || item.number || item.reference,
+      `INV-${normalizeText(item.id)}`,
     ),
-    customer_name: String(
-      customerObj.name ||
-        customerObj.full_name ||
-        getNestedValue(obj, [
-          "customer_name",
-          "client_name",
-          "beneficiary_name",
-          "name",
-        ]) ||
-        "-",
+    customer_id:
+      item.customer_id === null || item.customer_id === undefined
+        ? toNumber(customer.id)
+        : toNumber(item.customer_id),
+    customer_name: normalizeText(
+      item.customer_name ||
+        customer.name ||
+        customer.display_name ||
+        customer.full_name,
     ),
-    customer_phone: String(
-      customerObj.phone ||
-        customerObj.mobile ||
-        getNestedValue(obj, ["customer_phone", "phone", "mobile"]) ||
-        "",
+    customer_phone: normalizeText(
+      item.customer_phone ||
+        customer.phone ||
+        customer.phone_number ||
+        customer.mobile ||
+        customer.whatsapp_number,
     ),
-    customer_id: String(
-      customerObj.id || getNestedValue(obj, ["customer_id", "client_id"]) || "",
-    ),
-    total_amount: totalAmount,
-    paid_amount: paidAmount,
-    remaining_amount:
-      remainingValue !== undefined && remainingValue !== null
-        ? toNumber(remainingValue)
-        : Math.max(totalAmount - paidAmount, 0),
-    status: String(getNestedValue(obj, ["status", "state"]) || ""),
+    total_amount: toNumber(item.total_amount),
+    paid_amount: toNumber(item.paid_amount),
+    due_amount: toNumber(item.due_amount),
+    status: normalizeText(item.status),
   };
 }
 
-function normalizeCustomer(item: unknown, index: number): CustomerOption {
-  const obj = asDict(item);
+function normalizeOrder(value: unknown): OrderOption {
+  const item = asRecord(value);
+  const customer = asRecord(item.customer);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    name: String(
-      getNestedValue(obj, ["name", "full_name", "customer_name"]) || "-",
+    id: toNumber(item.id),
+    order_number: normalizeText(
+      item.order_number || item.number || item.code,
+      `ORD-${normalizeText(item.id)}`,
     ),
-    phone: String(getNestedValue(obj, ["phone", "mobile", "customer_phone"]) || ""),
-    email: String(getNestedValue(obj, ["email", "customer_email"]) || ""),
+    customer_id:
+      item.customer_id === null || item.customer_id === undefined
+        ? toNumber(customer.id)
+        : toNumber(item.customer_id),
+    customer_name: normalizeText(
+      item.customer_name ||
+        customer.name ||
+        customer.display_name ||
+        customer.full_name,
+    ),
+    customer_phone: normalizeText(
+      item.customer_phone ||
+        customer.phone ||
+        customer.phone_number ||
+        customer.mobile ||
+        customer.whatsapp_number,
+    ),
+    total_amount: toNumber(item.total_amount),
+    amount_paid: toNumber(item.amount_paid || item.paid_amount),
+    remaining_amount: toNumber(item.remaining_amount || item.due_amount),
+    status: normalizeText(item.status),
+    payment_status: normalizeText(item.payment_status),
+    product_name: normalizeText(item.product_name || asRecord(item.product).name || item.title),
   };
 }
 
-function makeDefaultForm(): FormState {
+function createInitialForm(): FormState {
   return {
-    source: "INVOICE",
+    source: "invoice",
+    status: "pending",
+    payment_method: "cash",
+    customer_id: "",
     invoice_id: "",
     order_id: "",
-    customer_id: "",
-    customer_name: "",
-    customer_phone: "",
-    customer_email: "",
-    payment_method: "CASH",
-    status: "PENDING",
-    amount: "",
-    payment_date: todayDate(),
-    reference: "",
+    amount: "0",
+    paid_amount: "0",
+    external_reference: "",
+    transaction_id: "",
+    payment_date: todayIso(),
     notes: "",
   };
 }
 
-function paymentMethodLabel(method: PaymentMethod, locale: AppLocale) {
-  const t = dictionary(locale);
+function paymentMethodLabel(method: PaymentMethod, locale: Locale) {
+  const t = translations[locale];
 
   const labels: Record<PaymentMethod, string> = {
-    CASH: t.cash,
-    BANK_TRANSFER: t.bankTransfer,
-    GATEWAY: t.gateway,
-    CARD: t.card,
-    WALLET: t.wallet,
-    TAMARA: t.tamara,
-    TABBY: t.tabby,
+    cash: t.cash,
+    bank_transfer: t.bankTransfer,
+    gateway: t.gateway,
+    credit_card: t.creditCard,
+    debit_card: t.debitCard,
+    apple_pay: t.applePay,
+    stc_pay: t.stcPay,
+    tamara: t.tamara,
+    tabby: t.tabby,
+    wallet: t.wallet,
   };
 
   return labels[method];
 }
 
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+function SarIcon({ className }: { className?: string }) {
   return (
     <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
+      src={SAR_ICON}
+      alt="SAR"
+      width={14}
+      height={14}
+      className={cn("inline-block h-3.5 w-3.5 object-contain", className)}
+      unoptimized
     />
   );
 }
 
-function MoneyText({ value }: { value: unknown }) {
+function MoneyValue({ value }: { value: unknown }) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <span className="inline-flex items-center gap-1 whitespace-nowrap font-medium tabular-nums text-foreground">
       <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
+      <SarIcon />
     </span>
   );
 }
 
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+function KpiCard({
+  title,
+  value,
+  trend,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+}) {
+  return (
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
+
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
+        </CardAction>
+      </CardHeader>
+    </Card>
+  );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label className="text-sm font-medium text-foreground">{children}</label>;
+}
 
-export default function SystemCreatePaymentPage() {
-  const auth = useAuth() as unknown;
+function InfoRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b py-3 last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="min-w-0 text-left text-sm font-medium text-foreground">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+export default function SystemPaymentCreatePage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [form, setForm] = useState<FormState>(() => makeDefaultForm());
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [form, setForm] = React.useState<FormState>(() => createInitialForm());
+  const [customers, setCustomers] = React.useState<CustomerOption[]>([]);
+  const [invoices, setInvoices] = React.useState<InvoiceOption[]>([]);
+  const [orders, setOrders] = React.useState<OrderOption[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState<false | "pending" | "paid">(false);
+  const [error, setError] = React.useState("");
+  const [dirty, setDirty] = React.useState(false);
+  const [createdId, setCreatedId] = React.useState<number | null>(null);
 
-  const [invoices, setInvoices] = useState<InvoiceOption[]>([]);
-  const [orders, setOrders] = useState<OrderOption[]>([]);
-  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [customerSearch, setCustomerSearch] = React.useState("");
+  const [invoiceSearch, setInvoiceSearch] = React.useState("");
+  const [orderSearch, setOrderSearch] = React.useState("");
 
-  const [invoiceSearch, setInvoiceSearch] = useState("");
-  const [orderSearch, setOrderSearch] = useState("");
-  const [customerSearch, setCustomerSearch] = useState("");
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const [errors, setErrors] = useState<FormErrors>({});
-  const [submitError, setSubmitError] = useState("");
-  const [isLoadingData, setIsLoadingData] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [didApplyQueryParams, setDidApplyQueryParams] = useState(false);
+  const selectedCustomer = React.useMemo(() => {
+    return customers.find((customer) => String(customer.id) === form.customer_id) || null;
+  }, [customers, form.customer_id]);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const selectedInvoice = React.useMemo(() => {
+    return invoices.find((invoice) => String(invoice.id) === form.invoice_id) || null;
+  }, [form.invoice_id, invoices]);
 
-  const canCreate = hasSafePermission(
-    auth,
-    ["payments.create", "billing.payments.create"],
-    "action",
-  );
+  const selectedOrder = React.useMemo(() => {
+    return orders.find((order) => String(order.id) === form.order_id) || null;
+  }, [form.order_id, orders]);
 
-  const canViewInvoices = hasSafePermission(
-    auth,
-    ["invoices.view", "billing.invoices.view", "payments.create"],
-    "view",
-  );
+  const amount = React.useMemo(() => toNumber(form.amount), [form.amount]);
+  const paidAmount = React.useMemo(() => toNumber(form.paid_amount), [form.paid_amount]);
+  const expectedAmount = React.useMemo(() => {
+    if (form.source === "invoice" && selectedInvoice) return selectedInvoice.due_amount;
+    if (form.source === "order" && selectedOrder) return selectedOrder.remaining_amount;
+    return amount;
+  }, [amount, form.source, selectedInvoice, selectedOrder]);
 
-  const canViewOrders = hasSafePermission(
-    auth,
-    ["orders.view", "payments.create"],
-    "view",
-  );
+  const filteredCustomers = React.useMemo(() => {
+    const query = customerSearch.trim().toLowerCase();
+    if (!query) return customers;
 
-  const canViewCustomers = hasSafePermission(
-    auth,
-    ["customers.view", "payments.create"],
-    "view",
-  );
-
-  const selectedInvoice = useMemo(
-    () => invoices.find((item) => item.id === form.invoice_id) || null,
-    [form.invoice_id, invoices],
-  );
-
-  const selectedOrder = useMemo(
-    () => orders.find((item) => item.id === form.order_id) || null,
-    [form.order_id, orders],
-  );
-
-  const selectedCustomer = useMemo(
-    () => customers.find((item) => item.id === form.customer_id) || null,
-    [form.customer_id, customers],
-  );
-
-  const sourceBalance = useMemo(() => {
-    if (form.source === "INVOICE" && selectedInvoice) {
-      return selectedInvoice.remaining_amount;
-    }
-
-    if (form.source === "ORDER" && selectedOrder) {
-      return selectedOrder.remaining_amount;
-    }
-
-    return 0;
-  }, [form.source, selectedInvoice, selectedOrder]);
-
-  const sourceTotal = useMemo(() => {
-    if (form.source === "INVOICE" && selectedInvoice) {
-      return selectedInvoice.total_amount;
-    }
-
-    if (form.source === "ORDER" && selectedOrder) {
-      return selectedOrder.total_amount;
-    }
-
-    return 0;
-  }, [form.source, selectedInvoice, selectedOrder]);
-
-  const sourcePaid = useMemo(() => {
-    if (form.source === "INVOICE" && selectedInvoice) {
-      return selectedInvoice.paid_amount;
-    }
-
-    if (form.source === "ORDER" && selectedOrder) {
-      return selectedOrder.paid_amount;
-    }
-
-    return 0;
-  }, [form.source, selectedInvoice, selectedOrder]);
-
-  const filteredInvoices = useMemo(() => {
-    const clean = invoiceSearch.trim().toLowerCase();
-
-    const base = invoices.filter((item) => item.remaining_amount > 0);
-
-    if (!clean) return base.slice(0, 60);
-
-    return base
-      .filter((item) =>
-        [
-          item.invoice_number,
-          item.customer_name,
-          item.customer_phone,
-          item.order_number,
-          String(item.remaining_amount),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(clean),
-      )
-      .slice(0, 60);
-  }, [invoiceSearch, invoices]);
-
-  const filteredOrders = useMemo(() => {
-    const clean = orderSearch.trim().toLowerCase();
-
-    const base = orders.filter((item) => item.remaining_amount > 0);
-
-    if (!clean) return base.slice(0, 60);
-
-    return base
-      .filter((item) =>
-        [
-          item.order_number,
-          item.customer_name,
-          item.customer_phone,
-          String(item.remaining_amount),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(clean),
-      )
-      .slice(0, 60);
-  }, [orderSearch, orders]);
-
-  const filteredCustomers = useMemo(() => {
-    const clean = customerSearch.trim().toLowerCase();
-
-    if (!clean) return customers.slice(0, 60);
-
-    return customers
-      .filter((item) =>
-        [item.name, item.phone, item.email]
-          .join(" ")
-          .toLowerCase()
-          .includes(clean),
-      )
-      .slice(0, 60);
+    return customers.filter((customer) =>
+      [customer.name, customer.phone, customer.email, customer.code]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
   }, [customerSearch, customers]);
 
-  const canSubmit =
-    canCreate &&
-    !authResolving &&
-    !isSaving &&
-    toNumber(form.amount) > 0 &&
-    Boolean(form.payment_date);
-
-  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({
-      ...current,
-      [key]: value,
-    }));
-    setIsDirty(true);
-
-    setErrors((current) => {
-      const next = { ...current };
-      delete next[key];
-
-      return next;
-    });
-  }
-
-  function changeSource(source: PaymentSource) {
-    setForm((current) => ({
-      ...current,
-      source,
-      invoice_id: source === "INVOICE" ? current.invoice_id : "",
-      order_id: source === "ORDER" ? current.order_id : "",
-      customer_id: source === "CUSTOMER" ? current.customer_id : "",
-      customer_name: source === "MANUAL" ? current.customer_name : "",
-      customer_phone: source === "MANUAL" ? current.customer_phone : "",
-      customer_email: source === "MANUAL" ? current.customer_email : "",
-      amount: "",
-    }));
-
-    setErrors({});
-    setSubmitError("");
-    setIsDirty(true);
-  }
-
-  function applyInvoice(invoiceId: string) {
-    const invoice = invoices.find((item) => item.id === invoiceId) || null;
-
-    setForm((current) => ({
-      ...current,
-      source: "INVOICE",
-      invoice_id: invoiceId,
-      order_id: invoice?.order_id || "",
-      customer_id: invoice?.customer_id || "",
-      customer_name: invoice?.customer_name || current.customer_name,
-      customer_phone: invoice?.customer_phone || current.customer_phone,
-      customer_email: current.customer_email,
-      amount: toMoneyInput(invoice?.remaining_amount),
-      notes:
-        invoice && locale === "ar"
-          ? `دفعة على الفاتورة ${invoice.invoice_number}`
-          : invoice
-            ? `Payment for invoice ${invoice.invoice_number}`
-            : current.notes,
-    }));
-
-    setErrors({});
-    setSubmitError("");
-    setIsDirty(true);
-  }
-
-  function applyOrder(orderId: string) {
-    const order = orders.find((item) => item.id === orderId) || null;
-
-    setForm((current) => ({
-      ...current,
-      source: "ORDER",
-      order_id: orderId,
-      invoice_id: "",
-      customer_id: order?.customer_id || "",
-      customer_name: order?.customer_name || current.customer_name,
-      customer_phone: order?.customer_phone || current.customer_phone,
-      customer_email: current.customer_email,
-      amount: toMoneyInput(order?.remaining_amount),
-      notes:
-        order && locale === "ar"
-          ? `دفعة على الطلب ${order.order_number}`
-          : order
-            ? `Payment for order ${order.order_number}`
-            : current.notes,
-    }));
-
-    setErrors({});
-    setSubmitError("");
-    setIsDirty(true);
-  }
-
-  function applyCustomer(customerId: string) {
-    const customer = customers.find((item) => item.id === customerId) || null;
-
-    setForm((current) => ({
-      ...current,
-      source: "CUSTOMER",
-      customer_id: customerId,
-      invoice_id: "",
-      order_id: "",
-      customer_name: customer?.name || current.customer_name,
-      customer_phone: customer?.phone || current.customer_phone,
-      customer_email: customer?.email || current.customer_email,
-    }));
-
-    setErrors({});
-    setSubmitError("");
-    setIsDirty(true);
-  }
-
-  function validateForm() {
-    const nextErrors: FormErrors = {};
-
-    if (form.source === "INVOICE" && !form.invoice_id) {
-      nextErrors.invoice_id = t.sourceRequired;
-    }
-
-    if (form.source === "ORDER" && !form.order_id) {
-      nextErrors.order_id = t.sourceRequired;
-    }
-
-    if (form.source === "CUSTOMER" && !form.customer_id) {
-      nextErrors.customer_id = t.sourceRequired;
-    }
-
-    if (form.source === "MANUAL" && !form.customer_name.trim()) {
-      nextErrors.customer_name = t.customerRequired;
-    }
-
-    if (!form.payment_date) nextErrors.payment_date = t.required;
-
-    const amount = toNumber(form.amount);
-
-    if (amount <= 0) {
-      nextErrors.amount = t.invalidAmount;
-    }
-
-    if (
-      ["INVOICE", "ORDER"].includes(form.source) &&
-      sourceBalance > 0 &&
-      amount > sourceBalance
-    ) {
-      nextErrors.amount = t.amountExceeds;
-    }
-
-    setErrors(nextErrors);
-
-    return Object.keys(nextErrors).length === 0;
-  }
-
-  function buildPayload() {
-    return {
-      source: form.source.toLowerCase(),
-      invoice_id: form.source === "INVOICE" ? form.invoice_id || null : null,
-      order_id:
-        form.source === "ORDER" || form.source === "INVOICE"
-          ? form.order_id || null
-          : null,
-      customer_id:
-        form.source !== "MANUAL" ? form.customer_id || null : null,
-      customer_name: form.customer_name.trim(),
-      customer_phone: form.customer_phone.trim(),
-      customer_email: form.customer_email.trim(),
-      payment_method: form.payment_method.toLowerCase(),
-      status: form.status.toLowerCase(),
-      amount: toNumber(form.amount),
-      payment_date: form.payment_date,
-      reference: form.reference.trim(),
-      source_reference: form.reference.trim(),
-      notes: form.notes.trim(),
-    };
-  }
-
-  const loadData = useCallback(
-    async (showToast = false) => {
-      try {
-        setIsLoadingData(true);
-
-        const requests: Array<Promise<void>> = [];
-
-        if (canViewInvoices) {
-          requests.push(
-            loadCollection<InvoiceOption>({
-              endpoints: [
-                "/api/invoices/list/?page_size=500",
-                "/api/invoices/?page_size=500",
-              ],
-              key: "invoices",
-              normalize: normalizeInvoice,
-              setRows: setInvoices,
-            }),
-          );
-        } else {
-          setInvoices([]);
-        }
-
-        if (canViewOrders) {
-          requests.push(
-            loadCollection<OrderOption>({
-              endpoints: [
-                "/api/orders/list/?page_size=500",
-                "/api/orders/?page_size=500",
-              ],
-              key: "orders",
-              normalize: normalizeOrder,
-              setRows: setOrders,
-            }),
-          );
-        } else {
-          setOrders([]);
-        }
-
-        if (canViewCustomers) {
-          requests.push(
-            loadCollection<CustomerOption>({
-              endpoints: [
-                "/api/customers/list/?page_size=500",
-                "/api/customers/?page_size=500",
-              ],
-              key: "customers",
-              normalize: normalizeCustomer,
-              setRows: setCustomers,
-            }),
-          );
-        } else {
-          setCustomers([]);
-        }
-
-        await Promise.all(requests);
-
-        if (showToast) {
-          toast.success(locale === "ar" ? "تم تحديث البيانات." : "Data refreshed.");
-        }
-      } catch (error) {
-        console.error("Payment create load data error:", error);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoadingData(false);
-      }
-    },
-    [canViewCustomers, canViewInvoices, canViewOrders, locale, t.loadError],
-  );
-
-  async function submitForm() {
-    if (!canCreate || isSaving) return;
-
-    const isValid = validateForm();
-
-    if (!isValid) {
-      setSubmitError(t.submitError);
-      return;
-    }
-
-    try {
-      setIsSaving(true);
-      setSubmitError("");
-
-      const payload = buildPayload();
-      const csrfToken = getCookie("csrftoken");
-      const endpoints = ["/api/payments/create/", "/api/payments/"];
-
-      let createdId = "";
-      let lastError = "";
-
-      for (const endpoint of endpoints) {
-        const response = await fetch(apiUrl(endpoint), {
-          method: "POST",
-          credentials: "include",
-          cache: "no-store",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-          },
-          body: JSON.stringify(payload),
-        });
-
-        const responsePayload = (await response.json().catch(() => null)) as
-          | ApiEnvelope<unknown>
-          | null;
-
-        if (
-          response.ok &&
-          responsePayload?.ok !== false &&
-          responsePayload?.success !== false
-        ) {
-          const data = asDict(responsePayload?.data);
-          const payment = asDict(data.payment || data.item || responsePayload);
-
-          createdId = String(
-            payment.id ||
-              data.id ||
-              getNestedValue(asDict(responsePayload), ["id", "uuid", "pk"]) ||
-              "",
-          );
-
-          break;
-        }
-
-        lastError =
-          responsePayload?.message ||
-          responsePayload?.detail ||
-          responsePayload?.error ||
-          `HTTP ${response.status}`;
-      }
-
-      if (!createdId && lastError) {
-        throw new Error(lastError);
-      }
-
-      toast.success(t.paymentCreated);
-
-      try {
-        window.localStorage.removeItem(DRAFT_KEY);
-      } catch {
-        // ignore local storage failures
-      }
-
-      setIsDirty(false);
-
-      if (createdId) {
-        window.location.href = `/system/payments/${createdId}`;
-        return;
-      }
-
-      window.location.href = "/system/payments/list";
-    } catch (error) {
-      console.error("Payment create submit error:", error);
-
-      const message =
-        error instanceof Error && error.message ? error.message : t.submitError;
-
-      setSubmitError(message);
-      toast.error(t.submitError);
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  function saveDraft() {
-    try {
-      window.localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
-      toast.success(t.draftSaved);
-    } catch (error) {
-      console.error("Payment draft save error:", error);
-    }
-  }
-
-  function clearForm() {
-    const confirmed = window.confirm(t.confirmClear);
-
-    if (!confirmed) return;
-
-    setForm(makeDefaultForm());
-    setErrors({});
-    setSubmitError("");
-    setInvoiceSearch("");
-    setOrderSearch("");
-    setCustomerSearch("");
-    setIsDirty(false);
-
-    try {
-      window.localStorage.removeItem(DRAFT_KEY);
-    } catch {
-      // ignore local storage failures
-    }
-
-    toast.success(t.draftCleared);
-  }
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+  const filteredInvoices = React.useMemo(() => {
+    const query = invoiceSearch.trim().toLowerCase();
+    if (!query) return invoices;
+
+    return invoices.filter((invoice) =>
+      [
+        invoice.invoice_number,
+        invoice.customer_name,
+        invoice.customer_phone,
+        invoice.status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [invoiceSearch, invoices]);
+
+  const filteredOrders = React.useMemo(() => {
+    const query = orderSearch.trim().toLowerCase();
+    if (!query) return orders;
+
+    return orders.filter((order) =>
+      [
+        order.order_number,
+        order.customer_name,
+        order.customer_phone,
+        order.product_name,
+        order.status,
+        order.payment_status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [orderSearch, orders]);
+
+  React.useEffect(() => {
+    const applyLocale = () => setLocale(getInitialLocale());
+
+    applyLocale();
+
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
     };
   }, []);
 
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(DRAFT_KEY);
-
-      if (!saved) return;
-
-      const parsed = JSON.parse(saved) as Partial<FormState>;
-
-      if (!parsed || typeof parsed !== "object") return;
-
-      setForm({
-        ...makeDefaultForm(),
-        ...parsed,
-      });
-      setIsDirty(true);
-      toast.success(t.draftRestored);
-    } catch (error) {
-      console.error("Payment draft restore error:", error);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadData(false);
-  }, [authResolving, loadData]);
-
-  useEffect(() => {
-    if (didApplyQueryParams || isLoadingData) return;
-
-    const invoiceId = searchParams.get("invoice") || searchParams.get("invoice_id");
-    const orderId = searchParams.get("order") || searchParams.get("order_id");
-    const customerId =
-      searchParams.get("customer") || searchParams.get("customer_id");
-
-    if (invoiceId && invoices.some((item) => item.id === invoiceId)) {
-      applyInvoice(invoiceId);
-      setDidApplyQueryParams(true);
-      return;
-    }
-
-    if (orderId && orders.some((item) => item.id === orderId)) {
-      applyOrder(orderId);
-      setDidApplyQueryParams(true);
-      return;
-    }
-
-    if (customerId && customers.some((item) => item.id === customerId)) {
-      applyCustomer(customerId);
-      setDidApplyQueryParams(true);
-      return;
-    }
-
-    if (invoiceId || orderId || customerId) {
-      setDidApplyQueryParams(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customers, didApplyQueryParams, invoices, isLoadingData, orders, searchParams]);
-
-  useEffect(() => {
+  React.useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
-      if (!isDirty || isSaving) return;
+      if (!dirty || saving) return;
 
       event.preventDefault();
-      event.returnValue = t.leaveConfirm;
+      event.returnValue = t.unsaved;
     };
 
     window.addEventListener("beforeunload", handler);
 
     return () => window.removeEventListener("beforeunload", handler);
-  }, [isDirty, isSaving, t.leaveConfirm]);
+  }, [dirty, saving, t.unsaved]);
 
-  if (!authResolving && !canCreate) {
+  const loadLookups = React.useCallback(async () => {
+    const controller = new AbortController();
+
+    try {
+      setLoading(true);
+      setError("");
+
+      const params = new URLSearchParams({
+        page: "1",
+        page_size: "500",
+      });
+
+      const [customersPayload, invoicesPayload, ordersPayload] = await Promise.all([
+        fetchJson<unknown>(makeApiUrl("/api/customers/", params), {
+          signal: controller.signal,
+        }),
+        fetchJson<unknown>(makeApiUrl("/api/invoices/", params), {
+          signal: controller.signal,
+        }),
+        fetchJson<unknown>(makeApiUrl("/api/orders/", params), {
+          signal: controller.signal,
+        }),
+      ]);
+
+      const nextCustomers = extractList(customersPayload)
+        .map(normalizeCustomer)
+        .filter((item) => item.id > 0);
+
+      const nextInvoices = extractList(invoicesPayload)
+        .map(normalizeInvoice)
+        .filter((item) => item.id > 0);
+
+      const nextOrders = extractList(ordersPayload)
+        .map(normalizeOrder)
+        .filter((item) => item.id > 0);
+
+      setCustomers(nextCustomers);
+      setInvoices(nextInvoices);
+      setOrders(nextOrders);
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.loadError;
+
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+
+    return () => controller.abort();
+  }, [t.loadError]);
+
+  React.useEffect(() => {
+    void loadLookups();
+
+    try {
+      const saved = window.localStorage.getItem(DRAFT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as FormState;
+        if (parsed && parsed.payment_method && parsed.source) {
+          setForm(parsed);
+          setDirty(true);
+          toast.success(t.draftLoaded);
+          return;
+        }
+      }
+    } catch {
+      // ignore invalid drafts
+    }
+
+    const invoiceId = searchParams.get("invoice_id") || searchParams.get("invoice");
+    const orderId = searchParams.get("order_id") || searchParams.get("order");
+    const customerId = searchParams.get("customer_id") || searchParams.get("customer");
+
+    if (invoiceId) {
+      setForm((current) => ({
+        ...current,
+        source: "invoice",
+        invoice_id: invoiceId,
+      }));
+      setDirty(true);
+      return;
+    }
+
+    if (orderId) {
+      setForm((current) => ({
+        ...current,
+        source: "order",
+        order_id: orderId,
+      }));
+      setDirty(true);
+      return;
+    }
+
+    if (customerId) {
+      setForm((current) => ({
+        ...current,
+        source: "customer",
+        customer_id: customerId,
+      }));
+      setDirty(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  React.useEffect(() => {
+    if (!selectedInvoice) return;
+
+    setForm((current) => {
+      if (current.source !== "invoice") return current;
+
+      return {
+        ...current,
+        customer_id: selectedInvoice.customer_id ? String(selectedInvoice.customer_id) : current.customer_id,
+        amount: String(selectedInvoice.due_amount || selectedInvoice.total_amount || current.amount),
+        paid_amount: current.status === "paid"
+          ? String(selectedInvoice.due_amount || selectedInvoice.total_amount || current.paid_amount)
+          : current.paid_amount,
+      };
+    });
+  }, [selectedInvoice]);
+
+  React.useEffect(() => {
+    if (!selectedOrder) return;
+
+    setForm((current) => {
+      if (current.source !== "order") return current;
+
+      return {
+        ...current,
+        customer_id: selectedOrder.customer_id ? String(selectedOrder.customer_id) : current.customer_id,
+        amount: String(selectedOrder.remaining_amount || selectedOrder.total_amount || current.amount),
+        paid_amount: current.status === "paid"
+          ? String(selectedOrder.remaining_amount || selectedOrder.total_amount || current.paid_amount)
+          : current.paid_amount,
+      };
+    });
+  }, [selectedOrder]);
+
+  function updateForm<T extends keyof FormState>(key: T, value: FormState[T]) {
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+    setDirty(true);
+  }
+
+  function handleSourceChange(source: PaymentSource) {
+    setForm((current) => ({
+      ...current,
+      source,
+      invoice_id: source === "invoice" ? current.invoice_id : "",
+      order_id: source === "order" ? current.order_id : "",
+    }));
+    setDirty(true);
+  }
+
+  function handleStatusChange(status: PaymentStatus) {
+    setForm((current) => ({
+      ...current,
+      status,
+      paid_amount: status === "paid" ? String(toNumber(current.amount)) : current.paid_amount,
+    }));
+    setDirty(true);
+  }
+
+  function handleInvoiceSelect(invoiceId: string) {
+    const invoice = invoices.find((item) => String(item.id) === invoiceId);
+
+    setForm((current) => ({
+      ...current,
+      source: "invoice",
+      invoice_id: invoiceId,
+      order_id: "",
+      customer_id: invoice?.customer_id ? String(invoice.customer_id) : current.customer_id,
+      amount: invoice ? String(invoice.due_amount || invoice.total_amount) : current.amount,
+      paid_amount: current.status === "paid" && invoice
+        ? String(invoice.due_amount || invoice.total_amount)
+        : current.paid_amount,
+    }));
+
+    setDirty(true);
+  }
+
+  function handleOrderSelect(orderId: string) {
+    const order = orders.find((item) => String(item.id) === orderId);
+
+    setForm((current) => ({
+      ...current,
+      source: "order",
+      order_id: orderId,
+      invoice_id: "",
+      customer_id: order?.customer_id ? String(order.customer_id) : current.customer_id,
+      amount: order ? String(order.remaining_amount || order.total_amount) : current.amount,
+      paid_amount: current.status === "paid" && order
+        ? String(order.remaining_amount || order.total_amount)
+        : current.paid_amount,
+    }));
+
+    setDirty(true);
+  }
+
+  function saveDraft() {
+    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+    setDirty(false);
+    toast.success(t.draftSaved);
+  }
+
+  function clearForm() {
+    if (!window.confirm(t.confirmClear)) return;
+
+    setForm(createInitialForm());
+    setDirty(false);
+    setCreatedId(null);
+    window.localStorage.removeItem(DRAFT_KEY);
+    toast.success(t.cleared);
+  }
+
+  function validate(nextStatus: PaymentStatus) {
+    if (form.source === "invoice" && !form.invoice_id) {
+      toast.error(t.requiredInvoice);
+      return false;
+    }
+
+    if (form.source === "order" && !form.order_id) {
+      toast.error(t.requiredOrder);
+      return false;
+    }
+
+    if (form.source !== "manual" && !form.customer_id) {
+      toast.error(t.requiredCustomer);
+      return false;
+    }
+
+    if (toNumber(form.amount) <= 0) {
+      toast.error(t.requiredAmount);
+      return false;
+    }
+
+    if (nextStatus === "paid" && toNumber(form.paid_amount) <= 0) {
+      toast.error(t.requiredAmount);
+      return false;
+    }
+
+    return true;
+  }
+
+  function buildPayload(nextStatus: PaymentStatus) {
+    const nextAmount = toNumber(form.amount);
+    const nextPaidAmount = nextStatus === "paid" ? toNumber(form.paid_amount || form.amount) : toNumber(form.paid_amount);
+
+    return {
+      payment_method: form.payment_method,
+      method: form.payment_method,
+      status: nextStatus,
+      customer_id: form.customer_id ? toNumber(form.customer_id) : null,
+      invoice_id: form.source === "invoice" && form.invoice_id ? toNumber(form.invoice_id) : null,
+      order_id: form.source === "order" && form.order_id ? toNumber(form.order_id) : null,
+      amount: nextAmount.toFixed(2),
+      paid_amount: nextPaidAmount.toFixed(2),
+      external_reference: form.external_reference.trim(),
+      transaction_id: form.transaction_id.trim(),
+      paid_at: nextStatus === "paid" ? form.payment_date : null,
+      initiated_at: form.payment_date || todayIso(),
+      notes: form.notes.trim(),
+      currency: "SAR",
+      auto_create_treasury_movement: nextStatus === "paid",
+      auto_post_accounting: nextStatus === "paid",
+    };
+  }
+
+  async function submitPayment(nextStatus: PaymentStatus) {
+    if (!validate(nextStatus)) return;
+
+    setSaving(nextStatus);
+    setError("");
+
+    try {
+      const payload = buildPayload(nextStatus);
+
+      const response = await fetchJson<ApiResponse>(makeApiUrl("/api/payments/create/"), {
+        method: "POST",
+        body: payload,
+      });
+
+      const paymentId = extractCreatedId(response);
+
+      setCreatedId(paymentId);
+      setDirty(false);
+      window.localStorage.removeItem(DRAFT_KEY);
+      toast.success(t.saved);
+
+      if (paymentId) {
+        router.push(`/system/payments/${paymentId}`);
+      }
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.submitError;
+
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
+      <div className="w-full space-y-4" dir={dir}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-56" />
+            <Skeleton className="h-4 w-96" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-32" />
+          </div>
+        </div>
 
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="space-y-4 p-4">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-80 w-full" />
+            </CardContent>
+          </Card>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="space-y-3 p-4">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <Skeleton key={index} className="h-10 w-full" />
+              ))}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/payments/list">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
-
-          <Link href="/system/payments">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <CreditCard className="h-4 w-4" />
-              <span>{t.dashboard}</span>
-            </Button>
-          </Link>
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadData(true)}
-            disabled={isLoadingData || isSaving}
-          >
-            {isLoadingData ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            <span>{t.refreshData}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" className="h-9 rounded-lg" onClick={() => router.back()}>
+            <BackIcon className="h-4 w-4" />
+            {t.back}
           </Button>
 
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={saveDraft}
-            disabled={isSaving}
-          >
+          <Button variant="outline" className="h-9 rounded-lg" onClick={() => void loadLookups()}>
+            <RefreshCw className="h-4 w-4" />
+            {t.refresh}
+          </Button>
+
+          <Button variant="outline" className="h-9 rounded-lg" onClick={saveDraft}>
             <Save className="h-4 w-4" />
-            <span>{locale === "ar" ? "حفظ مسودة" : "Save Draft"}</span>
+            {t.saveDraft}
           </Button>
 
-          <Button
-            className="h-10 rounded-xl"
-            onClick={submitForm}
-            disabled={!canSubmit}
-          >
-            {isSaving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            <span>{isSaving ? t.saving : t.save}</span>
+          <Button variant="outline" className="h-9 rounded-lg" onClick={clearForm}>
+            <RotateCcw className="h-4 w-4" />
+            {t.clear}
           </Button>
         </div>
       </div>
 
-      {submitError ? (
-        <Alert className="rounded-2xl border-destructive/20 bg-destructive/5 text-destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>{t.submitError}</AlertTitle>
-          <AlertDescription>{submitError}</AlertDescription>
-        </Alert>
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4 text-right">
+            <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+            <div>
+              <p className="font-semibold text-red-900">{t.errorTitle}</p>
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base font-bold">
-                {t.formTitle}
-              </CardTitle>
-              <CardDescription>{t.formDesc}</CardDescription>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard title={t.amount} value={<MoneyValue value={amount} />} trend={t.amount} />
+            <KpiCard title={t.paidAmount} value={<MoneyValue value={paidAmount} />} trend={t.paid} />
+            <KpiCard title={t.expectedAmount} value={<MoneyValue value={expectedAmount} />} trend={t.expectedAmount} />
+            <KpiCard title={t.netCollected} value={<MoneyValue value={paidAmount} />} trend={paymentMethodLabel(form.payment_method, locale)} />
+          </div>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div>
+                <CardTitle>{t.basicInfo}</CardTitle>
+                <CardDescription>{t.source}</CardDescription>
+              </div>
             </CardHeader>
 
-            <CardContent className="space-y-5">
+            <CardContent className="space-y-5 px-6 pb-6">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2">
-                  <Label>{t.source}</Label>
-                  <select
-                    value={form.source}
-                    onChange={(event) =>
-                      changeSource(event.target.value as PaymentSource)
-                    }
-                    disabled={isSaving}
-                    className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="INVOICE">{t.fromInvoice}</option>
-                    <option value="ORDER">{t.fromOrder}</option>
-                    <option value="CUSTOMER">{t.fromCustomer}</option>
-                    <option value="MANUAL">{t.manual}</option>
-                  </select>
+                  <FieldLabel>{t.source}</FieldLabel>
+                  <Select value={form.source} onValueChange={(value) => handleSourceChange(value as PaymentSource)}>
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="invoice">{t.fromInvoice}</SelectItem>
+                      <SelectItem value="order">{t.fromOrder}</SelectItem>
+                      <SelectItem value="customer">{t.fromCustomer}</SelectItem>
+                      <SelectItem value="manual">{t.manual}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>{t.paymentMethod}</Label>
-                  <select
+                  <FieldLabel>{t.paymentMethod}</FieldLabel>
+                  <Select
                     value={form.payment_method}
-                    onChange={(event) =>
-                      updateForm(
-                        "payment_method",
-                        event.target.value as PaymentMethod,
-                      )
-                    }
-                    disabled={isSaving}
-                    className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    onValueChange={(value) => updateForm("payment_method", value as PaymentMethod)}
                   >
-                    <option value="CASH">{t.cash}</option>
-                    <option value="BANK_TRANSFER">{t.bankTransfer}</option>
-                    <option value="GATEWAY">{t.gateway}</option>
-                    <option value="CARD">{t.card}</option>
-                    <option value="WALLET">{t.wallet}</option>
-                    <option value="TAMARA">{t.tamara}</option>
-                    <option value="TABBY">{t.tabby}</option>
-                  </select>
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue placeholder={t.chooseMethod} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cash">{t.cash}</SelectItem>
+                      <SelectItem value="bank_transfer">{t.bankTransfer}</SelectItem>
+                      <SelectItem value="gateway">{t.gateway}</SelectItem>
+                      <SelectItem value="credit_card">{t.creditCard}</SelectItem>
+                      <SelectItem value="debit_card">{t.debitCard}</SelectItem>
+                      <SelectItem value="apple_pay">{t.applePay}</SelectItem>
+                      <SelectItem value="stc_pay">{t.stcPay}</SelectItem>
+                      <SelectItem value="tamara">{t.tamara}</SelectItem>
+                      <SelectItem value="tabby">{t.tabby}</SelectItem>
+                      <SelectItem value="wallet">{t.wallet}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>{t.status}</Label>
-                  <select
-                    value={form.status}
-                    onChange={(event) =>
-                      updateForm("status", event.target.value as PaymentStatus)
-                    }
-                    disabled={isSaving}
-                    className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="PENDING">{t.pending}</option>
-                    <option value="CONFIRMED">{t.confirmed}</option>
-                  </select>
+                  <FieldLabel>{t.paymentStatus}</FieldLabel>
+                  <Select value={form.status} onValueChange={(value) => handleStatusChange(value as PaymentStatus)}>
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">{t.pending}</SelectItem>
+                      <SelectItem value="paid">{t.paid}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>{t.paymentDate}</Label>
+                  <FieldLabel>{t.paymentDate}</FieldLabel>
                   <div className="relative">
-                    <CalendarDays
-                      className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                        isArabic ? "right-3" : "left-3"
-                      }`}
-                    />
+                    <CalendarDays className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       type="date"
                       value={form.payment_date}
-                      onChange={(event) =>
-                        updateForm("payment_date", event.target.value)
-                      }
-                      disabled={isSaving}
-                      dir="ltr"
-                      className={`h-11 rounded-xl ${
-                        isArabic ? "pr-10" : "pl-10"
-                      }`}
+                      onChange={(event) => updateForm("payment_date", event.target.value)}
+                      className="h-10 rounded-lg bg-background pr-9"
                     />
                   </div>
-                  {errors.payment_date ? (
-                    <p className="text-xs text-destructive">
-                      {errors.payment_date}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-
-              {form.source === "INVOICE" ? (
-                <SourcePicker
-                  title={t.invoice}
-                  searchValue={invoiceSearch}
-                  onSearchChange={setInvoiceSearch}
-                  searchPlaceholder={t.searchInvoice}
-                  isLoading={isLoadingData}
-                  emptyText={t.noInvoices}
-                  error={errors.invoice_id}
-                  items={filteredInvoices.map((invoice) => ({
-                    id: invoice.id,
-                    title: invoice.invoice_number,
-                    subtitle: invoice.customer_name,
-                    meta: invoice.customer_phone || "-",
-                    amount: invoice.remaining_amount,
-                    isSelected: form.invoice_id === invoice.id,
-                    onClick: () => applyInvoice(invoice.id),
-                  }))}
-                />
-              ) : null}
-
-              {form.source === "ORDER" ? (
-                <SourcePicker
-                  title={t.order}
-                  searchValue={orderSearch}
-                  onSearchChange={setOrderSearch}
-                  searchPlaceholder={t.searchOrder}
-                  isLoading={isLoadingData}
-                  emptyText={t.noOrders}
-                  error={errors.order_id}
-                  items={filteredOrders.map((order) => ({
-                    id: order.id,
-                    title: order.order_number,
-                    subtitle: order.customer_name,
-                    meta: order.customer_phone || "-",
-                    amount: order.remaining_amount,
-                    isSelected: form.order_id === order.id,
-                    onClick: () => applyOrder(order.id),
-                  }))}
-                />
-              ) : null}
-
-              {form.source === "CUSTOMER" ? (
-                <CustomerPicker
-                  title={t.customer}
-                  searchValue={customerSearch}
-                  onSearchChange={setCustomerSearch}
-                  searchPlaceholder={t.searchCustomer}
-                  isLoading={isLoadingData}
-                  emptyText={t.noCustomers}
-                  error={errors.customer_id}
-                  customers={filteredCustomers}
-                  selectedId={form.customer_id}
-                  onSelect={applyCustomer}
-                />
-              ) : null}
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="space-y-2">
-                  <Label>{t.customerName}</Label>
-                  <Input
-                    value={form.customer_name}
-                    onChange={(event) =>
-                      updateForm("customer_name", event.target.value)
-                    }
-                    disabled={isSaving || form.source !== "MANUAL"}
-                    className="h-11 rounded-xl"
-                  />
-                  {errors.customer_name ? (
-                    <p className="text-xs text-destructive">
-                      {errors.customer_name}
-                    </p>
-                  ) : null}
                 </div>
 
-                <div className="space-y-2">
-                  <Label>{t.customerPhone}</Label>
-                  <Input
-                    value={form.customer_phone}
-                    onChange={(event) =>
-                      updateForm("customer_phone", event.target.value)
-                    }
-                    disabled={isSaving || form.source !== "MANUAL"}
-                    dir="ltr"
-                    className="h-11 rounded-xl"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>{t.customerEmail}</Label>
-                  <Input
-                    value={form.customer_email}
-                    onChange={(event) =>
-                      updateForm("customer_email", event.target.value)
-                    }
-                    disabled={isSaving || form.source !== "MANUAL"}
-                    dir="ltr"
-                    className="h-11 rounded-xl"
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>{t.amount}</Label>
-                  <div className="relative">
-                    <Input
-                      value={form.amount}
-                      onChange={(event) =>
-                        updateForm("amount", event.target.value)
-                      }
-                      disabled={isSaving}
-                      inputMode="decimal"
-                      dir="ltr"
-                      className="h-11 rounded-xl pe-10"
-                    />
-                    <SarIcon
-                      className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                        isArabic ? "left-3" : "right-3"
-                      }`}
-                    />
+                {form.source === "invoice" ? (
+                  <div className="space-y-2 md:col-span-2 xl:col-span-4">
+                    <FieldLabel>{t.invoice}</FieldLabel>
+                    <Select value={form.invoice_id || undefined} onValueChange={handleInvoiceSelect}>
+                      <SelectTrigger className="h-10 rounded-lg bg-background">
+                        <SelectValue placeholder={t.chooseInvoice} />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[360px]">
+                        <div className="p-2">
+                          <Input
+                            value={invoiceSearch}
+                            onChange={(event) => setInvoiceSearch(event.target.value)}
+                            placeholder={t.searchInvoice}
+                            className="h-9"
+                          />
+                        </div>
+                        {filteredInvoices.length ? (
+                          filteredInvoices.map((invoice) => (
+                            <SelectItem key={invoice.id} value={String(invoice.id)}>
+                              {invoice.invoice_number} — {invoice.customer_name || invoice.customer_phone || "—"} —{" "}
+                              {formatMoney(invoice.due_amount)}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">{t.noInvoices}</div>
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  {errors.amount ? (
-                    <p className="text-xs text-destructive">{errors.amount}</p>
-                  ) : null}
+                ) : null}
+
+                {form.source === "order" ? (
+                  <div className="space-y-2 md:col-span-2 xl:col-span-4">
+                    <FieldLabel>{t.order}</FieldLabel>
+                    <Select value={form.order_id || undefined} onValueChange={handleOrderSelect}>
+                      <SelectTrigger className="h-10 rounded-lg bg-background">
+                        <SelectValue placeholder={t.chooseOrder} />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[360px]">
+                        <div className="p-2">
+                          <Input
+                            value={orderSearch}
+                            onChange={(event) => setOrderSearch(event.target.value)}
+                            placeholder={t.searchOrder}
+                            className="h-9"
+                          />
+                        </div>
+                        {filteredOrders.length ? (
+                          filteredOrders.map((order) => (
+                            <SelectItem key={order.id} value={String(order.id)}>
+                              {order.order_number} — {order.customer_name || order.customer_phone || "—"} —{" "}
+                              {formatMoney(order.remaining_amount || order.total_amount)}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">{t.noOrders}</div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+
+                {form.source !== "manual" ? (
+                  <div className="space-y-2 md:col-span-2 xl:col-span-4">
+                    <FieldLabel>{t.customer}</FieldLabel>
+                    <Select
+                      value={form.customer_id || undefined}
+                      onValueChange={(value) => updateForm("customer_id", value)}
+                    >
+                      <SelectTrigger className="h-10 rounded-lg bg-background">
+                        <SelectValue placeholder={t.chooseCustomer} />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[320px]">
+                        <div className="p-2">
+                          <Input
+                            value={customerSearch}
+                            onChange={(event) => setCustomerSearch(event.target.value)}
+                            placeholder={t.searchCustomer}
+                            className="h-9"
+                          />
+                        </div>
+                        {filteredCustomers.length ? (
+                          filteredCustomers.map((customer) => (
+                            <SelectItem key={customer.id} value={String(customer.id)}>
+                              {customer.name} {customer.phone ? `- ${customer.phone}` : ""}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">{t.noCustomers}</div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div>
+                <CardTitle>{t.paymentInfo}</CardTitle>
+                <CardDescription>{paymentMethodLabel(form.payment_method, locale)}</CardDescription>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-5 px-6 pb-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-2">
+                  <FieldLabel>{t.amount}</FieldLabel>
+                  <Input
+                    value={form.amount}
+                    inputMode="decimal"
+                    onChange={(event) => updateForm("amount", toEnglishDigits(event.target.value))}
+                    className="h-10 rounded-lg bg-background text-right tabular-nums"
+                  />
                 </div>
 
                 <div className="space-y-2">
-                  <Label>{t.reference}</Label>
+                  <FieldLabel>{t.paidAmount}</FieldLabel>
                   <Input
-                    value={form.reference}
-                    onChange={(event) =>
-                      updateForm("reference", event.target.value)
-                    }
-                    disabled={isSaving}
-                    dir="ltr"
-                    className="h-11 rounded-xl"
+                    value={form.paid_amount}
+                    inputMode="decimal"
+                    onChange={(event) => updateForm("paid_amount", toEnglishDigits(event.target.value))}
+                    className="h-10 rounded-lg bg-background text-right tabular-nums"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.externalReference}</FieldLabel>
+                  <Input
+                    value={form.external_reference}
+                    onChange={(event) => updateForm("external_reference", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.externalReference}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.transactionId}</FieldLabel>
+                  <Input
+                    value={form.transaction_id}
+                    onChange={(event) => updateForm("transaction_id", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.transactionId}
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label>{t.notes}</Label>
-                <Textarea
+                <FieldLabel>{t.notes}</FieldLabel>
+                <textarea
                   value={form.notes}
                   onChange={(event) => updateForm("notes", event.target.value)}
-                  disabled={isSaving}
-                  className="min-h-[110px] rounded-xl"
+                  className="min-h-[110px] w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  placeholder={t.notes}
                 />
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <aside className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base font-bold">
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
+        <div className="space-y-4">
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle>{t.summary}</CardTitle>
+                  <CardDescription>{t.netCollected}</CardDescription>
+                </div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background">
+                  <WalletCards className="h-5 w-5 text-muted-foreground" />
+                </div>
+              </div>
             </CardHeader>
 
-            <CardContent className="space-y-4">
-              <div className="flex h-14 items-center justify-between rounded-2xl bg-muted/40 px-4">
-                <span className="text-sm text-muted-foreground">
-                  {t.paymentMethod}
-                </span>
-                <span className="font-semibold">
-                  {paymentMethodLabel(form.payment_method, locale)}
-                </span>
-              </div>
+            <CardContent className="space-y-2 px-6 pb-6">
+              <InfoRow label={t.selectedCustomer} value={selectedCustomer?.name || t.noCustomer} />
+              <InfoRow label={t.selectedInvoice} value={selectedInvoice?.invoice_number || t.noInvoice} />
+              <InfoRow label={t.selectedOrder} value={selectedOrder?.order_number || t.noOrder} />
+              <InfoRow label={t.expectedAmount} value={<MoneyValue value={expectedAmount} />} />
+              <InfoRow label={t.amount} value={<MoneyValue value={amount} />} />
+              <InfoRow label={t.paidAmount} value={<MoneyValue value={paidAmount} />} />
+              <InfoRow label={t.netCollected} value={<MoneyValue value={paidAmount} />} />
+              <InfoRow label={t.statusAfterSave} value={form.status === "paid" ? t.paid : t.pending} />
 
-              <div className="space-y-3 rounded-2xl border p-4">
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-muted-foreground">
-                    {t.selectedSource}
-                  </span>
-                  <span className="font-semibold">{sourceLabel(form, t)}</span>
-                </div>
-
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-muted-foreground">{t.totalAmount}</span>
-                  <MoneyText value={sourceTotal} />
-                </div>
-
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-muted-foreground">{t.paidAmount}</span>
-                  <MoneyText value={sourcePaid} />
-                </div>
-
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-muted-foreground">
-                    {t.remainingAmount}
-                  </span>
-                  <MoneyText value={sourceBalance} />
-                </div>
-
-                <div className="border-t pt-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-semibold">{t.paymentAmount}</span>
-                    <span className="text-lg font-bold">
-                      <MoneyText value={form.amount} />
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-muted/20 p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <UserRound className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-semibold">{t.customer}</span>
-                </div>
-
-                <p className="font-semibold">
-                  {form.customer_name || t.notSelected}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground" dir="ltr">
-                  {form.customer_phone || "-"}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground" dir="ltr">
-                  {form.customer_email || "-"}
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-2">
+              <div className="grid gap-2 pt-4">
                 <Button
-                  className="h-11 rounded-xl"
-                  onClick={submitForm}
-                  disabled={!canSubmit}
+                  className="h-10 rounded-lg bg-black text-white hover:bg-black/90"
+                  disabled={Boolean(saving)}
+                  onClick={() => void submitPayment(form.status)}
                 >
-                  {isSaving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  {isSaving ? t.saving : t.save}
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {t.submit}
                 </Button>
 
                 <Button
                   variant="outline"
-                  className="h-11 rounded-xl"
-                  onClick={clearForm}
-                  disabled={isSaving}
+                  className="h-10 rounded-lg bg-background"
+                  disabled={Boolean(saving)}
+                  onClick={() => void submitPayment("paid")}
                 >
-                  <Trash2 className="h-4 w-4" />
-                  {t.clear}
+                  {saving === "paid" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4" />
+                  )}
+                  {t.submitAndConfirm}
                 </Button>
+
+                {createdId ? (
+                  <Button asChild variant="outline" className="h-10 rounded-lg bg-background">
+                    <Link href={`/system/payments/${createdId}`}>
+                      <FileText className="h-4 w-4" />
+                      {t.viewPayment}
+                    </Link>
+                  </Button>
+                ) : null}
               </div>
             </CardContent>
           </Card>
-        </aside>
-      </div>
-    </div>
-  );
-}
 
-/* ============================================================
-   Small Components / Helpers
-============================================================ */
-
-async function loadCollection<T>({
-  endpoints,
-  key,
-  normalize,
-  setRows,
-}: {
-  endpoints: string[];
-  key: string;
-  normalize: (item: unknown, index: number) => T;
-  setRows: (rows: T[]) => void;
-}) {
-  let payload: ApiEnvelope<unknown> | null = null;
-
-  for (const endpoint of endpoints) {
-    const response = await fetch(apiUrl(endpoint), {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    });
-
-    const responsePayload = (await response.json().catch(() => null)) as
-      | ApiEnvelope<unknown>
-      | null;
-
-    if (
-      response.ok &&
-      responsePayload?.ok !== false &&
-      responsePayload?.success !== false
-    ) {
-      payload = responsePayload;
-      break;
-    }
-  }
-
-  const normalizedRows = extractRows(payload, key)
-    .map(normalize)
-    .filter(Boolean);
-
-  setRows(normalizedRows);
-}
-
-function sourceLabel(form: FormState, t: ReturnType<typeof dictionary>) {
-  if (form.source === "INVOICE") return t.fromInvoice;
-  if (form.source === "ORDER") return t.fromOrder;
-  if (form.source === "CUSTOMER") return t.fromCustomer;
-
-  return t.manual;
-}
-
-function SourcePicker({
-  title,
-  searchValue,
-  onSearchChange,
-  searchPlaceholder,
-  isLoading,
-  emptyText,
-  error,
-  items,
-}: {
-  title: string;
-  searchValue: string;
-  onSearchChange: (value: string) => void;
-  searchPlaceholder: string;
-  isLoading: boolean;
-  emptyText: string;
-  error?: string;
-  items: Array<{
-    id: string;
-    title: string;
-    subtitle: string;
-    meta: string;
-    amount: number;
-    isSelected: boolean;
-    onClick: () => void;
-  }>;
-}) {
-  return (
-    <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <Label>{title}</Label>
-        </div>
-
-        <Badge variant="outline" className="rounded-full">
-          {formatNumber(items.length)}
-        </Badge>
-      </div>
-
-      <div className="relative">
-        <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ltr:left-3 ltr:right-auto" />
-        <Input
-          value={searchValue}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={searchPlaceholder}
-          className="h-11 rounded-xl pr-10 ltr:pl-10 ltr:pr-3"
-        />
-      </div>
-
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-14 rounded-xl" />
-          ))}
-        </div>
-      ) : items.length > 0 ? (
-        <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={item.onClick}
-              className={`rounded-xl border p-3 text-start transition hover:bg-muted/50 ${
-                item.isSelected ? "border-primary bg-primary/5" : "bg-background"
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold" dir="ltr">
-                    {item.title}
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="grid gap-3 p-4">
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <User className="h-5 w-5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{selectedCustomer?.name || t.noCustomer}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {selectedCustomer?.phone || selectedCustomer?.email || "—"}
                   </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {item.subtitle}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                    {item.meta}
-                  </p>
-                </div>
-
-                <div className="text-end text-sm font-semibold">
-                  <MoneyText value={item.amount} />
                 </div>
               </div>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-          {emptyText}
-        </div>
-      )}
 
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
-    </div>
-  );
-}
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <ReceiptText className="h-5 w-5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{selectedInvoice?.invoice_number || t.noInvoice}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {selectedInvoice ? `${t.invoiceDue}: ${formatMoney(selectedInvoice.due_amount)}` : "—"}
+                  </p>
+                </div>
+              </div>
 
-function CustomerPicker({
-  title,
-  searchValue,
-  onSearchChange,
-  searchPlaceholder,
-  isLoading,
-  emptyText,
-  error,
-  customers,
-  selectedId,
-  onSelect,
-}: {
-  title: string;
-  searchValue: string;
-  onSearchChange: (value: string) => void;
-  searchPlaceholder: string;
-  isLoading: boolean;
-  emptyText: string;
-  error?: string;
-  customers: CustomerOption[];
-  selectedId: string;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <Label>{title}</Label>
-        <Badge variant="outline" className="rounded-full">
-          {formatNumber(customers.length)}
-        </Badge>
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <ShoppingCart className="h-5 w-5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{selectedOrder?.order_number || t.noOrder}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {selectedOrder ? `${t.orderRemaining}: ${formatMoney(selectedOrder.remaining_amount)}` : "—"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <Banknote className="h-5 w-5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{paymentMethodLabel(form.payment_method, locale)}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {formatMoney(amount)} SAR
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{t.statusAfterSave}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {form.status === "paid" ? t.paid : t.pending}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
-
-      <div className="relative">
-        <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ltr:left-3 ltr:right-auto" />
-        <Input
-          value={searchValue}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={searchPlaceholder}
-          className="h-11 rounded-xl pr-10 ltr:pl-10 ltr:pr-3"
-        />
-      </div>
-
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-14 rounded-xl" />
-          ))}
-        </div>
-      ) : customers.length > 0 ? (
-        <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
-          {customers.map((customer) => (
-            <button
-              key={customer.id}
-              type="button"
-              onClick={() => onSelect(customer.id)}
-              className={`rounded-xl border p-3 text-start transition hover:bg-muted/50 ${
-                selectedId === customer.id
-                  ? "border-primary bg-primary/5"
-                  : "bg-background"
-              }`}
-            >
-              <p className="font-semibold">{customer.name}</p>
-              <p className="mt-1 text-sm text-muted-foreground" dir="ltr">
-                {customer.phone || "-"}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                {customer.email || "-"}
-              </p>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-          {emptyText}
-        </div>
-      )}
-
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   );
 }

@@ -77,6 +77,10 @@
      Primey Care Brand Colors
      Primary:   #432a58
      Secondary: #8c9cdc
+
+     Layout direction:
+     - Keep the workspace background visually white and unified.
+     - Keep Primey purple as action/brand color only.
   ====================================================== */
 
   --background: #ffffff;
@@ -91,19 +95,19 @@
   --primary: #432a58;
   --primary-foreground: #ffffff;
 
-  --secondary: #8c9cdc;
-  --secondary-foreground: #432a58;
+  --secondary: #f8fafc;
+  --secondary-foreground: #18121f;
 
-  --muted: #f6f3f8;
-  --muted-foreground: #6d6475;
+  --muted: #ffffff;
+  --muted-foreground: #6b7280;
 
-  --accent: #eef1ff;
+  --accent: #ffffff;
   --accent-foreground: #432a58;
 
   --destructive: #dc2626;
 
-  --border: #e8e0ee;
-  --input: #e8e0ee;
+  --border: #edf0f4;
+  --input: #edf0f4;
   --ring: #8c9cdc;
 
   --chart-1: #432a58;
@@ -116,9 +120,9 @@
   --sidebar-foreground: #18121f;
   --sidebar-primary: #432a58;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f6f3f8;
+  --sidebar-accent: #ffffff;
   --sidebar-accent-foreground: #432a58;
-  --sidebar-border: #e8e0ee;
+  --sidebar-border: #edf0f4;
   --sidebar-ring: #8c9cdc;
 }
 
@@ -132,7 +136,7 @@
   --popover: #1f1728;
   --popover-foreground: #f8f5fb;
 
-  --primary: #8c9cdc;
+  --primary: #d3d8ec;
   --primary-foreground: #15101b;
 
   --secondary: #432a58;
@@ -174,6 +178,7 @@
   html {
     direction: rtl;
     scroll-behavior: smooth;
+    background: var(--background);
   }
 
   html[dir="ltr"] {
@@ -186,6 +191,7 @@
 
   body {
     @apply bg-background text-foreground;
+    min-height: 100vh;
     direction: inherit;
     text-align: start;
     font-family: var(--font-sans), sans-serif;

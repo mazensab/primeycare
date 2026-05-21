@@ -1,69 +1,76 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/contracts/page.tsx
-   🧠 Primey Care | Contracts Dashboard
+   📂 primey_frontend/app/system/contracts/page.tsx
+   📄 Primey Care — Contracts
    ------------------------------------------------------------
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ العقود مرتبطة بمقدمي الخدمة Providers فقط
-   ✅ لا يوجد اعتماد على Centers
-   ✅ لا تظهر مسارات تقنية أو أسماء API داخل الواجهة
-   ✅ لا توجد روابط تقارير داخل الوحدة
-   ✅ Error State مستقل
-   ✅ Empty State ذكي
-   ✅ Skeleton Loading
-   ✅ البحث في صف مستقل
-   ✅ الفلاتر في صف مستقل تحت البحث
-   ✅ فلتر التاريخ من / إلى على createdAt
-   ✅ Excel export بصيغة .xls HTML Workbook
-   ✅ Web PDF Print
-   ✅ حماية الأزرار والطلبات حسب الصلاحيات
-   ✅ fallback آمن لـ system_admin / superuser
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ استخدام toast من sonner
-   ✅ استخدام رمز SAR الرسمي /currency/sar.svg
-   ✅ بدون localhost hardcoded
-   ✅ الأرقام تبقى بالإنجليزية
+   ✅ Same approved Customers / Providers / Agents table pattern
+   ✅ Header buttons / KPI cards / toolbar / table unified
+   ✅ Real API only: /api/contracts/
+   ✅ Server pagination
+   ✅ Contract status actions
+   ✅ Excel .xls + Web print
+   ✅ SAR icon from /currency/sar.svg
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  BadgeCheck,
-  Building2,
-  CalendarClock,
-  CalendarDays,
-  ClipboardList,
-  Download,
+  ArrowUpDown,
+  BadgePercent,
+  CheckCircle2,
+  ColumnsIcon,
+  Copy,
   Eye,
-  FileText,
+  FileSpreadsheet,
   Layers3,
-  ListChecks,
   Loader2,
-  Percent,
+  MoreHorizontal,
   Plus,
   Printer,
-  RefreshCcw,
+  RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
-  Wallet,
+  Sparkles,
+  TriangleAlert,
   XCircle,
-  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -73,718 +80,435 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
-
-type AppLocale = "ar" | "en";
-type AuthRecord = Record<string, unknown>;
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
 type ContractStatus =
+  | "all"
   | "DRAFT"
   | "ACTIVE"
   | "SUSPENDED"
   | "EXPIRED"
-  | "TERMINATED"
-  | "UNKNOWN";
+  | "TERMINATED";
 
 type PricingModel =
-  | "DISCOUNT"
-  | "FIXED_PRICE"
+  | "all"
+  | "FIXED"
   | "COMMISSION"
+  | "PERCENTAGE"
+  | "DISCOUNT"
   | "MIXED"
-  | "UNKNOWN";
+  | "OTHER";
 
-type StatusFilter = "all" | ContractStatus;
-type PricingFilter = "all" | PricingModel;
+type SortKey =
+  | "newest"
+  | "oldest"
+  | "contract_number"
+  | "provider"
+  | "status"
+  | "start_date"
+  | "end_date"
+  | "most_products"
+  | "most_offers"
+  | "highest_discount";
 
-type Contract = {
-  id: number | string;
-  contractNumber: string;
+type ColumnKey =
+  | "select"
+  | "contract"
+  | "provider"
+  | "status"
+  | "pricing"
+  | "dates"
+  | "products"
+  | "offers"
+  | "visibility"
+  | "discount"
+  | "commission"
+  | "createdAt"
+  | "actions";
+
+type ContractProduct = {
+  id: number;
+  product_id: number | null;
+  product_name: string;
+  product_type: string;
+  is_active: boolean;
+  is_featured: boolean;
+  show_on_landing: boolean;
+  show_on_mobile: boolean;
+  show_on_offers: boolean;
+  price_before_discount: number;
+  price_after_discount: number;
+  discount_percentage: number;
+  system_commission_percentage: number;
+  offer_title: string;
+  offer_badge: string;
+};
+
+type ContractRecord = {
+  id: number;
+  contract_number: string;
   title: string;
-  providerId: string;
-  providerName: string;
-  status: ContractStatus;
-  pricingModel: PricingModel;
-  discountPercentage: number;
-  systemCommissionPercentage: number;
-  contractValue: number;
-  startDate: string;
-  endDate: string;
+  code: string;
+  provider_id: number | null;
+  provider_name: string;
+  provider_name_ar: string;
+  provider_name_en: string;
+  status: string;
+  pricing_model: string;
+  start_date: string | null;
+  end_date: string | null;
   notes: string;
-  createdAt: string;
-  updatedAt: string;
-  raw: Record<string, unknown>;
+  internal_notes: string;
+  total_contract_products: number;
+  active_contract_products: number;
+  featured_contract_offers: number;
+  landing_contract_offers: number;
+  mobile_contract_offers: number;
+  offers_page_contract_offers: number;
+  max_discount_percentage: number;
+  max_system_commission_percentage: number;
+  created_at: string | null;
+  updated_at: string | null;
+  contract_products: ContractProduct[];
+};
+
+type ContractsSummary = {
+  total_contracts: number;
+  active_contracts: number;
+  draft_contracts: number;
+  suspended_contracts: number;
+  expired_contracts: number;
+  terminated_contracts: number;
+  contracts_with_products: number;
+  providers_with_contracts: number;
+  total_contract_products: number;
+  active_contract_products: number;
+  featured_contract_offers: number;
+  landing_contract_offers: number;
+  mobile_contract_offers: number;
+  offers_page_contract_offers: number;
+  distinct_products_in_contracts: number;
+};
+
+type PaginationState = {
+  count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
 };
 
 type ContractsApiResponse = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
-  detail?: string;
-  error?: string;
-  count?: number;
   results?: unknown[];
-  contracts?: unknown[];
   items?: unknown[];
-  data?:
-    | unknown[]
-    | {
-        results?: unknown[];
-        contracts?: unknown[];
-        items?: unknown[];
-      };
+  data?: {
+    results?: unknown[];
+    items?: unknown[];
+    summary?: unknown;
+    pagination?: unknown;
+  };
+  summary?: unknown;
+  pagination?: unknown;
+  count?: number;
 };
 
-type ExcelSheetOptions = {
-  filename: string;
-  worksheetName: string;
-  title: string;
-  locale: AppLocale;
-  summaryRows: Array<[string, string | number]>;
-  filterRows: Array<[string, string | number]>;
-  headers: string[];
-  rows: Array<Array<string | number>>;
+const SAR_ICON = "/currency/sar.svg";
+const PAGE_SIZE = 10;
+
+const DEFAULT_VISIBLE_COLUMNS: Record<ColumnKey, boolean> = {
+  select: true,
+  contract: true,
+  provider: true,
+  status: true,
+  pricing: true,
+  dates: true,
+  products: true,
+  offers: true,
+  visibility: true,
+  discount: true,
+  commission: true,
+  createdAt: true,
+  actions: true,
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
+const translations = {
+  ar: {
+    title: "العقود",
+    subtitle: "إدارة عقود مقدمي الخدمة وعروض المنتجات والأسعار والخصومات.",
+    create: "إنشاء عقد",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    searchPlaceholder: "ابحث برقم العقد أو مقدم الخدمة أو المنتج...",
+    totalContracts: "إجمالي العقود",
+    activeContracts: "العقود النشطة",
+    offers: "العروض",
+    products: "المنتجات",
+    providers: "مقدمو الخدمة",
+    featuredOffers: "العروض المميزة",
+    landingOffers: "ظهور الهبوط",
+    mobileOffers: "ظهور الموبايل",
+    contract: "العقد",
+    provider: "مقدم الخدمة",
+    status: "الحالة",
+    pricing: "التسعير",
+    dates: "المدة",
+    productsCol: "المنتجات",
+    offersCol: "العروض",
+    visibility: "الظهور",
+    discount: "الخصم",
+    commission: "العمولة",
+    createdAt: "تاريخ الإنشاء",
+    actions: "الإجراءات",
+    columns: "الأعمدة",
+    sort: "الترتيب",
+    selected: "محدد",
+    allStatuses: "كل الحالات",
+    draft: "مسودة",
+    active: "نشط",
+    suspended: "معلق",
+    expired: "منتهي",
+    terminated: "منهى",
+    allPricing: "كل نماذج التسعير",
+    fixed: "ثابت",
+    commissionModel: "عمولة",
+    percentage: "نسبة",
+    discountModel: "خصم",
+    mixed: "مختلط",
+    other: "أخرى",
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    contractNumberSort: "رقم العقد",
+    providerSort: "مقدم الخدمة",
+    statusSort: "الحالة",
+    startDateSort: "تاريخ البداية",
+    endDateSort: "تاريخ النهاية",
+    mostProducts: "الأكثر منتجات",
+    mostOffers: "الأكثر عروض",
+    highestDiscount: "الأعلى خصمًا",
+    from: "من",
+    to: "إلى",
+    activeFilters: "فلاتر مفعلة",
+    clearSelection: "إلغاء التحديد",
+    view: "عرض التفاصيل",
+    copyNumber: "نسخ رقم العقد",
+    copyProvider: "نسخ مقدم الخدمة",
+    activate: "تفعيل العقد",
+    suspend: "تعليق العقد",
+    terminate: "إنهاء العقد",
+    expire: "إنهاء كمنتهي",
+    copied: "تم النسخ",
+    actionSuccess: "تم تحديث حالة العقد بنجاح.",
+    actionFailed: "تعذر تنفيذ العملية.",
+    confirmActivate: "هل تريد تفعيل العقد؟",
+    confirmSuspend: "هل تريد تعليق العقد؟",
+    confirmTerminate: "هل تريد إنهاء العقد؟",
+    confirmExpire: "هل تريد تعيين العقد كمنتهي؟",
+    noDataTitle: "لا توجد عقود بعد",
+    noDataDesc: "عند إنشاء عقود مقدمي الخدمة ستظهر هنا.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+    errorTitle: "تعذر تحميل العقود",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير العقود",
+    generatedAt: "تاريخ الطباعة",
+    showing: "عرض",
+    rows: "صفوف",
+    page: "صفحة",
+    of: "من",
+    next: "التالي",
+    previous: "السابق",
+    unknown: "غير محدد",
+    start: "البداية",
+    end: "النهاية",
+    landing: "هبوط",
+    mobile: "موبايل",
+    offersPage: "العروض",
+    featured: "مميز",
+  },
+  en: {
+    title: "Contracts",
+    subtitle: "Manage provider contracts, product offers, prices, and discounts.",
+    create: "Create Contract",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    searchPlaceholder: "Search contract number, provider, or product...",
+    totalContracts: "Total contracts",
+    activeContracts: "Active contracts",
+    offers: "Offers",
+    products: "Products",
+    providers: "Providers",
+    featuredOffers: "Featured offers",
+    landingOffers: "Landing visibility",
+    mobileOffers: "Mobile visibility",
+    contract: "Contract",
+    provider: "Provider",
+    status: "Status",
+    pricing: "Pricing",
+    dates: "Dates",
+    productsCol: "Products",
+    offersCol: "Offers",
+    visibility: "Visibility",
+    discount: "Discount",
+    commission: "Commission",
+    createdAt: "Created at",
+    actions: "Actions",
+    columns: "Columns",
+    sort: "Sort",
+    selected: "Selected",
+    allStatuses: "All statuses",
+    draft: "Draft",
+    active: "Active",
+    suspended: "Suspended",
+    expired: "Expired",
+    terminated: "Terminated",
+    allPricing: "All pricing",
+    fixed: "Fixed",
+    commissionModel: "Commission",
+    percentage: "Percentage",
+    discountModel: "Discount",
+    mixed: "Mixed",
+    other: "Other",
+    newest: "Newest",
+    oldest: "Oldest",
+    contractNumberSort: "Contract number",
+    providerSort: "Provider",
+    statusSort: "Status",
+    startDateSort: "Start date",
+    endDateSort: "End date",
+    mostProducts: "Most products",
+    mostOffers: "Most offers",
+    highestDiscount: "Highest discount",
+    from: "From",
+    to: "To",
+    activeFilters: "Active filters",
+    clearSelection: "Clear selection",
+    view: "View details",
+    copyNumber: "Copy contract number",
+    copyProvider: "Copy provider",
+    activate: "Activate contract",
+    suspend: "Suspend contract",
+    terminate: "Terminate contract",
+    expire: "Mark as expired",
+    copied: "Copied",
+    actionSuccess: "Contract status updated successfully.",
+    actionFailed: "Unable to complete operation.",
+    confirmActivate: "Do you want to activate this contract?",
+    confirmSuspend: "Do you want to suspend this contract?",
+    confirmTerminate: "Do you want to terminate this contract?",
+    confirmExpire: "Do you want to mark this contract as expired?",
+    noDataTitle: "No contracts yet",
+    noDataDesc: "Provider contracts will appear here once created.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other results.",
+    errorTitle: "Unable to load contracts",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "Contracts report",
+    generatedAt: "Generated at",
+    showing: "Showing",
+    rows: "Rows",
+    page: "Page",
+    of: "of",
+    next: "Next",
+    previous: "Previous",
+    unknown: "Unknown",
+    start: "Start",
+    end: "End",
+    landing: "Landing",
+    mobile: "Mobile",
+    offersPage: "Offers",
+    featured: "Featured",
+  },
+} as const;
 
-/* ============================================================
-   Locale Helpers
-============================================================ */
-
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const savedLocale = window.localStorage.getItem("primey-locale");
-
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
-    return "ar";
-  }
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/* ============================================================
-   API Helper
-============================================================ */
-
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-/* ============================================================
-   Permission Helpers
-============================================================ */
-
-function asRecord(value: unknown): AuthRecord {
-  return value && typeof value === "object" ? (value as AuthRecord) : {};
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
-function getNestedRecord(source: AuthRecord, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as AuthRecord;
-    }
-  }
-
-  return {};
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
 }
 
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as AuthRecord;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as AuthRecord;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown): AuthRecord {
-  const auth = asRecord(authValue);
-
-  return getNestedRecord(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asRecord(auth.permissions);
-  const userPermissions = asRecord(user.permissions);
-  const authProfilePermissions = asRecord(auth.profile_permissions);
-  const userProfilePermissions = asRecord(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asRecord(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasKnownPermissionSignal(authValue: unknown) {
-  return (
-    getAuthRoles(authValue).length > 0 ||
-    getAuthPermissionCodes(authValue).length > 0
-  );
-}
-
-function hasPermissionCode(authValue: unknown, codes: string[]) {
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length === 0) return undefined;
-
-  return codes.some((code) => permissions.includes(code));
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const explicitPermission = hasPermissionCode(authValue, codes);
-
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "support",
-          "accountant",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin"].includes(role),
-    );
-  }
-
-  if (!hasKnownPermissionSignal(authValue)) {
-    return true;
-  }
-
-  return mode === "view";
-}
-
-/* ============================================================
-   Normalizers
-============================================================ */
-
-function toNumber(value: unknown): number {
+function toNumber(value: unknown, fallback = 0) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
 
-  const parsed = Number(
-    String(value ?? "")
-      .replace(/,/g, "")
-      .replace(/[^\d.-]/g, ""),
-  );
-
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function normalizeStatus(value: unknown): ContractStatus {
-  const status = String(value || "").toUpperCase();
-
-  if (status === "DRAFT") return "DRAFT";
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "SUSPENDED") return "SUSPENDED";
-  if (status === "EXPIRED") return "EXPIRED";
-  if (status === "TERMINATED") return "TERMINATED";
-
-  return "UNKNOWN";
-}
-
-function normalizePricingModel(value: unknown): PricingModel {
-  const model = String(value || "").toUpperCase();
-
-  if (model === "DISCOUNT") return "DISCOUNT";
-  if (model === "FIXED_PRICE") return "FIXED_PRICE";
-  if (model === "COMMISSION") return "COMMISSION";
-  if (model === "MIXED") return "MIXED";
-
-  return "UNKNOWN";
-}
-
-function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
-  const direct = obj[key];
-
-  if (direct !== undefined && direct !== null && direct !== "") {
-    return direct;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  const containers = ["contract", "provider", "item", "data", "summary", "totals"];
+  return fallback;
+}
 
-  for (const container of containers) {
-    const nested = obj[container];
+function toBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    if (nested && typeof nested === "object") {
-      const nestedObj = nested as Record<string, unknown>;
-      const value = nestedObj[key];
-
-      if (value !== undefined && value !== null && value !== "") {
-        return value;
-      }
-    }
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "on", "نعم"].includes(value.toLowerCase());
   }
 
-  return undefined;
+  return false;
 }
 
-function extractContracts(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-
-  if (!payload || typeof payload !== "object") return [];
-
-  const response = payload as ContractsApiResponse;
-
-  if (Array.isArray(response.results)) return response.results;
-  if (Array.isArray(response.contracts)) return response.contracts;
-  if (Array.isArray(response.items)) return response.items;
-  if (Array.isArray(response.data)) return response.data;
-
-  if (response.data && typeof response.data === "object") {
-    if (Array.isArray(response.data.results)) return response.data.results;
-    if (Array.isArray(response.data.contracts)) return response.data.contracts;
-    if (Array.isArray(response.data.items)) return response.data.items;
-  }
-
-  return [];
-}
-
-function normalizeContract(item: unknown): Contract {
-  const obj = (item || {}) as Record<string, unknown>;
-  const provider = obj.provider as Record<string, unknown> | undefined;
-  const id = getObjectValue(obj, "id") ?? "";
-
-  const contractNumber =
-    getObjectValue(obj, "contract_number") ??
-    getObjectValue(obj, "number") ??
-    getObjectValue(obj, "code") ??
-    (id ? `CTR-${id}` : "-");
-
-  const title =
-    getObjectValue(obj, "title") ??
-    getObjectValue(obj, "name") ??
-    getObjectValue(obj, "contract_title") ??
-    contractNumber;
-
-  return {
-    id: id as number | string,
-    contractNumber: String(contractNumber || "-"),
-    title: String(title || "-"),
-    providerId: String(
-      getObjectValue(obj, "provider_id") ?? provider?.id ?? "",
-    ),
-    providerName: String(
-      getObjectValue(obj, "provider_name") ?? provider?.name ?? "-",
-    ),
-    status: normalizeStatus(getObjectValue(obj, "status")),
-    pricingModel: normalizePricingModel(
-      getObjectValue(obj, "pricing_model") ?? getObjectValue(obj, "model"),
-    ),
-    discountPercentage: toNumber(
-      getObjectValue(obj, "discount_percentage") ??
-        getObjectValue(obj, "discount_percent"),
-    ),
-    systemCommissionPercentage: toNumber(
-      getObjectValue(obj, "system_commission_percentage") ??
-        getObjectValue(obj, "commission_percentage") ??
-        getObjectValue(obj, "commission_percent"),
-    ),
-    contractValue: toNumber(
-      getObjectValue(obj, "contract_value") ??
-        getObjectValue(obj, "total_value") ??
-        getObjectValue(obj, "amount") ??
-        0,
-    ),
-    startDate: String(
-      getObjectValue(obj, "start_date") ??
-        getObjectValue(obj, "valid_from") ??
-        "",
-    ),
-    endDate: String(
-      getObjectValue(obj, "end_date") ??
-        getObjectValue(obj, "valid_to") ??
-        "",
-    ),
-    notes: String(getObjectValue(obj, "notes") ?? ""),
-    createdAt: String(getObjectValue(obj, "created_at") ?? ""),
-    updatedAt: String(getObjectValue(obj, "updated_at") ?? ""),
-    raw: obj,
-  };
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    pageTitle: isArabic ? "إدارة العقود" : "Contracts Management",
-    pageSubtitle: isArabic
-      ? "متابعة عقود مقدمي الخدمة، حالات التفعيل، نسب الخصم، ونسب النظام."
-      : "Monitor provider contracts, activation status, discount rates, and system commission rates.",
-
-    createContract: isArabic ? "إنشاء عقد" : "Create Contract",
-    contractsList: isArabic ? "قائمة العقود" : "Contracts List",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
-
-    searchPlaceholder: isArabic
-      ? "ابحث برقم العقد أو العنوان أو مقدم الخدمة أو الحالة..."
-      : "Search by contract number, title, provider, or status...",
-
-    all: isArabic ? "الكل" : "All",
-    allStatuses: isArabic ? "كل الحالات" : "All Statuses",
-    allPricing: isArabic ? "كل نماذج التسعير" : "All Pricing Models",
-    fromDate: isArabic ? "من تاريخ" : "From Date",
-    toDate: isArabic ? "إلى تاريخ" : "To Date",
-    notSelected: isArabic ? "غير محدد" : "Not selected",
-
-    totalContracts: isArabic ? "إجمالي العقود" : "Total Contracts",
-    activeContracts: isArabic ? "العقود النشطة" : "Active Contracts",
-    totalValue: isArabic ? "قيمة العقود" : "Contracts Value",
-    avgCommission: isArabic ? "متوسط نسبة النظام" : "Avg. System Commission",
-
-    latestContracts: isArabic ? "أحدث العقود" : "Latest Contracts",
-    latestContractsDesc: isArabic
-      ? "عرض مختصر لأحدث العقود حسب الفلاتر الحالية."
-      : "A compact view of the latest contracts based on current filters.",
-
-    statusTitle: isArabic ? "حالة العقود" : "Contracts Status",
-    statusDesc: isArabic
-      ? "تحليل سريع لحالات العقود التشغيلية."
-      : "Quick analysis of operational contract statuses.",
-
-    quickAccessTitle: isArabic ? "إجراءات وحدة العقود" : "Contracts Module Actions",
-    quickAccessSubtitle: isArabic
-      ? "اختصارات منظمة للوصول إلى أهم صفحات وحدة العقود."
-      : "Organized shortcuts to the key contracts module pages.",
-    actionListTitle: isArabic ? "قائمة العقود" : "Contracts List",
-    actionListDesc: isArabic
-      ? "استعراض جميع العقود، البحث، الفلترة، وإدارة السجلات."
-      : "Browse all contracts, search, filter, and manage records.",
-    actionCreateTitle: isArabic ? "إنشاء عقد" : "Create Contract",
-    actionCreateDesc: isArabic
-      ? "إضافة عقد جديد وربطه بمقدم الخدمة والمنتجات والشروط."
-      : "Add a new contract and link it with provider, products, and terms.",
-    open: isArabic ? "فتح" : "Open",
-    manage: isArabic ? "إدارة" : "Manage",
-    viewFullList: isArabic ? "عرض القائمة الكاملة" : "View Full List",
-
-    draft: isArabic ? "مسودة" : "Draft",
-    active: isArabic ? "نشط" : "Active",
-    suspended: isArabic ? "موقوف" : "Suspended",
-    expired: isArabic ? "منتهي" : "Expired",
-    terminated: isArabic ? "منهى" : "Terminated",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    discount: isArabic ? "خصم" : "Discount",
-    fixedPrice: isArabic ? "سعر ثابت" : "Fixed Price",
-    commission: isArabic ? "عمولة" : "Commission",
-    mixed: isArabic ? "مختلط" : "Mixed",
-
-    table: {
-      contract: isArabic ? "العقد" : "Contract",
-      provider: isArabic ? "مقدم الخدمة" : "Provider",
-      pricing: isArabic ? "التسعير" : "Pricing",
-      discount: isArabic ? "الخصم" : "Discount",
-      commission: isArabic ? "نسبة النظام" : "System Commission",
-      value: isArabic ? "القيمة" : "Value",
-      period: isArabic ? "المدة" : "Period",
-      status: isArabic ? "الحالة" : "Status",
-      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    emptyTitle: isArabic ? "لا توجد عقود بعد" : "No contracts yet",
-    emptyText: isArabic
-      ? "عند إنشاء عقود جديدة ستظهر بياناتها هنا مباشرة."
-      : "New contracts will appear here once they are created.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو فلاتر الحالة أو التسعير أو التاريخ."
-      : "Try changing search keywords, status, pricing, or date filters.",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض بيانات العقود. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view contracts data. Contact your system administrator if you need access.",
-
-    apiError: isArabic
-      ? "تعذر تحميل بيانات العقود."
-      : "Unable to load contracts data.",
-    apiErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    refreshSuccess: isArabic
-      ? "تم تحديث بيانات العقود بنجاح."
-      : "Contracts data refreshed successfully.",
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    latestRecords: isArabic ? "آخر السجلات" : "Latest records",
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    reportScope: isArabic ? "نطاق التقرير" : "Report Scope",
-    currentFilteredData: isArabic
-      ? "حسب الفلاتر الحالية"
-      : "Current filtered data",
-    filterSearch: isArabic ? "البحث" : "Search",
-    filterStatus: isArabic ? "فلتر الحالة" : "Status Filter",
-    filterPricing: isArabic ? "فلتر التسعير" : "Pricing Filter",
-    filterDateFrom: isArabic ? "تاريخ الإنشاء من" : "Created From",
-    filterDateTo: isArabic ? "تاريخ الإنشاء إلى" : "Created To",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
-    printTitle: isArabic ? "قائمة العقود" : "Contracts List",
-  };
-}
-
-/* ============================================================
-   UI Helpers
-============================================================ */
-
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0";
-
+function formatInteger(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(numericValue);
+  }).format(toNumber(value));
 }
 
-function formatMoney(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0.00";
-
-  return numericValue.toLocaleString("en-US", {
+function formatMoney(value: unknown) {
+  return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  });
+  }).format(toNumber(value));
 }
 
-function formatPercent(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0%";
-
-  return `${numericValue.toLocaleString("en-US", {
-    maximumFractionDigits: 2,
-  })}%`;
+function formatPercent(value: unknown) {
+  return `${formatMoney(value)}%`;
 }
 
-function formatDate(value: string): string {
-  if (!value) return "-";
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const date = new Date(value);
+  const parsed = new Date(value);
 
-  if (Number.isNaN(date.getTime())) return "-";
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).slice(0, 10);
+  }
 
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
+  return parsed.toISOString().slice(0, 10);
 }
 
-function toDateOnly(value: string): string {
-  if (!value) return "";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return "";
-
-  return date.toISOString().slice(0, 10);
-}
-
-function isDateInsideRange(value: string, dateFrom: string, dateTo: string) {
-  if (!dateFrom && !dateTo) return true;
-
-  const dateOnly = toDateOnly(value);
-
-  if (!dateOnly) return false;
-
-  if (dateFrom && dateOnly < dateFrom) return false;
-  if (dateTo && dateOnly > dateTo) return false;
-
-  return true;
-}
-
-function escapeHtml(value: string | number) {
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -793,1008 +517,1047 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function percent(value: number, total: number) {
-  if (!total) return 0;
-  return Math.min(100, Math.max(0, Math.round((value / total) * 100)));
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
+  }
+
+  return envBase;
 }
 
-function isValidContractId(id: Contract["id"]) {
-  const value = String(id || "").trim();
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const base = getApiBaseUrl();
+  const query = params?.toString();
 
-  return value.length > 0 && value !== "-" && value !== "undefined";
+  return `${base}${path}${query ? `?${query}` : ""}`;
 }
 
-function SarAmount({ value }: { value: number | string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span>{formatMoney(value)}</span>
-      <Image
-        src={SAR_ICON_PATH}
-        alt=""
-        width={14}
-        height={14}
-        className="h-3.5 w-3.5"
-      />
-    </span>
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const found = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${name}=`));
+
+  return found ? decodeURIComponent(found.split("=").slice(1).join("=")) : "";
+}
+
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
+
+async function fetchJson<T>(
+  url: string,
+  options?: {
+    signal?: AbortSignal;
+    method?: "GET" | "POST" | "PATCH";
+    body?: unknown;
+  },
+): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
+
+  const response = await fetch(url, {
+    method: options?.method || "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal: options?.signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options?.method && options.method !== "GET"
+        ? { "Content-Type": "application/json" }
+        : {}),
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body:
+      options?.method && options.method !== "GET"
+        ? JSON.stringify(options.body || {})
+        : undefined,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
+}
+
+function extractContracts(payload: ContractsApiResponse) {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+
+  if (payload.data && typeof payload.data === "object") {
+    if (Array.isArray(payload.data.results)) return payload.data.results;
+    if (Array.isArray(payload.data.items)) return payload.data.items;
+  }
+
+  return [];
+}
+
+function extractSummary(payload: ContractsApiResponse) {
+  if (payload.summary && typeof payload.summary === "object") return payload.summary;
+
+  if (
+    payload.data &&
+    typeof payload.data === "object" &&
+    payload.data.summary &&
+    typeof payload.data.summary === "object"
+  ) {
+    return payload.data.summary;
+  }
+
+  return {};
+}
+
+function extractPagination(payload: ContractsApiResponse): PaginationState {
+  const rootPagination = asRecord(payload.pagination);
+  const dataPagination = asRecord(asRecord(payload.data).pagination);
+  const pagination = Object.keys(dataPagination).length ? dataPagination : rootPagination;
+
+  const count = toNumber(
+    pagination.count ??
+      pagination.total_count ??
+      pagination.total ??
+      payload.count,
+    0,
   );
-}
 
-function statusLabel(status: ContractStatus, locale: AppLocale) {
-  const t = dictionary(locale);
+  const page = toNumber(pagination.page ?? pagination.current_page, 1);
+  const pageSize = toNumber(pagination.page_size ?? pagination.per_page, PAGE_SIZE);
+  const totalPages = Math.max(
+    toNumber(
+      pagination.total_pages ??
+        pagination.pages ??
+        Math.ceil(count / Math.max(pageSize, 1)),
+      1,
+    ),
+    1,
+  );
 
-  const labels: Record<ContractStatus, string> = {
-    DRAFT: t.draft,
-    ACTIVE: t.active,
-    SUSPENDED: t.suspended,
-    EXPIRED: t.expired,
-    TERMINATED: t.terminated,
-    UNKNOWN: t.unknown,
+  return {
+    count,
+    page,
+    page_size: pageSize,
+    total_pages: totalPages,
+    has_next: toBoolean(pagination.has_next) || page < totalPages,
+    has_previous: toBoolean(pagination.has_previous) || page > 1,
   };
-
-  return labels[status];
 }
 
-function pricingLabel(model: PricingModel, locale: AppLocale) {
-  const t = dictionary(locale);
+function normalizeContractProduct(value: unknown): ContractProduct {
+  const item = asRecord(value);
+  const product = asRecord(item.product);
 
-  const labels: Record<PricingModel, string> = {
-    DISCOUNT: t.discount,
-    FIXED_PRICE: t.fixedPrice,
-    COMMISSION: t.commission,
-    MIXED: t.mixed,
-    UNKNOWN: t.unknown,
+  return {
+    id: toNumber(item.id),
+    product_id:
+      item.product_id === null || item.product_id === undefined
+        ? toNumber(product.id) || null
+        : toNumber(item.product_id),
+    product_name: normalizeText(
+      item.product_name ||
+        item.product_title ||
+        product.name ||
+        product.title ||
+        product.name_ar ||
+        product.name_en,
+    ),
+    product_type: normalizeText(
+      item.product_type || product.product_type || product.type,
+    ),
+    is_active: toBoolean(item.is_active),
+    is_featured: toBoolean(item.is_featured),
+    show_on_landing: toBoolean(item.show_on_landing),
+    show_on_mobile: toBoolean(item.show_on_mobile),
+    show_on_offers: toBoolean(item.show_on_offers),
+    price_before_discount: toNumber(item.price_before_discount),
+    price_after_discount: toNumber(item.price_after_discount),
+    discount_percentage: toNumber(item.discount_percentage),
+    system_commission_percentage: toNumber(item.system_commission_percentage),
+    offer_title: normalizeText(item.offer_title || item.title),
+    offer_badge: normalizeText(item.offer_badge || item.badge),
   };
-
-  return labels[model];
 }
 
-function statusBadge(status: ContractStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
+function normalizeContract(value: unknown): ContractRecord {
+  const item = asRecord(value);
+  const provider = asRecord(item.provider);
 
-  if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
+  const contractProducts = asArray(
+    item.contract_products ||
+      item.products ||
+      item.items ||
+      item.offers,
+  ).map(normalizeContractProduct);
+
+  const providerName = normalizeText(
+    item.provider_name ||
+      item.provider_display_name ||
+      provider.name_ar ||
+      provider.name ||
+      provider.name_en,
+  );
+
+  const maxDiscount =
+    toNumber(item.max_discount_percentage) ||
+    toNumber(item.highest_discount_percentage) ||
+    contractProducts.reduce(
+      (max, product) => Math.max(max, product.discount_percentage),
+      0,
     );
+
+  const maxCommission =
+    toNumber(item.max_system_commission_percentage) ||
+    contractProducts.reduce(
+      (max, product) => Math.max(max, product.system_commission_percentage),
+      0,
+    );
+
+  return {
+    id: toNumber(item.id),
+    contract_number: normalizeText(
+      item.contract_number || item.number || item.code || item.reference,
+      `CON-${normalizeText(item.id)}`,
+    ),
+    title: normalizeText(item.title || item.name || item.contract_title),
+    code: normalizeText(item.code),
+    provider_id:
+      item.provider_id === null || item.provider_id === undefined
+        ? toNumber(provider.id) || null
+        : toNumber(item.provider_id),
+    provider_name: providerName,
+    provider_name_ar: normalizeText(item.provider_name_ar || provider.name_ar),
+    provider_name_en: normalizeText(item.provider_name_en || provider.name_en),
+    status: normalizeText(item.status).toUpperCase(),
+    pricing_model: normalizeText(item.pricing_model).toUpperCase(),
+    start_date: normalizeText(item.start_date) || null,
+    end_date: normalizeText(item.end_date) || null,
+    notes: normalizeText(item.notes),
+    internal_notes: normalizeText(item.internal_notes),
+    total_contract_products: toNumber(
+      item.total_contract_products,
+      contractProducts.length,
+    ),
+    active_contract_products: toNumber(
+      item.active_contract_products,
+      contractProducts.filter((product) => product.is_active).length,
+    ),
+    featured_contract_offers: toNumber(
+      item.featured_contract_offers,
+      contractProducts.filter((product) => product.is_featured).length,
+    ),
+    landing_contract_offers: toNumber(
+      item.landing_contract_offers,
+      contractProducts.filter((product) => product.show_on_landing).length,
+    ),
+    mobile_contract_offers: toNumber(
+      item.mobile_contract_offers,
+      contractProducts.filter((product) => product.show_on_mobile).length,
+    ),
+    offers_page_contract_offers: toNumber(
+      item.offers_page_contract_offers,
+      contractProducts.filter((product) => product.show_on_offers).length,
+    ),
+    max_discount_percentage: maxDiscount,
+    max_system_commission_percentage: maxCommission,
+    created_at: normalizeText(item.created_at) || null,
+    updated_at: normalizeText(item.updated_at) || null,
+    contract_products: contractProducts,
+  };
+}
+
+function normalizeSummary(value: unknown): ContractsSummary {
+  const item = asRecord(value);
+
+  return {
+    total_contracts: toNumber(item.total_contracts),
+    active_contracts: toNumber(item.active_contracts),
+    draft_contracts: toNumber(item.draft_contracts),
+    suspended_contracts: toNumber(item.suspended_contracts),
+    expired_contracts: toNumber(item.expired_contracts),
+    terminated_contracts: toNumber(item.terminated_contracts),
+    contracts_with_products: toNumber(item.contracts_with_products),
+    providers_with_contracts: toNumber(item.providers_with_contracts),
+    total_contract_products: toNumber(item.total_contract_products),
+    active_contract_products: toNumber(item.active_contract_products),
+    featured_contract_offers: toNumber(item.featured_contract_offers),
+    landing_contract_offers: toNumber(item.landing_contract_offers),
+    mobile_contract_offers: toNumber(item.mobile_contract_offers),
+    offers_page_contract_offers: toNumber(item.offers_page_contract_offers),
+    distinct_products_in_contracts: toNumber(item.distinct_products_in_contracts),
+  };
+}
+
+function getStatusLabel(status: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(status).toUpperCase();
+
+  if (normalized === "DRAFT") return t.draft;
+  if (normalized === "ACTIVE") return t.active;
+  if (normalized === "SUSPENDED") return t.suspended;
+  if (normalized === "EXPIRED") return t.expired;
+  if (normalized === "TERMINATED") return t.terminated;
+
+  return normalized || t.unknown;
+}
+
+function getStatusClass(status: string) {
+  const normalized = normalizeText(status).toUpperCase();
+
+  if (normalized === "ACTIVE") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
-  if (status === "DRAFT") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
+  if (normalized === "SUSPENDED") {
+    return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
   }
 
-  if (status === "SUSPENDED") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
+  if (normalized === "EXPIRED") {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
   }
 
-  if (status === "EXPIRED" || status === "TERMINATED") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
+  if (normalized === "TERMINATED") {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
   }
 
+  return "border-muted bg-muted/40 text-muted-foreground hover:bg-muted/40";
+}
+
+function getPricingLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(value).toUpperCase();
+
+  if (normalized === "FIXED") return t.fixed;
+  if (normalized === "COMMISSION") return t.commissionModel;
+  if (normalized === "PERCENTAGE") return t.percentage;
+  if (normalized === "DISCOUNT") return t.discountModel;
+  if (normalized === "MIXED") return t.mixed;
+  if (normalized === "OTHER") return t.other;
+
+  return normalized || t.unknown;
+}
+
+function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
   return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn(
+        "max-w-full rounded-full px-2.5 py-1 text-xs font-medium",
+        getStatusClass(status),
+      )}
+    >
+      <span className="truncate">{getStatusLabel(status, locale)}</span>
     </Badge>
   );
 }
 
-/* ============================================================
-   Skeleton
-============================================================ */
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function SummaryCardsSkeleton() {
+function MoneyValue({ value }: { value: unknown }) {
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-2">
-                <SkeletonLine className="h-7 w-20" />
-                <SkeletonLine className="h-4 w-32" />
-              </div>
-              <SkeletonLine className="h-10 w-10 rounded-xl" />
-            </div>
-            <div className="mt-4 flex items-center gap-2">
-              <SkeletonLine className="h-3 w-8" />
-              <SkeletonLine className="h-2 flex-1" />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <span className="inline-flex items-center gap-1 whitespace-nowrap font-medium tabular-nums text-foreground">
+      <span>{formatMoney(value)}</span>
+      <img src={SAR_ICON} alt="" className="h-3.5 w-3.5 shrink-0 object-contain" />
+    </span>
   );
 }
 
-function StatusCardsSkeleton() {
-  return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <div
-          key={index}
-          className="space-y-3 rounded-xl border bg-background/70 p-3"
-        >
-          <SkeletonLine className="h-7 w-14" />
-          <SkeletonLine className="h-4 w-20" />
-          <SkeletonLine className="h-2 w-full" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
-  return (
-    <>
-      {Array.from({ length: 6 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 0
-                    ? "h-9 w-56 rounded-lg"
-                    : "h-4 w-24 rounded-lg"
-                }
-              />
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </>
-  );
-}
-
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel(options: ExcelSheetOptions) {
-  const dir = options.locale === "ar" ? "rtl" : "ltr";
-  const align = options.locale === "ar" ? "right" : "left";
-  const colspan = Math.max(options.headers.length, 2);
-
-  const summaryHtml = options.summaryRows
-    .map(
-      ([label, value]) => `
-        <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const filterHtml = options.filterRows
-    .map(
-      ([label, value]) => `
-        <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const headerHtml = options.headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
-    .join("");
-
-  const rowsHtml = options.rows
-    .map(
-      (row) => `
-        <tr>
-          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(options.worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${options.locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-        <style>
-          body {
-            direction: ${dir};
-            font-family: Arial, sans-serif;
-          }
-          table {
-            border-collapse: collapse;
-            width: 100%;
-          }
-          th,
-          td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th {
-            background: #d8ecfb;
-            color: #000000;
-            font-weight: 700;
-          }
-          .title {
-            font-size: 20px;
-            font-weight: 700;
-            text-align: center;
-            background: #ffffff;
-          }
-          .section {
-            font-weight: 700;
-            background: #eef6ff;
-          }
-          .summary-label {
-            font-weight: 700;
-            background: #f8fafc;
-            width: 240px;
-          }
-          .summary-value {
-            font-weight: 700;
-          }
-        </style>
-      </head>
-      <body dir="${dir}">
-        <table>
-          <tr>
-            <td class="title" colspan="${colspan}">
-              ${escapeHtml(options.title)}
-            </td>
-          </tr>
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "ملخص القائمة" : "List Summary"}
-          </td></tr>
-          ${summaryHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${options.locale === "ar" ? "الفلاتر المستخدمة" : "Applied Filters"}
-          </td></tr>
-          ${filterHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr>${headerHtml}</tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = options.filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
+function KpiCard({
   title,
-  rows,
-  t,
+  value,
+  trend,
+  icon: Icon,
 }: {
-  locale: AppLocale;
   title: string;
-  rows: Contract[];
-  t: ReturnType<typeof dictionary>;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
-  const isArabic = locale === "ar";
-  const now = new Date().toLocaleString("en-US");
+  return (
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-  const tableRows = rows
-    .map(
-      (contract, index) => `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(contract.contractNumber || "-")}</td>
-          <td>${escapeHtml(contract.title || "-")}</td>
-          <td>${escapeHtml(contract.providerName || "-")}</td>
-          <td>${escapeHtml(pricingLabel(contract.pricingModel, locale))}</td>
-          <td>${escapeHtml(formatPercent(contract.discountPercentage))}</td>
-          <td>${escapeHtml(formatPercent(contract.systemCommissionPercentage))}</td>
-          <td>${escapeHtml(formatMoney(contract.contractValue))}</td>
-          <td>${escapeHtml(statusLabel(contract.status, locale))}</td>
-          <td>${escapeHtml(formatDate(contract.startDate))}</td>
-          <td>${escapeHtml(formatDate(contract.endDate))}</td>
-          <td>${escapeHtml(formatDate(contract.createdAt))}</td>
-        </tr>
-      `,
-    )
-    .join("");
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
 
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #ffffff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .print-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 16px;
-            margin-bottom: 18px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-          }
-          h1 {
-            margin: 0;
-            font-size: 22px;
-            font-weight: 800;
-          }
-          .meta {
-            margin-top: 8px;
-            color: #6b7280;
-            font-size: 12px;
-            line-height: 1.8;
-          }
-          .badge {
-            display: inline-block;
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            color: #374151;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-          }
-          th {
-            background: #f3f4f6;
-            color: #111827;
-            font-weight: 700;
-          }
-          th,
-          td {
-            border: 1px solid #e5e7eb;
-            padding: 9px 8px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          tr:nth-child(even) td {
-            background: #fafafa;
-          }
-          @page {
-            size: A4 landscape;
-            margin: 12mm;
-          }
-          @media print {
-            body { padding: 0; }
-          }
-        </style>
-      </head>
-
-      <body>
-        <div class="print-header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
           </div>
-          <div class="badge">Primey Care</div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
         </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>${escapeHtml(t.table.contract)}</th>
-              <th>${escapeHtml(isArabic ? "العنوان" : "Title")}</th>
-              <th>${escapeHtml(t.table.provider)}</th>
-              <th>${escapeHtml(t.table.pricing)}</th>
-              <th>${escapeHtml(t.table.discount)}</th>
-              <th>${escapeHtml(t.table.commission)}</th>
-              <th>${escapeHtml(t.table.value)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-              <th>${escapeHtml(isArabic ? "البداية" : "Start")}</th>
-              <th>${escapeHtml(isArabic ? "النهاية" : "End")}</th>
-              <th>${escapeHtml(t.table.createdAt)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="12" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+      </CardHeader>
+    </Card>
+  );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function HeaderSortButton({
+  children,
+  active,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex w-full items-center justify-start gap-1 truncate text-xs font-semibold transition hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      <span className="truncate">{children}</span>
+      <ArrowUpDown className="h-3.5 w-3.5 shrink-0" />
+    </button>
+  );
+}
+
+function TableHeaderCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <TableHead
+      className={cn(
+        "h-11 whitespace-nowrap px-4 text-right align-middle text-xs font-semibold text-muted-foreground",
+        className,
+      )}
+    >
+      {children}
+    </TableHead>
+  );
+}
+
+function TableBodyCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <TableCell
+      className={cn(
+        "h-[62px] overflow-hidden px-4 text-right align-middle",
+        className,
+      )}
+    >
+      {children}
+    </TableCell>
+  );
+}
 
 export default function SystemContractsPage() {
-  const auth = useAuth() as unknown;
-
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [contracts, setContracts] = useState<Contract[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [pricingFilter, setPricingFilter] = useState<PricingFilter>("all");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
-
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
-
-  const canViewContracts = hasSafePermission(
-    auth,
-    ["contracts.view", "contracts.list"],
-    "view",
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [contracts, setContracts] = React.useState<ContractRecord[]>([]);
+  const [summary, setSummary] = React.useState<ContractsSummary>(() =>
+    normalizeSummary({}),
   );
+  const [pagination, setPagination] = React.useState<PaginationState>({
+    count: 0,
+    page: 1,
+    page_size: PAGE_SIZE,
+    total_pages: 1,
+    has_next: false,
+    has_previous: false,
+  });
 
-  const canCreateContracts = hasSafePermission(
-    auth,
-    ["contracts.create"],
-    "action",
-  );
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [actionLoadingId, setActionLoadingId] = React.useState<number | null>(null);
+  const [error, setError] = React.useState("");
 
-  const canExportContracts = hasSafePermission(
-    auth,
-    ["contracts.export", "reports.export"],
-    "action",
-  );
+  const [searchInput, setSearchInput] = React.useState("");
+  const [search, setSearch] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState<ContractStatus>("all");
+  const [pricingFilter, setPricingFilter] = React.useState<PricingModel>("all");
+  const [sortKey, setSortKey] = React.useState<SortKey>("newest");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
+  const [selectedIds, setSelectedIds] = React.useState<Array<number>>([]);
+  const [visibleColumns, setVisibleColumns] =
+    React.useState<Record<ColumnKey, boolean>>(DEFAULT_VISIBLE_COLUMNS);
+  const [page, setPage] = React.useState(1);
 
-  const canPrintContracts = hasSafePermission(
-    auth,
-    ["contracts.print", "reports.print"],
-    "action",
-  );
+  const didLoadRef = React.useRef(false);
 
-  const canViewContractDetails = hasSafePermission(
-    auth,
-    ["contracts.view", "contracts.detail"],
-    "view",
-  );
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
 
-  const stats = useMemo(() => {
-    const total = contracts.length;
-    const active = contracts.filter((item) => item.status === "ACTIVE").length;
-    const draft = contracts.filter((item) => item.status === "DRAFT").length;
-    const suspended = contracts.filter(
-      (item) => item.status === "SUSPENDED",
-    ).length;
-    const expired = contracts.filter((item) => item.status === "EXPIRED").length;
-    const terminated = contracts.filter(
-      (item) => item.status === "TERMINATED",
-    ).length;
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-    const totalValue = contracts.reduce(
-      (sum, item) => sum + item.contractValue,
-      0,
-    );
-
-    const avgCommission =
-      total > 0
-        ? contracts.reduce(
-            (sum, item) => sum + item.systemCommissionPercentage,
-            0,
-          ) / total
-        : 0;
-
-    return {
-      total,
-      active,
-      draft,
-      suspended,
-      expired,
-      terminated,
-      totalValue,
-      avgCommission,
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
     };
-  }, [contracts]);
 
-  const filteredContracts = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
+    applyLocale();
 
-    return contracts.filter((contract) => {
-      const matchesStatus =
-        statusFilter === "all" ? true : contract.status === statusFilter;
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-      const matchesPricing =
-        pricingFilter === "all"
-          ? true
-          : contract.pricingModel === pricingFilter;
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
 
-      const matchesDate = isDateInsideRange(
-        contract.createdAt,
-        dateFrom,
-        dateTo,
-      );
+  React.useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 450);
 
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            contract.contractNumber,
-            contract.title,
-            contract.providerName,
-            contract.status,
-            contract.pricingModel,
-            statusLabel(contract.status, locale),
-            pricingLabel(contract.pricingModel, locale),
-            formatDate(contract.createdAt),
-            toDateOnly(contract.createdAt),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
+    return () => window.clearTimeout(timeout);
+  }, [searchInput]);
 
-      return matchesStatus && matchesPricing && matchesDate && matchesQuery;
-    });
-  }, [contracts, dateFrom, dateTo, locale, pricingFilter, query, statusFilter]);
+  const loadContracts = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
 
-  const latestContracts = useMemo(
-    () =>
-      [...filteredContracts]
-        .sort((a, b) => {
-          const first = new Date(a.createdAt || a.updatedAt || 0).getTime();
-          const second = new Date(b.createdAt || b.updatedAt || 0).getTime();
+      try {
+        if (!silent) setLoading(true);
 
-          return second - first;
-        })
-        .slice(0, 8),
-    [filteredContracts],
+        setRefreshing(true);
+        setError("");
+
+        const params = new URLSearchParams({
+          page: String(page),
+          page_size: String(PAGE_SIZE),
+        });
+
+        if (search) {
+          params.set("search", search);
+          params.set("q", search);
+        }
+
+        if (statusFilter !== "all") params.set("status", statusFilter);
+        if (pricingFilter !== "all") params.set("pricing_model", pricingFilter);
+
+        if (dateFrom) {
+          params.set("date_from", dateFrom);
+          params.set("created_from", dateFrom);
+          params.set("start_from", dateFrom);
+        }
+
+        if (dateTo) {
+          params.set("date_to", dateTo);
+          params.set("created_to", dateTo);
+          params.set("end_to", dateTo);
+        }
+
+        if (sortKey === "oldest") {
+          params.set("ordering", "created_at");
+          params.set("sort", "oldest");
+        } else if (sortKey === "provider") {
+          params.set("ordering", "provider__name");
+          params.set("sort", "provider");
+        } else if (sortKey === "contract_number") {
+          params.set("ordering", "contract_number");
+          params.set("sort", "contract_number");
+        } else if (sortKey === "start_date") {
+          params.set("ordering", "start_date");
+          params.set("sort", "start_date");
+        } else if (sortKey === "end_date") {
+          params.set("ordering", "end_date");
+          params.set("sort", "end_date");
+        } else if (sortKey === "status") {
+          params.set("ordering", "status");
+          params.set("sort", "status");
+        } else {
+          params.set("ordering", "-created_at");
+          params.set("sort", sortKey);
+        }
+
+        const payload = await fetchJson<ContractsApiResponse>(
+          makeApiUrl("/api/contracts/", params),
+          { signal: controller.signal },
+        );
+
+        const nextContracts = extractContracts(payload).map(normalizeContract);
+        const nextSummary = normalizeSummary(extractSummary(payload));
+        const nextPagination = extractPagination(payload);
+
+        setContracts(nextContracts);
+        setSummary(nextSummary);
+        setPagination(nextPagination);
+        setSelectedIds([]);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setContracts([]);
+        setSummary(normalizeSummary({}));
+        setPagination({
+          count: 0,
+          page,
+          page_size: PAGE_SIZE,
+          total_pages: 1,
+          has_next: false,
+          has_previous: false,
+        });
+        setSelectedIds([]);
+        setError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+
+      return () => controller.abort();
+    },
+    [
+      dateFrom,
+      dateTo,
+      page,
+      pricingFilter,
+      search,
+      sortKey,
+      statusFilter,
+      t.errorDesc,
+    ],
   );
 
-  const hasSearchOrFilter =
-    query.trim().length > 0 ||
+  React.useEffect(() => {
+    if (!didLoadRef.current) {
+      didLoadRef.current = true;
+      void loadContracts();
+      return;
+    }
+
+    void loadContracts({ silent: true });
+  }, [loadContracts]);
+
+  const visibleColumnCount = Object.values(visibleColumns).filter(Boolean).length || 1;
+
+  const hasActiveFilters =
+    Boolean(search.trim()) ||
     statusFilter !== "all" ||
     pricingFilter !== "all" ||
+    sortKey !== "newest" ||
     Boolean(dateFrom) ||
     Boolean(dateTo);
 
-  const statusFilters = useMemo(
-    () => [
-      {
-        value: "all" as StatusFilter,
-        label: t.allStatuses,
-        count: contracts.length,
-      },
-      {
-        value: "ACTIVE" as StatusFilter,
-        label: t.active,
-        count: stats.active,
-      },
-      {
-        value: "DRAFT" as StatusFilter,
-        label: t.draft,
-        count: stats.draft,
-      },
-      {
-        value: "SUSPENDED" as StatusFilter,
-        label: t.suspended,
-        count: stats.suspended,
-      },
-      {
-        value: "EXPIRED" as StatusFilter,
-        label: t.expired,
-        count: stats.expired,
-      },
-      {
-        value: "TERMINATED" as StatusFilter,
-        label: t.terminated,
-        count: stats.terminated,
-      },
-    ],
-    [contracts.length, stats, t],
-  );
+  const allPageSelected =
+    contracts.length > 0 && contracts.every((contract) => selectedIds.includes(contract.id));
 
-  const pricingFilters = useMemo(
-    () => [
-      {
-        value: "all" as PricingFilter,
-        label: t.allPricing,
-        count: contracts.length,
-      },
-      ...(["DISCOUNT", "FIXED_PRICE", "COMMISSION", "MIXED"] as PricingModel[]).map(
-        (model) => ({
-          value: model as PricingFilter,
-          label: pricingLabel(model, locale),
-          count: contracts.filter((item) => item.pricingModel === model).length,
-        }),
-      ),
-    ],
-    [contracts, locale, t.allPricing],
-  );
-
-  const summaryCards = useMemo(
-    () => [
-      {
-        title: t.totalContracts,
-        value: stats.total,
-        icon: FileText,
-        helper: t.activeContracts,
-        helperValue: formatNumber(stats.active),
-        percent: stats.total > 0 ? 100 : 0,
-        isMoney: false,
-        isPercent: false,
-      },
-      {
-        title: t.activeContracts,
-        value: stats.active,
-        icon: BadgeCheck,
-        helper: t.totalContracts,
-        helperValue: `${percent(stats.active, stats.total)}%`,
-        percent: percent(stats.active, stats.total),
-        isMoney: false,
-        isPercent: false,
-      },
-      {
-        title: t.totalValue,
-        value: stats.totalValue,
-        icon: Wallet,
-        helper: t.totalContracts,
-        helperValue: formatNumber(stats.total),
-        percent: stats.totalValue > 0 ? 100 : 0,
-        isMoney: true,
-        isPercent: false,
-      },
-      {
-        title: t.avgCommission,
-        value: stats.avgCommission,
-        icon: Percent,
-        helper: t.activeContracts,
-        helperValue: formatNumber(stats.active),
-        percent: Math.min(Math.round(stats.avgCommission), 100),
-        isMoney: false,
-        isPercent: true,
-      },
-    ],
-    [stats, t],
-  );
-
-  const statusCards = useMemo(
-    () => [
-      {
-        title: t.active,
-        value: stats.active,
-        icon: BadgeCheck,
-        percent: percent(stats.active, stats.total),
-        filter: "ACTIVE" as StatusFilter,
-      },
-      {
-        title: t.draft,
-        value: stats.draft,
-        icon: Layers3,
-        percent: percent(stats.draft, stats.total),
-        filter: "DRAFT" as StatusFilter,
-      },
-      {
-        title: t.suspended,
-        value: stats.suspended,
-        icon: ShieldCheck,
-        percent: percent(stats.suspended, stats.total),
-        filter: "SUSPENDED" as StatusFilter,
-      },
-      {
-        title: t.expired,
-        value: stats.expired,
-        icon: CalendarClock,
-        percent: percent(stats.expired, stats.total),
-        filter: "EXPIRED" as StatusFilter,
-      },
-      {
-        title: t.terminated,
-        value: stats.terminated,
-        icon: XCircle,
-        percent: percent(stats.terminated, stats.total),
-        filter: "TERMINATED" as StatusFilter,
-      },
-    ],
-    [stats, t],
-  );
-
-  const moduleActions = useMemo(
-    () =>
-      [
-        canViewContracts
-          ? {
-              title: t.actionListTitle,
-              description: t.actionListDesc,
-              href: "/system/contracts/list",
-              icon: ListChecks,
-              badge: `${formatNumber(stats.total)}`,
-              cta: t.manage,
-            }
-          : null,
-        canCreateContracts
-          ? {
-              title: t.actionCreateTitle,
-              description: t.actionCreateDesc,
-              href: "/system/contracts/create",
-              icon: Plus,
-              badge: isArabic ? "جديد" : "New",
-              cta: t.open,
-            }
-          : null,
-      ].filter(Boolean) as Array<{
-        title: string;
-        description: string;
-        href: string;
-        icon: LucideIcon;
-        badge: string;
-        cta: string;
-      }>,
-    [canCreateContracts, canViewContracts, isArabic, stats.total, t],
-  );
-
-  const loadContracts = useCallback(
-    async (showToast = false) => {
-      if (!canViewContracts) {
-        setIsLoading(false);
-        setContracts([]);
-        return;
-      }
-
-      try {
-        setIsLoading(true);
-        setErrorMessage("");
-
-        const response = await fetch(apiUrl("/api/contracts/?page_size=100"), {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-          },
-        });
-
-        const payload = (await response.json().catch(() => null)) as
-          | ContractsApiResponse
-          | null;
-
-        if (!response.ok || payload?.ok === false) {
-          throw new Error(
-            payload?.message ||
-              payload?.detail ||
-              payload?.error ||
-              `HTTP ${response.status}`,
-          );
-        }
-
-        setContracts(extractContracts(payload).map(normalizeContract));
-
-        if (showToast) {
-          toast.success(t.refreshSuccess);
-        }
-      } catch (error) {
-        console.error("Failed to load contracts:", error);
-        setContracts([]);
-        setErrorMessage(t.apiError);
-        toast.error(t.apiError);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [canViewContracts, t.apiError, t.refreshSuccess],
-  );
-
-  function clearFilters() {
-    setQuery("");
+  function resetFilters() {
+    setSearchInput("");
+    setSearch("");
     setStatusFilter("all");
     setPricingFilter("all");
+    setSortKey("newest");
     setDateFrom("");
     setDateTo("");
+    setSelectedIds([]);
+    setPage(1);
   }
 
-  function exportContracts() {
-    if (!canExportContracts) return;
+  function toggleSelectAllPage(checked: boolean) {
+    if (!checked) {
+      setSelectedIds([]);
+      return;
+    }
 
-    if (filteredContracts.length === 0) {
+    setSelectedIds(contracts.map((contract) => contract.id));
+  }
+
+  function toggleSelectContract(id: number, checked: boolean) {
+    setSelectedIds((current) => {
+      if (checked) return Array.from(new Set([...current, id]));
+      return current.filter((item) => item !== id);
+    });
+  }
+
+  async function copyValue(value: string) {
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t.copied);
+    } catch {
+      toast.error(t.actionFailed);
+    }
+  }
+
+  async function runStatusAction(
+    contract: ContractRecord,
+    action: "activate" | "suspend" | "terminate" | "expire",
+  ) {
+    const confirmations = {
+      activate: t.confirmActivate,
+      suspend: t.confirmSuspend,
+      terminate: t.confirmTerminate,
+      expire: t.confirmExpire,
+    };
+
+    if (!window.confirm(confirmations[action])) return;
+
+    setActionLoadingId(contract.id);
+
+    try {
+      await fetchJson<unknown>(
+        makeApiUrl(`/api/contracts/${contract.id}/${action}/`),
+        {
+          method: "POST",
+          body: {},
+        },
+      );
+
+      toast.success(t.actionSuccess);
+      await loadContracts({ silent: true });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.actionFailed;
+
+      toast.error(message);
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
+
+  function buildExportRows() {
+    return contracts.map((contract) => ({
+      contract: contract.contract_number,
+      title: contract.title,
+      provider: contract.provider_name,
+      status: getStatusLabel(contract.status, locale),
+      pricing: getPricingLabel(contract.pricing_model, locale),
+      start: formatDate(contract.start_date),
+      end: formatDate(contract.end_date),
+      products: contract.total_contract_products,
+      activeProducts: contract.active_contract_products,
+      featured: contract.featured_contract_offers,
+      landing: contract.landing_contract_offers,
+      mobile: contract.mobile_contract_offers,
+      offersPage: contract.offers_page_contract_offers,
+      discount: contract.max_discount_percentage,
+      commission: contract.max_system_commission_percentage,
+      createdAt: formatDate(contract.created_at),
+    }));
+  }
+
+  function exportExcel() {
+    const rows = buildExportRows();
+
+    if (!rows.length) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    const generatedAt = new Date();
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+            .num { mso-number-format: "0"; }
+            .money { mso-number-format: "0.00"; }
+          </style>
+        </head>
+        <body>
+          <h2>${escapeHtml(t.printTitle)}</h2>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.contract)}</th>
+                <th>${escapeHtml(t.provider)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.pricing)}</th>
+                <th>${escapeHtml(t.start)}</th>
+                <th>${escapeHtml(t.end)}</th>
+                <th>${escapeHtml(t.products)}</th>
+                <th>${escapeHtml(t.featured)}</th>
+                <th>${escapeHtml(t.landing)}</th>
+                <th>${escapeHtml(t.mobile)}</th>
+                <th>${escapeHtml(t.offersPage)}</th>
+                <th>${escapeHtml(t.discount)}</th>
+                <th>${escapeHtml(t.commission)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.contract)}</td>
+                      <td>${escapeHtml(row.provider)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.pricing)}</td>
+                      <td>${escapeHtml(row.start)}</td>
+                      <td>${escapeHtml(row.end)}</td>
+                      <td class="num">${escapeHtml(row.products)}</td>
+                      <td class="num">${escapeHtml(row.featured)}</td>
+                      <td class="num">${escapeHtml(row.landing)}</td>
+                      <td class="num">${escapeHtml(row.mobile)}</td>
+                      <td class="num">${escapeHtml(row.offersPage)}</td>
+                      <td class="money">${escapeHtml(row.discount)}</td>
+                      <td class="money">${escapeHtml(row.commission)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
 
-    const statusFilterLabel =
-      statusFilters.find((item) => item.value === statusFilter)?.label || t.all;
-
-    const pricingFilterLabel =
-      pricingFilters.find((item) => item.value === pricingFilter)?.label ||
-      t.all;
-
-    downloadExcel({
-      filename: `primey-care-contracts-dashboard-${generatedAt
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "العقود" : "Contracts",
-      title: t.pageTitle,
-      locale,
-      summaryRows: [
-        [t.generatedAt, generatedAt.toLocaleString("en-US")],
-        [t.reportScope, t.currentFilteredData],
-        [
-          t.table.contract,
-          `${formatNumber(filteredContracts.length)} / ${formatNumber(
-            contracts.length,
-          )}`,
-        ],
-        [t.totalContracts, stats.total],
-        [t.activeContracts, stats.active],
-        [t.totalValue, formatMoney(stats.totalValue)],
-        [t.avgCommission, formatPercent(stats.avgCommission)],
-      ],
-      filterRows: [
-        [t.filterSearch, query || t.all],
-        [t.filterStatus, statusFilterLabel],
-        [t.filterPricing, pricingFilterLabel],
-        [t.filterDateFrom, dateFrom || t.notSelected],
-        [t.filterDateTo, dateTo || t.notSelected],
-      ],
-      headers: [
-        t.table.contract,
-        isArabic ? "العنوان" : "Title",
-        t.table.provider,
-        t.table.pricing,
-        t.table.discount,
-        t.table.commission,
-        t.table.value,
-        t.table.status,
-        isArabic ? "البداية" : "Start Date",
-        isArabic ? "النهاية" : "End Date",
-        t.table.createdAt,
-      ],
-      rows: filteredContracts.map((contract) => [
-        contract.contractNumber || "-",
-        contract.title || "-",
-        contract.providerName || "-",
-        pricingLabel(contract.pricingModel, locale),
-        formatPercent(contract.discountPercentage),
-        formatPercent(contract.systemCommissionPercentage),
-        formatMoney(contract.contractValue),
-        statusLabel(contract.status, locale),
-        formatDate(contract.startDate),
-        formatDate(contract.endDate),
-        formatDate(contract.createdAt),
-      ]),
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
     });
 
-    toast.success(t.exportSuccess);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-contracts-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
-  function printContracts() {
-    if (!canPrintContracts) return;
+  function printPage() {
+    const rows = buildExportRows();
 
-    if (filteredContracts.length === 0) {
-      toast.error(t.exportEmpty);
+    if (!rows.length) {
+      toast.error(t.printEmpty);
       return;
     }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.printError);
+      toast.error(t.actionFailed);
       return;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.printTitle,
-        rows: filteredContracts,
-        t,
-      }),
-    );
-    printWindow.document.close();
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            .num { direction: ltr; unicode-bidi: embed; white-space: nowrap; }
+            @media print {
+              body { padding: 16px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.showing)}: ${escapeHtml(rows.length)}</p>
+            </div>
+          </div>
 
-    toast.success(t.printSuccess);
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.totalContracts)}</span><strong>${escapeHtml(summary.total_contracts || pagination.count)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.activeContracts)}</span><strong>${escapeHtml(summary.active_contracts)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.products)}</span><strong>${escapeHtml(summary.total_contract_products)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.featuredOffers)}</span><strong>${escapeHtml(summary.featured_contract_offers)}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.contract)}</th>
+                <th>${escapeHtml(t.provider)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.pricing)}</th>
+                <th>${escapeHtml(t.dates)}</th>
+                <th>${escapeHtml(t.products)}</th>
+                <th>${escapeHtml(t.visibility)}</th>
+                <th>${escapeHtml(t.discount)}</th>
+                <th>${escapeHtml(t.commission)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.contract)}</td>
+                      <td>${escapeHtml(row.provider)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.pricing)}</td>
+                      <td>${escapeHtml(row.start)} - ${escapeHtml(row.end)}</td>
+                      <td class="num">${escapeHtml(row.products)}</td>
+                      <td class="num">${escapeHtml(row.landing)} / ${escapeHtml(row.mobile)} / ${escapeHtml(row.offersPage)}</td>
+                      <td class="num">${escapeHtml(formatPercent(row.discount))}</td>
+                      <td class="num">${escapeHtml(formatPercent(row.commission))}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadContracts(false);
-  }, [authResolving, loadContracts]);
-
-  if (!authResolving && !canViewContracts) {
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
+      <div className="w-full space-y-4" dir={dir}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-52" />
+            <Skeleton className="h-4 w-96" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-28" />
+          </div>
+        </div>
 
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Card key={index} className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="min-h-[112px] px-6 py-5">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-8 w-32" />
+                <Skeleton className="h-5 w-20" />
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
+
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-80 w-full" />
           </CardContent>
         </Card>
       </div>
@@ -1802,586 +1565,761 @@ export default function SystemContractsPage() {
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.pageTitle}
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+            {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.pageSubtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadContracts(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadContracts({ silent: true })}
+            disabled={refreshing}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canExportContracts ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={exportContracts}
-              disabled={
-                isLoading ||
-                filteredContracts.length === 0 ||
-                Boolean(errorMessage)
-              }
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
 
-          {canPrintContracts ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printContracts}
-              disabled={
-                isLoading ||
-                filteredContracts.length === 0 ||
-                Boolean(errorMessage)
-              }
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
 
-          {canViewContracts ? (
-            <Link href="/system/contracts/list">
-              <Button
-                variant="outline"
-                className="h-10 w-full rounded-xl sm:w-auto"
-              >
-                <ListChecks className="h-4 w-4" />
-                <span>{t.contractsList}</span>
-              </Button>
-            </Link>
-          ) : null}
-
-          {canCreateContracts ? (
+          <Button asChild className="h-9 rounded-lg bg-black px-4 text-white hover:bg-black/90">
             <Link href="/system/contracts/create">
-              <Button className="h-10 w-full rounded-xl sm:w-auto">
-                <Plus className="h-4 w-4" />
-                <span>{t.createContract}</span>
-              </Button>
+              <Plus className="h-4 w-4" />
+              {t.create}
             </Link>
-          ) : null}
+          </Button>
         </div>
       </div>
 
-      {/* Error State */}
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.totalContracts}
+          value={formatInteger(summary.total_contracts || pagination.count)}
+          trend={`${t.activeContracts}: ${formatInteger(summary.active_contracts)}`}
+          icon={ShieldCheck}
+        />
 
+        <KpiCard
+          title={t.products}
+          value={formatInteger(summary.total_contract_products)}
+          trend={`${t.active}: ${formatInteger(summary.active_contract_products)}`}
+          icon={Layers3}
+        />
+
+        <KpiCard
+          title={t.featuredOffers}
+          value={formatInteger(summary.featured_contract_offers)}
+          trend={`${t.landing}: ${formatInteger(summary.landing_contract_offers)}`}
+          icon={Sparkles}
+        />
+
+        <KpiCard
+          title={t.providers}
+          value={formatInteger(summary.providers_with_contracts)}
+          trend={`${t.offersPage}: ${formatInteger(summary.offers_page_contract_offers)}`}
+          icon={BadgePercent}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-destructive">
-                  {errorMessage}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.apiErrorHint}
-                </p>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadContracts(true)}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadContracts()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {!errorMessage ? (
-        <>
-          {/* Summary */}
-          {isLoading ? (
-            <SummaryCardsSkeleton />
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {summaryCards.map((item) => {
-                const Icon = item.icon;
-
-                return (
-                  <Card
-                    key={item.title}
-                    className="rounded-2xl border bg-card shadow-sm"
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-2xl font-bold">
-                            {item.isMoney ? (
-                              <SarAmount value={item.value} />
-                            ) : item.isPercent ? (
-                              formatPercent(item.value)
-                            ) : (
-                              formatNumber(item.value)
-                            )}
-                          </p>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {item.title}
-                          </p>
-                        </div>
-
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                          <Icon className="h-5 w-5" />
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-2">
-                        <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                          {formatNumber(item.percent)}%
-                        </span>
-                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-primary transition-all"
-                            style={{ width: `${item.percent}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        {item.helper}: {item.helperValue}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-col gap-3">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
             </div>
-          )}
 
-          {/* Status */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
-                {t.statusTitle}
-              </CardTitle>
-              <CardDescription>{t.statusDesc}</CardDescription>
-            </CardHeader>
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    setStatusFilter(value as ContractStatus);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[145px]">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <SelectValue placeholder={t.status} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allStatuses}</SelectItem>
+                    <SelectItem value="DRAFT">{t.draft}</SelectItem>
+                    <SelectItem value="ACTIVE">{t.active}</SelectItem>
+                    <SelectItem value="SUSPENDED">{t.suspended}</SelectItem>
+                    <SelectItem value="EXPIRED">{t.expired}</SelectItem>
+                    <SelectItem value="TERMINATED">{t.terminated}</SelectItem>
+                  </SelectContent>
+                </Select>
 
-            <CardContent>
-              {isLoading ? (
-                <StatusCardsSkeleton />
-              ) : (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                  {statusCards.map((card) => {
-                    const Icon = card.icon;
+                <Select
+                  value={pricingFilter}
+                  onValueChange={(value) => {
+                    setPricingFilter(value as PricingModel);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[150px]">
+                    <BadgePercent className="h-4 w-4" />
+                    <SelectValue placeholder={t.pricing} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allPricing}</SelectItem>
+                    <SelectItem value="FIXED">{t.fixed}</SelectItem>
+                    <SelectItem value="COMMISSION">{t.commissionModel}</SelectItem>
+                    <SelectItem value="PERCENTAGE">{t.percentage}</SelectItem>
+                    <SelectItem value="DISCOUNT">{t.discountModel}</SelectItem>
+                    <SelectItem value="MIXED">{t.mixed}</SelectItem>
+                    <SelectItem value="OTHER">{t.other}</SelectItem>
+                  </SelectContent>
+                </Select>
 
-                    return (
-                      <button
-                        key={card.title}
-                        type="button"
-                        className="space-y-2 rounded-xl border bg-background/70 p-3 text-start transition hover:bg-muted/40"
-                        onClick={() => setStatusFilter(card.filter)}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-2xl font-bold">
-                            {formatNumber(card.value)}
-                          </p>
-                          <Icon className="h-4 w-4 text-muted-foreground" />
-                        </div>
-
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm text-muted-foreground">
-                              {card.title}
-                            </p>
-                            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                              {formatNumber(card.percent)}%
-                            </span>
-                          </div>
-
-                          <div className="h-2 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full bg-primary transition-all"
-                              style={{ width: `${card.percent}%` }}
-                            />
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <span className="text-xs text-muted-foreground">{t.from}</span>
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(event) => {
+                      setDateFrom(event.target.value);
+                      setPage(1);
+                    }}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
                 </div>
-              )}
-            </CardContent>
-          </Card>
 
-          {/* Contracts Table */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="flex flex-col gap-3 pb-3 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <CardTitle className="text-base font-bold">
-                  {t.latestContracts}
-                </CardTitle>
-                <CardDescription className="mt-1 text-sm leading-6">
-                  {t.latestContractsDesc}
-                </CardDescription>
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <span className="text-xs text-muted-foreground">{t.to}</span>
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(event) => {
+                      setDateTo(event.target.value);
+                      setPage(1);
+                    }}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
               </div>
 
-              {canViewContracts ? (
-                <Link href="/system/contracts/list">
-                  <Button variant="outline" className="h-9 rounded-xl">
-                    <ListChecks className="h-4 w-4" />
-                    <span>{t.viewFullList}</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background">
+                      <ColumnsIcon className="h-4 w-4" />
+                      {t.columns}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {(
+                      [
+                        ["select", t.selected],
+                        ["contract", t.contract],
+                        ["provider", t.provider],
+                        ["status", t.status],
+                        ["pricing", t.pricing],
+                        ["dates", t.dates],
+                        ["products", t.productsCol],
+                        ["offers", t.offersCol],
+                        ["visibility", t.visibility],
+                        ["discount", t.discount],
+                        ["commission", t.commission],
+                        ["createdAt", t.createdAt],
+                        ["actions", t.actions],
+                      ] as [ColumnKey, string][]
+                    ).map(([key, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={visibleColumns[key]}
+                        onCheckedChange={(checked) =>
+                          setVisibleColumns((current) => ({
+                            ...current,
+                            [key]: Boolean(checked),
+                          }))
+                        }
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg bg-background"
+                  onClick={resetFilters}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t.reset}
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background">
+                      <ArrowUpDown className="h-4 w-4" />
+                      {t.sort}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                    {(
+                      [
+                        ["newest", t.newest],
+                        ["oldest", t.oldest],
+                        ["contract_number", t.contractNumberSort],
+                        ["provider", t.providerSort],
+                        ["status", t.statusSort],
+                        ["start_date", t.startDateSort],
+                        ["end_date", t.endDateSort],
+                        ["most_products", t.mostProducts],
+                        ["most_offers", t.mostOffers],
+                        ["highest_discount", t.highestDiscount],
+                      ] as [SortKey, string][]
+                    ).map(([key, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={sortKey === key}
+                        onCheckedChange={() => {
+                          setSortKey(key);
+                          setPage(1);
+                        }}
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {selectedIds.length > 0 ? (
+                  <Button
+                    variant="outline"
+                    className="h-9 rounded-lg bg-background"
+                    onClick={() => setSelectedIds([])}
+                  >
+                    <XCircle className="h-4 w-4" />
+                    {t.clearSelection} ({formatInteger(selectedIds.length)})
                   </Button>
-                </Link>
-              ) : null}
-            </CardHeader>
+                ) : null}
 
-            <CardContent className="space-y-4">
-              {/* Search Row */}
-              <div className="relative w-full">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                />
-              </div>
-
-              {/* Filters Row */}
-              <div className="grid gap-3">
-                <div className="flex flex-wrap gap-2">
-                  {statusFilters.map((item) => {
-                    const isSelected = statusFilter === item.value;
-
-                    return (
-                      <Button
-                        key={item.value}
-                        type="button"
-                        variant={isSelected ? "default" : "outline"}
-                        className="h-10 rounded-xl"
-                        onClick={() => setStatusFilter(item.value)}
-                      >
-                        <span>{item.label}</span>
-                        <Badge
-                          variant={isSelected ? "secondary" : "outline"}
-                          className="ms-1 rounded-full"
-                        >
-                          {formatNumber(item.count)}
-                        </Badge>
-                      </Button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {pricingFilters.map((item) => {
-                    const isSelected = pricingFilter === item.value;
-
-                    return (
-                      <Button
-                        key={item.value}
-                        type="button"
-                        variant={isSelected ? "default" : "outline"}
-                        className="h-10 rounded-xl"
-                        onClick={() => setPricingFilter(item.value)}
-                      >
-                        <span>{item.label}</span>
-                        <Badge
-                          variant={isSelected ? "secondary" : "outline"}
-                          className="ms-1 rounded-full"
-                        >
-                          {formatNumber(item.count)}
-                        </Badge>
-                      </Button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-                  <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:max-w-xl">
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-2 text-sm font-medium">
-                        <CalendarDays className="h-4 w-4 text-muted-foreground" />
-                        <span>{t.fromDate}</span>
-                      </label>
-                      <Input
-                        type="date"
-                        value={dateFrom}
-                        onChange={(event) => setDateFrom(event.target.value)}
-                        className="h-10 rounded-xl"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-2 text-sm font-medium">
-                        <CalendarDays className="h-4 w-4 text-muted-foreground" />
-                        <span>{t.toDate}</span>
-                      </label>
-                      <Input
-                        type="date"
-                        value={dateTo}
-                        onChange={(event) => setDateTo(event.target.value)}
-                        className="h-10 rounded-xl"
-                      />
-                    </div>
-                  </div>
-
-                  {hasSearchOrFilter ? (
-                    <Button
-                      variant="outline"
-                      className="h-10 rounded-xl"
-                      onClick={clearFilters}
-                    >
-                      {t.clearFilters}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="overflow-hidden rounded-xl border">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t.table.contract}</TableHead>
-                        <TableHead>{t.table.provider}</TableHead>
-                        <TableHead>{t.table.pricing}</TableHead>
-                        <TableHead>{t.table.discount}</TableHead>
-                        <TableHead>{t.table.commission}</TableHead>
-                        <TableHead>{t.table.value}</TableHead>
-                        <TableHead>{t.table.period}</TableHead>
-                        <TableHead>{t.table.status}</TableHead>
-                        {canViewContractDetails ? (
-                          <TableHead>{t.table.action}</TableHead>
-                        ) : null}
-                      </TableRow>
-                    </TableHeader>
-
-                    <TableBody>
-                      {isLoading ? (
-                        <TableRowsSkeleton
-                          columnsCount={canViewContractDetails ? 9 : 8}
-                        />
-                      ) : latestContracts.length === 0 ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={canViewContractDetails ? 9 : 8}
-                            className="h-36 text-center"
-                          >
-                            <div className="mx-auto max-w-md space-y-2">
-                              <p className="font-semibold">
-                                {hasSearchOrFilter
-                                  ? t.noResultsTitle
-                                  : t.emptyTitle}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {hasSearchOrFilter ? t.noResultsText : t.emptyText}
-                              </p>
-
-                              {hasSearchOrFilter ? (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="mt-2 rounded-xl"
-                                  onClick={clearFilters}
-                                >
-                                  {t.clearFilters}
-                                </Button>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        latestContracts.map((contract) => (
-                          <TableRow
-                            key={`${contract.id}-${contract.contractNumber}`}
-                          >
-                            <TableCell>
-                              <div className="flex min-w-[220px] items-center gap-3">
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-muted">
-                                  <FileText className="h-4 w-4" />
-                                </div>
-
-                                <div className="min-w-0">
-                                  <p className="truncate font-medium">
-                                    {contract.contractNumber || "-"}
-                                  </p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {contract.title || "-"}
-                                  </p>
-                                </div>
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              <div className="flex min-w-[180px] items-center gap-3">
-                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-muted">
-                                  <Building2 className="h-4 w-4" />
-                                </div>
-
-                                <div className="min-w-0">
-                                  <p className="truncate font-medium">
-                                    {contract.providerName || "-"}
-                                  </p>
-                                </div>
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              <Badge variant="secondary" className="rounded-full">
-                                {pricingLabel(contract.pricingModel, locale)}
-                              </Badge>
-                            </TableCell>
-
-                            <TableCell>
-                              {formatPercent(contract.discountPercentage)}
-                            </TableCell>
-
-                            <TableCell>
-                              {formatPercent(contract.systemCommissionPercentage)}
-                            </TableCell>
-
-                            <TableCell>
-                              <SarAmount value={contract.contractValue} />
-                            </TableCell>
-
-                            <TableCell>
-                              <div className="min-w-[150px] text-sm">
-                                <p>{formatDate(contract.startDate)}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {formatDate(contract.endDate)}
-                                </p>
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              {statusBadge(contract.status, locale)}
-                            </TableCell>
-
-                            {canViewContractDetails ? (
-                              <TableCell>
-                                {isValidContractId(contract.id) ? (
-                                  <Link href={`/system/contracts/${contract.id}`}>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 rounded-lg"
-                                    >
-                                      <Eye className="h-4 w-4" />
-                                    </Button>
-                                  </Link>
-                                ) : null}
-                              </TableCell>
-                            ) : null}
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                <p>
-                  {t.showing} {formatNumber(latestContracts.length)} {t.from}{" "}
-                  {formatNumber(filteredContracts.length)} · {t.latestRecords}
-                </p>
-
-                {canViewContracts ? (
-                  <Link href="/system/contracts/list">
-                    <Button variant="outline" size="sm" className="rounded-xl">
-                      <ListChecks className="h-4 w-4" />
-                      {t.viewFullList}
-                    </Button>
-                  </Link>
+                {hasActiveFilters ? (
+                  <Badge variant="secondary" className="h-9 rounded-lg px-3 text-xs font-semibold">
+                    {t.activeFilters}
+                  </Badge>
                 ) : null}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
-          {/* Action Cards */}
-          {moduleActions.length > 0 ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base font-bold">
-                  {t.quickAccessTitle}
-                </CardTitle>
-                <CardDescription className="leading-6">
-                  {t.quickAccessSubtitle}
-                </CardDescription>
-              </CardHeader>
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1260px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    {visibleColumns.select ? (
+                      <TableHeaderCell className="w-[46px] px-3">
+                        <Checkbox
+                          checked={allPageSelected}
+                          onCheckedChange={(checked) =>
+                            toggleSelectAllPage(Boolean(checked))
+                          }
+                          aria-label={t.selected}
+                        />
+                      </TableHeaderCell>
+                    ) : null}
 
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-2">
-                  {moduleActions.map((item) => {
-                    const Icon = item.icon;
+                    {visibleColumns.contract ? (
+                      <TableHeaderCell className="w-[220px]">
+                        <HeaderSortButton
+                          active={sortKey === "contract_number"}
+                          onClick={() => {
+                            setSortKey("contract_number");
+                            setPage(1);
+                          }}
+                        >
+                          {t.contract}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
 
-                    return (
-                      <Link key={item.href} href={item.href} className="block">
-                        <Card className="h-full rounded-2xl border bg-background shadow-none transition hover:bg-muted/40 hover:shadow-sm">
-                          <CardContent className="flex h-full items-start justify-between gap-4 p-4">
-                            <div className="min-w-0 space-y-3">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-                                  <Icon className="h-5 w-5" />
-                                </div>
+                    {visibleColumns.provider ? (
+                      <TableHeaderCell className="w-[210px]">
+                        <HeaderSortButton
+                          active={sortKey === "provider"}
+                          onClick={() => {
+                            setSortKey("provider");
+                            setPage(1);
+                          }}
+                        >
+                          {t.provider}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
 
-                                <Badge
-                                  variant="secondary"
-                                  className="rounded-full"
-                                >
-                                  {item.badge}
-                                </Badge>
+                    {visibleColumns.status ? (
+                      <TableHeaderCell className="w-[115px]">
+                        <HeaderSortButton
+                          active={sortKey === "status"}
+                          onClick={() => {
+                            setSortKey("status");
+                            setPage(1);
+                          }}
+                        >
+                          {t.status}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.pricing ? (
+                      <TableHeaderCell className="w-[120px]">{t.pricing}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.dates ? (
+                      <TableHeaderCell className="w-[150px]">{t.dates}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.products ? (
+                      <TableHeaderCell className="w-[95px]">
+                        <HeaderSortButton
+                          active={sortKey === "most_products"}
+                          onClick={() => {
+                            setSortKey("most_products");
+                            setPage(1);
+                          }}
+                        >
+                          {t.productsCol}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.offers ? (
+                      <TableHeaderCell className="w-[95px]">
+                        <HeaderSortButton
+                          active={sortKey === "most_offers"}
+                          onClick={() => {
+                            setSortKey("most_offers");
+                            setPage(1);
+                          }}
+                        >
+                          {t.offersCol}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.visibility ? (
+                      <TableHeaderCell className="w-[150px]">{t.visibility}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.discount ? (
+                      <TableHeaderCell className="w-[105px]">
+                        <HeaderSortButton
+                          active={sortKey === "highest_discount"}
+                          onClick={() => {
+                            setSortKey("highest_discount");
+                            setPage(1);
+                          }}
+                        >
+                          {t.discount}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.commission ? (
+                      <TableHeaderCell className="w-[105px]">{t.commission}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.createdAt ? (
+                      <TableHeaderCell className="w-[120px]">
+                        <HeaderSortButton
+                          active={sortKey === "newest" || sortKey === "oldest"}
+                          onClick={() => {
+                            setSortKey("newest");
+                            setPage(1);
+                          }}
+                        >
+                          {t.createdAt}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.actions ? (
+                      <TableHeaderCell className="w-[72px] text-center">
+                        {t.actions}
+                      </TableHeaderCell>
+                    ) : null}
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {contracts.length ? (
+                    contracts.map((contract) => (
+                      <TableRow key={contract.id} className="h-[62px]">
+                        {visibleColumns.select ? (
+                          <TableBodyCell className="w-[46px] px-3">
+                            <Checkbox
+                              checked={selectedIds.includes(contract.id)}
+                              onCheckedChange={(checked) =>
+                                toggleSelectContract(contract.id, Boolean(checked))
+                              }
+                              aria-label={contract.contract_number}
+                            />
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.contract ? (
+                          <TableBodyCell className="w-[220px]">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40">
+                                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
                               </div>
 
-                              <div>
-                                <p className="font-semibold">{item.title}</p>
-                                <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
-                                  {item.description}
+                              <div className="min-w-0 flex-1">
+                                <Link
+                                  href={`/system/contracts/${contract.id}`}
+                                  className="block truncate text-sm font-semibold text-foreground hover:underline"
+                                >
+                                  {contract.contract_number}
+                                </Link>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {contract.title || contract.code || "—"}
                                 </p>
                               </div>
-
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-xl"
-                              >
-                                {item.cta}
-                              </Button>
                             </div>
-                          </CardContent>
-                        </Card>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
-        </>
-      ) : null}
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.provider ? (
+                          <TableBodyCell className="w-[210px]">
+                            {contract.provider_id ? (
+                              <Link
+                                href={`/system/providers/${contract.provider_id}`}
+                                className="block truncate text-sm font-medium text-foreground hover:underline"
+                              >
+                                {contract.provider_name || "—"}
+                              </Link>
+                            ) : (
+                              <span className="block truncate text-sm text-muted-foreground">
+                                {contract.provider_name || "—"}
+                              </span>
+                            )}
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.status ? (
+                          <TableBodyCell className="w-[115px]">
+                            <StatusBadge status={contract.status} locale={locale} />
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.pricing ? (
+                          <TableBodyCell className="w-[120px]">
+                            <Badge
+                              variant="outline"
+                              className="max-w-full rounded-full bg-muted/40 px-2.5 py-1 text-xs font-medium"
+                            >
+                              <span className="truncate">
+                                {getPricingLabel(contract.pricing_model, locale)}
+                              </span>
+                            </Badge>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.dates ? (
+                          <TableBodyCell className="w-[150px]">
+                            <div className="space-y-0.5 text-xs tabular-nums text-muted-foreground">
+                              <p className="truncate">{t.start}: {formatDate(contract.start_date)}</p>
+                              <p className="truncate">{t.end}: {formatDate(contract.end_date)}</p>
+                            </div>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.products ? (
+                          <TableBodyCell className="w-[95px]">
+                            <span className="block truncate text-sm font-medium tabular-nums">
+                              {formatInteger(contract.total_contract_products)}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.offers ? (
+                          <TableBodyCell className="w-[95px]">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                              <Sparkles className="h-3.5 w-3.5" />
+                              {formatInteger(contract.featured_contract_offers)}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.visibility ? (
+                          <TableBodyCell className="w-[150px]">
+                            <div className="flex flex-wrap gap-1">
+                              <Badge variant="outline" className="rounded-full bg-muted/40 text-[11px]">
+                                {t.landing}: {formatInteger(contract.landing_contract_offers)}
+                              </Badge>
+                              <Badge variant="outline" className="rounded-full bg-muted/40 text-[11px]">
+                                {t.mobile}: {formatInteger(contract.mobile_contract_offers)}
+                              </Badge>
+                              <Badge variant="outline" className="rounded-full bg-muted/40 text-[11px]">
+                                {t.offersPage}: {formatInteger(contract.offers_page_contract_offers)}
+                              </Badge>
+                            </div>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.discount ? (
+                          <TableBodyCell className="w-[105px]">
+                            <Badge
+                              variant="outline"
+                              className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+                            >
+                              {formatPercent(contract.max_discount_percentage)}
+                            </Badge>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.commission ? (
+                          <TableBodyCell className="w-[105px]">
+                            <span className="block truncate text-sm font-medium tabular-nums">
+                              {formatPercent(contract.max_system_commission_percentage)}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.createdAt ? (
+                          <TableBodyCell className="w-[120px]">
+                            <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                              {formatDate(contract.created_at)}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.actions ? (
+                          <TableBodyCell className="w-[72px] text-center">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 rounded-lg"
+                                  disabled={actionLoadingId === contract.id}
+                                >
+                                  {actionLoadingId === contract.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </DropdownMenuTrigger>
+
+                              <DropdownMenuContent
+                                align={locale === "ar" ? "start" : "end"}
+                                className="w-56"
+                              >
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/system/contracts/${contract.id}`}>
+                                    <Eye className="h-4 w-4" />
+                                    {t.view}
+                                  </Link>
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem
+                                  onClick={() => void copyValue(contract.contract_number)}
+                                >
+                                  <Copy className="h-4 w-4" />
+                                  {t.copyNumber}
+                                </DropdownMenuItem>
+
+                                {contract.provider_name ? (
+                                  <DropdownMenuItem
+                                    onClick={() => void copyValue(contract.provider_name)}
+                                  >
+                                    <Copy className="h-4 w-4" />
+                                    {t.copyProvider}
+                                  </DropdownMenuItem>
+                                ) : null}
+
+                                <DropdownMenuSeparator />
+
+                                <DropdownMenuItem
+                                  onClick={() => void runStatusAction(contract, "activate")}
+                                  disabled={contract.status === "ACTIVE"}
+                                >
+                                  <CheckCircle2 className="h-4 w-4" />
+                                  {t.activate}
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem
+                                  onClick={() => void runStatusAction(contract, "suspend")}
+                                  disabled={contract.status === "SUSPENDED"}
+                                >
+                                  <TriangleAlert className="h-4 w-4" />
+                                  {t.suspend}
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem
+                                  onClick={() => void runStatusAction(contract, "expire")}
+                                  disabled={contract.status === "EXPIRED"}
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                  {t.expire}
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem
+                                  className="text-red-600 focus:text-red-600"
+                                  onClick={() => void runStatusAction(contract, "terminate")}
+                                  disabled={contract.status === "TERMINATED"}
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                  {t.terminate}
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableBodyCell>
+                        ) : null}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={visibleColumnCount} className="h-72">
+                        <div className="flex flex-col items-center justify-center gap-3 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                            <ShieldCheck className="h-6 w-6 text-muted-foreground" />
+                          </div>
+
+                          <div className="space-y-1">
+                            <p className="font-semibold text-foreground">
+                              {hasActiveFilters ? t.noResultsTitle : t.noDataTitle}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {hasActiveFilters ? t.noResultsDesc : t.noDataDesc}
+                            </p>
+                          </div>
+
+                          {hasActiveFilters ? (
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-lg"
+                              onClick={resetFilters}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              {t.reset}
+                            </Button>
+                          ) : (
+                            <Button
+                              asChild
+                              className="h-9 rounded-lg bg-black text-white hover:bg-black/90"
+                            >
+                              <Link href="/system/contracts/create">
+                                <Plus className="h-4 w-4" />
+                                {t.create}
+                              </Link>
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-muted-foreground">
+              {t.showing}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(contracts.length)}
+              </span>{" "}
+              {t.of}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(pagination.count || summary.total_contracts)}
+              </span>{" "}
+              {t.rows}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                disabled={!pagination.has_previous || refreshing}
+                onClick={() => setPage((current) => Math.max(current - 1, 1))}
+              >
+                {t.previous}
+              </Button>
+
+              <div className="rounded-lg border bg-background px-3 py-2 text-sm tabular-nums">
+                {t.page} {formatInteger(page)} {t.of}{" "}
+                {formatInteger(pagination.total_pages)}
+              </div>
+
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                disabled={!pagination.has_next || refreshing}
+                onClick={() =>
+                  setPage((current) =>
+                    Math.min(current + 1, pagination.total_pages),
+                  )
+                }
+              >
+                {t.next}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

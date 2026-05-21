@@ -3,6 +3,10 @@
 # 🧭 Primey Care — Customers Module
 # ------------------------------------------------------------
 # ✅ الموديل الأساسي للعملاء
+# ✅ يدعم إدارة العملاء من النظام
+# ✅ يدعم ربط العميل بحساب مستخدم
+# ✅ يدعم دخول العميل برقم الجوال + OTP واتساب
+# ✅ يدعم ربط العميل تجاريًا بالمندوب والوسيط
 # ✅ مناسب للبناء عليه لاحقًا في:
 #    - الطلبات
 #    - العضويات / البطاقات
@@ -10,14 +14,56 @@
 #    - المدفوعات
 #    - الواتساب
 #    - كشف الحساب
+#    - تقارير المندوبين والوسطاء
 # ============================================================
 
 from __future__ import annotations
+
+import re
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+
+
+# ============================================================
+# 🧰 Shared Helpers
+# ============================================================
+
+def normalize_customer_phone(value: str | None) -> str:
+    """
+    توحيد رقم الجوال للاستخدام كمعرف دخول آمن.
+
+    أمثلة:
+    - 05xxxxxxxx  -> 9665xxxxxxxx
+    - +9665xxxxxx -> 9665xxxxxxxx
+    - 009665xxxxx -> 9665xxxxxxxx
+
+    ملاحظة:
+    هذه الدالة لا تتحقق من صحة الرقم بشكل نهائي، لكنها تنظفه وتوحده
+    حتى تستخدمه الخدمات و OTP والبحث.
+    """
+    raw_value = str(value or "").strip()
+
+    if not raw_value:
+        return ""
+
+    digits = re.sub(r"\D+", "", raw_value)
+
+    if not digits:
+        return ""
+
+    if digits.startswith("00"):
+        digits = digits[2:]
+
+    if digits.startswith("0") and len(digits) == 10:
+        digits = f"966{digits[1:]}"
+
+    if digits.startswith("5") and len(digits) == 9:
+        digits = f"966{digits}"
+
+    return digits
 
 
 # ============================================================
@@ -47,6 +93,7 @@ class Customer(models.Model):
         WEBSITE = "website", "Website"
         WHATSAPP = "whatsapp", "WhatsApp"
         AGENT = "agent", "Agent"
+        BROKER = "broker", "Broker"
         ADMIN = "admin", "Admin"
         IMPORT = "import", "Import"
         OTHER = "other", "Other"
@@ -85,6 +132,72 @@ class Customer(models.Model):
         default=Source.ADMIN,
         db_index=True,
         verbose_name="Source",
+    )
+
+    # --------------------------------------------------------
+    # 🔹 Commercial Assignment
+    # --------------------------------------------------------
+    agent = models.ForeignKey(
+        "agents.Agent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="customers",
+        db_index=True,
+        verbose_name="Linked Agent",
+        help_text="Sales or delivery agent related to this customer.",
+    )
+
+    broker = models.ForeignKey(
+        "agents.Broker",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="customers",
+        db_index=True,
+        verbose_name="Linked Broker",
+        help_text="Broker related to this customer. Can be resolved from the selected agent.",
+    )
+
+    # --------------------------------------------------------
+    # 🔹 Linked User Account
+    # --------------------------------------------------------
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="customer_profile",
+        verbose_name="Linked User Account",
+        help_text="Django user account used for customer portal login.",
+    )
+
+    normalized_phone = models.CharField(
+        max_length=30,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Normalized Login Phone",
+        help_text="Normalized unique phone number used for customer OTP login.",
+    )
+
+    phone_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Phone Verified At",
+    )
+
+    whatsapp_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="WhatsApp Verified At",
+    )
+
+    last_login_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Last Customer Login At",
     )
 
     # --------------------------------------------------------
@@ -276,10 +389,15 @@ class Customer(models.Model):
         indexes = [
             models.Index(fields=["customer_code"]),
             models.Index(fields=["customer_type", "status"]),
+            models.Index(fields=["agent"]),
+            models.Index(fields=["broker"]),
+            models.Index(fields=["agent", "broker"]),
+            models.Index(fields=["source"]),
             models.Index(fields=["display_name"]),
             models.Index(fields=["email"]),
             models.Index(fields=["phone_number"]),
             models.Index(fields=["whatsapp_number"]),
+            models.Index(fields=["normalized_phone"]),
             models.Index(fields=["city"]),
             models.Index(fields=["created_at"]),
         ]
@@ -305,6 +423,88 @@ class Customer(models.Model):
     def is_active_customer(self) -> bool:
         return self.status == self.Status.ACTIVE
 
+    @property
+    def has_customer_account(self) -> bool:
+        return bool(self.user_id)
+
+    @property
+    def is_phone_verified(self) -> bool:
+        return bool(self.phone_verified_at)
+
+    @property
+    def is_whatsapp_verified(self) -> bool:
+        return bool(self.whatsapp_verified_at)
+
+    @property
+    def login_identifier(self) -> str:
+        return self.normalized_phone or normalize_customer_phone(self.primary_contact_number)
+
+    @property
+    def agent_name(self) -> str:
+        if not self.agent_id:
+            return ""
+
+        return (
+            getattr(self.agent, "display_name", "")
+            or getattr(self.agent, "full_name", "")
+            or getattr(self.agent, "name", "")
+            or ""
+        )
+
+    @property
+    def broker_name(self) -> str:
+        if not self.broker_id:
+            return ""
+
+        return (
+            getattr(self.broker, "display_name", "")
+            or getattr(self.broker, "name", "")
+            or ""
+        )
+
+    @property
+    def has_agent(self) -> bool:
+        return bool(self.agent_id)
+
+    @property
+    def has_broker(self) -> bool:
+        return bool(self.broker_id)
+
+    # --------------------------------------------------------
+    # 🔹 Public Actions
+    # --------------------------------------------------------
+    def mark_phone_verified(self, *, commit: bool = True) -> None:
+        now = timezone.now()
+        self.phone_verified_at = now
+
+        if commit:
+            self.save(update_fields=["phone_verified_at", "updated_at"])
+
+    def mark_whatsapp_verified(self, *, commit: bool = True) -> None:
+        now = timezone.now()
+        self.whatsapp_verified_at = now
+
+        if commit:
+            self.save(update_fields=["whatsapp_verified_at", "updated_at"])
+
+    def mark_customer_login(self, *, commit: bool = True) -> None:
+        self.last_login_at = timezone.now()
+
+        if commit:
+            self.save(update_fields=["last_login_at", "updated_at"])
+
+    # --------------------------------------------------------
+    # 🔹 Internal Assignment Helpers
+    # --------------------------------------------------------
+    def _sync_broker_from_agent(self) -> None:
+        if not self.agent_id:
+            return
+
+        agent_broker_id = getattr(self.agent, "broker_id", None)
+
+        if agent_broker_id and not self.broker_id:
+            self.broker = self.agent.broker
+
     # --------------------------------------------------------
     # 🔹 Validation
     # --------------------------------------------------------
@@ -312,9 +512,9 @@ class Customer(models.Model):
         super().clean()
 
         if self.customer_type == self.CustomerType.INDIVIDUAL:
-            if not self.first_name or not self.last_name:
+            if not self.first_name and not self.last_name:
                 raise ValidationError(
-                    "Individual customer must have first name and last name."
+                    "Individual customer must have at least first name or last name."
                 )
 
         if self.customer_type == self.CustomerType.CORPORATE:
@@ -331,6 +531,39 @@ class Customer(models.Model):
         if self.date_of_birth and self.date_of_birth > timezone.localdate():
             raise ValidationError("Date of birth cannot be in the future.")
 
+        normalized_phone = normalize_customer_phone(
+            self.normalized_phone or self.whatsapp_number or self.phone_number
+        )
+
+        if normalized_phone and len(normalized_phone) < 9:
+            raise ValidationError(
+                {"normalized_phone": "Normalized phone number is too short."}
+            )
+
+        self.normalized_phone = normalized_phone or None
+
+        if self.agent_id:
+            agent_status = str(getattr(self.agent, "status", "") or "").strip().upper()
+            if agent_status and agent_status != "ACTIVE":
+                raise ValidationError(
+                    {"agent": "لا يمكن ربط العميل بمندوب غير نشط."}
+                )
+
+        if self.broker_id:
+            broker_status = str(getattr(self.broker, "status", "") or "").strip().upper()
+            if broker_status and broker_status != "ACTIVE":
+                raise ValidationError(
+                    {"broker": "لا يمكن ربط العميل بوسيط غير نشط."}
+                )
+
+        if self.agent_id and self.broker_id:
+            agent_broker_id = getattr(self.agent, "broker_id", None)
+
+            if agent_broker_id and agent_broker_id != self.broker_id:
+                raise ValidationError(
+                    {"broker": "الوسيط لا يطابق الوسيط المرتبط بالمندوب."}
+                )
+
     # --------------------------------------------------------
     # 🔹 Internal Helpers
     # --------------------------------------------------------
@@ -338,7 +571,7 @@ class Customer(models.Model):
         if self.customer_type == self.CustomerType.CORPORATE:
             return self.company_name.strip()
 
-        return self.full_name
+        return self.full_name or self.primary_contact_number or self.email or ""
 
     def _generate_customer_code(self) -> str:
         if self.pk:
@@ -366,6 +599,14 @@ class Customer(models.Model):
         self.passport_number = (self.passport_number or "").strip()
         self.tags = (self.tags or "").strip()
 
+        if not self.normalized_phone:
+            self.normalized_phone = normalize_customer_phone(
+                self.whatsapp_number or self.phone_number
+            ) or None
+        else:
+            self.normalized_phone = normalize_customer_phone(self.normalized_phone) or None
+
+        self._sync_broker_from_agent()
         self.display_name = self._build_display_name()
 
         self.full_clean()
@@ -376,3 +617,164 @@ class Customer(models.Model):
         if is_new and not self.customer_code:
             self.customer_code = self._generate_customer_code()
             super().save(update_fields=["customer_code"])
+
+
+# ============================================================
+# 🔐 Customer Login OTP
+# ============================================================
+
+class CustomerLoginOTP(models.Model):
+    class Purpose(models.TextChoices):
+        LOGIN = "login", "Login"
+        VERIFY_PHONE = "verify_phone", "Verify Phone"
+        VERIFY_WHATSAPP = "verify_whatsapp", "Verify WhatsApp"
+
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.CASCADE,
+        related_name="login_otps",
+        verbose_name="Customer",
+    )
+
+    phone_number = models.CharField(
+        max_length=30,
+        db_index=True,
+        verbose_name="Phone Number",
+        help_text="Original phone number used for OTP request.",
+    )
+
+    normalized_phone = models.CharField(
+        max_length=30,
+        db_index=True,
+        verbose_name="Normalized Phone Number",
+        help_text="Normalized phone number used for OTP verification.",
+    )
+
+    code_hash = models.CharField(
+        max_length=128,
+        verbose_name="OTP Code Hash",
+        help_text="Hashed OTP code. Never store the raw OTP.",
+    )
+
+    purpose = models.CharField(
+        max_length=30,
+        choices=Purpose.choices,
+        default=Purpose.LOGIN,
+        db_index=True,
+        verbose_name="Purpose",
+    )
+
+    expires_at = models.DateTimeField(
+        db_index=True,
+        verbose_name="Expires At",
+    )
+
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Verified At",
+    )
+
+    attempts_count = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="Attempts Count",
+    )
+
+    max_attempts = models.PositiveSmallIntegerField(
+        default=5,
+        verbose_name="Max Attempts",
+    )
+
+    request_ip = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        verbose_name="Request IP",
+    )
+
+    user_agent = models.TextField(
+        blank=True,
+        verbose_name="User Agent",
+    )
+
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Metadata",
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        db_index=True,
+        verbose_name="Created At",
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="Updated At",
+    )
+
+    class Meta:
+        verbose_name = "Customer Login OTP"
+        verbose_name_plural = "Customer Login OTPs"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["customer", "purpose", "created_at"]),
+            models.Index(fields=["normalized_phone", "purpose", "created_at"]),
+            models.Index(fields=["expires_at"]),
+            models.Index(fields=["verified_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.customer_id} | {self.normalized_phone} | {self.purpose}"
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() > self.expires_at
+
+    @property
+    def is_verified(self) -> bool:
+        return bool(self.verified_at)
+
+    @property
+    def can_attempt(self) -> bool:
+        return not self.is_verified and not self.is_expired and self.attempts_count < self.max_attempts
+
+    def clean(self) -> None:
+        super().clean()
+
+        self.phone_number = (self.phone_number or "").strip()
+        self.normalized_phone = normalize_customer_phone(self.normalized_phone or self.phone_number)
+
+        if not self.normalized_phone:
+            raise ValidationError(
+                {"normalized_phone": "Normalized phone number is required."}
+            )
+
+        if not self.code_hash:
+            raise ValidationError({"code_hash": "OTP code hash is required."})
+
+        if not self.expires_at:
+            raise ValidationError({"expires_at": "OTP expiry date is required."})
+
+    def mark_verified(self, *, commit: bool = True) -> None:
+        self.verified_at = timezone.now()
+
+        if commit:
+            self.save(update_fields=["verified_at", "updated_at"])
+
+    def register_failed_attempt(self, *, commit: bool = True) -> None:
+        self.attempts_count += 1
+
+        if commit:
+            self.save(update_fields=["attempts_count", "updated_at"])
+
+    def save(self, *args, **kwargs):
+        self.phone_number = (self.phone_number or "").strip()
+        self.normalized_phone = normalize_customer_phone(
+            self.normalized_phone or self.phone_number
+        )
+        self.user_agent = (self.user_agent or "").strip()
+
+        self.full_clean()
+
+        super().save(*args, **kwargs)

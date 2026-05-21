@@ -4,10 +4,14 @@
 # ------------------------------------------------------------
 # ✅ إدارة الصناديق والحسابات البنكية وبوابات الدفع
 # ✅ إدارة الحركات المالية
+# ✅ دعم الحساب المحاسبي المقابل counterparty_ledger_account
 # ✅ عرض المصدر والطرف والربط المحاسبي
 # ✅ عرض الرصيد قبل/بعد وأثر الرصيد
+# ✅ عرض حالة الترحيل المحاسبي
 # ✅ إجراءات تأكيد وإلغاء حركات الخزينة من لوحة الإدارة
 # ============================================================
+
+from __future__ import annotations
 
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
@@ -76,6 +80,26 @@ class TreasuryHasJournalEntryFilter(admin.SimpleListFilter):
 
         if self.value() == "no":
             return queryset.filter(journal_entry__isnull=True)
+
+        return queryset
+
+
+class TreasuryHasCounterpartyAccountFilter(admin.SimpleListFilter):
+    title = "له حساب مقابل"
+    parameter_name = "has_counterparty_account"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("yes", "نعم"),
+            ("no", "لا"),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == "yes":
+            return queryset.filter(counterparty_ledger_account__isnull=False)
+
+        if self.value() == "no":
+            return queryset.filter(counterparty_ledger_account__isnull=True)
 
         return queryset
 
@@ -250,6 +274,7 @@ class TreasuryAccountAdmin(admin.ModelAdmin):
             .select_related("ledger_account")
         )
 
+    @admin.display(description="نوع الحساب", ordering="account_type")
     def account_type_badge(self, obj):
         colors = {
             TreasuryAccountType.CASHBOX: "#15803d",
@@ -266,9 +291,7 @@ class TreasuryAccountAdmin(admin.ModelAdmin):
             obj.get_account_type_display(),
         )
 
-    account_type_badge.short_description = "نوع الحساب"
-    account_type_badge.admin_order_field = "account_type"
-
+    @admin.display(description="الحالة", ordering="status")
     def status_badge(self, obj):
         if obj.status == TreasuryAccountStatus.ACTIVE:
             return format_html(
@@ -288,9 +311,6 @@ class TreasuryAccountAdmin(admin.ModelAdmin):
         return format_html(
             '<span style="color:#991b1b;font-weight:700;">غير نشط</span>'
         )
-
-    status_badge.short_description = "الحالة"
-    status_badge.admin_order_field = "status"
 
     @admin.action(description="تفعيل الحسابات المحددة")
     def activate_accounts(self, request, queryset):
@@ -355,12 +375,14 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
         "status_badge",
         "treasury_account",
         "destination_account",
+        "counterparty_ledger_account",
         "amount",
         "fees_amount",
         "net_amount",
         "currency",
         "party_display",
         "source_display",
+        "accounting_status_badge",
         "journal_entry_link",
         "balance_effect_badge",
         "created_at",
@@ -374,6 +396,8 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
         "currency",
         "treasury_account",
         "destination_account",
+        "counterparty_ledger_account",
+        TreasuryHasCounterpartyAccountFilter,
         TreasuryBalanceEffectFilter,
         TreasuryHasJournalEntryFilter,
         "party_type",
@@ -398,6 +422,8 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
         "treasury_account__code",
         "destination_account__name",
         "destination_account__code",
+        "counterparty_ledger_account__code",
+        "counterparty_ledger_account__name",
     )
 
     readonly_fields = (
@@ -414,6 +440,7 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
     autocomplete_fields = (
         "treasury_account",
         "destination_account",
+        "counterparty_ledger_account",
         "journal_entry",
         "created_by",
         "confirmed_by",
@@ -440,6 +467,7 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
                 "fields": (
                     "treasury_account",
                     "destination_account",
+                    "counterparty_ledger_account",
                 )
             },
         ),
@@ -560,6 +588,7 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
             .select_related(
                 "treasury_account",
                 "destination_account",
+                "counterparty_ledger_account",
                 "journal_entry",
                 "created_by",
                 "confirmed_by",
@@ -567,6 +596,7 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
             )
         )
 
+    @admin.display(description="نوع الحركة", ordering="transaction_type")
     def transaction_type_badge(self, obj):
         colors = {
             TreasuryTransactionType.INCOME: "#15803d",
@@ -588,12 +618,12 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
             obj.get_transaction_type_display(),
         )
 
-    transaction_type_badge.short_description = "نوع الحركة"
-    transaction_type_badge.admin_order_field = "transaction_type"
-
+    @admin.display(description="المصدر", ordering="source")
     def source_badge(self, obj):
         colors = {
             TreasuryTransactionSource.MANUAL: "#374151",
+            TreasuryTransactionSource.MANUAL_RECEIPT: "#15803d",
+            TreasuryTransactionSource.MANUAL_PAYMENT: "#b45309",
             TreasuryTransactionSource.PAYMENT: "#15803d",
             TreasuryTransactionSource.INVOICE: "#2563eb",
             TreasuryTransactionSource.ORDER: "#7c3aed",
@@ -601,6 +631,12 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
             TreasuryTransactionSource.TRANSFER: "#0369a1",
             TreasuryTransactionSource.GATEWAY: "#9333ea",
             TreasuryTransactionSource.AGENT_COMMISSION: "#b45309",
+            TreasuryTransactionSource.AGENT_COD_COLLECTION: "#0f766e",
+            TreasuryTransactionSource.AGENT_CASH_SETTLEMENT: "#166534",
+            TreasuryTransactionSource.AGENT_EARNING_SETTLEMENT: "#7c2d12",
+            TreasuryTransactionSource.BROKER_COMMISSION: "#6d28d9",
+            TreasuryTransactionSource.BROKER_CASH_SETTLEMENT: "#047857",
+            TreasuryTransactionSource.BROKER_EARNING_SETTLEMENT: "#92400e",
             TreasuryTransactionSource.ACCOUNTING: "#0f766e",
             TreasuryTransactionSource.OPENING_BALANCE: "#4b5563",
             TreasuryTransactionSource.ADJUSTMENT: "#7c2d12",
@@ -615,9 +651,7 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
             obj.get_source_display(),
         )
 
-    source_badge.short_description = "المصدر"
-    source_badge.admin_order_field = "source"
-
+    @admin.display(description="الحالة", ordering="status")
     def status_badge(self, obj):
         if obj.status == TreasuryTransactionStatus.CONFIRMED:
             return format_html(
@@ -633,9 +667,7 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
             '<span style="color:#92400e;font-weight:700;">مسودة</span>'
         )
 
-    status_badge.short_description = "الحالة"
-    status_badge.admin_order_field = "status"
-
+    @admin.display(description="الطرف")
     def party_display(self, obj):
         if obj.party_type or obj.party_id or obj.party_name:
             name = obj.party_name or "-"
@@ -645,16 +677,14 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
 
         return "-"
 
-    party_display.short_description = "الطرف"
-
+    @admin.display(description="مصدر الربط")
     def source_display(self, obj):
         if obj.source_type or obj.source_id or obj.source_number:
             return f"{obj.source_type or '-'}:{obj.source_id or '-'} / {obj.source_number or '-'}"
 
         return "-"
 
-    source_display.short_description = "مصدر الربط"
-
+    @admin.display(description="القيد المحاسبي", ordering="journal_entry_reference")
     def journal_entry_link(self, obj):
         if obj.journal_entry:
             return obj.journal_entry.entry_number
@@ -664,9 +694,23 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
 
         return "-"
 
-    journal_entry_link.short_description = "القيد المحاسبي"
-    journal_entry_link.admin_order_field = "journal_entry_reference"
+    @admin.display(description="الترحيل المحاسبي")
+    def accounting_status_badge(self, obj):
+        if obj.journal_entry_id or obj.journal_entry_reference:
+            return format_html(
+                '<span style="color:#166534;font-weight:700;">مرحل</span>'
+            )
 
+        if obj.status == TreasuryTransactionStatus.CONFIRMED:
+            return format_html(
+                '<span style="color:#92400e;font-weight:700;">مؤكد بلا قيد</span>'
+            )
+
+        return format_html(
+            '<span style="color:#6b7280;font-weight:700;">غير مرحل</span>'
+        )
+
+    @admin.display(description="أثر الرصيد")
     def balance_effect_badge(self, obj):
         if obj.balance_applied and obj.balance_reversed:
             return format_html(
@@ -682,8 +726,6 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
             '<span style="color:#991b1b;font-weight:700;">غير مطبق</span>'
         )
 
-    balance_effect_badge.short_description = "أثر الرصيد"
-
     def save_model(self, request, obj, form, change):
         if not obj.pk and request.user and request.user.is_authenticated:
             obj.created_by = request.user
@@ -698,6 +740,11 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
         for transaction_obj in queryset:
             try:
                 if transaction_obj.status == TreasuryTransactionStatus.CONFIRMED:
+                    confirm_treasury_transaction(
+                        transaction_obj,
+                        actor=request.user,
+                        post_to_accounting=None,
+                    )
                     skipped_count += 1
                     continue
 
@@ -712,6 +759,7 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
                 confirm_treasury_transaction(
                     transaction_obj,
                     actor=request.user,
+                    post_to_accounting=None,
                 )
                 confirmed_count += 1
 
@@ -738,7 +786,7 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
         if skipped_count:
             self.message_user(
                 request,
-                f"تم تجاوز {skipped_count} حركة لأنها مؤكدة مسبقًا.",
+                f"تم تجاوز أو إعادة فحص {skipped_count} حركة لأنها مؤكدة مسبقًا.",
                 level=messages.WARNING,
             )
 
@@ -776,7 +824,7 @@ class TreasuryTransactionAdmin(admin.ModelAdmin):
         if cancelled_count:
             self.message_user(
                 request,
-                f"تم إلغاء {cancelled_count} حركة خزينة بنجاح.",
+                f"تم إلغاء {cancelled_count} حركة خزينة.",
                 level=messages.SUCCESS,
             )
 

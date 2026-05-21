@@ -2,633 +2,382 @@
 
 /* ============================================================
    📂 app/system/accounting/reports/page.tsx
-   🧠 Primey Care | Accounting Reports Page
-
-   ✅ المسار:
-      app/system/accounting/reports/page.tsx
-
-   ✅ العمل:
-      صفحة تقارير المحاسبة داخل مديول المحاسبة.
-      تعرض مركز تقارير المحاسبة، المؤشرات المالية المختصرة، وروابط التقارير المحاسبية الأساسية.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Accounting Reports Build
-
-   ✅ يعتمد على:
-      - /api/accounting/reports/summary/
-      - /api/accounting/reports/
-      - /api/reports/accounting/
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Accounting dashboard page
-      - Accounting journals pages
-      - Accounting accounts pages
-      - Accounting cost centers pages
-      - Fiscal years / periods pages
-      - Central reports module
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - عرض مؤشرات محاسبية مختصرة.
-      - عرض بطاقات تقارير المحاسبة.
-      - بحث في صف مستقل.
-      - الفلاتر في صف منفصل.
-      - تصنيف التقارير حسب النوع.
-      - Excel export بصيغة .xls HTML Workbook.
-      - Web PDF Print.
-      - Error State مستقل.
-      - Empty State ذكي.
-      - Skeleton Loading.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - أرقام إنجليزية دائمًا.
-      - رمز SAR من /currency/sar.svg بعد الرقم.
-
+   🧾 Primey Care — Accounting Reports Center
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - الملف المرفق كان شبه فارغ، لذلك تم بناء الصفحة كاملة من الصفر.
-      - الالتزام بالقاعدة: w-full space-y-4 بدون main/min-h-screen/max-w.
-      - عدم عرض أي مسارات أو عبارات تقنية داخل واجهة المستخدم.
-      - استخدام sonner للتنبيهات.
-      - استخدام Excel HTML Workbook بدل CSV أو XLSX.
+   ✅ Approved operational pattern
+   ✅ Real API only:
+      GET /api/accounting/accounts/?page=1&page_size=500
+      GET /api/accounting/ledger/?page=1&page_size=500
+   ✅ No missing reports endpoint calls
+   ✅ Accounting reports hub + live summary
+   ✅ Search / type filter / sort / columns
+   ✅ Excel .xls + Web print
+   ✅ Skeleton loading
+   ✅ Error / Empty states
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
+  ArrowUpDown,
   BarChart3,
-  BookOpenCheck,
+  BookOpen,
   Building2,
   CalendarClock,
-  Columns3,
-  Download,
-  FileBarChart,
   FileSpreadsheet,
-  FileText,
+  FolderTree,
+  Landmark,
   Layers3,
   Loader2,
+  NotebookText,
   Printer,
-  RefreshCcw,
+  ReceiptText,
+  RefreshCw,
+  RotateCcw,
   Search,
+  Settings2,
   ShieldCheck,
+  TrendingDown,
+  TrendingUp,
+  TriangleAlert,
   WalletCards,
-  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type ReportCategory =
-  | "FINANCIAL_STATEMENTS"
-  | "LEDGER"
-  | "JOURNALS"
-  | "COST_CENTERS"
-  | "PERIODS";
-
-type CategoryFilter = "ALL" | ReportCategory;
-
-type AccountingSummary = {
-  total_debit: number;
-  total_credit: number;
-  net_balance: number;
-  journal_entries_count: number;
-  posted_entries_count: number;
-  draft_entries_count: number;
-  accounts_count: number;
-  cost_centers_count: number;
-  fiscal_years_count: number;
-  open_periods_count: number;
-};
-
-type ReportItem = {
-  id: string;
-  titleAr: string;
-  titleEn: string;
-  descriptionAr: string;
-  descriptionEn: string;
-  category: ReportCategory;
-  href: string;
-  icon: "statement" | "ledger" | "journal" | "cost" | "period";
-};
-
-type ApiEnvelope<T> = {
-  ok?: boolean;
-  success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
-  summary?: Partial<AccountingSummary>;
+type ApiResponse = {
+  count?: number;
+  total?: number;
+  total_count?: number;
   results?: unknown[];
   items?: unknown[];
   rows?: unknown[];
+  data?: unknown;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-
-const DEFAULT_SUMMARY: AccountingSummary = {
-  total_debit: 0,
-  total_credit: 0,
-  net_balance: 0,
-  journal_entries_count: 0,
-  posted_entries_count: 0,
-  draft_entries_count: 0,
-  accounts_count: 0,
-  cost_centers_count: 0,
-  fiscal_years_count: 0,
-  open_periods_count: 0,
+type AccountRecord = {
+  id: string;
+  code: string;
+  name: string;
+  account_type: string;
+  account_type_label: string;
+  is_active: boolean;
 };
 
-/* ============================================================
-   Locale / API
-============================================================ */
+type LedgerRecord = {
+  id: string;
+  date: string | null;
+  account_id: string;
+  account_code: string;
+  account_name: string;
+  debit: number;
+  credit: number;
+};
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+type ReportType =
+  | "all"
+  | "statement"
+  | "financial"
+  | "operations"
+  | "setup";
 
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+type SortKey = "recommended" | "name" | "type" | "status";
 
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
+type ColumnKey =
+  | "report"
+  | "type"
+  | "description"
+  | "status"
+  | "updated"
+  | "actions";
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
+type AccountingReport = {
+  id: string;
+  title: string;
+  description: string;
+  type: Exclude<ReportType, "all">;
+  href: string;
+  status: "ready" | "setup";
+  updated: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
+
+const DEFAULT_COLUMNS: Record<ColumnKey, boolean> = {
+  report: true,
+  type: true,
+  description: true,
+  status: true,
+  updated: true,
+  actions: true,
+};
+
+const translations = {
+  ar: {
+    title: "تقارير المحاسبة",
+    subtitle:
+      "مركز تقارير المحاسبة لعرض القوائم المالية، دفتر الأستاذ، القيود، والحسابات.",
+    back: "المحاسبة",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    open: "فتح التقرير",
+
+    searchPlaceholder: "ابحث باسم التقرير أو الوصف...",
+    reportType: "نوع التقرير",
+    sort: "الترتيب",
+    columns: "الأعمدة",
+
+    all: "الكل",
+    statement: "قوائم مالية",
+    financial: "تحليل مالي",
+    operations: "عمليات محاسبية",
+    setup: "إعدادات محاسبية",
+
+    recommended: "الموصى به",
+    nameSort: "اسم التقرير",
+    typeSort: "نوع التقرير",
+    statusSort: "الحالة",
+
+    accounts: "الحسابات",
+    movements: "الحركات",
+    revenue: "الإيرادات",
+    expenses: "المصروفات",
+    activeAccounts: "حساب نشط",
+    ledgerMovements: "حركة محاسبية",
+    revenueAccounts: "حساب إيراد",
+    expenseAccounts: "حساب مصروف",
+
+    report: "التقرير",
+    type: "النوع",
+    description: "الوصف",
+    status: "الحالة",
+    updated: "آخر تحديث",
+    actions: "الإجراءات",
+    ready: "جاهز",
+    setupNeeded: "إعداد",
+
+    trialBalance: "ميزان المراجعة",
+    trialBalanceDesc: "مراجعة أرصدة الحسابات المدينة والدائنة والتأكد من توازنها.",
+    profitLoss: "الأرباح والخسائر",
+    profitLossDesc: "تحليل الإيرادات والمصروفات وصافي الربح أو الخسارة.",
+    balanceSheet: "الميزانية العمومية",
+    balanceSheetDesc: "عرض الأصول والالتزامات وحقوق الملكية وفرق التوازن.",
+    ledger: "دفتر الأستاذ",
+    ledgerDesc: "استعراض حركات الحسابات والمدين والدائن والرصيد الجاري.",
+    journals: "قيود اليومية",
+    journalsDesc: "متابعة القيود المحاسبية وسطورها وحالة الترحيل والتوازن.",
+    accountsReport: "دليل الحسابات",
+    accountsReportDesc: "عرض شجرة الحسابات وأنواعها وحالتها وقابليتها للترحيل.",
+    periods: "الفترات المحاسبية",
+    periodsDesc: "إدارة الفترات المحاسبية وحالة الفتح والإغلاق.",
+    fiscalYears: "السنوات المالية",
+    fiscalYearsDesc: "إدارة السنوات المالية وربطها بالفترات المحاسبية.",
+    costCenters: "مراكز التكلفة",
+    costCentersDesc: "تحليل الحسابات والقيود حسب مراكز التكلفة.",
+
+    showing: "عرض",
+    of: "من",
+    rows: "صفوف",
+    noDataTitle: "لا توجد تقارير",
+    noDataDesc: "لم يتم العثور على تقارير محاسبية للعرض.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+    errorTitle: "تعذر تحميل بيانات التقارير",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    refreshed: "تم تحديث تقارير المحاسبة.",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير مركز تقارير المحاسبة",
+    generatedAt: "تاريخ الطباعة",
+    sar: "ر.س",
+  },
+  en: {
+    title: "Accounting Reports",
+    subtitle:
+      "Accounting reports center for financial statements, ledger, journals, and accounts.",
+    back: "Accounting",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    open: "Open report",
+
+    searchPlaceholder: "Search by report name or description...",
+    reportType: "Report type",
+    sort: "Sort",
+    columns: "Columns",
+
+    all: "All",
+    statement: "Statements",
+    financial: "Financial analysis",
+    operations: "Accounting operations",
+    setup: "Accounting setup",
+
+    recommended: "Recommended",
+    nameSort: "Report name",
+    typeSort: "Report type",
+    statusSort: "Status",
+
+    accounts: "Accounts",
+    movements: "Movements",
+    revenue: "Revenue",
+    expenses: "Expenses",
+    activeAccounts: "Active accounts",
+    ledgerMovements: "Ledger movements",
+    revenueAccounts: "Revenue accounts",
+    expenseAccounts: "Expense accounts",
+
+    report: "Report",
+    type: "Type",
+    description: "Description",
+    status: "Status",
+    updated: "Updated",
+    actions: "Actions",
+    ready: "Ready",
+    setupNeeded: "Setup",
+
+    trialBalance: "Trial Balance",
+    trialBalanceDesc: "Review debit and credit account balances and verify balance.",
+    profitLoss: "Profit & Loss",
+    profitLossDesc: "Analyze revenue, expenses, and net profit or loss.",
+    balanceSheet: "Balance Sheet",
+    balanceSheetDesc: "View assets, liabilities, equity, and balance difference.",
+    ledger: "General Ledger",
+    ledgerDesc: "Review account movements, debit, credit, and running balance.",
+    journals: "Journal Entries",
+    journalsDesc: "Track accounting entries, lines, posting, and balance status.",
+    accountsReport: "Chart of Accounts",
+    accountsReportDesc: "View account tree, types, status, and posting readiness.",
+    periods: "Accounting Periods",
+    periodsDesc: "Manage accounting periods and opening or closing status.",
+    fiscalYears: "Fiscal Years",
+    fiscalYearsDesc: "Manage fiscal years and related accounting periods.",
+    costCenters: "Cost Centers",
+    costCentersDesc: "Analyze accounts and journal entries by cost center.",
+
+    showing: "Showing",
+    of: "of",
+    rows: "rows",
+    noDataTitle: "No reports",
+    noDataDesc: "No accounting reports were found.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other results.",
+    errorTitle: "Unable to load reports data",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    refreshed: "Accounting reports refreshed.",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "Accounting reports center report",
+    generatedAt: "Generated at",
+    sar: "SAR",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
+}
+
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
+
+  return fallback;
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
-
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as Dict;
-    }
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (["1", "true", "yes", "on", "active", "posting"].includes(normalized)) return true;
+    if (["0", "false", "no", "off", "inactive"].includes(normalized)) return false;
   }
 
-  return {};
+  return fallback;
 }
 
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
+function formatInteger(value: unknown) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(
+    toNumber(value),
   );
 }
 
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
-  }
-
-  return true;
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "تقارير المحاسبة" : "Accounting Reports",
-    subtitle: isArabic
-      ? "مركز تقارير المحاسبة لمراجعة القوائم المالية، الأستاذ العام، القيود، مراكز التكلفة، والفترات."
-      : "Accounting reports center for financial statements, ledger, journals, cost centers, and periods.",
-
-    back: isArabic ? "لوحة المحاسبة" : "Accounting Overview",
-    centralReports: isArabic ? "مركز التقارير" : "Reports Center",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-
-    summaryTitle: isArabic ? "ملخص التقارير المحاسبية" : "Accounting Reports Summary",
-    summaryDesc: isArabic
-      ? "مؤشرات مختصرة تساعد في قراءة وضع المحاسبة قبل فتح التقارير التفصيلية."
-      : "Short indicators to review accounting status before opening detailed reports.",
-
-    reportsTitle: isArabic ? "التقارير المتاحة" : "Available Reports",
-    reportsDesc: isArabic
-      ? "اختر التقرير المناسب حسب نوع المراجعة المطلوبة."
-      : "Choose the report that matches the required review.",
-
-    totalDebit: isArabic ? "إجمالي المدين" : "Total Debit",
-    totalCredit: isArabic ? "إجمالي الدائن" : "Total Credit",
-    netBalance: isArabic ? "الصافي" : "Net Balance",
-    journalEntries: isArabic ? "القيود المحاسبية" : "Journal Entries",
-    postedEntries: isArabic ? "قيود مرحلة" : "Posted Entries",
-    draftEntries: isArabic ? "قيود مسودة" : "Draft Entries",
-    accounts: isArabic ? "الحسابات" : "Accounts",
-    costCenters: isArabic ? "مراكز التكلفة" : "Cost Centers",
-    fiscalYears: isArabic ? "السنوات المالية" : "Fiscal Years",
-    openPeriods: isArabic ? "فترات مفتوحة" : "Open Periods",
-
-    searchPlaceholder: isArabic
-      ? "ابحث باسم التقرير أو وصفه..."
-      : "Search by report name or description...",
-
-    all: isArabic ? "الكل" : "All",
-    financialStatements: isArabic ? "القوائم المالية" : "Financial Statements",
-    ledger: isArabic ? "الأستاذ العام" : "Ledger",
-    journals: isArabic ? "القيود" : "Journals",
-    costCentersReports: isArabic ? "مراكز التكلفة" : "Cost Centers",
-    periods: isArabic ? "الفترات" : "Periods",
-
-    openReport: isArabic ? "فتح التقرير" : "Open Report",
-
-    emptyTitle: isArabic ? "لا توجد تقارير مطابقة" : "No matching reports",
-    emptyText: isArabic
-      ? "جرّب تغيير البحث أو التصنيف."
-      : "Try changing the search or category.",
-    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض تقارير المحاسبة" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض تقارير المحاسبة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view accounting reports. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل ملخص تقارير المحاسبة."
-      : "Unable to load accounting reports summary.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث تقارير المحاسبة بنجاح."
-      : "Accounting reports refreshed successfully.",
-
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد التقارير" : "Reports Count",
-  };
-}
-
-/* ============================================================
-   Data
-============================================================ */
-
-function reportsCatalog(): ReportItem[] {
-  return [
-    {
-      id: "accounting-summary",
-      titleAr: "ملخص المحاسبة",
-      titleEn: "Accounting Summary",
-      descriptionAr: "نظرة عامة على الأرصدة والقيود والحسابات.",
-      descriptionEn: "Overview of balances, entries, and accounts.",
-      category: "FINANCIAL_STATEMENTS",
-      href: "/system/reports/accounting",
-      icon: "statement",
-    },
-    {
-      id: "balance-sheet",
-      titleAr: "قائمة المركز المالي",
-      titleEn: "Balance Sheet",
-      descriptionAr: "عرض الأصول والالتزامات وحقوق الملكية.",
-      descriptionEn: "View assets, liabilities, and equity.",
-      category: "FINANCIAL_STATEMENTS",
-      href: "/system/accounting/balance-sheet",
-      icon: "statement",
-    },
-    {
-      id: "trial-balance",
-      titleAr: "ميزان المراجعة",
-      titleEn: "Trial Balance",
-      descriptionAr: "مراجعة إجمالي المدين والدائن لكل حساب.",
-      descriptionEn: "Review total debit and credit for each account.",
-      category: "FINANCIAL_STATEMENTS",
-      href: "/system/reports/accounting",
-      icon: "statement",
-    },
-    {
-      id: "chart-of-accounts",
-      titleAr: "دليل الحسابات",
-      titleEn: "Chart of Accounts",
-      descriptionAr: "عرض الحسابات وتصنيفها وأرصدتها.",
-      descriptionEn: "View accounts, classifications, and balances.",
-      category: "LEDGER",
-      href: "/system/accounting/accounts",
-      icon: "ledger",
-    },
-    {
-      id: "general-ledger",
-      titleAr: "الأستاذ العام",
-      titleEn: "General Ledger",
-      descriptionAr: "مراجعة حركة الحسابات والقيود المرتبطة.",
-      descriptionEn: "Review account movements and linked entries.",
-      category: "LEDGER",
-      href: "/system/accounting/accounts",
-      icon: "ledger",
-    },
-    {
-      id: "journal-entries",
-      titleAr: "تقرير القيود اليومية",
-      titleEn: "Journal Entries Report",
-      descriptionAr: "عرض القيود حسب الحالة والمصدر والفترة.",
-      descriptionEn: "View journal entries by status, source, and period.",
-      category: "JOURNALS",
-      href: "/system/accounting/journals",
-      icon: "journal",
-    },
-    {
-      id: "cost-centers",
-      titleAr: "تقرير مراكز التكلفة",
-      titleEn: "Cost Centers Report",
-      descriptionAr: "مراجعة أرصدة وحركات مراكز التكلفة.",
-      descriptionEn: "Review balances and movements by cost center.",
-      category: "COST_CENTERS",
-      href: "/system/accounting/cost-centers",
-      icon: "cost",
-    },
-    {
-      id: "fiscal-years",
-      titleAr: "تقرير السنوات المالية",
-      titleEn: "Fiscal Years Report",
-      descriptionAr: "عرض حالة السنوات المالية والفترات المرتبطة.",
-      descriptionEn: "View fiscal year status and linked periods.",
-      category: "PERIODS",
-      href: "/system/accounting/fiscal-years",
-      icon: "period",
-    },
-    {
-      id: "accounting-periods",
-      titleAr: "تقرير الفترات المحاسبية",
-      titleEn: "Accounting Periods Report",
-      descriptionAr: "مراجعة الفترات المفتوحة والمغلقة والقيود المرتبطة.",
-      descriptionEn: "Review open and closed periods with linked entries.",
-      category: "PERIODS",
-      href: "/system/accounting/periods",
-      icon: "period",
-    },
-  ];
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
-}
-
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function escapeHtml(value: string | number) {
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).replace("T", " ").slice(0, 16);
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -637,992 +386,1126 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function extractSummary(payload: ApiEnvelope<unknown> | null): Partial<AccountingSummary> {
-  if (!payload) return {};
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
 
-  const data = asDict(payload.data);
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
+}
+
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const query = params?.toString();
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
+}
+
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  return (payload || {}) as T;
+}
+
+function extractArray(payload: ApiResponse) {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.rows)) return payload.rows;
+
+  const data = asRecord(payload.data);
+
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.rows)) return data.rows;
+  if (Array.isArray(data.accounts)) return data.accounts;
+  if (Array.isArray(data.ledger)) return data.ledger;
+  if (Array.isArray(data.movements)) return data.movements;
+  if (Array.isArray(data.entries)) return data.entries;
+
+  return [];
+}
+
+function normalizeAccount(value: unknown): AccountRecord {
+  const item = asRecord(value);
+  const id = normalizeText(item.id || item.pk || item.uuid);
 
   return {
-    ...asDict(payload.summary),
-    ...asDict(data.summary),
-    ...asDict(data.accounting),
-    ...asDict(data.totals),
-    ...asDict(data),
+    id,
+    code: normalizeText(item.code),
+    name: normalizeText(item.name || item.name_ar || item.name_en || `#${id}`),
+    account_type: normalizeText(item.account_type || item.type),
+    account_type_label: normalizeText(item.account_type_label || item.account_type || item.type),
+    is_active: toBoolean(item.is_active, true),
   };
 }
 
-function normalizeSummary(value: Partial<AccountingSummary>): AccountingSummary {
+function normalizeLedger(value: unknown): LedgerRecord {
+  const item = asRecord(value);
+  const entry = asRecord(item.entry || item.journal || item.journal_entry);
+  const account = asRecord(item.account);
+
   return {
-    total_debit: toNumber(value.total_debit),
-    total_credit: toNumber(value.total_credit),
-    net_balance: toNumber(value.net_balance) || toNumber(value.total_debit) - toNumber(value.total_credit),
-    journal_entries_count: toNumber(value.journal_entries_count),
-    posted_entries_count: toNumber(value.posted_entries_count),
-    draft_entries_count: toNumber(value.draft_entries_count),
-    accounts_count: toNumber(value.accounts_count),
-    cost_centers_count: toNumber(value.cost_centers_count),
-    fiscal_years_count: toNumber(value.fiscal_years_count),
-    open_periods_count: toNumber(value.open_periods_count),
+    id: normalizeText(item.id || item.pk || item.uuid),
+    date:
+      normalizeText(item.date || item.entry_date || item.posting_date || entry.entry_date) ||
+      null,
+    account_id: normalizeText(item.account_id || account.id),
+    account_code: normalizeText(item.account_code || account.code),
+    account_name: normalizeText(
+      item.account_name || account.name || account.name_ar || account.name_en,
+    ),
+    debit: toNumber(item.debit ?? item.debit_amount ?? item.total_debit),
+    credit: toNumber(item.credit ?? item.credit_amount ?? item.total_credit),
   };
 }
 
-function categoryLabel(category: CategoryFilter, locale: AppLocale) {
-  const t = dictionary(locale);
+function normalizeAccountType(value: string) {
+  const type = value.toLowerCase();
 
-  const labels: Record<CategoryFilter, string> = {
-    ALL: t.all,
-    FINANCIAL_STATEMENTS: t.financialStatements,
-    LEDGER: t.ledger,
-    JOURNALS: t.journals,
-    COST_CENTERS: t.costCentersReports,
-    PERIODS: t.periods,
-  };
+  if (["revenue", "income", "sales", "sale"].includes(type)) return "revenue";
+  if (["expense", "expenses", "cost", "costs"].includes(type)) return "expense";
+  if (["asset", "assets"].includes(type)) return "asset";
+  if (["liability", "liabilities"].includes(type)) return "liability";
+  if (["equity", "owner_equity", "capital"].includes(type)) return "equity";
 
-  return labels[category];
+  return "other";
 }
 
-function reportTitle(report: ReportItem, locale: AppLocale) {
-  return locale === "ar" ? report.titleAr : report.titleEn;
+function getReportTypeLabel(type: AccountingReport["type"], locale: Locale) {
+  const t = translations[locale];
+
+  if (type === "statement") return t.statement;
+  if (type === "financial") return t.financial;
+  if (type === "operations") return t.operations;
+
+  return t.setup;
 }
 
-function reportDescription(report: ReportItem, locale: AppLocale) {
-  return locale === "ar" ? report.descriptionAr : report.descriptionEn;
+function getStatusLabel(status: AccountingReport["status"], locale: Locale) {
+  const t = translations[locale];
+  return status === "ready" ? t.ready : t.setupNeeded;
 }
 
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+function getBadgeClass(value: string) {
+  const normalized = value.toLowerCase();
+
+  if (["ready", "statement", "revenue"].includes(normalized)) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  if (["financial", "operations"].includes(normalized)) {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function StatusBadge({ value, label }: { value: string; label: string }) {
   return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", getBadgeClass(value))}
+    >
+      {label || value || "—"}
+    </Badge>
   );
 }
 
-function MoneyText({ value }: { value: unknown }) {
+function MoneyValue({ value, label }: { value: number; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <div className="flex items-center justify-start gap-1 text-sm font-semibold tabular-nums">
       <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-function ReportIcon({ type }: { type: ReportItem["icon"] }) {
-  if (type === "statement") return <FileBarChart className="h-5 w-5" />;
-  if (type === "ledger") return <BookOpenCheck className="h-5 w-5" />;
-  if (type === "journal") return <FileText className="h-5 w-5" />;
-  if (type === "cost") return <Building2 className="h-5 w-5" />;
-  return <CalendarClock className="h-5 w-5" />;
-}
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function KpiSkeleton() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <SkeletonLine className="h-8 w-28" />
-            <SkeletonLine className="mt-3 h-4 w-24" />
-          </CardContent>
-        </Card>
-      ))}
+      <img src="/currency/sar.svg" alt={label} className="h-3.5 w-3.5" />
     </div>
   );
 }
 
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  worksheetName,
+function KpiCard({
   title,
-  locale,
-  summary,
-  reports,
+  value,
+  trend,
+  icon: Icon,
 }: {
-  filename: string;
-  worksheetName: string;
   title: string;
-  locale: AppLocale;
-  summary: AccountingSummary;
-  reports: ReportItem[];
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
+  return (
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-  const t = dictionary(locale);
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
 
-  const rowsHtml = reports
-    .map(
-      (report) => `
-        <tr>
-          <td>${escapeHtml(reportTitle(report, locale))}</td>
-          <td>${escapeHtml(categoryLabel(report.category, locale))}</td>
-          <td>${escapeHtml(reportDescription(report, locale))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${isArabic ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; color: #000; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-          .summary-value { font-weight: 700; }
-        </style>
-      </head>
-
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="3">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="3"></td></tr>
-          <tr><td class="section" colspan="3">${escapeHtml(t.summaryTitle)}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.generatedAt)}</td><td class="summary-value" colspan="2">${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalDebit)}</td><td class="summary-value" colspan="2">${escapeHtml(formatMoney(summary.total_debit))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalCredit)}</td><td class="summary-value" colspan="2">${escapeHtml(formatMoney(summary.total_credit))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.netBalance)}</td><td class="summary-value" colspan="2">${escapeHtml(formatMoney(summary.net_balance))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.journalEntries)}</td><td class="summary-value" colspan="2">${escapeHtml(formatNumber(summary.journal_entries_count))}</td></tr>
-          <tr><td colspan="3"></td></tr>
-          <tr>
-            <th>${escapeHtml(isArabic ? "التقرير" : "Report")}</th>
-            <th>${escapeHtml(isArabic ? "التصنيف" : "Category")}</th>
-            <th>${escapeHtml(isArabic ? "الوصف" : "Description")}</th>
-          </tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  summary,
-  reports,
-}: {
-  locale: AppLocale;
-  title: string;
-  summary: AccountingSummary;
-  reports: ReportItem[];
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-  const now = new Date().toLocaleString("en-US");
-
-  const rows = reports
-    .map(
-      (report, index) => `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(reportTitle(report, locale))}</td>
-          <td>${escapeHtml(categoryLabel(report.category, locale))}</td>
-          <td>${escapeHtml(reportDescription(report, locale))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .print-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 18px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .summary-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .summary-card span {
-            display: block;
-            color: #6b7280;
-            font-size: 11px;
-            margin-bottom: 5px;
-          }
-          .summary-card strong { font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; }
-          th { background: #f3f4f6; color: #111827; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 9px 8px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          tr:nth-child(even) td { background: #fafafa; }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-
-      <body>
-        <div class="print-header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(reports.length)}</div>
-            </div>
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
           </div>
-          <div class="badge">Primey Care</div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
         </div>
-
-        <div class="summary-grid">
-          <div class="summary-card"><span>${escapeHtml(t.totalDebit)}</span><strong>${formatMoney(summary.total_debit)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.totalCredit)}</span><strong>${formatMoney(summary.total_credit)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.netBalance)}</span><strong>${formatMoney(summary.net_balance)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.journalEntries)}</span><strong>${formatNumber(summary.journal_entries_count)}</strong></div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>${escapeHtml(isArabic ? "التقرير" : "Report")}</th>
-              <th>${escapeHtml(isArabic ? "التصنيف" : "Category")}</th>
-              <th>${escapeHtml(isArabic ? "الوصف" : "Description")}</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+      </CardHeader>
+    </Card>
+  );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function ReportsSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="min-h-[112px] px-6 py-5">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-5 w-20" />
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-80 w-full" />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 export default function AccountingReportsPage() {
-  const auth = useAuth() as unknown;
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [accounts, setAccounts] = React.useState<AccountRecord[]>([]);
+  const [ledgerRows, setLedgerRows] = React.useState<LedgerRecord[]>([]);
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [summary, setSummary] = useState<AccountingSummary>(DEFAULT_SUMMARY);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [query, setQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("ALL");
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState("");
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const [searchInput, setSearchInput] = React.useState("");
+  const [typeFilter, setTypeFilter] = React.useState<ReportType>("all");
+  const [sortKey, setSortKey] = React.useState<SortKey>("recommended");
+  const [columns, setColumns] = React.useState<Record<ColumnKey, boolean>>(DEFAULT_COLUMNS);
 
-  const canView = hasSafePermission(
-    auth,
-    ["accounting.view", "accounting.reports.view", "reports.accounting.view"],
-    "view",
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
+
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
+
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
+
+    applyLocale();
+
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
+
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
+
+  const reports = React.useMemo<AccountingReport[]>(
+    () => [
+      {
+        id: "trial-balance",
+        title: t.trialBalance,
+        description: t.trialBalanceDesc,
+        type: "statement",
+        href: "/system/accounting/trial-balance",
+        status: "ready",
+        updated: formatDateTime(new Date().toISOString()),
+        icon: ShieldCheck,
+      },
+      {
+        id: "profit-loss",
+        title: t.profitLoss,
+        description: t.profitLossDesc,
+        type: "financial",
+        href: "/system/accounting/profit-loss",
+        status: "ready",
+        updated: formatDateTime(new Date().toISOString()),
+        icon: TrendingUp,
+      },
+      {
+        id: "balance-sheet",
+        title: t.balanceSheet,
+        description: t.balanceSheetDesc,
+        type: "statement",
+        href: "/system/accounting/balance-sheet",
+        status: "ready",
+        updated: formatDateTime(new Date().toISOString()),
+        icon: Landmark,
+      },
+      {
+        id: "ledger",
+        title: t.ledger,
+        description: t.ledgerDesc,
+        type: "operations",
+        href: "/system/accounting/ledger",
+        status: "ready",
+        updated: formatDateTime(new Date().toISOString()),
+        icon: BookOpen,
+      },
+      {
+        id: "journals",
+        title: t.journals,
+        description: t.journalsDesc,
+        type: "operations",
+        href: "/system/accounting/journals",
+        status: "ready",
+        updated: formatDateTime(new Date().toISOString()),
+        icon: NotebookText,
+      },
+      {
+        id: "accounts",
+        title: t.accountsReport,
+        description: t.accountsReportDesc,
+        type: "setup",
+        href: "/system/accounting/accounts",
+        status: "ready",
+        updated: formatDateTime(new Date().toISOString()),
+        icon: FolderTree,
+      },
+      {
+        id: "periods",
+        title: t.periods,
+        description: t.periodsDesc,
+        type: "setup",
+        href: "/system/accounting/periods",
+        status: "ready",
+        updated: formatDateTime(new Date().toISOString()),
+        icon: CalendarClock,
+      },
+      {
+        id: "fiscal-years",
+        title: t.fiscalYears,
+        description: t.fiscalYearsDesc,
+        type: "setup",
+        href: "/system/accounting/fiscal-years",
+        status: "ready",
+        updated: formatDateTime(new Date().toISOString()),
+        icon: Layers3,
+      },
+      {
+        id: "cost-centers",
+        title: t.costCenters,
+        description: t.costCentersDesc,
+        type: "setup",
+        href: "/system/accounting/cost-centers",
+        status: "ready",
+        updated: formatDateTime(new Date().toISOString()),
+        icon: Building2,
+      },
+    ],
+    [t],
   );
 
-  const canExport = hasSafePermission(
-    auth,
-    ["accounting.export", "reports.accounting.export", "reports.export"],
-    "action",
-  );
-
-  const canPrint = hasSafePermission(
-    auth,
-    ["accounting.print", "reports.accounting.print", "reports.print"],
-    "action",
-  );
-
-  const reports = useMemo(() => reportsCatalog(), []);
-
-  const filteredReports = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
-
-    return reports.filter((report) => {
-      const matchesCategory =
-        categoryFilter === "ALL" ? true : report.category === categoryFilter;
-
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            report.titleAr,
-            report.titleEn,
-            report.descriptionAr,
-            report.descriptionEn,
-            categoryLabel(report.category, locale),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
-
-      return matchesCategory && matchesQuery;
-    });
-  }, [categoryFilter, locale, query, reports]);
-
-  const hasSearchOrFilter = query.trim().length > 0 || categoryFilter !== "ALL";
-
-  const categoryOptions = useMemo(() => {
-    const categories: CategoryFilter[] = [
-      "ALL",
-      "FINANCIAL_STATEMENTS",
-      "LEDGER",
-      "JOURNALS",
-      "COST_CENTERS",
-      "PERIODS",
-    ];
-
-    return categories.map((category) => ({
-      value: category,
-      label: categoryLabel(category, locale),
-      count:
-        category === "ALL"
-          ? reports.length
-          : reports.filter((report) => report.category === category).length,
-    }));
-  }, [locale, reports]);
-
-  const loadSummary = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setIsLoading(false);
-        setSummary(DEFAULT_SUMMARY);
-        return;
-      }
+  const loadReportsData = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
 
       try {
-        setIsLoading(true);
-        setErrorMessage("");
+        if (!silent) setLoading(true);
 
-        const endpoints = [
-          "/api/accounting/reports/summary/",
-          "/api/accounting/reports/",
-          "/api/reports/accounting/",
-        ];
+        setRefreshing(true);
+        setError("");
 
-        let loadedPayload: ApiEnvelope<unknown> | null = null;
-        let loaded = false;
-        let lastError = "";
+        const params = new URLSearchParams({
+          page: "1",
+          page_size: "500",
+        });
 
-        for (const endpoint of endpoints) {
-          const response = await fetch(apiUrl(endpoint), {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-          });
+        const [accountsResult, ledgerResult] = await Promise.allSettled([
+          fetchJson<ApiResponse>(
+            makeApiUrl("/api/accounting/accounts/", params),
+            controller.signal,
+          ),
+          fetchJson<ApiResponse>(
+            makeApiUrl("/api/accounting/ledger/", params),
+            controller.signal,
+          ),
+        ]);
 
-          const payload = (await response.json().catch(() => null)) as
-            | ApiEnvelope<unknown>
-            | null;
-
-          if ([400, 404, 405].includes(response.status)) {
-            lastError =
-              payload?.message ||
-              payload?.detail ||
-              payload?.error ||
-              `HTTP ${response.status}`;
-            continue;
-          }
-
-          if (
-            !response.ok ||
-            payload?.ok === false ||
-            payload?.success === false
-          ) {
-            throw new Error(
-              payload?.message ||
-                payload?.detail ||
-                payload?.error ||
-                `HTTP ${response.status}`,
-            );
-          }
-
-          loadedPayload = payload;
-          loaded = true;
-          break;
+        if (accountsResult.status === "rejected") {
+          throw accountsResult.reason;
         }
 
-        if (!loaded || !loadedPayload) {
-          setSummary(DEFAULT_SUMMARY);
-          setErrorMessage(lastError || t.loadError);
-          return;
+        setAccounts(
+          extractArray(accountsResult.value)
+            .map(normalizeAccount)
+            .filter((account) => account.is_active)
+            .sort((a, b) => a.code.localeCompare(b.code)),
+        );
+
+        if (ledgerResult.status === "fulfilled") {
+          setLedgerRows(extractArray(ledgerResult.value).map(normalizeLedger));
+        } else {
+          setLedgerRows([]);
         }
 
-        setSummary(normalizeSummary(extractSummary(loadedPayload)));
+        if (silent) toast.success(t.refreshed);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
 
-        if (showToast) {
-          toast.success(t.loadSuccess);
-        }
-      } catch (error) {
-        console.error("Accounting reports summary load error:", error);
-        setSummary(DEFAULT_SUMMARY);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
+        setError(message);
       } finally {
-        setIsLoading(false);
+        setLoading(false);
+        setRefreshing(false);
       }
+
+      return () => controller.abort();
     },
-    [canView, t.loadError, t.loadSuccess],
+    [t.errorDesc, t.refreshed],
   );
 
-  function clearFilters() {
-    setQuery("");
-    setCategoryFilter("ALL");
+  React.useEffect(() => {
+    void loadReportsData();
+  }, [loadReportsData]);
+
+  const summary = React.useMemo(() => {
+    const revenueAccounts = accounts.filter(
+      (account) => normalizeAccountType(account.account_type) === "revenue",
+    );
+
+    const expenseAccounts = accounts.filter(
+      (account) => normalizeAccountType(account.account_type) === "expense",
+    );
+
+    let revenue = 0;
+    let expenses = 0;
+
+    ledgerRows.forEach((row) => {
+      const relatedAccount = accounts.find(
+        (account) =>
+          account.id === row.account_id ||
+          account.code === row.account_code ||
+          account.name === row.account_name,
+      );
+
+      const type = normalizeAccountType(relatedAccount?.account_type || "");
+
+      if (type === "revenue") {
+        revenue += Math.max(0, row.credit - row.debit);
+      }
+
+      if (type === "expense") {
+        expenses += Math.max(0, row.debit - row.credit);
+      }
+    });
+
+    return {
+      activeAccounts: accounts.length,
+      ledgerMovements: ledgerRows.length,
+      revenue,
+      expenses,
+      revenueAccounts: revenueAccounts.length,
+      expenseAccounts: expenseAccounts.length,
+    };
+  }, [accounts, ledgerRows]);
+
+  const filteredReports = React.useMemo(() => {
+    const query = searchInput.trim().toLowerCase();
+
+    let result = reports.filter((report) => {
+      const matchesSearch =
+        !query ||
+        report.title.toLowerCase().includes(query) ||
+        report.description.toLowerCase().includes(query) ||
+        getReportTypeLabel(report.type, locale).toLowerCase().includes(query);
+
+      const matchesType = typeFilter === "all" || report.type === typeFilter;
+
+      return matchesSearch && matchesType;
+    });
+
+    result = [...result].sort((a, b) => {
+      if (sortKey === "name") return a.title.localeCompare(b.title);
+      if (sortKey === "type") return a.type.localeCompare(b.type);
+      if (sortKey === "status") return a.status.localeCompare(b.status);
+
+      return reports.findIndex((report) => report.id === a.id) - reports.findIndex((report) => report.id === b.id);
+    });
+
+    return result;
+  }, [locale, reports, searchInput, sortKey, typeFilter]);
+
+  const hasActiveFilters =
+    Boolean(searchInput.trim()) || typeFilter !== "all" || sortKey !== "recommended";
+
+  const visibleColumnCount = Object.values(columns).filter(Boolean).length;
+
+  function resetFilters() {
+    setSearchInput("");
+    setTypeFilter("all");
+    setSortKey("recommended");
+  }
+
+  function columnLabel(key: ColumnKey) {
+    if (key === "report") return t.report;
+    if (key === "type") return t.type;
+    if (key === "description") return t.description;
+    if (key === "status") return t.status;
+    if (key === "updated") return t.updated;
+    return t.actions;
+  }
+
+  function buildExportRows() {
+    return filteredReports.map((report) => ({
+      report: report.title,
+      type: getReportTypeLabel(report.type, locale),
+      description: report.description,
+      status: getStatusLabel(report.status, locale),
+      updated: report.updated,
+      href: report.href,
+    }));
   }
 
   function exportExcel() {
-    if (!canExport) return;
+    const exportRows = buildExportRows();
 
-    if (filteredReports.length === 0) {
+    if (!exportRows.length) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    downloadExcel({
-      filename: `primey-care-accounting-reports-${new Date()
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "تقارير المحاسبة" : "Accounting Reports",
-      title: t.title,
-      locale,
-      summary,
-      reports: filteredReports,
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(t.printTitle)}</h1>
+          <p>${escapeHtml(t.accounts)}: ${escapeHtml(summary.activeAccounts)}</p>
+          <p>${escapeHtml(t.movements)}: ${escapeHtml(summary.ledgerMovements)}</p>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.report)}</th>
+                <th>${escapeHtml(t.type)}</th>
+                <th>${escapeHtml(t.description)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.updated)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${exportRows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.report)}</td>
+                      <td>${escapeHtml(row.type)}</td>
+                      <td>${escapeHtml(row.description)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.updated)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
     });
 
-    toast.success(t.exportSuccess);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-accounting-reports-${new Date()
+      .toISOString()
+      .slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
   function printPage() {
-    if (!canPrint) return;
+    const exportRows = buildExportRows();
 
-    if (filteredReports.length === 0) {
-      toast.error(t.exportEmpty);
+    if (!exportRows.length) {
+      toast.error(t.printEmpty);
       return;
     }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.printError);
+      toast.error(t.printEmpty);
       return;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        summary,
-        reports: filteredReports,
-      }),
-    );
-    printWindow.document.close();
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+              margin-bottom: 18px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.showing)}: ${escapeHtml(exportRows.length)}</p>
+            </div>
+          </div>
 
-    toast.success(t.printSuccess);
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.accounts)}</span><strong>${escapeHtml(summary.activeAccounts)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.movements)}</span><strong>${escapeHtml(summary.ledgerMovements)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.revenue)}</span><strong>${escapeHtml(formatMoney(summary.revenue))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.expenses)}</span><strong>${escapeHtml(formatMoney(summary.expenses))}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.report)}</th>
+                <th>${escapeHtml(t.type)}</th>
+                <th>${escapeHtml(t.description)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.updated)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${exportRows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.report)}</td>
+                      <td>${escapeHtml(row.type)}</td>
+                      <td>${escapeHtml(row.description)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.updated)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadSummary(false);
-  }, [authResolving, loadSummary]);
-
-  if (!authResolving && !canView) {
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="w-full space-y-4" dir={dir}>
+        <ReportsSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/accounting">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
-
-          <Link href="/system/reports/accounting">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <BarChart3 className="h-4 w-4" />
-              <span>{t.centralReports}</span>
-            </Button>
-          </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/accounting">
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
 
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadSummary(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadReportsData({ silent: true })}
+            disabled={refreshing}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canExport ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={filteredReports.length === 0}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
 
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={filteredReports.length === 0}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.accounts}
+          value={formatInteger(summary.activeAccounts)}
+          trend={t.activeAccounts}
+          icon={FolderTree}
+        />
 
+        <KpiCard
+          title={t.movements}
+          value={formatInteger(summary.ledgerMovements)}
+          trend={t.ledgerMovements}
+          icon={BookOpen}
+        />
+
+        <KpiCard
+          title={t.revenue}
+          value={<MoneyValue value={summary.revenue} label={t.sar} />}
+          trend={`${t.revenueAccounts}: ${formatInteger(summary.revenueAccounts)}`}
+          icon={TrendingUp}
+        />
+
+        <KpiCard
+          title={t.expenses}
+          value={<MoneyValue value={summary.expenses} label={t.sar} />}
+          trend={`${t.expenseAccounts}: ${formatInteger(summary.expenseAccounts)}`}
+          icon={TrendingDown}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-destructive">
-                  {errorMessage}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadSummary(true)}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadReportsData()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {isLoading ? (
-        <KpiSkeleton />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    <MoneyText value={summary.total_debit} />
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.totalDebit}
-                  </p>
-                </div>
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <div className="relative w-full">
+            <Search
+              className={cn(
+                "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                locale === "ar" ? "right-3" : "left-3",
+              )}
+            />
+            <Input
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder={t.searchPlaceholder}
+              className={cn(
+                "h-10 rounded-lg bg-background",
+                locale === "ar" ? "pr-9" : "pl-9",
+              )}
+            />
+          </div>
 
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                  <WalletCards className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    <MoneyText value={summary.total_credit} />
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.totalCredit}
-                  </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300">
-                  <ShieldCheck className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    <MoneyText value={summary.net_balance} />
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.netBalance}
-                  </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-300">
-                  <BarChart3 className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    {formatNumber(summary.journal_entries_count)}
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.journalEntries}
-                  </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-50 text-teal-700 dark:bg-teal-950/30 dark:text-teal-300">
-                  <FileText className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-bold">
-              {t.reportsTitle}
-            </CardTitle>
-            <CardDescription>{t.reportsDesc}</CardDescription>
-          </CardHeader>
-
-          <CardContent className="space-y-4">
-            <div className="relative w-full">
-              <Search
-                className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                  isArabic ? "right-3" : "left-3"
-                }`}
-              />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t.searchPlaceholder}
-                className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-              />
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={typeFilter}
+                onValueChange={(value) => setTypeFilter(value as ReportType)}
+              >
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[185px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    {t.reportType}: {t.all}
+                  </SelectItem>
+                  <SelectItem value="statement">{t.statement}</SelectItem>
+                  <SelectItem value="financial">{t.financial}</SelectItem>
+                  <SelectItem value="operations">{t.operations}</SelectItem>
+                  <SelectItem value="setup">{t.setup}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {categoryOptions.map((category) => (
-                <Button
-                  key={category.value}
-                  type="button"
-                  variant={
-                    categoryFilter === category.value ? "default" : "outline"
+              <Select value={sortKey} onValueChange={(value) => setSortKey(value as SortKey)}>
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[165px]">
+                  <ArrowUpDown className="h-4 w-4" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="recommended">{t.recommended}</SelectItem>
+                  <SelectItem value="name">{t.nameSort}</SelectItem>
+                  <SelectItem value="type">{t.typeSort}</SelectItem>
+                  <SelectItem value="status">{t.statusSort}</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select
+                value="columns"
+                onValueChange={(value) => {
+                  if (value in columns) {
+                    setColumns((current) => ({
+                      ...current,
+                      [value]: !current[value as ColumnKey],
+                    }));
                   }
-                  className="h-10 rounded-xl"
-                  onClick={() => setCategoryFilter(category.value)}
-                >
-                  <Columns3 className="h-4 w-4" />
-                  <span>
-                    {category.label} ({formatNumber(category.count)})
-                  </span>
-                </Button>
-              ))}
+                }}
+              >
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[150px]">
+                  <Settings2 className="h-4 w-4" />
+                  <SelectValue placeholder={t.columns} />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(columns) as ColumnKey[]).map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {columns[key] ? "✓ " : ""}
+                      {columnLabel(key)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-              {hasSearchOrFilter ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 rounded-xl"
-                  onClick={clearFilters}
-                >
-                  {t.clearFilters}
-                </Button>
-              ) : null}
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                onClick={resetFilters}
+              >
+                <RotateCcw className="h-4 w-4" />
+                {t.reset}
+              </Button>
             </div>
+          </div>
 
-            {filteredReports.length > 0 ? (
-              <div className="grid gap-3 md:grid-cols-2">
-                {filteredReports.map((report) => (
-                  <Card
-                    key={report.id}
-                    className="rounded-2xl border bg-background shadow-sm"
-                  >
-                    <CardContent className="flex h-full flex-col gap-4 p-5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                            <ReportIcon type={report.icon} />
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1080px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    {columns.report ? (
+                      <TableHead className="h-11 w-[280px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.report}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.type ? (
+                      <TableHead className="h-11 w-[155px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.type}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.description ? (
+                      <TableHead className="h-11 w-[340px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.description}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.status ? (
+                      <TableHead className="h-11 w-[120px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.status}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.updated ? (
+                      <TableHead className="h-11 w-[150px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.updated}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.actions ? (
+                      <TableHead className="h-11 w-[120px] whitespace-nowrap px-4 text-center text-xs font-semibold text-muted-foreground">
+                        {t.actions}
+                      </TableHead>
+                    ) : null}
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {filteredReports.length ? (
+                    filteredReports.map((report) => {
+                      const Icon = report.icon;
+
+                      return (
+                        <TableRow key={report.id} className="h-[66px]">
+                          {columns.report ? (
+                            <TableCell className="h-[66px] w-[280px] overflow-hidden px-4 text-right align-middle">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
+                                  <Icon className="h-4 w-4 text-muted-foreground" />
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="block truncate text-sm font-semibold text-foreground">
+                                    {report.title}
+                                  </span>
+                                  <span className="block truncate text-xs text-muted-foreground">
+                                    {report.id}
+                                  </span>
+                                </div>
+                              </div>
+                            </TableCell>
+                          ) : null}
+
+                          {columns.type ? (
+                            <TableCell className="h-[66px] w-[155px] overflow-hidden px-4 text-right align-middle">
+                              <StatusBadge
+                                value={report.type}
+                                label={getReportTypeLabel(report.type, locale)}
+                              />
+                            </TableCell>
+                          ) : null}
+
+                          {columns.description ? (
+                            <TableCell className="h-[66px] w-[340px] overflow-hidden px-4 text-right align-middle">
+                              <span className="block truncate text-sm text-muted-foreground">
+                                {report.description}
+                              </span>
+                            </TableCell>
+                          ) : null}
+
+                          {columns.status ? (
+                            <TableCell className="h-[66px] w-[120px] overflow-hidden px-4 text-right align-middle">
+                              <StatusBadge
+                                value={report.status}
+                                label={getStatusLabel(report.status, locale)}
+                              />
+                            </TableCell>
+                          ) : null}
+
+                          {columns.updated ? (
+                            <TableCell className="h-[66px] w-[150px] overflow-hidden px-4 text-right align-middle">
+                              <span className="block truncate text-sm text-muted-foreground tabular-nums">
+                                {report.updated}
+                              </span>
+                            </TableCell>
+                          ) : null}
+
+                          {columns.actions ? (
+                            <TableCell className="h-[66px] w-[120px] overflow-hidden px-4 text-center align-middle">
+                              <Button asChild variant="outline" size="sm" className="h-8 rounded-lg">
+                                <Link href={report.href}>
+                                  <BarChart3 className="h-4 w-4" />
+                                  {t.open}
+                                </Link>
+                              </Button>
+                            </TableCell>
+                          ) : null}
+                        </TableRow>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={Math.max(1, visibleColumnCount)} className="h-72">
+                        <div className="flex flex-col items-center justify-center gap-3 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                            <Search className="h-6 w-6 text-muted-foreground" />
                           </div>
 
-                          <div>
-                            <p className="font-semibold">
-                              {reportTitle(report, locale)}
+                          <div className="space-y-1">
+                            <p className="font-semibold text-foreground">
+                              {hasActiveFilters ? t.noResultsTitle : t.noDataTitle}
                             </p>
-                            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                              {reportDescription(report, locale)}
+                            <p className="text-sm text-muted-foreground">
+                              {hasActiveFilters ? t.noResultsDesc : t.noDataDesc}
                             </p>
                           </div>
+
+                          {hasActiveFilters ? (
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-lg"
+                              onClick={resetFilters}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              {t.reset}
+                            </Button>
+                          ) : null}
                         </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
 
-                        <Badge variant="outline" className="rounded-full px-3 py-1">
-                          {categoryLabel(report.category, locale)}
-                        </Badge>
-                      </div>
-
-                      <div className="mt-auto">
-                        <Link href={report.href}>
-                          <Button className="h-10 w-full rounded-xl">
-                            <FileSpreadsheet className="h-4 w-4" />
-                            {t.openReport}
-                          </Button>
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : (
-              <Card className="rounded-2xl border bg-background shadow-sm">
-                <CardContent className="flex min-h-44 flex-col items-center justify-center gap-2 p-6 text-center">
-                  <FileBarChart className="h-10 w-10 text-muted-foreground/40" />
-                  <p className="font-semibold">{t.emptyTitle}</p>
-                  <p className="max-w-md text-sm text-muted-foreground">
-                    {t.emptyText}
-                  </p>
-
-                  {hasSearchOrFilter ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-2 rounded-xl"
-                      onClick={clearFilters}
-                    >
-                      {t.clearFilters}
-                    </Button>
-                  ) : null}
-                </CardContent>
-              </Card>
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <BarChart3 className="h-4 w-4" />
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between rounded-xl border bg-muted/40 px-3 py-2 text-sm">
-                <span>{t.postedEntries}</span>
-                <span>{formatNumber(summary.posted_entries_count)}</span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                <span>{t.draftEntries}</span>
-                <span>{formatNumber(summary.draft_entries_count)}</span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                <span>{t.accounts}</span>
-                <span>{formatNumber(summary.accounts_count)}</span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                <span>{t.costCenters}</span>
-                <span>{formatNumber(summary.cost_centers_count)}</span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                <span>{t.fiscalYears}</span>
-                <span>{formatNumber(summary.fiscal_years_count)}</span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                <span>{t.openPeriods}</span>
-                <span>{formatNumber(summary.open_periods_count)}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Layers3 className="h-4 w-4" />
-                {t.reportsTitle}
-              </div>
-
-              <div className="text-2xl font-bold">
-                {formatNumber(filteredReports.length)}
-              </div>
-
-              <p className="text-sm leading-6 text-muted-foreground">
-                {categoryLabel(categoryFilter, locale)}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+          <div className="text-sm text-muted-foreground">
+            {t.showing}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(filteredReports.length)}
+            </span>{" "}
+            {t.of}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(reports.length)}
+            </span>{" "}
+            {t.rows}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

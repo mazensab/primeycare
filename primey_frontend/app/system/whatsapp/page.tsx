@@ -1,68 +1,94 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/whatsapp/page.tsx
-   🧠 Primey Care | WhatsApp Overview
-
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ نفس النمط المعتمد
-   ✅ w-full space-y-4
-   ✅ بدون main / min-h-screen / max-w
-   ✅ أزرار انتقال للصفحات التي أزلناها من السايدر
-   ✅ Skeleton Loading
-   ✅ Error State مستقل
-   ✅ Empty State ذكي
-   ✅ Excel .xls HTML Workbook
-   ✅ Web PDF Print
-   ✅ sonner
-   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
-   ✅ بدون localhost hardcoded
-   ✅ لا توجد نصوص تقنية ظاهرة في الواجهة
+   📂 primey_frontend/app/system/whatsapp/page.tsx
+   🟢 Primey Care — WhatsApp Overview
+   ------------------------------------------------------------
+   ✅ Same approved Customers / Orders / Users operational pattern
+   ✅ Real API only:
+      - GET  /api/whatsapp/status/
+      - GET  /api/whatsapp/settings/
+      - GET  /api/whatsapp/inbox/summary/
+      - GET  /api/whatsapp/logs/
+      - GET  /api/whatsapp/templates/
+      - GET  /api/whatsapp/broadcasts/
+      - POST /api/whatsapp/session/create-qr/
+      - POST /api/whatsapp/session/create-pairing-code/
+      - POST /api/whatsapp/session/disconnect/
+      - POST /api/whatsapp/send-test/
+   ✅ Internal navigation cards for removed sidebar children
+   ✅ Header buttons / KPI cards / status panels / recent logs table
+   ✅ Excel .xls + Web print
+   ✅ Skeleton loading
+   ✅ Error state
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
+import * as React from "react";
 import Link from "next/link";
 import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import {
-  ArrowUpRight,
-  BadgeCheck,
-  BellRing,
-  ClipboardList,
-  Download,
-  FileText,
+  ArrowUpDown,
+  Bell,
+  CheckCircle2,
+  ColumnsIcon,
+  FileSpreadsheet,
   Inbox,
+  Layers3,
   Loader2,
-  Megaphone,
   MessageCircle,
+  MoreHorizontal,
+  Phone,
   Printer,
-  RefreshCcw,
+  QrCode,
+  Radio,
+  RefreshCw,
+  RotateCcw,
   Search,
   Send,
   Settings,
   ShieldCheck,
   Smartphone,
+  TerminalSquare,
+  TriangleAlert,
+  Unplug,
   Wifi,
   WifiOff,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -72,495 +98,445 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
+type StatusFilter = "all" | "SENT" | "FAILED" | "PENDING" | "DELIVERED" | "READ";
+type SortKey = "newest" | "oldest" | "recipient" | "status" | "event";
+type ColumnKey =
+  | "select"
+  | "recipient"
+  | "event"
+  | "status"
+  | "message"
+  | "createdAt"
+  | "provider"
+  | "actions";
 
-type WhatsAppStatus = "CONNECTED" | "DISCONNECTED" | "ERROR" | "PENDING" | "UNKNOWN";
-type DeliveryStatus = "SENT" | "DELIVERED" | "READ" | "FAILED" | "PENDING" | "UNKNOWN";
-type TemplateStatus = "APPROVED" | "PENDING" | "REJECTED" | "DRAFT" | "UNKNOWN";
+type WhatsAppStatus = {
+  configured: boolean;
+  is_enabled: boolean;
+  is_active: boolean;
+  connected: boolean;
+  provider: string;
+  session_name: string;
+  session_mode: string;
+  session_status: string;
+  connected_phone: string;
+  device_label: string;
+  qr_code: string;
+  pairing_code: string;
+  last_connected_at: string | null;
+  last_check_at: string | null;
+  last_error_message: string;
+  gateway_message: string;
+};
 
-type WhatsAppLogRow = {
-  id: string;
+type WhatsAppConfig = {
+  id: number | null;
+  provider: string;
+  is_enabled: boolean;
+  is_active: boolean;
+  business_name: string;
+  phone_number: string;
+  default_language_code: string;
+  default_country_code: string;
+  allow_broadcasts: boolean;
+  send_test_enabled: boolean;
+  default_test_recipient: string;
+  session_name: string;
+  session_mode: string;
+  session_status: string;
+  session_connected_phone: string;
+  session_device_label: string;
+  last_error_message: string;
+};
+
+type InboxSummary = {
+  total_conversations: number;
+  open_conversations: number;
+  unread_conversations: number;
+  resolved_conversations: number;
+  pinned_conversations: number;
+  muted_conversations: number;
+  latest_message_at: string | null;
+};
+
+type WhatsAppLogRecord = {
+  id: number;
+  status: string;
+  delivery_status: string;
+  provider_status: string;
+  direction: string;
+  message_type: string;
   recipient_name: string;
   recipient_phone: string;
+  recipient_role: string;
+  template_name: string;
+  event_code: string;
+  trigger_source: string;
   message_body: string;
-  template_name: string;
-  event_code: string;
-  status: DeliveryStatus;
-  provider_status: string;
+  payload_summary: string;
+  failure_reason: string;
   error_message: string;
-  created_at: string;
+  external_message_id: string;
+  provider_message_id: string;
+  created_at: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
 };
 
-type WhatsAppTemplateRow = {
-  id: string;
-  template_name: string;
-  template_key: string;
-  event_code: string;
-  language_code: string;
-  status: TemplateStatus;
-  is_active: boolean;
-  created_at: string;
-};
-
-type WhatsAppSummary = {
-  connected: boolean;
-  configured: boolean;
-  total_logs: number;
-  sent_logs: number;
-  delivered_logs: number;
-  read_logs: number;
-  failed_logs: number;
-  pending_logs: number;
-  total_templates: number;
-  active_templates: number;
-  approved_templates: number;
-  pending_templates: number;
-  total_broadcasts: number;
-  total_conversations: number;
-  unread_conversations: number;
-  unread_messages: number;
-};
-
-type ApiEnvelope<T> = {
+type ApiResponse = {
   ok?: boolean;
   success?: boolean;
   message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
+  data?: unknown;
   results?: unknown[];
-  items?: unknown[];
-  rows?: unknown[];
-  logs?: unknown[];
-  templates?: unknown[];
-  broadcasts?: unknown[];
-  conversations?: unknown[];
-  summary?: Partial<WhatsAppSummary>;
-  stats?: Partial<WhatsAppSummary>;
+  count?: number;
+  config?: unknown;
+  summary?: unknown;
 };
 
-const DEFAULT_SUMMARY: WhatsAppSummary = {
-  connected: false,
-  configured: false,
-  total_logs: 0,
-  sent_logs: 0,
-  delivered_logs: 0,
-  read_logs: 0,
-  failed_logs: 0,
-  pending_logs: 0,
-  total_templates: 0,
-  active_templates: 0,
-  approved_templates: 0,
-  pending_templates: 0,
-  total_broadcasts: 0,
-  total_conversations: 0,
-  unread_conversations: 0,
-  unread_messages: 0,
+const DEFAULT_VISIBLE_COLUMNS: Record<ColumnKey, boolean> = {
+  select: true,
+  recipient: true,
+  event: true,
+  status: true,
+  message: true,
+  createdAt: true,
+  provider: true,
+  actions: true,
 };
 
-/* ============================================================
-   Locale / API
-============================================================ */
+const translations = {
+  ar: {
+    title: "واتساب",
+    subtitle: "إدارة اتصال واتساب، صندوق الوارد، القوالب، البث، السجلات، وحالة الجلسة.",
+    refresh: "تحديث",
+    settings: "الإعدادات",
+    inbox: "صندوق الوارد",
+    logs: "السجلات",
+    templates: "القوالب",
+    broadcasts: "البث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    connected: "متصل",
+    disconnected: "غير متصل",
+    connecting: "جاري الاتصال",
+    failed: "فشل الاتصال",
+    inactive: "غير مفعل",
+    enabled: "مفعل",
+    disabled: "معطل",
+    status: "الحالة",
+    session: "الجلسة",
+    sessionStatus: "حالة الجلسة",
+    connectedPhone: "الرقم المتصل",
+    device: "الجهاز",
+    lastConnected: "آخر اتصال",
+    lastCheck: "آخر فحص",
+    provider: "المزود",
+    businessName: "اسم النشاط",
+    defaultLanguage: "اللغة الافتراضية",
+    defaultCountry: "مفتاح الدولة",
+    allowBroadcasts: "السماح بالبث",
+    sendTestEnabled: "إرسال تجريبي",
+    qrSession: "إنشاء QR",
+    pairingSession: "رمز ربط",
+    disconnect: "فصل الجلسة",
+    phoneForPairing: "رقم الربط",
+    testMessage: "رسالة اختبار",
+    testPhone: "رقم الاختبار",
+    testName: "اسم المستلم",
+    testBody: "نص الرسالة",
+    sendTest: "إرسال اختبار",
+    totalInbox: "المحادثات",
+    unreadInbox: "غير مقروءة",
+    totalLogs: "سجلات الرسائل",
+    totalTemplates: "القوالب",
+    totalBroadcasts: "رسائل البث",
+    latestActivity: "آخر السجلات",
+    navigation: "إدارة واتساب",
+    navigationDesc: "انتقل للصفحات الداخلية لإدارة كل جزء من مركز واتساب.",
+    sessionPanel: "حالة الاتصال",
+    sessionPanelDesc: "متابعة حالة الجلسة الحالية وربط الجهاز.",
+    testPanel: "إرسال رسالة اختبار",
+    testPanelDesc: "استخدمها للتحقق من عمل الاتصال والإرسال.",
+    qrCode: "رمز QR",
+    pairingCode: "رمز الربط",
+    noQr: "لا يوجد QR حاليًا.",
+    noPairing: "لا يوجد رمز ربط حاليًا.",
+    recipient: "المستلم",
+    event: "الحدث",
+    message: "الرسالة",
+    createdAt: "تاريخ الإنشاء",
+    actions: "الإجراءات",
+    columns: "الأعمدة",
+    sort: "الترتيب",
+    selected: "محدد",
+    allStatuses: "كل الحالات",
+    sent: "مرسلة",
+    pending: "معلقة",
+    delivered: "تم التسليم",
+    read: "مقروءة",
+    failedStatus: "فاشلة",
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    recipientSort: "المستلم",
+    statusSort: "الحالة",
+    eventSort: "الحدث",
+    searchPlaceholder: "ابحث في السجلات بالرقم أو المستلم أو الحدث أو الرسالة...",
+    activeFilters: "فلاتر مفعلة",
+    clearSelection: "إلغاء التحديد",
+    noDataTitle: "لا توجد سجلات",
+    noDataDesc: "ستظهر سجلات واتساب هنا عند وجود رسائل.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض سجلات أخرى.",
+    errorTitle: "تعذر تحميل بيانات واتساب",
+    errorDesc: "تأكد من تشغيل الباكند وخدمة واتساب ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    actionSuccess: "تم تنفيذ العملية بنجاح.",
+    actionFailed: "تعذر تنفيذ العملية.",
+    testSent: "تمت معالجة رسالة الاختبار.",
+    requiredPhone: "رقم الجوال مطلوب.",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير واتساب",
+    generatedAt: "تاريخ الطباعة",
+    showing: "عرض",
+    rows: "صفوف",
+    of: "من",
+    unknown: "غير محدد",
+    open: "فتح",
+    copied: "تم النسخ",
+    copyMessage: "نسخ الرسالة",
+    noMessage: "لا توجد رسالة.",
+  },
+  en: {
+    title: "WhatsApp",
+    subtitle: "Manage WhatsApp connection, inbox, templates, broadcasts, logs, and session status.",
+    refresh: "Refresh",
+    settings: "Settings",
+    inbox: "Inbox",
+    logs: "Logs",
+    templates: "Templates",
+    broadcasts: "Broadcasts",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    connected: "Connected",
+    disconnected: "Disconnected",
+    connecting: "Connecting",
+    failed: "Connection failed",
+    inactive: "Inactive",
+    enabled: "Enabled",
+    disabled: "Disabled",
+    status: "Status",
+    session: "Session",
+    sessionStatus: "Session status",
+    connectedPhone: "Connected phone",
+    device: "Device",
+    lastConnected: "Last connected",
+    lastCheck: "Last check",
+    provider: "Provider",
+    businessName: "Business name",
+    defaultLanguage: "Default language",
+    defaultCountry: "Country code",
+    allowBroadcasts: "Allow broadcasts",
+    sendTestEnabled: "Test sending",
+    qrSession: "Create QR",
+    pairingSession: "Pairing code",
+    disconnect: "Disconnect",
+    phoneForPairing: "Pairing phone",
+    testMessage: "Test message",
+    testPhone: "Test phone",
+    testName: "Recipient name",
+    testBody: "Message body",
+    sendTest: "Send test",
+    totalInbox: "Conversations",
+    unreadInbox: "Unread",
+    totalLogs: "Message logs",
+    totalTemplates: "Templates",
+    totalBroadcasts: "Broadcast messages",
+    latestActivity: "Latest logs",
+    navigation: "WhatsApp management",
+    navigationDesc: "Open internal pages to manage each part of WhatsApp center.",
+    sessionPanel: "Connection status",
+    sessionPanelDesc: "Monitor current session and pair the device.",
+    testPanel: "Send test message",
+    testPanelDesc: "Use it to verify connection and sending.",
+    qrCode: "QR code",
+    pairingCode: "Pairing code",
+    noQr: "No QR available now.",
+    noPairing: "No pairing code available now.",
+    recipient: "Recipient",
+    event: "Event",
+    message: "Message",
+    createdAt: "Created at",
+    actions: "Actions",
+    columns: "Columns",
+    sort: "Sort",
+    selected: "Selected",
+    allStatuses: "All statuses",
+    sent: "Sent",
+    pending: "Pending",
+    delivered: "Delivered",
+    read: "Read",
+    failedStatus: "Failed",
+    newest: "Newest",
+    oldest: "Oldest",
+    recipientSort: "Recipient",
+    statusSort: "Status",
+    eventSort: "Event",
+    searchPlaceholder: "Search logs by phone, recipient, event, or message...",
+    activeFilters: "Active filters",
+    clearSelection: "Clear selection",
+    noDataTitle: "No logs",
+    noDataDesc: "WhatsApp logs will appear here once messages exist.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other logs.",
+    errorTitle: "Unable to load WhatsApp data",
+    errorDesc: "Make sure the backend and WhatsApp service are running, then try again.",
+    tryAgain: "Try again",
+    actionSuccess: "Action completed successfully.",
+    actionFailed: "Unable to complete action.",
+    testSent: "Test message processed.",
+    requiredPhone: "Phone number is required.",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "WhatsApp report",
+    generatedAt: "Generated at",
+    showing: "Showing",
+    rows: "Rows",
+    of: "of",
+    unknown: "Unknown",
+    open: "Open",
+    copied: "Copied",
+    copyMessage: "Copy message",
+    noMessage: "No message.",
+  },
+} as const;
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+const NAVIGATION_ITEMS = [
+  {
+    key: "inbox",
+    href: "/system/whatsapp/inbox",
+    icon: Inbox,
+  },
+  {
+    key: "templates",
+    href: "/system/whatsapp/templates",
+    icon: Layers3,
+  },
+  {
+    key: "broadcasts",
+    href: "/system/whatsapp/broadcasts",
+    icon: Radio,
+  },
+  {
+    key: "logs",
+    href: "/system/whatsapp/logs",
+    icon: TerminalSquare,
+  },
+  {
+    key: "settings",
+    href: "/system/whatsapp/settings",
+    icon: Settings,
+  },
+] as const;
 
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
 
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
+}
+
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
+
+  return fallback;
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasAnyPermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
+    if (["1", "true", "yes", "on", "enabled", "active", "connected"].includes(normalized)) {
+      return true;
     }
 
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "support"].includes(role),
-    );
+    if (["0", "false", "no", "off", "disabled", "inactive", "disconnected"].includes(normalized)) {
+      return false;
+    }
   }
 
-  return true;
+  return fallback;
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
+function toEnglishDigits(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "";
 
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "واتساب" : "WhatsApp",
-    subtitle: isArabic
-      ? "لوحة متابعة مركز واتساب والمحادثات والقوالب والسجلات والبث الجماعي."
-      : "Overview for WhatsApp center, inbox, templates, logs, and broadcasts.",
-
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-
-    inbox: isArabic ? "صندوق المحادثات" : "Inbox",
-    logs: isArabic ? "سجلات واتساب" : "WhatsApp Logs",
-    templates: isArabic ? "قوالب واتساب" : "WhatsApp Templates",
-    broadcasts: isArabic ? "البث الجماعي" : "Broadcasts",
-    settings: isArabic ? "إعدادات واتساب" : "WhatsApp Settings",
-
-    connected: isArabic ? "متصل" : "Connected",
-    disconnected: isArabic ? "غير متصل" : "Disconnected",
-    configured: isArabic ? "مهيأ" : "Configured",
-    notConfigured: isArabic ? "غير مهيأ" : "Not Configured",
-
-    totalLogs: isArabic ? "إجمالي الرسائل" : "Total Messages",
-    sentLogs: isArabic ? "مرسلة" : "Sent",
-    deliveredLogs: isArabic ? "تم التسليم" : "Delivered",
-    readLogs: isArabic ? "مقروءة" : "Read",
-    failedLogs: isArabic ? "فاشلة" : "Failed",
-    pendingLogs: isArabic ? "قيد الانتظار" : "Pending",
-    totalTemplates: isArabic ? "القوالب" : "Templates",
-    activeTemplates: isArabic ? "قوالب نشطة" : "Active Templates",
-    approvedTemplates: isArabic ? "قوالب معتمدة" : "Approved Templates",
-    totalBroadcasts: isArabic ? "عمليات البث" : "Broadcasts",
-    totalConversations: isArabic ? "المحادثات" : "Conversations",
-    unreadConversations: isArabic ? "محادثات غير مقروءة" : "Unread Conversations",
-    unreadMessages: isArabic ? "رسائل غير مقروءة" : "Unread Messages",
-
-    shortcutsTitle: isArabic ? "اختصارات واتساب" : "WhatsApp Shortcuts",
-    shortcutsDesc: isArabic
-      ? "الوصول السريع للصفحات التي أزلناها من السايدر بعد تنظيف قسم التواصل."
-      : "Quick access to pages removed from the sidebar after communication cleanup.",
-
-    latestLogsTitle: isArabic ? "أحدث سجلات واتساب" : "Latest WhatsApp Logs",
-    latestLogsDesc: isArabic
-      ? "آخر الرسائل وحالة الإرسال والمستلم."
-      : "Latest messages with delivery status and recipient.",
-
-    searchPlaceholder: isArabic
-      ? "ابحث في سجلات واتساب بالاسم أو الجوال أو الرسالة أو القالب..."
-      : "Search WhatsApp logs by name, phone, message, or template...",
-
-    table: {
-      message: isArabic ? "الرسالة" : "Message",
-      recipient: isArabic ? "المستلم" : "Recipient",
-      template: isArabic ? "القالب" : "Template",
-      event: isArabic ? "الحدث" : "Event",
-      status: isArabic ? "الحالة" : "Status",
-      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-    },
-
-    sent: isArabic ? "مرسل" : "Sent",
-    delivered: isArabic ? "تم التسليم" : "Delivered",
-    read: isArabic ? "مقروء" : "Read",
-    failed: isArabic ? "فشل" : "Failed",
-    pending: isArabic ? "قيد الانتظار" : "Pending",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    approved: isArabic ? "معتمد" : "Approved",
-    rejected: isArabic ? "مرفوض" : "Rejected",
-    draft: isArabic ? "مسودة" : "Draft",
-
-    open: isArabic ? "فتح" : "Open",
-
-    emptyTitle: isArabic ? "لا توجد سجلات واتساب" : "No WhatsApp logs",
-    emptyText: isArabic
-      ? "ستظهر سجلات واتساب هنا بعد إرسال أول رسالة."
-      : "WhatsApp logs will appear here after sending the first message.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث."
-      : "Try changing your search terms.",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض واتساب" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض مركز واتساب. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view WhatsApp center. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل بيانات واتساب."
-      : "Unable to load WhatsApp data.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث بيانات واتساب."
-      : "WhatsApp data refreshed.",
-
-    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-  };
+  return String(value)
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
 }
 
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
+function normalizePhone(value: string) {
+  return toEnglishDigits(value).replace(/[^\d+]/g, "");
 }
 
-function formatNumber(value: unknown): string {
+function formatInteger(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(toNumber(value));
 }
 
-function formatDate(value: string, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const parsed = new Date(value);
 
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).slice(0, 10);
+  }
+
+  return parsed.toISOString().slice(0, 10);
 }
 
-function escapeHtml(value: string | number) {
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).replace("T", " ").slice(0, 16);
+  }
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -569,1174 +545,1642 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
 
-    if (value !== undefined && value !== null && value !== "") return value;
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
   }
 
-  for (const container of ["log", "message", "template", "data", "payload"]) {
-    const nested = obj[container];
+  return envBase;
+}
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const query = params?.toString();
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
+}
 
-      if (value !== undefined && value !== null && value !== "") return value;
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const found = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${name}=`));
+
+  return found ? decodeURIComponent(found.split("=").slice(1).join("=")) : "";
+}
+
+async function fetchJson<T>(
+  url: string,
+  options?: {
+    signal?: AbortSignal;
+    method?: "GET" | "POST";
+    body?: unknown;
+  },
+): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
+
+  const response = await fetch(url, {
+    method: options?.method || "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal: options?.signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options?.method === "POST" ? { "Content-Type": "application/json" } : {}),
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body:
+      options?.method === "POST"
+        ? JSON.stringify(options.body || {})
+        : undefined,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
 }
 
-function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
-  if (!payload) return [];
-
-  const data = asDict(payload.data);
-  const directValue = (payload as Dict)[key];
-
-  if (Array.isArray(directValue)) return directValue;
+function extractArray(payload: ApiResponse) {
   if (Array.isArray(payload.results)) return payload.results;
-  if (Array.isArray(payload.items)) return payload.items;
-  if (Array.isArray(payload.rows)) return payload.rows;
-  if (Array.isArray(payload.logs)) return payload.logs;
-  if (Array.isArray(payload.templates)) return payload.templates;
-  if (Array.isArray(payload.broadcasts)) return payload.broadcasts;
-  if (Array.isArray(payload.conversations)) return payload.conversations;
-
-  if (Array.isArray(data[key])) return data[key] as unknown[];
-  if (Array.isArray(data.results)) return data.results as unknown[];
-  if (Array.isArray(data.items)) return data.items as unknown[];
-  if (Array.isArray(data.rows)) return data.rows as unknown[];
-  if (Array.isArray(data.logs)) return data.logs as unknown[];
-  if (Array.isArray(data.templates)) return data.templates as unknown[];
-  if (Array.isArray(data.broadcasts)) return data.broadcasts as unknown[];
-  if (Array.isArray(data.conversations)) return data.conversations as unknown[];
-
   if (Array.isArray(payload.data)) return payload.data;
+
+  const data = asRecord(payload.data);
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.items)) return data.items;
 
   return [];
 }
 
-function normalizeDeliveryStatus(value: unknown): DeliveryStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["SENT", "SENDING"].includes(clean)) return "SENT";
-  if (["DELIVERED"].includes(clean)) return "DELIVERED";
-  if (["READ", "SEEN"].includes(clean)) return "READ";
-  if (["FAILED", "ERROR"].includes(clean)) return "FAILED";
-  if (["PENDING", "QUEUED", "WAITING"].includes(clean)) return "PENDING";
-
-  return "UNKNOWN";
-}
-
-function normalizeTemplateStatus(value: unknown): TemplateStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["APPROVED", "ACTIVE"].includes(clean)) return "APPROVED";
-  if (["PENDING", "SUBMITTED"].includes(clean)) return "PENDING";
-  if (["REJECTED", "FAILED"].includes(clean)) return "REJECTED";
-  if (["DRAFT", "NEW"].includes(clean)) return "DRAFT";
-
-  return "UNKNOWN";
-}
-
-function normalizeWhatsAppStatus(payload: ApiEnvelope<unknown> | null): WhatsAppStatus {
-  const data = asDict(payload?.data);
-  const merged = {
-    ...data,
-    ...asDict(payload),
-  };
-
-  const connected = Boolean(
-    merged.connected ||
-      merged.is_connected ||
-      merged.session_connected ||
-      String(merged.session_status || "").toLowerCase() === "connected",
-  );
-
-  const hasError = Boolean(merged.last_error_message || merged.error_message);
-
-  if (connected) return "CONNECTED";
-  if (hasError) return "ERROR";
-
-  const sessionStatus = String(merged.session_status || merged.status || "").toUpperCase();
-
-  if (["PENDING", "CONNECTING", "WAITING"].includes(sessionStatus)) {
-    return "PENDING";
-  }
-
-  if (["DISCONNECTED", "OFFLINE", "INACTIVE"].includes(sessionStatus)) {
-    return "DISCONNECTED";
-  }
-
-  return "UNKNOWN";
-}
-
-function normalizeLog(item: unknown, index: number): WhatsAppLogRow {
-  const obj = asDict(item);
+function normalizeStatus(value: unknown): WhatsAppStatus {
+  const item = asRecord(value);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    recipient_name: String(
-      getNestedValue(obj, ["recipient_name", "customer_name", "name"]) || "",
-    ),
-    recipient_phone: String(
-      getNestedValue(obj, ["recipient_phone", "phone", "mobile"]) || "",
-    ),
-    message_body: String(
-      getNestedValue(obj, ["message_body", "body", "content", "payload_summary"]) || "",
-    ),
-    template_name: String(
-      getNestedValue(obj, ["template_name", "template_key", "template"]) || "",
-    ),
-    event_code: String(getNestedValue(obj, ["event_code", "event", "trigger_source"]) || ""),
-    status: normalizeDeliveryStatus(
-      getNestedValue(obj, ["delivery_status", "provider_status", "status"]),
-    ),
-    provider_status: String(
-      getNestedValue(obj, ["provider_status", "gateway_status"]) || "",
-    ),
-    error_message: String(
-      getNestedValue(obj, ["error_message", "failure_reason", "last_error"]) || "",
-    ),
-    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
+    configured: toBoolean(item.configured, true),
+    is_enabled: toBoolean(item.is_enabled),
+    is_active: toBoolean(item.is_active),
+    connected: toBoolean(item.connected),
+    provider: normalizeText(item.provider || "whatsapp_web_session"),
+    session_name: normalizeText(item.session_name),
+    session_mode: normalizeText(item.session_mode || "qr"),
+    session_status: normalizeText(item.session_status || "disconnected"),
+    connected_phone: normalizeText(item.connected_phone || item.phone_number),
+    device_label: normalizeText(item.device_label || item.device_name),
+    qr_code: normalizeText(item.qr_code),
+    pairing_code: normalizeText(item.pairing_code),
+    last_connected_at: normalizeText(item.last_connected_at) || null,
+    last_check_at: normalizeText(item.last_check_at) || null,
+    last_error_message: normalizeText(item.last_error_message),
+    gateway_message: normalizeText(item.gateway_message || item.message),
   };
 }
 
-function normalizeTemplate(item: unknown, index: number): WhatsAppTemplateRow {
-  const obj = asDict(item);
+function normalizeConfig(value: unknown): WhatsAppConfig {
+  const item = asRecord(value);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    template_name: String(
-      getNestedValue(obj, ["template_name", "name", "title"]) || "-",
-    ),
-    template_key: String(
-      getNestedValue(obj, ["template_key", "key", "code"]) || "",
-    ),
-    event_code: String(getNestedValue(obj, ["event_code", "event"]) || ""),
-    language_code: String(
-      getNestedValue(obj, ["language_code", "language"]) || "",
-    ),
-    status: normalizeTemplateStatus(
-      getNestedValue(obj, ["approval_status", "provider_status", "status"]),
-    ),
-    is_active: Boolean(getNestedValue(obj, ["is_active", "active"]) ?? false),
-    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
+    id: item.id === null || item.id === undefined ? null : toNumber(item.id),
+    provider: normalizeText(item.provider || "whatsapp_web_session"),
+    is_enabled: toBoolean(item.is_enabled),
+    is_active: toBoolean(item.is_active),
+    business_name: normalizeText(item.business_name || item.app_name || "Primey Care"),
+    phone_number: normalizeText(item.phone_number),
+    default_language_code: normalizeText(item.default_language_code || "ar"),
+    default_country_code: normalizeText(item.default_country_code || "966"),
+    allow_broadcasts: toBoolean(item.allow_broadcasts, true),
+    send_test_enabled: toBoolean(item.send_test_enabled, true),
+    default_test_recipient: normalizeText(item.default_test_recipient),
+    session_name: normalizeText(item.session_name || "primey-care-system-session"),
+    session_mode: normalizeText(item.session_mode || "qr"),
+    session_status: normalizeText(item.session_status || "disconnected"),
+    session_connected_phone: normalizeText(item.session_connected_phone),
+    session_device_label: normalizeText(item.session_device_label),
+    last_error_message: normalizeText(item.last_error_message),
   };
 }
 
-function extractSummary(payload: ApiEnvelope<unknown> | null) {
-  if (!payload) return {};
-
-  const data = asDict(payload.data);
+function normalizeInboxSummary(value: unknown): InboxSummary {
+  const item = asRecord(value);
 
   return {
-    ...asDict(payload.summary),
-    ...asDict(payload.stats),
-    ...asDict(data.summary),
-    ...asDict(data.stats),
-    ...asDict(data.totals),
-    ...asDict(data),
-  };
-}
-
-function buildSummary({
-  statusPayload,
-  logs,
-  templates,
-  broadcastsCount,
-  inboxSummary,
-}: {
-  statusPayload: ApiEnvelope<unknown> | null;
-  logs: WhatsAppLogRow[];
-  templates: WhatsAppTemplateRow[];
-  broadcastsCount: number;
-  inboxSummary: Dict;
-}): WhatsAppSummary {
-  const statusData = {
-    ...asDict(statusPayload?.data),
-    ...asDict(statusPayload),
-  };
-
-  const apiInbox = asDict(inboxSummary);
-
-  const connectedStatus = normalizeWhatsAppStatus(statusPayload);
-  const configured = Boolean(
-    statusData.configured ||
-      statusData.is_enabled ||
-      statusData.is_active ||
-      statusData.phone_number_id ||
-      statusData.connected_phone,
-  );
-
-  return {
-    connected: connectedStatus === "CONNECTED",
-    configured,
-    total_logs: logs.length,
-    sent_logs: logs.filter((item) => item.status === "SENT").length,
-    delivered_logs: logs.filter((item) => item.status === "DELIVERED").length,
-    read_logs: logs.filter((item) => item.status === "READ").length,
-    failed_logs: logs.filter((item) => item.status === "FAILED").length,
-    pending_logs: logs.filter((item) => item.status === "PENDING").length,
-    total_templates: templates.length,
-    active_templates: templates.filter((item) => item.is_active).length,
-    approved_templates: templates.filter((item) => item.status === "APPROVED").length,
-    pending_templates: templates.filter((item) => item.status === "PENDING").length,
-    total_broadcasts: broadcastsCount,
     total_conversations: toNumber(
-      apiInbox.total_conversations || apiInbox.conversations_count,
+      item.total_conversations ?? item.total ?? item.count,
     ),
+    open_conversations: toNumber(item.open_conversations ?? item.open),
     unread_conversations: toNumber(
-      apiInbox.unread_conversations || apiInbox.unread_conversations_count,
+      item.unread_conversations ?? item.unread ?? item.unread_count,
     ),
-    unread_messages: toNumber(
-      apiInbox.unread_messages || apiInbox.unread_messages_count,
-    ),
+    resolved_conversations: toNumber(item.resolved_conversations ?? item.resolved),
+    pinned_conversations: toNumber(item.pinned_conversations ?? item.pinned),
+    muted_conversations: toNumber(item.muted_conversations ?? item.muted),
+    latest_message_at: normalizeText(item.latest_message_at || item.last_message_at) || null,
   };
 }
 
-function statusLabel(status: DeliveryStatus, locale: AppLocale) {
-  const t = dictionary(locale);
+function normalizeLog(value: unknown): WhatsAppLogRecord {
+  const item = asRecord(value);
 
-  const labels: Record<DeliveryStatus, string> = {
-    SENT: t.sent,
-    DELIVERED: t.delivered,
-    READ: t.read,
-    FAILED: t.failed,
-    PENDING: t.pending,
-    UNKNOWN: t.unknown,
+  return {
+    id: toNumber(item.id),
+    status: normalizeText(item.status || item.delivery_status || "PENDING").toUpperCase(),
+    delivery_status: normalizeText(item.delivery_status || item.status || "PENDING").toUpperCase(),
+    provider_status: normalizeText(item.provider_status),
+    direction: normalizeText(item.direction || "OUTBOUND"),
+    message_type: normalizeText(item.message_type),
+    recipient_name: normalizeText(item.recipient_name),
+    recipient_phone: normalizeText(item.recipient_phone),
+    recipient_role: normalizeText(item.recipient_role),
+    template_name: normalizeText(item.template_name),
+    event_code: normalizeText(item.event_code),
+    trigger_source: normalizeText(item.trigger_source),
+    message_body: normalizeText(item.message_body || item.payload_summary),
+    payload_summary: normalizeText(item.payload_summary || item.message_body),
+    failure_reason: normalizeText(item.failure_reason),
+    error_message: normalizeText(item.error_message || item.failure_reason),
+    external_message_id: normalizeText(item.external_message_id),
+    provider_message_id: normalizeText(item.provider_message_id || item.external_message_id),
+    created_at: normalizeText(item.created_at) || null,
+    sent_at: normalizeText(item.sent_at) || null,
+    delivered_at: normalizeText(item.delivered_at) || null,
+    read_at: normalizeText(item.read_at) || null,
   };
-
-  return labels[status];
 }
 
-function templateStatusLabel(status: TemplateStatus, locale: AppLocale) {
-  const t = dictionary(locale);
+function extractConfig(payload: ApiResponse) {
+  if (payload.config) return payload.config;
 
-  const labels: Record<TemplateStatus, string> = {
-    APPROVED: t.approved,
-    PENDING: t.pending,
-    REJECTED: t.rejected,
-    DRAFT: t.draft,
-    UNKNOWN: t.unknown,
-  };
+  const data = asRecord(payload.data);
+  if (data.config) return data.config;
 
-  return labels[status];
+  return data;
 }
 
-function statusBadge(status: DeliveryStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
+function extractSummary(payload: ApiResponse) {
+  if (payload.summary) return payload.summary;
+
+  const data = asRecord(payload.data);
+  if (data.summary) return data.summary;
+
+  return data;
+}
+
+function getConnectionLabel(status: WhatsAppStatus, locale: Locale) {
+  const t = translations[locale];
+  const sessionStatus = status.session_status.toLowerCase();
+
+  if (status.connected || sessionStatus === "connected") return t.connected;
+  if (sessionStatus.includes("qr") || sessionStatus.includes("pair") || sessionStatus.includes("connect")) return t.connecting;
+  if (sessionStatus.includes("fail") || sessionStatus.includes("error")) return t.failed;
+  if (!status.is_active) return t.inactive;
+
+  return t.disconnected;
+}
+
+function getConnectionBadgeClass(status: WhatsAppStatus) {
+  const sessionStatus = status.session_status.toLowerCase();
+
+  if (status.connected || sessionStatus === "connected") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  if (sessionStatus.includes("qr") || sessionStatus.includes("pair") || sessionStatus.includes("connect")) {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  if (sessionStatus.includes("fail") || sessionStatus.includes("error")) {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+  }
+
+  return "border-muted bg-muted/40 text-muted-foreground hover:bg-muted/40";
+}
+
+function getDeliveryLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const status = normalizeText(value).toUpperCase();
+
+  if (status === "SENT") return t.sent;
+  if (status === "DELIVERED") return t.delivered;
+  if (status === "READ") return t.read;
+  if (status === "FAILED") return t.failedStatus;
+
+  return t.pending;
+}
+
+function getDeliveryBadgeClass(value: string) {
+  const status = normalizeText(value).toUpperCase();
 
   if (status === "SENT" || status === "DELIVERED" || status === "READ") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "PENDING") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
   if (status === "FAILED") {
-    return (
-      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
-        {label}
-      </Badge>
-    );
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
   }
 
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function KpiCard({
+  title,
+  value,
+  trend,
+  icon: Icon,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
+
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
+        </div>
+      </CardHeader>
+    </Card>
+  );
+}
+
+function StatusBadge({
+  status,
+  locale,
+}: {
+  status: WhatsAppStatus;
+  locale: Locale;
+}) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full px-2.5 py-1 text-xs font-medium",
+        getConnectionBadgeClass(status),
+      )}
+    >
+      {getConnectionLabel(status, locale)}
     </Badge>
   );
 }
 
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+function DeliveryBadge({
+  value,
+  locale,
+}: {
+  value: string;
+  locale: Locale;
+}) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full px-2.5 py-1 text-xs font-medium",
+        getDeliveryBadgeClass(value),
+      )}
+    >
+      {getDeliveryLabel(value, locale)}
+    </Badge>
+  );
 }
 
-function PageSkeleton() {
+function HeaderSortButton({
+  children,
+  active,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <SkeletonLine className="h-8 w-28" />
-              <SkeletonLine className="mt-3 h-4 w-24" />
-            </CardContent>
-          </Card>
-        ))}
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex w-full items-center justify-start gap-1 truncate text-xs font-semibold transition hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      <span className="truncate">{children}</span>
+      <ArrowUpDown className="h-3.5 w-3.5 shrink-0" />
+    </button>
+  );
+}
+
+function TableHeaderCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <TableHead
+      className={cn(
+        "h-11 whitespace-nowrap px-4 text-right align-middle text-xs font-semibold text-muted-foreground",
+        className,
+      )}
+    >
+      {children}
+    </TableHead>
+  );
+}
+
+function TableBodyCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <TableCell
+      className={cn(
+        "h-[62px] overflow-hidden px-4 text-right align-middle",
+        className,
+      )}
+    >
+      {children}
+    </TableCell>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b py-3 last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="min-w-0 text-left text-sm font-medium text-foreground">
+        {value}
       </div>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-24 w-full rounded-2xl" />
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="space-y-3 p-5">
-          <SkeletonLine className="h-7 w-48" />
-          {Array.from({ length: 7 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
-          ))}
-        </CardContent>
-      </Card>
     </div>
   );
 }
 
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  title,
-  locale,
-  summary,
-  rows,
-}: {
-  filename: string;
-  title: string;
-  locale: AppLocale;
-  summary: WhatsAppSummary;
-  rows: WhatsAppLogRow[];
-}) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const t = dictionary(locale);
-
-  const rowsHtml = rows
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.recipient_name || "-")}</td>
-          <td>${escapeHtml(item.recipient_phone || "-")}</td>
-          <td>${escapeHtml(item.template_name || "-")}</td>
-          <td>${escapeHtml(item.event_code || "-")}</td>
-          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(item.message_body || "-")}</td>
-          <td>${escapeHtml(item.error_message || "-")}</td>
-          <td>${escapeHtml(formatDate(item.created_at, locale))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-        </style>
-      </head>
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="8">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="8"></td></tr>
-          <tr><td class="section" colspan="8">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalLogs)}</td><td colspan="7">${escapeHtml(formatNumber(summary.total_logs))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.deliveredLogs)}</td><td colspan="7">${escapeHtml(formatNumber(summary.delivered_logs))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.failedLogs)}</td><td colspan="7">${escapeHtml(formatNumber(summary.failed_logs))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalTemplates)}</td><td colspan="7">${escapeHtml(formatNumber(summary.total_templates))}</td></tr>
-
-          <tr><td colspan="8"></td></tr>
-          <tr>
-            <th>${escapeHtml(t.table.recipient)}</th>
-            <th>${escapeHtml("Phone")}</th>
-            <th>${escapeHtml(t.table.template)}</th>
-            <th>${escapeHtml(t.table.event)}</th>
-            <th>${escapeHtml(t.table.status)}</th>
-            <th>${escapeHtml(t.table.message)}</th>
-            <th>${escapeHtml("Error")}</th>
-            <th>${escapeHtml(t.table.createdAt)}</th>
-          </tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  summary,
-  rows,
-}: {
-  locale: AppLocale;
-  title: string;
-  summary: WhatsAppSummary;
-  rows: WhatsAppLogRow[];
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-
-  const tableRows = rows
-    .slice(0, 40)
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.recipient_name || "-")}</td>
-          <td>${escapeHtml(item.recipient_phone || "-")}</td>
-          <td>${escapeHtml(item.template_name || "-")}</td>
-          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(formatDate(item.created_at, locale))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 5px 12px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          .grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .box {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .box span { color: #6b7280; display: block; font-size: 11px; }
-          .box strong { display: block; margin-top: 6px; font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-          th { background: #f3f4f6; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
-          </div>
-          <div class="badge">Primey Care</div>
+function DashboardSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-52" />
+          <Skeleton className="h-4 w-96" />
         </div>
 
-        <div class="grid">
-          <div class="box"><span>${escapeHtml(t.totalLogs)}</span><strong>${escapeHtml(formatNumber(summary.total_logs))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.deliveredLogs)}</span><strong>${escapeHtml(formatNumber(summary.delivered_logs))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.failedLogs)}</span><strong>${escapeHtml(formatNumber(summary.failed_logs))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.totalTemplates)}</span><strong>${escapeHtml(formatNumber(summary.total_templates))}</strong></div>
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
         </div>
+      </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th>${escapeHtml(t.table.recipient)}</th>
-              <th>${escapeHtml("Phone")}</th>
-              <th>${escapeHtml(t.table.template)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-              <th>${escapeHtml(t.table.createdAt)}</th>
-            </tr>
-          </thead>
-          <tbody>${tableRows || `<tr><td colspan="5">${escapeHtml(t.emptyTitle)}</td></tr>`}</tbody>
-        </table>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="min-h-[112px] px-6 py-5">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-5 w-20" />
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
 
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-80 w-full" />
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-4">
+            {Array.from({ length: 7 }).map((_, index) => (
+              <Skeleton key={index} className="h-10 w-full" />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
 }
-
-/* ============================================================
-   Page
-============================================================ */
 
 export default function SystemWhatsAppPage() {
-  const auth = useAuth() as unknown;
+  const [locale, setLocale] = React.useState<Locale>("ar");
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [rows, setRows] = useState<WhatsAppLogRow[]>([]);
-  const [templates, setTemplates] = useState<WhatsAppTemplateRow[]>([]);
-  const [summary, setSummary] = useState<WhatsAppSummary>(DEFAULT_SUMMARY);
-  const [query, setQuery] = useState("");
-  const [connectionStatus, setConnectionStatus] = useState<WhatsAppStatus>("UNKNOWN");
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [status, setStatus] = React.useState<WhatsAppStatus>(() =>
+    normalizeStatus({}),
+  );
+  const [config, setConfig] = React.useState<WhatsAppConfig>(() =>
+    normalizeConfig({}),
+  );
+  const [summary, setSummary] = React.useState<InboxSummary>(() =>
+    normalizeInboxSummary({}),
+  );
+  const [logs, setLogs] = React.useState<WhatsAppLogRecord[]>([]);
+  const [templatesCount, setTemplatesCount] = React.useState(0);
+  const [broadcastsCount, setBroadcastsCount] = React.useState(0);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [actionLoading, setActionLoading] = React.useState("");
+  const [error, setError] = React.useState("");
 
-  const canView = hasAnyPermission(
-    auth,
-    ["whatsapp.view", "whatsapp.logs.view", "system.view"],
-    "view",
+  const [searchInput, setSearchInput] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
+  const [sortKey, setSortKey] = React.useState<SortKey>("newest");
+  const [selectedIds, setSelectedIds] = React.useState<number[]>([]);
+  const [visibleColumns, setVisibleColumns] =
+    React.useState<Record<ColumnKey, boolean>>(DEFAULT_VISIBLE_COLUMNS);
+
+  const [pairingPhone, setPairingPhone] = React.useState("");
+  const [testPhone, setTestPhone] = React.useState("");
+  const [testName, setTestName] = React.useState("");
+  const [testMessage, setTestMessage] = React.useState("");
+
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
+
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
+
+    applyLocale();
+
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
+
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
+
+  const loadDashboard = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
+
+      try {
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setError("");
+
+        const logsParams = new URLSearchParams({ limit: "100" });
+
+        const [
+          statusResponse,
+          settingsResponse,
+          inboxResponse,
+          logsResponse,
+          templatesResponse,
+          broadcastsResponse,
+        ] = await Promise.allSettled([
+          fetchJson<ApiResponse>(makeApiUrl("/api/whatsapp/status/"), {
+            signal: controller.signal,
+          }),
+          fetchJson<ApiResponse>(makeApiUrl("/api/whatsapp/settings/"), {
+            signal: controller.signal,
+          }),
+          fetchJson<ApiResponse>(makeApiUrl("/api/whatsapp/inbox/summary/"), {
+            signal: controller.signal,
+          }),
+          fetchJson<ApiResponse>(makeApiUrl("/api/whatsapp/logs/", logsParams), {
+            signal: controller.signal,
+          }),
+          fetchJson<ApiResponse>(makeApiUrl("/api/whatsapp/templates/"), {
+            signal: controller.signal,
+          }),
+          fetchJson<ApiResponse>(makeApiUrl("/api/whatsapp/broadcasts/"), {
+            signal: controller.signal,
+          }),
+        ]);
+
+        if (statusResponse.status === "fulfilled") {
+          setStatus(normalizeStatus(statusResponse.value));
+        } else {
+          throw statusResponse.reason;
+        }
+
+        if (settingsResponse.status === "fulfilled") {
+          const nextConfig = normalizeConfig(extractConfig(settingsResponse.value));
+          setConfig(nextConfig);
+          setTestPhone((current) => current || nextConfig.default_test_recipient);
+        }
+
+        if (inboxResponse.status === "fulfilled") {
+          setSummary(normalizeInboxSummary(extractSummary(inboxResponse.value)));
+        }
+
+        if (logsResponse.status === "fulfilled") {
+          setLogs(extractArray(logsResponse.value).map(normalizeLog));
+        }
+
+        if (templatesResponse.status === "fulfilled") {
+          setTemplatesCount(
+            toNumber(templatesResponse.value.count, extractArray(templatesResponse.value).length),
+          );
+        }
+
+        if (broadcastsResponse.status === "fulfilled") {
+          setBroadcastsCount(
+            toNumber(broadcastsResponse.value.count, extractArray(broadcastsResponse.value).length),
+          );
+        }
+
+        setSelectedIds([]);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+
+      return () => controller.abort();
+    },
+    [t.errorDesc],
   );
 
-  const canViewInbox = hasAnyPermission(
-    auth,
-    ["whatsapp.view", "whatsapp.inbox.view"],
-    "view",
-  );
+  React.useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
 
-  const canViewLogs = hasAnyPermission(
-    auth,
-    ["whatsapp.view", "whatsapp.logs.view"],
-    "view",
-  );
+  const filteredLogs = React.useMemo(() => {
+    const query = searchInput.trim().toLowerCase();
 
-  const canViewTemplates = hasAnyPermission(
-    auth,
-    ["whatsapp.view", "whatsapp.templates.view"],
-    "view",
-  );
+    let items = logs.filter((log) => {
+      const matchesSearch =
+        !query ||
+        log.recipient_name.toLowerCase().includes(query) ||
+        log.recipient_phone.toLowerCase().includes(query) ||
+        log.event_code.toLowerCase().includes(query) ||
+        log.message_body.toLowerCase().includes(query) ||
+        log.failure_reason.toLowerCase().includes(query) ||
+        log.external_message_id.toLowerCase().includes(query);
 
-  const canViewBroadcasts = hasAnyPermission(
-    auth,
-    ["whatsapp.view", "whatsapp.broadcasts.view"],
-    "view",
-  );
+      const matchesStatus =
+        statusFilter === "all" ||
+        log.delivery_status.toUpperCase() === statusFilter ||
+        log.status.toUpperCase() === statusFilter;
 
-  const canViewSettings = hasAnyPermission(
-    auth,
-    ["whatsapp.settings", "whatsapp.settings.view", "system.settings"],
-    "view",
-  );
+      return matchesSearch && matchesStatus;
+    });
 
-  const canExport = hasAnyPermission(
-    auth,
-    ["whatsapp.export", "reports.export"],
-    "action",
-  );
+    items = [...items].sort((a, b) => {
+      if (sortKey === "oldest") {
+        return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+      }
 
-  const canPrint = hasAnyPermission(
-    auth,
-    ["whatsapp.print", "reports.print"],
-    "action",
-  );
+      if (sortKey === "recipient") {
+        return (a.recipient_name || a.recipient_phone).localeCompare(
+          b.recipient_name || b.recipient_phone,
+        );
+      }
 
-  const filteredRows = useMemo(() => {
-    const clean = query.trim().toLowerCase();
+      if (sortKey === "status") {
+        return a.delivery_status.localeCompare(b.delivery_status);
+      }
 
-    const sorted = [...rows].sort((a, b) =>
-      String(b.created_at).localeCompare(String(a.created_at)),
-    );
+      if (sortKey === "event") {
+        return a.event_code.localeCompare(b.event_code);
+      }
 
-    if (!clean) return sorted.slice(0, 12);
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    });
 
-    return sorted
-      .filter((item) =>
-        [
-          item.recipient_name,
-          item.recipient_phone,
-          item.message_body,
-          item.template_name,
-          item.event_code,
-          item.provider_status,
-          item.error_message,
-          statusLabel(item.status, locale),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(clean),
-      )
-      .slice(0, 12);
-  }, [locale, query, rows]);
+    return items;
+  }, [logs, searchInput, sortKey, statusFilter]);
 
-  const activeSummary = useMemo(
-    () => ({
-      ...summary,
-      total_logs: filteredRows.length,
-      sent_logs: filteredRows.filter((item) => item.status === "SENT").length,
-      delivered_logs: filteredRows.filter((item) => item.status === "DELIVERED").length,
-      read_logs: filteredRows.filter((item) => item.status === "READ").length,
-      failed_logs: filteredRows.filter((item) => item.status === "FAILED").length,
-      pending_logs: filteredRows.filter((item) => item.status === "PENDING").length,
-    }),
-    [filteredRows, summary],
-  );
+  const hasActiveFilters =
+    Boolean(searchInput.trim()) ||
+    statusFilter !== "all" ||
+    sortKey !== "newest";
 
-  const displaySummary = query.trim() ? activeSummary : summary;
-  const hasData = rows.length > 0;
-  const hasSearch = query.trim().length > 0;
+  const visibleColumnCount = Object.values(visibleColumns).filter(Boolean).length || 1;
 
-  const loadWhatsApp = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setRows([]);
-        setTemplates([]);
-        setSummary(DEFAULT_SUMMARY);
-        setIsLoading(false);
+  const allPageSelected =
+    filteredLogs.length > 0 && filteredLogs.every((item) => selectedIds.includes(item.id));
+
+  function resetFilters() {
+    setSearchInput("");
+    setStatusFilter("all");
+    setSortKey("newest");
+    setSelectedIds([]);
+  }
+
+  function toggleSelectAllPage(checked: boolean) {
+    if (!checked) {
+      setSelectedIds([]);
+      return;
+    }
+
+    setSelectedIds(filteredLogs.map((item) => item.id));
+  }
+
+  function toggleSelectItem(id: number, checked: boolean) {
+    setSelectedIds((current) => {
+      if (checked) return Array.from(new Set([...current, id]));
+      return current.filter((item) => item !== id);
+    });
+  }
+
+  async function runSessionAction(action: "qr" | "pairing" | "disconnect") {
+    setActionLoading(action);
+
+    try {
+      if (action === "pairing" && !normalizePhone(pairingPhone)) {
+        toast.error(t.requiredPhone);
         return;
       }
 
-      try {
-        setIsLoading(true);
-        setErrorMessage("");
+      const endpoint =
+        action === "qr"
+          ? "/api/whatsapp/session/create-qr/"
+          : action === "pairing"
+            ? "/api/whatsapp/session/create-pairing-code/"
+            : "/api/whatsapp/session/disconnect/";
 
-        const [statusPayload, logsPayload, templatesPayload, broadcastsPayload, inboxPayload] =
-          await Promise.all([
-            safeGet("/api/whatsapp/status/"),
-            safeGet("/api/whatsapp/logs/?page_size=500"),
-            safeGet("/api/whatsapp/templates/?page_size=500"),
-            safeGet("/api/whatsapp/broadcasts/?page_size=500"),
-            safeGet("/api/whatsapp/inbox/summary/"),
-          ]);
+      const body =
+        action === "pairing"
+          ? {
+              phone_number: normalizePhone(pairingPhone),
+              session_name: config.session_name || status.session_name,
+              session_mode: "pairing_code",
+            }
+          : {
+              session_name: config.session_name || status.session_name,
+              session_mode: action === "qr" ? "qr" : config.session_mode || status.session_mode,
+            };
 
-        const normalizedLogs = extractRows(logsPayload, "logs")
-          .map(normalizeLog)
-          .filter((item) => item.id || item.recipient_phone || item.message_body);
+      const response = await fetchJson<ApiResponse>(makeApiUrl(endpoint), {
+        method: "POST",
+        body,
+      });
 
-        const normalizedTemplates = extractRows(templatesPayload, "templates")
-          .map(normalizeTemplate)
-          .filter((item) => item.id || item.template_name);
+      const nextStatus = normalizeStatus({
+        ...status,
+        ...response,
+      });
 
-        const broadcastsCount =
-          extractRows(broadcastsPayload, "broadcasts").length ||
-          toNumber(extractSummary(broadcastsPayload).broadcasts_count) ||
-          toNumber(extractSummary(broadcastsPayload).total_broadcasts);
+      setStatus(nextStatus);
+      toast.success(t.actionSuccess);
+      await loadDashboard({ silent: true });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.actionFailed;
 
-        const inboxSummary = extractSummary(inboxPayload);
+      toast.error(message);
+    } finally {
+      setActionLoading("");
+    }
+  }
 
-        setRows(normalizedLogs);
-        setTemplates(normalizedTemplates);
-        setConnectionStatus(normalizeWhatsAppStatus(statusPayload));
-        setSummary(
-          buildSummary({
-            statusPayload,
-            logs: normalizedLogs,
-            templates: normalizedTemplates,
-            broadcastsCount,
-            inboxSummary,
-          }),
-        );
+  async function sendTestMessage() {
+    const phone = normalizePhone(testPhone);
 
-        if (showToast) toast.success(t.loadSuccess);
-      } catch (error) {
-        console.error("WhatsApp overview load error:", error);
-        setRows([]);
-        setTemplates([]);
-        setSummary(DEFAULT_SUMMARY);
-        setConnectionStatus("UNKNOWN");
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [canView, t.loadError, t.loadSuccess],
-  );
+    if (!phone) {
+      toast.error(t.requiredPhone);
+      return;
+    }
+
+    setActionLoading("test");
+
+    try {
+      await fetchJson<ApiResponse>(makeApiUrl("/api/whatsapp/send-test/"), {
+        method: "POST",
+        body: {
+          phone_number: phone,
+          recipient_phone: phone,
+          recipient_name: testName.trim() || "User",
+          message: testMessage.trim() || "Primey Care WhatsApp test message.",
+        },
+      });
+
+      toast.success(t.testSent);
+      await loadDashboard({ silent: true });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.actionFailed;
+
+      toast.error(message);
+    } finally {
+      setActionLoading("");
+    }
+  }
+
+  async function copyValue(value: string) {
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t.copied);
+    } catch {
+      toast.error(t.actionFailed);
+    }
+  }
+
+  function buildExportRows() {
+    return filteredLogs.map((log) => ({
+      recipient: log.recipient_name || log.recipient_phone || "—",
+      phone: log.recipient_phone || "—",
+      event: log.event_code || log.trigger_source || "—",
+      status: getDeliveryLabel(log.delivery_status || log.status, locale),
+      message: log.message_body || log.payload_summary || log.failure_reason || "—",
+      provider: log.provider_status || log.external_message_id || "—",
+      createdAt: formatDateTime(log.created_at),
+    }));
+  }
 
   function exportExcel() {
-    if (!canExport) return;
+    const rows = buildExportRows();
 
-    if (!hasData) {
+    if (!rows.length) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    downloadExcel({
-      filename: `primey-care-whatsapp-${new Date().toISOString().slice(0, 10)}.xls`,
-      title: t.title,
-      locale,
-      summary: displaySummary,
-      rows: hasSearch ? filteredRows : rows,
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h2>${escapeHtml(t.printTitle)}</h2>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.recipient)}</th>
+                <th>${escapeHtml(t.event)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.message)}</th>
+                <th>${escapeHtml(t.provider)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.recipient)}<br />${escapeHtml(row.phone)}</td>
+                      <td>${escapeHtml(row.event)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.message)}</td>
+                      <td>${escapeHtml(row.provider)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
     });
 
-    toast.success(t.exportSuccess);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-whatsapp-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
   function printPage() {
-    if (!canPrint) return;
+    const rows = buildExportRows();
 
-    if (!hasData) {
-      toast.error(t.exportEmpty);
+    if (!rows.length) {
+      toast.error(t.printEmpty);
       return;
     }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.printError);
+      toast.error(t.actionFailed);
       return;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        summary: displaySummary,
-        rows: hasSearch ? filteredRows : rows,
-      }),
-    );
-    printWindow.document.close();
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.status)}: ${escapeHtml(getConnectionLabel(status, locale))}</p>
+              <p>${escapeHtml(t.connectedPhone)}: ${escapeHtml(status.connected_phone || config.session_connected_phone || "—")}</p>
+            </div>
+          </div>
 
-    toast.success(t.printSuccess);
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.totalInbox)}</span><strong>${escapeHtml(summary.total_conversations)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.unreadInbox)}</span><strong>${escapeHtml(summary.unread_conversations)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.totalLogs)}</span><strong>${escapeHtml(logs.length)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.totalTemplates)}</span><strong>${escapeHtml(templatesCount)}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.recipient)}</th>
+                <th>${escapeHtml(t.event)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.message)}</th>
+                <th>${escapeHtml(t.provider)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.recipient)}<br />${escapeHtml(row.phone)}</td>
+                      <td>${escapeHtml(row.event)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.message)}</td>
+                      <td>${escapeHtml(row.provider)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadWhatsApp(false);
-  }, [authResolving, loadWhatsApp]);
-
-  if (!authResolving && !canView) {
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="w-full space-y-4" dir={dir}>
+        <DashboardSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadWhatsApp(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadDashboard({ silent: true })}
+            disabled={refreshing || Boolean(actionLoading)}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canExport ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={isLoading || !hasData || Boolean(errorMessage)}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/whatsapp/settings">
+              <Settings className="h-4 w-4" />
+              {t.settings}
+            </Link>
+          </Button>
 
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={isLoading || !hasData || Boolean(errorMessage)}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/whatsapp/inbox">
+              <Inbox className="h-4 w-4" />
+              {t.inbox}
+            </Link>
+          </Button>
+
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/whatsapp/logs">
+              <TerminalSquare className="h-4 w-4" />
+              {t.logs}
+            </Link>
+          </Button>
+
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
+
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.status}
+          value={getConnectionLabel(status, locale)}
+          trend={status.connected_phone || config.session_connected_phone || status.session_status || "—"}
+          icon={status.connected ? Wifi : WifiOff}
+        />
 
+        <KpiCard
+          title={t.totalInbox}
+          value={formatInteger(summary.total_conversations)}
+          trend={`${t.unreadInbox}: ${formatInteger(summary.unread_conversations)}`}
+          icon={Inbox}
+        />
+
+        <KpiCard
+          title={t.totalLogs}
+          value={formatInteger(logs.length)}
+          trend={`${t.showing} ${formatInteger(filteredLogs.length)}`}
+          icon={TerminalSquare}
+        />
+
+        <KpiCard
+          title={t.totalTemplates}
+          value={formatInteger(templatesCount)}
+          trend={`${t.totalBroadcasts}: ${formatInteger(broadcastsCount)}`}
+          icon={Layers3}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadWhatsApp(true)}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadDashboard()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {isLoading ? (
-        <PageSkeleton />
-      ) : (
-        <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <KpiCard
-              title={connectionStatus === "CONNECTED" ? t.connected : t.disconnected}
-              value={connectionStatus === "CONNECTED" ? t.connected : t.disconnected}
-              icon={connectionStatus === "CONNECTED" ? <Wifi className="h-5 w-5" /> : <WifiOff className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.totalLogs}
-              value={formatNumber(displaySummary.total_logs)}
-              icon={<MessageCircle className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.deliveredLogs}
-              value={formatNumber(displaySummary.delivered_logs)}
-              icon={<BadgeCheck className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.failedLogs}
-              value={formatNumber(displaySummary.failed_logs)}
-              icon={<XCircle className="h-5 w-5" />}
-            />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MiniStat title={t.totalTemplates} value={displaySummary.total_templates} />
-            <MiniStat title={t.activeTemplates} value={displaySummary.active_templates} />
-            <MiniStat title={t.totalConversations} value={displaySummary.total_conversations} />
-            <MiniStat title={t.unreadMessages} value={displaySummary.unread_messages} />
-          </div>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base font-bold">
-                {t.shortcutsTitle}
-              </CardTitle>
-              <CardDescription>{t.shortcutsDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                {canViewInbox ? (
-                  <ShortcutCard
-                    href="/system/whatsapp/inbox"
-                    icon={<Inbox className="h-5 w-5" />}
-                    title={t.inbox}
-                    description={
-                      isArabic
-                        ? "فتح صندوق محادثات واتساب ومتابعة الرسائل."
-                        : "Open WhatsApp inbox and conversations."
-                    }
-                  />
-                ) : null}
-
-                {canViewLogs ? (
-                  <ShortcutCard
-                    href="/system/whatsapp/logs"
-                    icon={<FileText className="h-5 w-5" />}
-                    title={t.logs}
-                    description={
-                      isArabic
-                        ? "عرض سجلات الإرسال وحالات الرسائل."
-                        : "View sending logs and message statuses."
-                    }
-                  />
-                ) : null}
-
-                {canViewTemplates ? (
-                  <ShortcutCard
-                    href="/system/whatsapp/templates"
-                    icon={<ClipboardList className="h-5 w-5" />}
-                    title={t.templates}
-                    description={
-                      isArabic
-                        ? "إدارة قوالب الرسائل المرتبطة بالأحداث."
-                        : "Manage event-based WhatsApp templates."
-                    }
-                  />
-                ) : null}
-
-                {canViewBroadcasts ? (
-                  <ShortcutCard
-                    href="/system/whatsapp/broadcasts"
-                    icon={<Megaphone className="h-5 w-5" />}
-                    title={t.broadcasts}
-                    description={
-                      isArabic
-                        ? "إدارة حملات ورسائل البث الجماعي."
-                        : "Manage WhatsApp broadcast messages."
-                    }
-                  />
-                ) : null}
-
-                {canViewSettings ? (
-                  <ShortcutCard
-                    href="/system/whatsapp/settings"
-                    icon={<Settings className="h-5 w-5" />}
-                    title={t.settings}
-                    description={
-                      isArabic
-                        ? "ضبط إعدادات الربط وقنوات الإرسال."
-                        : "Configure connection and sending settings."
-                    }
-                  />
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-4">
-              <div className="relative w-full">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {!hasData ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-                <MessageCircle className="h-12 w-12 text-muted-foreground/40" />
-                <p className="text-lg font-semibold">{t.emptyTitle}</p>
-                <p className="max-w-md text-sm text-muted-foreground">
-                  {t.emptyText}
-                </p>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {hasData && hasSearch && filteredRows.length === 0 ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-                <Search className="h-12 w-12 text-muted-foreground/40" />
-                <p className="text-lg font-semibold">{t.noResultsTitle}</p>
-                <p className="max-w-md text-sm text-muted-foreground">
-                  {t.noResultsText}
-                </p>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-4">
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <CardTitle className="text-base font-bold">
-                    {t.latestLogsTitle}
-                  </CardTitle>
-                  <CardDescription>{t.latestLogsDesc}</CardDescription>
+                  <CardTitle>{t.sessionPanel}</CardTitle>
+                  <CardDescription>{t.sessionPanelDesc}</CardDescription>
                 </div>
 
-                {canViewLogs ? (
-                  <Link href="/system/whatsapp/logs">
-                    <Button variant="outline" className="h-10 rounded-xl">
-                      <ArrowUpRight className="h-4 w-4" />
-                      {t.logs}
-                    </Button>
-                  </Link>
-                ) : null}
+                <StatusBadge status={status} locale={locale} />
               </div>
             </CardHeader>
 
-            <CardContent>
-              <div className="overflow-hidden rounded-xl border">
+            <CardContent className="space-y-4 px-6 pb-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <InfoRow label={t.sessionStatus} value={status.session_status || config.session_status || "—"} />
+                <InfoRow label={t.connectedPhone} value={status.connected_phone || config.session_connected_phone || "—"} />
+                <InfoRow label={t.device} value={status.device_label || config.session_device_label || "—"} />
+                <InfoRow label={t.session} value={status.session_name || config.session_name || "—"} />
+                <InfoRow label={t.provider} value={status.provider || config.provider || "—"} />
+                <InfoRow label={t.lastConnected} value={formatDateTime(status.last_connected_at)} />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border bg-background p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <QrCode className="h-4 w-4 text-muted-foreground" />
+                      <p className="text-sm font-semibold">{t.qrCode}</p>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      className="h-8 rounded-lg"
+                      disabled={Boolean(actionLoading)}
+                      onClick={() => void runSessionAction("qr")}
+                    >
+                      {actionLoading === "qr" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <QrCode className="h-4 w-4" />
+                      )}
+                      {t.qrSession}
+                    </Button>
+                  </div>
+
+                  {status.qr_code ? (
+                    <div className="overflow-hidden rounded-lg border bg-white p-3">
+                      <img
+                        src={status.qr_code}
+                        alt={t.qrCode}
+                        className="mx-auto h-48 w-48 object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex min-h-[218px] items-center justify-center rounded-lg border bg-muted/30 p-4 text-center text-sm text-muted-foreground">
+                      {t.noQr}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border bg-background p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Smartphone className="h-4 w-4 text-muted-foreground" />
+                      <p className="text-sm font-semibold">{t.pairingCode}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3">
+                    <Input
+                      value={pairingPhone}
+                      onChange={(event) => setPairingPhone(normalizePhone(event.target.value))}
+                      placeholder={t.phoneForPairing}
+                      className="h-10 rounded-lg bg-background text-right tabular-nums"
+                      dir="ltr"
+                    />
+
+                    <Button
+                      variant="outline"
+                      className="h-10 rounded-lg"
+                      disabled={Boolean(actionLoading)}
+                      onClick={() => void runSessionAction("pairing")}
+                    >
+                      {actionLoading === "pairing" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Smartphone className="h-4 w-4" />
+                      )}
+                      {t.pairingSession}
+                    </Button>
+
+                    <div className="flex min-h-[112px] items-center justify-center rounded-lg border bg-muted/30 p-4 text-center">
+                      {status.pairing_code ? (
+                        <button
+                          type="button"
+                          onClick={() => void copyValue(status.pairing_code)}
+                          className="font-display text-3xl font-bold tracking-[0.25em] text-foreground"
+                          dir="ltr"
+                        >
+                          {status.pairing_code}
+                        </button>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">{t.noPairing}</span>
+                      )}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      className="h-10 rounded-lg text-red-600 hover:text-red-600"
+                      disabled={Boolean(actionLoading)}
+                      onClick={() => void runSessionAction("disconnect")}
+                    >
+                      {actionLoading === "disconnect" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Unplug className="h-4 w-4" />
+                      )}
+                      {t.disconnect}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle>{t.latestActivity}</CardTitle>
+              <CardDescription>{t.subtitle}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-3 p-4">
+              <div className="flex flex-col gap-3">
+                <div className="relative w-full">
+                  <Search
+                    className={cn(
+                      "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                      locale === "ar" ? "right-3" : "left-3",
+                    )}
+                  />
+                  <Input
+                    value={searchInput}
+                    onChange={(event) => setSearchInput(event.target.value)}
+                    placeholder={t.searchPlaceholder}
+                    className={cn(
+                      "h-10 rounded-lg bg-background",
+                      locale === "ar" ? "pr-9" : "pl-9",
+                    )}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={statusFilter}
+                      onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+                    >
+                      <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[150px]">
+                        <CheckCircle2 className="h-4 w-4" />
+                        <SelectValue placeholder={t.status} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t.allStatuses}</SelectItem>
+                        <SelectItem value="SENT">{t.sent}</SelectItem>
+                        <SelectItem value="PENDING">{t.pending}</SelectItem>
+                        <SelectItem value="DELIVERED">{t.delivered}</SelectItem>
+                        <SelectItem value="READ">{t.read}</SelectItem>
+                        <SelectItem value="FAILED">{t.failedStatus}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" className="h-9 rounded-lg bg-background">
+                          <ColumnsIcon className="h-4 w-4" />
+                          {t.columns}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                        <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        {(
+                          [
+                            ["select", t.selected],
+                            ["recipient", t.recipient],
+                            ["event", t.event],
+                            ["status", t.status],
+                            ["message", t.message],
+                            ["createdAt", t.createdAt],
+                            ["provider", t.provider],
+                            ["actions", t.actions],
+                          ] as [ColumnKey, string][]
+                        ).map(([key, label]) => (
+                          <DropdownMenuCheckboxItem
+                            key={key}
+                            checked={visibleColumns[key]}
+                            onCheckedChange={(checked) =>
+                              setVisibleColumns((current) => ({
+                                ...current,
+                                [key]: Boolean(checked),
+                              }))
+                            }
+                          >
+                            {label}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+
+                    <Button
+                      variant="outline"
+                      className="h-9 rounded-lg bg-background"
+                      onClick={resetFilters}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      {t.reset}
+                    </Button>
+
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" className="h-9 rounded-lg bg-background">
+                          <ArrowUpDown className="h-4 w-4" />
+                          {t.sort}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                        {(
+                          [
+                            ["newest", t.newest],
+                            ["oldest", t.oldest],
+                            ["recipient", t.recipientSort],
+                            ["status", t.statusSort],
+                            ["event", t.eventSort],
+                          ] as [SortKey, string][]
+                        ).map(([key, label]) => (
+                          <DropdownMenuCheckboxItem
+                            key={key}
+                            checked={sortKey === key}
+                            onCheckedChange={() => setSortKey(key)}
+                          >
+                            {label}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+
+                    {selectedIds.length > 0 ? (
+                      <Button
+                        variant="outline"
+                        className="h-9 rounded-lg bg-background"
+                        onClick={() => setSelectedIds([])}
+                      >
+                        <XCircle className="h-4 w-4" />
+                        {t.clearSelection} ({formatInteger(selectedIds.length)})
+                      </Button>
+                    ) : null}
+
+                    {hasActiveFilters ? (
+                      <Badge variant="secondary" className="h-9 rounded-lg px-3 text-xs font-semibold">
+                        {t.activeFilters}
+                      </Badge>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border bg-background">
                 <div className="overflow-x-auto">
-                  <Table>
+                  <Table className="min-w-[1040px] table-fixed">
                     <TableHeader>
-                      <TableRow>
-                        <TableHead className="min-w-[230px]">
-                          {t.table.recipient}
-                        </TableHead>
-                        <TableHead className="min-w-[250px]">
-                          {t.table.message}
-                        </TableHead>
-                        <TableHead className="min-w-[150px]">
-                          {t.table.template}
-                        </TableHead>
-                        <TableHead className="min-w-[130px]">
-                          {t.table.status}
-                        </TableHead>
-                        <TableHead className="min-w-[160px]">
-                          {t.table.createdAt}
-                        </TableHead>
+                      <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                        {visibleColumns.select ? (
+                          <TableHeaderCell className="w-[46px] px-3">
+                            <Checkbox
+                              checked={allPageSelected}
+                              onCheckedChange={(checked) => toggleSelectAllPage(Boolean(checked))}
+                              aria-label={t.selected}
+                            />
+                          </TableHeaderCell>
+                        ) : null}
+
+                        {visibleColumns.recipient ? (
+                          <TableHeaderCell className="w-[210px]">
+                            <HeaderSortButton
+                              active={sortKey === "recipient"}
+                              onClick={() => setSortKey("recipient")}
+                            >
+                              {t.recipient}
+                            </HeaderSortButton>
+                          </TableHeaderCell>
+                        ) : null}
+
+                        {visibleColumns.event ? (
+                          <TableHeaderCell className="w-[170px]">
+                            <HeaderSortButton
+                              active={sortKey === "event"}
+                              onClick={() => setSortKey("event")}
+                            >
+                              {t.event}
+                            </HeaderSortButton>
+                          </TableHeaderCell>
+                        ) : null}
+
+                        {visibleColumns.status ? (
+                          <TableHeaderCell className="w-[120px]">
+                            <HeaderSortButton
+                              active={sortKey === "status"}
+                              onClick={() => setSortKey("status")}
+                            >
+                              {t.status}
+                            </HeaderSortButton>
+                          </TableHeaderCell>
+                        ) : null}
+
+                        {visibleColumns.message ? (
+                          <TableHeaderCell className="w-[300px]">{t.message}</TableHeaderCell>
+                        ) : null}
+
+                        {visibleColumns.createdAt ? (
+                          <TableHeaderCell className="w-[145px]">
+                            <HeaderSortButton
+                              active={sortKey === "newest" || sortKey === "oldest"}
+                              onClick={() => setSortKey("newest")}
+                            >
+                              {t.createdAt}
+                            </HeaderSortButton>
+                          </TableHeaderCell>
+                        ) : null}
+
+                        {visibleColumns.provider ? (
+                          <TableHeaderCell className="w-[150px]">{t.provider}</TableHeaderCell>
+                        ) : null}
+
+                        {visibleColumns.actions ? (
+                          <TableHeaderCell className="w-[72px] text-center">
+                            {t.actions}
+                          </TableHeaderCell>
+                        ) : null}
                       </TableRow>
                     </TableHeader>
 
                     <TableBody>
-                      {filteredRows.length > 0 ? (
-                        filteredRows.map((item) => (
-                          <TableRow key={`${item.id}-${item.recipient_phone}`}>
-                            <TableCell>
-                              <div className="min-w-[210px]">
-                                <p className="font-semibold">
-                                  {item.recipient_name || "-"}
-                                </p>
-                                <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground" dir="ltr">
-                                  <Smartphone className="h-3.5 w-3.5" />
-                                  {item.recipient_phone || "-"}
-                                </p>
-                              </div>
-                            </TableCell>
+                      {filteredLogs.length ? (
+                        filteredLogs.map((log) => (
+                          <TableRow key={log.id} className="h-[62px]">
+                            {visibleColumns.select ? (
+                              <TableBodyCell className="w-[46px] px-3">
+                                <Checkbox
+                                  checked={selectedIds.includes(log.id)}
+                                  onCheckedChange={(checked) =>
+                                    toggleSelectItem(log.id, Boolean(checked))
+                                  }
+                                  aria-label={`${log.recipient_name || log.recipient_phone}`}
+                                />
+                              </TableBodyCell>
+                            ) : null}
 
-                            <TableCell>
-                              <div className="min-w-[230px]">
-                                <p className="line-clamp-2 text-sm leading-6">
-                                  {item.message_body || "-"}
-                                </p>
-                                {item.error_message ? (
-                                  <p className="mt-1 line-clamp-1 text-xs text-destructive">
-                                    {item.error_message}
+                            {visibleColumns.recipient ? (
+                              <TableBodyCell className="w-[210px]">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-emerald-50">
+                                    <MessageCircle className="h-4 w-4 text-emerald-700" />
+                                  </div>
+
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-semibold text-foreground">
+                                      {log.recipient_name || log.recipient_phone || t.unknown}
+                                    </p>
+                                    <p className="truncate text-xs tabular-nums text-muted-foreground" dir="ltr">
+                                      {log.recipient_phone || "—"}
+                                    </p>
+                                  </div>
+                                </div>
+                              </TableBodyCell>
+                            ) : null}
+
+                            {visibleColumns.event ? (
+                              <TableBodyCell className="w-[170px]">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium text-foreground">
+                                    {log.event_code || "—"}
                                   </p>
-                                ) : null}
-                              </div>
-                            </TableCell>
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {log.trigger_source || log.message_type || "—"}
+                                  </p>
+                                </div>
+                              </TableBodyCell>
+                            ) : null}
 
-                            <TableCell>
-                              <div className="min-w-[130px]">
-                                <p className="font-medium">
-                                  {item.template_name || "-"}
+                            {visibleColumns.status ? (
+                              <TableBodyCell className="w-[120px]">
+                                <DeliveryBadge value={log.delivery_status || log.status} locale={locale} />
+                              </TableBodyCell>
+                            ) : null}
+
+                            {visibleColumns.message ? (
+                              <TableBodyCell className="w-[300px]">
+                                <p className="line-clamp-2 text-sm text-muted-foreground">
+                                  {log.message_body || log.payload_summary || log.failure_reason || t.noMessage}
                                 </p>
-                                <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                                  {item.event_code || "-"}
-                                </p>
-                              </div>
-                            </TableCell>
+                              </TableBodyCell>
+                            ) : null}
 
-                            <TableCell>{statusBadge(item.status, locale)}</TableCell>
+                            {visibleColumns.createdAt ? (
+                              <TableBodyCell className="w-[145px]">
+                                <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                                  {formatDateTime(log.created_at)}
+                                </span>
+                              </TableBodyCell>
+                            ) : null}
 
-                            <TableCell>
-                              {formatDate(item.created_at, locale)}
-                            </TableCell>
+                            {visibleColumns.provider ? (
+                              <TableBodyCell className="w-[150px]">
+                                <span className="block truncate text-sm text-muted-foreground">
+                                  {log.provider_status || log.provider_message_id || "—"}
+                                </span>
+                              </TableBodyCell>
+                            ) : null}
+
+                            {visibleColumns.actions ? (
+                              <TableBodyCell className="w-[72px] text-center">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 rounded-lg"
+                                    >
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+
+                                  <DropdownMenuContent
+                                    align={locale === "ar" ? "start" : "end"}
+                                    className="w-44"
+                                  >
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        void copyValue(
+                                          log.message_body ||
+                                            log.payload_summary ||
+                                            log.failure_reason ||
+                                            "",
+                                        )
+                                      }
+                                    >
+                                      <MessageCircle className="h-4 w-4" />
+                                      {t.copyMessage}
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableBodyCell>
+                            ) : null}
                           </TableRow>
                         ))
                       ) : (
                         <TableRow>
-                          <TableCell colSpan={5} className="h-32 text-center">
-                            <p className="text-sm text-muted-foreground">
-                              {hasSearch ? t.noResultsText : t.emptyText}
-                            </p>
+                          <TableCell colSpan={visibleColumnCount} className="h-72">
+                            <div className="flex flex-col items-center justify-center gap-3 text-center">
+                              <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                                <MessageCircle className="h-6 w-6 text-muted-foreground" />
+                              </div>
+
+                              <div className="space-y-1">
+                                <p className="font-semibold text-foreground">
+                                  {hasActiveFilters ? t.noResultsTitle : t.noDataTitle}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  {hasActiveFilters ? t.noResultsDesc : t.noDataDesc}
+                                </p>
+                              </div>
+
+                              {hasActiveFilters ? (
+                                <Button
+                                  variant="outline"
+                                  className="h-9 rounded-lg"
+                                  onClick={resetFilters}
+                                >
+                                  <RotateCcw className="h-4 w-4" />
+                                  {t.reset}
+                                </Button>
+                              ) : null}
+                            </div>
                           </TableCell>
                         </TableRow>
                       )}
@@ -1744,163 +2188,122 @@ export default function SystemWhatsAppPage() {
                   </Table>
                 </div>
               </div>
+
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="text-sm text-muted-foreground">
+                  {t.showing}{" "}
+                  <span className="font-medium text-foreground tabular-nums">
+                    {formatInteger(filteredLogs.length)}
+                  </span>{" "}
+                  {t.of}{" "}
+                  <span className="font-medium text-foreground tabular-nums">
+                    {formatInteger(logs.length)}
+                  </span>{" "}
+                  {t.rows}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-4">
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle>{t.navigation}</CardTitle>
+              <CardDescription>{t.navigationDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-3 px-6 pb-6">
+              {NAVIGATION_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const label = t[item.key];
+
+                return (
+                  <Button
+                    key={item.key}
+                    asChild
+                    variant="outline"
+                    className="h-11 justify-start rounded-lg bg-background"
+                  >
+                    <Link href={item.href}>
+                      <Icon className="h-4 w-4" />
+                      {label}
+                    </Link>
+                  </Button>
+                );
+              })}
             </CardContent>
           </Card>
 
-          {templates.length > 0 ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base font-bold">
-                  {t.templates}
-                </CardTitle>
-                <CardDescription>
-                  {formatNumber(templates.length)} {t.totalTemplates}
-                </CardDescription>
-              </CardHeader>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle>{t.testPanel}</CardTitle>
+              <CardDescription>{t.testPanelDesc}</CardDescription>
+            </CardHeader>
 
-              <CardContent>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {templates.slice(0, 6).map((template) => (
-                    <Card
-                      key={`${template.id}-${template.template_key}`}
-                      className="rounded-2xl border bg-background/70 shadow-sm"
-                    >
-                      <CardContent className="space-y-3 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="font-semibold">{template.template_name}</p>
-                            <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                              {template.template_key || template.event_code || "-"}
-                            </p>
-                          </div>
+            <CardContent className="space-y-3 px-6 pb-6">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">{t.testPhone}</label>
+                <Input
+                  value={testPhone}
+                  onChange={(event) => setTestPhone(normalizePhone(event.target.value))}
+                  className="h-10 rounded-lg bg-background text-right tabular-nums"
+                  dir="ltr"
+                />
+              </div>
 
-                          <Badge variant="outline" className="rounded-full">
-                            {templateStatusLabel(template.status, locale)}
-                          </Badge>
-                        </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">{t.testName}</label>
+                <Input
+                  value={testName}
+                  onChange={(event) => setTestName(event.target.value)}
+                  className="h-10 rounded-lg bg-background"
+                />
+              </div>
 
-                        <div className="flex flex-wrap gap-2">
-                          {template.is_active ? (
-                            <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
-                              {t.activeTemplates}
-                            </Badge>
-                          ) : null}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">{t.testBody}</label>
+                <textarea
+                  value={testMessage}
+                  onChange={(event) => setTestMessage(event.target.value)}
+                  className="min-h-[120px] w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                />
+              </div>
 
-                          {template.language_code ? (
-                            <Badge variant="outline" className="rounded-full" dir="ltr">
-                              {template.language_code}
-                            </Badge>
-                          ) : null}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
-        </>
-      )}
+              <Button
+                className="h-10 w-full rounded-lg bg-black text-white hover:bg-black/90"
+                disabled={Boolean(actionLoading) || !config.send_test_enabled}
+                onClick={() => void sendTestMessage()}
+              >
+                {actionLoading === "test" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                {t.sendTest}
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle>{t.settings}</CardTitle>
+              <CardDescription>{config.business_name || "Primey Care"}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-2 px-6 pb-6">
+              <InfoRow label={t.businessName} value={config.business_name || "—"} />
+              <InfoRow label={t.status} value={config.is_enabled ? t.enabled : t.disabled} />
+              <InfoRow label={t.provider} value={config.provider || "—"} />
+              <InfoRow label={t.defaultLanguage} value={config.default_language_code || "—"} />
+              <InfoRow label={t.defaultCountry} value={config.default_country_code || "—"} />
+              <InfoRow label={t.allowBroadcasts} value={config.allow_broadcasts ? t.enabled : t.disabled} />
+              <InfoRow label={t.sendTestEnabled} value={config.send_test_enabled ? t.enabled : t.disabled} />
+              <InfoRow label={t.lastCheck} value={formatDateTime(status.last_check_at)} />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
-  );
-}
-
-/* ============================================================
-   Small Components
-============================================================ */
-
-async function safeGet(endpoint: string) {
-  const response = await fetch(apiUrl(endpoint), {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  }).catch(() => null);
-
-  if (!response) return null;
-
-  const payload = (await response.json().catch(() => null)) as
-    | ApiEnvelope<unknown>
-    | null;
-
-  if (!response.ok || payload?.ok === false || payload?.success === false) {
-    return null;
-  }
-
-  return payload;
-}
-
-function KpiCard({
-  title,
-  value,
-  icon,
-}: {
-  title: string;
-  value: ReactNode;
-  icon: ReactNode;
-}) {
-  return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-2xl font-bold">{value}</div>
-            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
-          </div>
-
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            {icon}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function MiniStat({ title, value }: { title: string; value: number }) {
-  return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-muted-foreground">{title}</span>
-          <span className="text-lg font-bold">{formatNumber(value)}</span>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ShortcutCard({
-  href,
-  icon,
-  title,
-  description,
-}: {
-  href: string;
-  icon: ReactNode;
-  title: string;
-  description: string;
-}) {
-  return (
-    <Link href={href}>
-      <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
-        <CardContent className="flex h-full flex-col gap-4 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              {icon}
-            </div>
-
-            <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
-          </div>
-
-          <div>
-            <p className="font-semibold">{title}</p>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              {description}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
   );
 }

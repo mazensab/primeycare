@@ -18,7 +18,7 @@
 # - أثر الرصيد يطبق مرة واحدة فقط عند التأكيد.
 # - عند إلغاء حركة مؤكدة يتم عكس أثرها على الرصيد.
 # - لا يسمح بتعديل الحقول المالية الجوهرية بعد التأكيد.
-# - يدعم ربط الحركة بحساب محاسبي وبقيد محاسبي.
+# - يدعم ربط الحركة بحساب الخزينة والحساب المحاسبي المقابل والقيد المحاسبي.
 # - يدعم مصدر الحركة والطرف المرتبط والمرجع الخارجي.
 # ============================================================
 
@@ -70,13 +70,25 @@ class TreasuryTransactionStatus(models.TextChoices):
 
 class TreasuryTransactionSource(models.TextChoices):
     MANUAL = "MANUAL", "يدوي"
+    MANUAL_RECEIPT = "MANUAL_RECEIPT", "سند قبض يدوي"
+    MANUAL_PAYMENT = "MANUAL_PAYMENT", "سند صرف يدوي"
+
     PAYMENT = "PAYMENT", "دفعة"
     INVOICE = "INVOICE", "فاتورة"
     ORDER = "ORDER", "طلب"
     REFUND = "REFUND", "استرداد"
     TRANSFER = "TRANSFER", "تحويل"
     GATEWAY = "GATEWAY", "بوابة دفع"
+
     AGENT_COMMISSION = "AGENT_COMMISSION", "عمولة مندوب"
+    AGENT_COD_COLLECTION = "AGENT_COD_COLLECTION", "تحصيل COD بواسطة مندوب"
+    AGENT_CASH_SETTLEMENT = "AGENT_CASH_SETTLEMENT", "توريد عهدة مندوب"
+    AGENT_EARNING_SETTLEMENT = "AGENT_EARNING_SETTLEMENT", "تسوية مستحقات مندوب"
+
+    BROKER_COMMISSION = "BROKER_COMMISSION", "عمولة وسيط"
+    BROKER_CASH_SETTLEMENT = "BROKER_CASH_SETTLEMENT", "توريد عهدة وسيط"
+    BROKER_EARNING_SETTLEMENT = "BROKER_EARNING_SETTLEMENT", "تسوية مستحقات وسيط"
+
     ACCOUNTING = "ACCOUNTING", "محاسبة"
     OPENING_BALANCE = "OPENING_BALANCE", "رصيد افتتاحي"
     ADJUSTMENT = "ADJUSTMENT", "تسوية"
@@ -435,6 +447,18 @@ class TreasuryTransaction(models.Model):
         verbose_name="الحساب الوجهة",
         help_text="يستخدم في حالة التحويل",
     )
+    counterparty_ledger_account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        related_name="treasury_counterparty_transactions",
+        null=True,
+        blank=True,
+        verbose_name="الحساب المحاسبي المقابل",
+        help_text=(
+            "الحساب المحاسبي المقابل لحركة القبض أو الصرف أو التسوية. "
+            "مثال: ذمم العملاء، عهدة مندوب، مستحقات مندوب، دائنون، مصروف، إيراد."
+        ),
+    )
 
     # ========================================================
     # 💰 بيانات مالية
@@ -500,7 +524,7 @@ class TreasuryTransaction(models.Model):
         max_length=80,
         blank=True,
         verbose_name="نوع الطرف",
-        help_text="مثال: customer, provider, agent, employee",
+        help_text="مثال: customer, provider, agent, broker, employee",
     )
     party_id = models.CharField(
         max_length=80,
@@ -639,6 +663,7 @@ class TreasuryTransaction(models.Model):
             models.Index(fields=["transaction_date"]),
             models.Index(fields=["treasury_account"]),
             models.Index(fields=["destination_account"]),
+            models.Index(fields=["counterparty_ledger_account"]),
             models.Index(fields=["reference"]),
             models.Index(fields=["external_reference"]),
             models.Index(fields=["source_type"]),
@@ -737,6 +762,54 @@ class TreasuryTransaction(models.Model):
                 {"destination_account": "لا يمكن التحويل إلى حساب خزينة غير نشط."}
             )
 
+        if self.counterparty_ledger_account:
+            if self.counterparty_ledger_account.is_group:
+                raise ValidationError(
+                    {"counterparty_ledger_account": "لا يمكن استخدام حساب محاسبي تجميعي كحساب مقابل."}
+                )
+
+            if not self.counterparty_ledger_account.is_active:
+                raise ValidationError(
+                    {"counterparty_ledger_account": "لا يمكن استخدام حساب محاسبي غير نشط كحساب مقابل."}
+                )
+
+        sources_requiring_counterparty = {
+            TreasuryTransactionSource.MANUAL_RECEIPT,
+            TreasuryTransactionSource.MANUAL_PAYMENT,
+            TreasuryTransactionSource.AGENT_CASH_SETTLEMENT,
+            TreasuryTransactionSource.AGENT_EARNING_SETTLEMENT,
+            TreasuryTransactionSource.BROKER_CASH_SETTLEMENT,
+            TreasuryTransactionSource.BROKER_EARNING_SETTLEMENT,
+        }
+
+        types_requiring_counterparty = {
+            TreasuryTransactionType.INCOME,
+            TreasuryTransactionType.EXPENSE,
+            TreasuryTransactionType.DEPOSIT,
+            TreasuryTransactionType.WITHDRAW,
+            TreasuryTransactionType.REFUND,
+            TreasuryTransactionType.FEE,
+        }
+
+        if (
+            self.transaction_type in types_requiring_counterparty
+            and self.source in sources_requiring_counterparty
+            and not self.counterparty_ledger_account_id
+            and not self.journal_entry_id
+        ):
+            raise ValidationError(
+                {
+                    "counterparty_ledger_account": (
+                        "الحساب المحاسبي المقابل مطلوب لهذه الحركة حتى يمكن إنشاء القيد المحاسبي تلقائيًا."
+                    )
+                }
+            )
+
+        if self.transaction_type == TreasuryTransactionType.TRANSFER and self.counterparty_ledger_account_id:
+            raise ValidationError(
+                {"counterparty_ledger_account": "التحويل الداخلي يستخدم حساب الوجهة ولا يحتاج حسابًا مقابلًا."}
+            )
+
         if self.status == TreasuryTransactionStatus.CONFIRMED and not self.confirmed_at:
             self.confirmed_at = timezone.now()
 
@@ -765,6 +838,7 @@ class TreasuryTransaction(models.Model):
             "source": previous.source,
             "treasury_account_id": previous.treasury_account_id,
             "destination_account_id": previous.destination_account_id,
+            "counterparty_ledger_account_id": previous.counterparty_ledger_account_id,
             "amount": _money(previous.amount),
             "fees_amount": _money(previous.fees_amount),
             "currency": previous.currency,
@@ -776,6 +850,7 @@ class TreasuryTransaction(models.Model):
             "source": self.source,
             "treasury_account_id": self.treasury_account_id,
             "destination_account_id": self.destination_account_id,
+            "counterparty_ledger_account_id": self.counterparty_ledger_account_id,
             "amount": _money(self.amount),
             "fees_amount": _money(self.fees_amount),
             "currency": self.currency,
@@ -1093,6 +1168,28 @@ class TreasuryTransaction(models.Model):
     # ========================================================
     # Properties
     # ========================================================
+
+    @property
+    def has_accounting_entry(self) -> bool:
+        return bool(self.journal_entry_id or self.journal_entry_reference)
+
+    @property
+    def needs_accounting_posting(self) -> bool:
+        return self.is_confirmed and not self.has_accounting_entry
+
+    @property
+    def is_agent_settlement(self) -> bool:
+        return self.source in {
+            TreasuryTransactionSource.AGENT_CASH_SETTLEMENT,
+            TreasuryTransactionSource.AGENT_EARNING_SETTLEMENT,
+        }
+
+    @property
+    def is_broker_settlement(self) -> bool:
+        return self.source in {
+            TreasuryTransactionSource.BROKER_CASH_SETTLEMENT,
+            TreasuryTransactionSource.BROKER_EARNING_SETTLEMENT,
+        }
 
     @property
     def is_draft(self) -> bool:

@@ -1,13 +1,15 @@
 # ============================================================
 # 📂 api/payments/detail.py
-# 🧠 Payment Detail API — Primey Care V2
+# 🧠 Payment Detail API — Primey Care V2.1
 # ------------------------------------------------------------
 # ✅ تفاصيل دفعة واحدة
 # ✅ إظهار الربط مع الفاتورة / الطلب / العميل
+# ✅ إظهار بيانات حساب العميل و OTP
 # ✅ إظهار مراجع الخزينة والمحاسبة
 # ✅ إظهار بيانات البوابة والعملية الخارجية
 # ✅ Unified response: ok / success / data
 # ✅ Compatible with Accounting / Treasury / Gateways flow
+# ✅ Compatible with Customer Portal / OTP customer account fields
 # ============================================================
 
 from __future__ import annotations
@@ -143,6 +145,16 @@ def _iso_datetime(value: Any) -> str | None:
         return None
 
 
+def _iso_date(value: Any) -> str | None:
+    if not value:
+        return None
+
+    try:
+        return value.isoformat()
+    except Exception:
+        return None
+
+
 def _safe_attr(obj: Any, attr_name: str, default: Any = None) -> Any:
     try:
         return getattr(obj, attr_name, default)
@@ -179,10 +191,15 @@ def _serialize_invoice(invoice) -> dict[str, Any] | None:
         "label": _label(invoice),
         "invoice_number": _safe_attr(invoice, "invoice_number", ""),
         "status": _safe_attr(invoice, "status", ""),
-        "issue_date": _iso_datetime(_safe_attr(invoice, "issue_date", None)),
-        "due_date": _iso_datetime(_safe_attr(invoice, "due_date", None)),
+        "invoice_type": _safe_attr(invoice, "invoice_type", ""),
+        "issue_date": _iso_date(_safe_attr(invoice, "issue_date", None)),
+        "due_date": _iso_date(_safe_attr(invoice, "due_date", None)),
+        "order_id": _safe_attr(invoice, "order_id", None),
+        "customer_id": _safe_attr(invoice, "customer_id", None),
         "subtotal": _money(_safe_attr(invoice, "subtotal", "0.00")),
         "discount_amount": _money(_safe_attr(invoice, "discount_amount", "0.00")),
+        "taxable_amount": _money(_safe_attr(invoice, "taxable_amount", "0.00")),
+        "tax_rate": _money(_safe_attr(invoice, "tax_rate", "0.00")),
         "tax_amount": _money(_safe_attr(invoice, "tax_amount", "0.00")),
         "total_amount": _money(
             _safe_attr(invoice, "total_amount", None)
@@ -194,6 +211,8 @@ def _serialize_invoice(invoice) -> dict[str, Any] | None:
         "currency": _safe_attr(invoice, "currency", "SAR") or "SAR",
         "accounting_entry_reference": _safe_attr(invoice, "accounting_entry_reference", ""),
         "is_accounting_posted": bool(_safe_attr(invoice, "is_accounting_posted", False)),
+        "created_at": _iso_datetime(_safe_attr(invoice, "created_at", None)),
+        "updated_at": _iso_datetime(_safe_attr(invoice, "updated_at", None)),
     }
 
 
@@ -212,10 +231,20 @@ def _serialize_order(order) -> dict[str, Any] | None:
         "status": _safe_attr(order, "status", ""),
         "payment_status": _safe_attr(order, "payment_status", ""),
         "fulfillment_status": _safe_attr(order, "fulfillment_status", ""),
+        "source": _safe_attr(order, "source", ""),
+        "product_name": _safe_attr(order, "product_name", ""),
+        "product_type": _safe_attr(order, "product_type", ""),
         "total_amount": _money(_safe_attr(order, "total_amount", "0.00")),
         "amount_paid": _money(_safe_attr(order, "amount_paid", "0.00")),
         "remaining_amount": _money(_safe_attr(order, "remaining_amount", "0.00")),
         "currency_code": _safe_attr(order, "currency_code", "SAR") or "SAR",
+        "customer_id": _safe_attr(order, "customer_id", None),
+        "product_id": _safe_attr(order, "product_id", None),
+        "provider_id": _safe_attr(order, "provider_id", None),
+        "contract_id": _safe_attr(order, "contract_id", None),
+        "agent_id": _safe_attr(order, "agent_id", None),
+        "created_at": _iso_datetime(_safe_attr(order, "created_at", None)),
+        "updated_at": _iso_datetime(_safe_attr(order, "updated_at", None)),
     }
 
 
@@ -223,18 +252,50 @@ def _serialize_customer(customer) -> dict[str, Any] | None:
     if not customer:
         return None
 
+    display_name = (
+        _safe_attr(customer, "display_name", "")
+        or _safe_attr(customer, "full_name", "")
+        or _safe_attr(customer, "name", "")
+        or _label(customer)
+    )
+
+    phone_number = (
+        _safe_attr(customer, "phone_number", "")
+        or _safe_attr(customer, "phone", "")
+        or _safe_attr(customer, "mobile", "")
+    )
+
+    whatsapp_number = _safe_attr(customer, "whatsapp_number", "")
+    user = _safe_attr(customer, "user", None)
+
     return {
         "id": _safe_attr(customer, "id", None),
         "customer_code": _safe_attr(customer, "customer_code", ""),
-        "name": _label(customer),
-        "phone": (
-            _safe_attr(customer, "phone_number", "")
-            or _safe_attr(customer, "phone", "")
-            or _safe_attr(customer, "mobile", "")
-        ),
-        "whatsapp": _safe_attr(customer, "whatsapp_number", ""),
-        "email": _safe_attr(customer, "email", ""),
+        "name": display_name,
+        "display_name": display_name,
+        "full_name": _safe_attr(customer, "full_name", "") or display_name,
         "status": _safe_attr(customer, "status", ""),
+        "phone": phone_number,
+        "phone_number": phone_number,
+        "whatsapp": whatsapp_number,
+        "whatsapp_number": whatsapp_number,
+        "primary_contact_number": (
+            whatsapp_number
+            or phone_number
+            or _safe_attr(customer, "alternative_phone_number", "")
+        ),
+        "email": _safe_attr(customer, "email", ""),
+        "normalized_phone": _safe_attr(customer, "normalized_phone", ""),
+        "user_id": _safe_attr(customer, "user_id", None),
+        "user_username": _safe_attr(user, "username", "") if user else "",
+        "has_customer_account": bool(_safe_attr(customer, "user_id", None)),
+        "is_phone_verified": bool(_safe_attr(customer, "phone_verified_at", None)),
+        "is_whatsapp_verified": bool(_safe_attr(customer, "whatsapp_verified_at", None)),
+        "phone_verified_at": _iso_datetime(_safe_attr(customer, "phone_verified_at", None)),
+        "whatsapp_verified_at": _iso_datetime(_safe_attr(customer, "whatsapp_verified_at", None)),
+        "last_login_at": _iso_datetime(_safe_attr(customer, "last_login_at", None)),
+        "created_at": _iso_datetime(_safe_attr(customer, "created_at", None)),
+        "updated_at": _iso_datetime(_safe_attr(customer, "updated_at", None)),
     }
 
 
@@ -300,7 +361,10 @@ def _serialize_payment(payment) -> dict[str, Any]:
         "failure_reason": _safe_attr(payment, "failure_reason", ""),
 
         "financial_flow": {
-            "gateway_completed": bool(_safe_attr(payment, "transaction_id", "") or _safe_attr(payment, "external_reference", "")),
+            "gateway_completed": bool(
+                _safe_attr(payment, "transaction_id", "")
+                or _safe_attr(payment, "external_reference", "")
+            ),
             "accounting_posted": bool(_safe_attr(payment, "is_accounting_posted", False)),
             "treasury_posted": bool(_safe_attr(payment, "is_treasury_posted", False)),
             "accounting_reference": _safe_attr(payment, "accounting_entry_reference", ""),
@@ -314,6 +378,7 @@ def _build_queryset(Payment, request):
         "invoice",
         "order",
         "customer",
+        "customer__user",
     ).all()
 
     company_id = _extract_company_id(request)
@@ -345,6 +410,9 @@ def payment_detail_api(request, payment_id: int):
         return _json_success(
             {
                 "payment": serialized_payment,
+                "customer": serialized_payment.get("customer"),
+                "order": serialized_payment.get("order"),
+                "invoice": serialized_payment.get("invoice"),
                 "financial_flow": serialized_payment["financial_flow"],
             },
             message="Payment loaded successfully.",

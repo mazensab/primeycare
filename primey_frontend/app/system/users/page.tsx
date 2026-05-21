@@ -1,58 +1,77 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/users/page.tsx
-   🧠 Primey Care | System Users Overview
-
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ نفس النمط المعتمد
-   ✅ w-full space-y-4
-   ✅ بدون main / min-h-screen / max-w
-   ✅ أزرار انتقال للصفحات التي أزلناها من السايدر
-   ✅ Skeleton Loading
-   ✅ Error State مستقل
-   ✅ Empty State ذكي
-   ✅ Excel .xls HTML Workbook
-   ✅ Web PDF Print
-   ✅ sonner
-   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
+   📂 primey_frontend/app/system/users/page.tsx
+   👥 Primey Care — Login Accounts Management V2
+   ------------------------------------------------------------
+   ✅ إدارة حسابات الدخول فقط
+   ✅ لا تكرر بيانات العميل / مقدم الخدمة / المندوب / الوسيط
+   ✅ يدعم entity / actor / linked_actor / actor_context من الباكند
+   ✅ Same approved Products / Customers table spirit
+   ✅ Real API only: /api/users/
+   ✅ Server pagination: q / user_type / role / is_active / page / per_page
+   ✅ Actions: activate / deactivate / send password link
+   ✅ Excel .xls + Web print
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
+import * as React from "react";
 import Link from "next/link";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowUpRight,
-  BadgeCheck,
-  Download,
+  ArrowUpDown,
+  CheckCircle2,
+  ColumnsIcon,
+  Copy,
   Eye,
-  FileText,
+  FileSpreadsheet,
   KeyRound,
   Loader2,
-  Mail,
-  Phone,
-  PlusCircle,
+  MoreHorizontal,
+  Plus,
   Printer,
-  RefreshCcw,
+  RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
-  UserCheck,
+  TriangleAlert,
   UserCog,
   Users,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -62,491 +81,470 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
+type UserStatusFilter = "all" | "active" | "inactive";
 
-type UserStatus = "ACTIVE" | "INACTIVE" | "PENDING" | "BLOCKED" | "UNKNOWN";
-
-type UserRole =
-  | "SYSTEM_ADMIN"
-  | "PROVIDER_ADMIN"
-  | "CUSTOMER_USER"
-  | "AGENT_USER"
+type UserTypeFilter =
+  | "all"
+  | "SUPER_ADMIN"
+  | "SYSTEM"
+  | "STAFF"
   | "ACCOUNTANT"
-  | "SUPPORT"
-  | "VIEWER"
-  | "UNKNOWN";
+  | "PROVIDER"
+  | "CENTER"
+  | "CUSTOMER"
+  | "AGENT"
+  | "BROKER"
+  | "OTHER";
 
-type SystemUserRow = {
-  id: string;
-  full_name: string;
+type RoleFilter =
+  | "all"
+  | "system_admin"
+  | "provider_admin"
+  | "customer_user"
+  | "agent_user"
+  | "broker_user"
+  | "accountant"
+  | "support"
+  | "viewer";
+
+type SortKey =
+  | "newest"
+  | "oldest"
+  | "name"
+  | "username"
+  | "email"
+  | "user_type"
+  | "role"
+  | "last_login";
+
+type ColumnKey =
+  | "select"
+  | "user"
+  | "contact"
+  | "userType"
+  | "role"
+  | "workspace"
+  | "actor"
+  | "groups"
+  | "status"
+  | "staff"
+  | "lastLogin"
+  | "createdAt"
+  | "actions";
+
+type UserProfileRecord = {
+  display_name: string;
+  avatar_url: string;
+  bio: string;
+  user_type: string;
+  role: string;
+  phone_number: string;
+  whatsapp_number: string;
+  alternate_email: string;
+  preferred_language: string;
+  timezone: string;
+  is_profile_completed: boolean;
+  extra_data: ApiRecord;
+  tags: string[];
+};
+
+type UserRecord = {
+  id: number;
   username: string;
   email: string;
-  phone: string;
-  role: UserRole;
-  user_type: string;
-  workspace: string;
-  status: UserStatus;
+  first_name: string;
+  last_name: string;
+  full_name: string;
   is_active: boolean;
+  status: string;
   is_staff: boolean;
   is_superuser: boolean;
-  permissions_count: number;
-  last_login: string;
-  date_joined: string;
-  created_at: string;
+  last_login: string | null;
+  date_joined: string | null;
+  groups: string[];
+
+  user_type: string;
+  role: string;
+  workspace: string;
+
+  entity_type: string;
+  entity_id: number | null;
+  actor_type: string;
+  actor_id: number | null;
+  actor_name: string;
+  actor_code: string;
+
+  company_id: number | null;
+  provider_id: number | null;
+  center_id: number | null;
+  customer_id: number | null;
+  agent_id: number | null;
+  broker_id: number | null;
+
+  phone: string;
+  mobile: string;
+  phone_number: string;
+  whatsapp_number: string;
+  notes: string;
+  profile: UserProfileRecord;
 };
 
-type UsersSummary = {
-  total_users: number;
-  active_users: number;
-  inactive_users: number;
-  pending_users: number;
-  blocked_users: number;
-  system_admins: number;
-  provider_admins: number;
-  customer_users: number;
-  agent_users: number;
-  accountants: number;
-  support_users: number;
-  viewers: number;
-  staff_users: number;
-  superusers: number;
+type PaginationState = {
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
 };
 
-type ApiEnvelope<T> = {
-  ok?: boolean;
+type UsersApiResponse = {
   success?: boolean;
+  ok?: boolean;
   message?: string;
   detail?: string;
   error?: string;
-  data?: T;
+  errors?: unknown;
   results?: unknown[];
   items?: unknown[];
-  rows?: unknown[];
   users?: unknown[];
-  summary?: Partial<UsersSummary>;
-  stats?: Partial<UsersSummary>;
-};
-
-const DEFAULT_SUMMARY: UsersSummary = {
-  total_users: 0,
-  active_users: 0,
-  inactive_users: 0,
-  pending_users: 0,
-  blocked_users: 0,
-  system_admins: 0,
-  provider_admins: 0,
-  customer_users: 0,
-  agent_users: 0,
-  accountants: 0,
-  support_users: 0,
-  viewers: 0,
-  staff_users: 0,
-  superusers: 0,
-};
-
-/* ============================================================
-   Locale / API
-============================================================ */
-
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
-
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
-}
-
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
-
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasAnyPermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "support"].includes(role),
-    );
-  }
-
-  return true;
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "مستخدمي النظام" : "System Users",
-    subtitle: isArabic
-      ? "لوحة متابعة مستخدمي النظام والأدوار والصلاحيات وحالة التفعيل."
-      : "Overview for system users, roles, permissions, and account status.",
-
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-    usersList: isArabic ? "قائمة المستخدمين" : "Users List",
-    createUser: isArabic ? "إنشاء مستخدم" : "Create User",
-
-    totalUsers: isArabic ? "إجمالي المستخدمين" : "Total Users",
-    activeUsers: isArabic ? "مستخدمون نشطون" : "Active Users",
-    inactiveUsers: isArabic ? "غير نشطين" : "Inactive Users",
-    pendingUsers: isArabic ? "بانتظار التفعيل" : "Pending Users",
-    blockedUsers: isArabic ? "محظورون" : "Blocked Users",
-    systemAdmins: isArabic ? "مدراء النظام" : "System Admins",
-    providerAdmins: isArabic ? "مدراء مقدمي الخدمة" : "Provider Admins",
-    customerUsers: isArabic ? "مستخدمو العملاء" : "Customer Users",
-    agentUsers: isArabic ? "مستخدمو المندوبين" : "Agent Users",
-    accountants: isArabic ? "المحاسبون" : "Accountants",
-    supportUsers: isArabic ? "الدعم" : "Support",
-    staffUsers: isArabic ? "طاقم داخلي" : "Staff Users",
-    superusers: isArabic ? "صلاحية عليا" : "Superusers",
-
-    shortcutsTitle: isArabic ? "اختصارات المستخدمين" : "User Shortcuts",
-    shortcutsDesc: isArabic
-      ? "الوصول السريع لقائمة المستخدمين أو إنشاء مستخدم بعد تنظيف السايدر."
-      : "Quick access to user list and create page after sidebar cleanup.",
-
-    latestTitle: isArabic ? "أحدث المستخدمين" : "Latest Users",
-    latestDesc: isArabic
-      ? "أحدث المستخدمين مع الدور والحالة والصلاحيات."
-      : "Latest users with role, status, and permissions.",
-
-    searchPlaceholder: isArabic
-      ? "ابحث بالاسم أو اسم المستخدم أو البريد أو الجوال أو الدور..."
-      : "Search by name, username, email, phone, or role...",
-
-    table: {
-      user: isArabic ? "المستخدم" : "User",
-      username: isArabic ? "اسم المستخدم" : "Username",
-      contact: isArabic ? "التواصل" : "Contact",
-      role: isArabic ? "الدور" : "Role",
-      workspace: isArabic ? "المساحة" : "Workspace",
-      status: isArabic ? "الحالة" : "Status",
-      permissions: isArabic ? "الصلاحيات" : "Permissions",
-      lastLogin: isArabic ? "آخر دخول" : "Last Login",
-      joinedAt: isArabic ? "تاريخ الانضمام" : "Joined At",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    pending: isArabic ? "بانتظار التفعيل" : "Pending",
-    blocked: isArabic ? "محظور" : "Blocked",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    systemAdmin: isArabic ? "مدير النظام" : "System Admin",
-    providerAdmin: isArabic ? "مدير مقدم خدمة" : "Provider Admin",
-    customerUser: isArabic ? "عميل" : "Customer",
-    agentUser: isArabic ? "مندوب" : "Agent",
-    accountant: isArabic ? "محاسب" : "Accountant",
-    support: isArabic ? "دعم" : "Support",
-    viewer: isArabic ? "مشاهد" : "Viewer",
-
-    staff: isArabic ? "داخلي" : "Staff",
-    superuser: isArabic ? "صلاحية عليا" : "Superuser",
-    view: isArabic ? "عرض" : "View",
-
-    emptyTitle: isArabic ? "لا توجد بيانات مستخدمين" : "No user data",
-    emptyText: isArabic
-      ? "ستظهر بيانات المستخدمين هنا بعد إنشاء أول مستخدم."
-      : "User data will appear here after creating the first user.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث."
-      : "Try changing your search terms.",
-
-    accessDeniedTitle: isArabic
-      ? "غير مصرح بعرض المستخدمين"
-      : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض مستخدمي النظام. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view system users. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل بيانات المستخدمين."
-      : "Unable to load users.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث بيانات المستخدمين."
-      : "Users refreshed.",
-
-    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
+  data?: {
+    results?: unknown[];
+    items?: unknown[];
+    users?: unknown[];
+    pagination?: unknown;
+    count?: unknown;
   };
+  count?: unknown;
+  page?: unknown;
+  per_page?: unknown;
+  page_size?: unknown;
+  total_pages?: unknown;
+  num_pages?: unknown;
+  pagination?: unknown;
+};
+
+type ActionApiResponse = {
+  success?: boolean;
+  ok?: boolean;
+  message?: string;
+  detail?: string;
+  error?: string;
+  errors?: unknown;
+  data?: unknown;
+  user?: unknown;
+  reset?: {
+    uid?: string;
+    token?: string;
+    reset_path?: string;
+    reset_url?: string;
+  };
+};
+
+const PAGE_SIZE = 10;
+
+const DEFAULT_VISIBLE_COLUMNS: Record<ColumnKey, boolean> = {
+  select: true,
+  user: true,
+  contact: true,
+  userType: true,
+  role: true,
+  workspace: true,
+  actor: true,
+  groups: false,
+  status: true,
+  staff: true,
+  lastLogin: true,
+  createdAt: true,
+  actions: true,
+};
+
+const translations = {
+  ar: {
+    title: "حسابات الدخول",
+    subtitle:
+      "إدارة حسابات الدخول فقط: التفعيل، التعطيل، بيانات الدخول، وروابط كلمة المرور. بيانات العميل أو مقدم الخدمة أو المندوب أو الوسيط تدار من صفحاتهم التشغيلية.",
+    create: "إضافة حساب نظام",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    searchPlaceholder: "ابحث بالاسم أو اسم المستخدم أو البريد أو الجوال...",
+    totalUsers: "إجمالي الحسابات",
+    activeUsers: "الحسابات النشطة",
+    inactiveUsers: "الحسابات المعطلة",
+    linkedAccounts: "حسابات مرتبطة",
+    admins: "حسابات النظام",
+    completedProfiles: "ملفات مكتملة",
+    user: "حساب الدخول",
+    contact: "التواصل",
+    userType: "نوع الحساب",
+    role: "الدور",
+    workspace: "المساحة",
+    actor: "الكيان المرتبط",
+    groups: "المجموعات",
+    status: "الحالة",
+    staff: "إداري",
+    lastLogin: "آخر دخول",
+    createdAt: "تاريخ الإنشاء",
+    actions: "الإجراءات",
+    columns: "الأعمدة",
+    sort: "الترتيب",
+    selected: "محدد",
+    allTypes: "كل الأنواع",
+    superAdmin: "سوبر أدمن",
+    system: "النظام",
+    staffUser: "موظف نظام",
+    provider: "مقدم خدمة",
+    center: "مركز",
+    customer: "عميل",
+    agent: "مندوب",
+    broker: "وسيط",
+    accountant: "محاسب",
+    support: "الدعم",
+    viewer: "مشاهد",
+    other: "أخرى",
+    allRoles: "كل الأدوار",
+    systemAdmin: "مدير النظام",
+    providerAdmin: "مدير مقدم خدمة",
+    customerUser: "مستخدم عميل",
+    agentUser: "مستخدم مندوب",
+    brokerUser: "مستخدم وسيط",
+    allStatuses: "كل الحالات",
+    active: "نشط",
+    inactive: "غير نشط",
+    yes: "نعم",
+    no: "لا",
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    nameSort: "الاسم",
+    usernameSort: "اسم المستخدم",
+    emailSort: "البريد",
+    userTypeSort: "نوع الحساب",
+    roleSort: "الدور",
+    lastLoginSort: "آخر دخول",
+    activeFilters: "فلاتر مفعلة",
+    clearSelection: "إلغاء التحديد",
+    view: "عرض وإدارة الحساب",
+    copyUsername: "نسخ اسم المستخدم",
+    copyEmail: "نسخ البريد",
+    activate: "تفعيل الحساب",
+    deactivate: "تعطيل الحساب",
+    passwordLink: "توليد رابط كلمة المرور",
+    copyPasswordLink: "نسخ رابط كلمة المرور",
+    copied: "تم النسخ",
+    actionSuccess: "تم تنفيذ العملية بنجاح.",
+    passwordLinkGenerated: "تم توليد رابط كلمة المرور.",
+    actionFailed: "تعذر تنفيذ العملية.",
+    confirmActivate: "هل تريد تفعيل هذا الحساب؟",
+    confirmDeactivate: "هل تريد تعطيل هذا الحساب؟",
+    noDataTitle: "لا توجد حسابات بعد",
+    noDataDesc: "عند إنشاء حسابات دخول ستظهر هنا.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+    errorTitle: "تعذر تحميل حسابات الدخول",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير حسابات الدخول",
+    generatedAt: "تاريخ الطباعة",
+    showing: "عرض",
+    rows: "صفوف",
+    page: "صفحة",
+    of: "من",
+    next: "التالي",
+    previous: "السابق",
+    unknown: "غير محدد",
+    superuser: "سوبر أدمن",
+    normal: "عادي",
+    noContact: "لا توجد بيانات تواصل",
+    notLinked: "غير مرتبط",
+  },
+  en: {
+    title: "Login Accounts",
+    subtitle:
+      "Manage login accounts only: activation, deactivation, credentials, and password links. Customer, provider, agent, and broker operational data stays in their own pages.",
+    create: "Add System Account",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    searchPlaceholder: "Search name, username, email, or phone...",
+    totalUsers: "Total accounts",
+    activeUsers: "Active accounts",
+    inactiveUsers: "Inactive accounts",
+    linkedAccounts: "Linked accounts",
+    admins: "System accounts",
+    completedProfiles: "Completed profiles",
+    user: "Login account",
+    contact: "Contact",
+    userType: "Account type",
+    role: "Role",
+    workspace: "Workspace",
+    actor: "Linked actor",
+    groups: "Groups",
+    status: "Status",
+    staff: "Staff",
+    lastLogin: "Last login",
+    createdAt: "Created at",
+    actions: "Actions",
+    columns: "Columns",
+    sort: "Sort",
+    selected: "Selected",
+    allTypes: "All types",
+    superAdmin: "Super admin",
+    system: "System",
+    staffUser: "System staff",
+    provider: "Provider",
+    center: "Center",
+    customer: "Customer",
+    agent: "Agent",
+    broker: "Broker",
+    accountant: "Accountant",
+    support: "Support",
+    viewer: "Viewer",
+    other: "Other",
+    allRoles: "All roles",
+    systemAdmin: "System admin",
+    providerAdmin: "Provider admin",
+    customerUser: "Customer user",
+    agentUser: "Agent user",
+    brokerUser: "Broker user",
+    allStatuses: "All statuses",
+    active: "Active",
+    inactive: "Inactive",
+    yes: "Yes",
+    no: "No",
+    newest: "Newest",
+    oldest: "Oldest",
+    nameSort: "Name",
+    usernameSort: "Username",
+    emailSort: "Email",
+    userTypeSort: "Account type",
+    roleSort: "Role",
+    lastLoginSort: "Last login",
+    activeFilters: "Active filters",
+    clearSelection: "Clear selection",
+    view: "View account",
+    copyUsername: "Copy username",
+    copyEmail: "Copy email",
+    activate: "Activate account",
+    deactivate: "Deactivate account",
+    passwordLink: "Generate password link",
+    copyPasswordLink: "Copy password link",
+    copied: "Copied",
+    actionSuccess: "Action completed successfully.",
+    passwordLinkGenerated: "Password link generated.",
+    actionFailed: "Unable to complete action.",
+    confirmActivate: "Do you want to activate this account?",
+    confirmDeactivate: "Do you want to deactivate this account?",
+    noDataTitle: "No accounts yet",
+    noDataDesc: "Created login accounts will appear here.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other results.",
+    errorTitle: "Unable to load login accounts",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "Login accounts report",
+    generatedAt: "Generated at",
+    showing: "Showing",
+    rows: "Rows",
+    page: "Page",
+    of: "of",
+    next: "Next",
+    previous: "Previous",
+    unknown: "Unknown",
+    superuser: "Superuser",
+    normal: "Normal",
+    noContact: "No contact data",
+    notLinked: "Not linked",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function formatNumber(value: unknown): string {
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  return fallback;
+}
+
+function toNullableNumber(value: unknown) {
+  const parsed = toNumber(value, 0);
+  return parsed > 0 ? parsed : null;
+}
+
+function toBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "on", "active", "نشط"].includes(value.toLowerCase());
+  }
+
+  return false;
+}
+
+function formatInteger(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(toNumber(value));
 }
 
-function formatDate(value: string, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const parsed = new Date(value);
 
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).slice(0, 10);
+  }
+
+  return parsed.toISOString().slice(0, 10);
 }
 
-function escapeHtml(value: string | number) {
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).replace("T", " ").slice(0, 16);
+  }
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -555,737 +553,1273 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function stringifyApiError(value: unknown): string {
+  if (!value) return "";
 
-    if (value !== undefined && value !== null && value !== "") return value;
+  if (typeof value === "string") return value;
+
+  if (Array.isArray(value)) {
+    return value.map((item) => stringifyApiError(item)).filter(Boolean).join("، ");
   }
 
-  for (const container of ["user", "account", "profile", "data", "stats"]) {
-    const nested = obj[container];
+  if (isRecord(value)) {
+    return Object.entries(value)
+      .map(([key, item]) => {
+        const message = stringifyApiError(item);
+        return message ? `${key}: ${message}` : "";
+      })
+      .filter(Boolean)
+      .join(" | ");
+  }
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+  return String(value);
+}
 
-      if (value !== undefined && value !== null && value !== "") return value;
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
+  }
+
+  return envBase;
+}
+
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const base = getApiBaseUrl();
+  const query = params?.toString();
+
+  return `${base}${path}${query ? `?${query}` : ""}`;
+}
+
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const found = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${name}=`));
+
+  return found ? decodeURIComponent(found.split("=").slice(1).join("=")) : "";
+}
+
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
+
+async function fetchJson<T>(
+  url: string,
+  options?: {
+    signal?: AbortSignal;
+    method?: "GET" | "POST";
+    body?: unknown;
+  },
+): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
+
+  const response = await fetch(url, {
+    method: options?.method || "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal: options?.signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options?.method === "POST" ? { "Content-Type": "application/json" } : {}),
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body:
+      options?.method === "POST"
+        ? JSON.stringify(options.body || {})
+        : undefined,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      stringifyApiError(payload?.errors) ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
 }
 
-function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
-  if (!payload) return [];
+function getRecordName(record: ApiRecord) {
+  return normalizeText(
+    record.name ||
+      record.full_name ||
+      record.display_name ||
+      record.company_name ||
+      record.title ||
+      record.provider_name ||
+      record.customer_name ||
+      record.agent_name ||
+      record.broker_name,
+  );
+}
 
-  const data = asDict(payload.data);
-  const directValue = (payload as Dict)[key];
+function getRecordCode(record: ApiRecord) {
+  return normalizeText(
+    record.code ||
+      record.agent_code ||
+      record.broker_code ||
+      record.customer_code ||
+      record.provider_code ||
+      record.referral_code ||
+      record.external_reference,
+  );
+}
 
-  if (Array.isArray(directValue)) return directValue;
+function normalizeProfile(value: unknown): UserProfileRecord {
+  const profile = asRecord(value);
+
+  return {
+    display_name: normalizeText(profile.display_name),
+    avatar_url: normalizeText(profile.avatar_url),
+    bio: normalizeText(profile.bio),
+    user_type: normalizeText(profile.user_type || "OTHER").toUpperCase(),
+    role: normalizeText(profile.role || "viewer").toLowerCase(),
+    phone_number: normalizeText(profile.phone_number),
+    whatsapp_number: normalizeText(profile.whatsapp_number),
+    alternate_email: normalizeText(profile.alternate_email),
+    preferred_language: normalizeText(profile.preferred_language || "ar"),
+    timezone: normalizeText(profile.timezone || "Asia/Riyadh"),
+    is_profile_completed: toBoolean(profile.is_profile_completed),
+    extra_data: asRecord(profile.extra_data),
+    tags: asArray(profile.tags).map((tag) => normalizeText(tag)).filter(Boolean),
+  };
+}
+
+function inferWorkspace({
+  workspace,
+  userType,
+  role,
+  entityType,
+}: {
+  workspace: string;
+  userType: string;
+  role: string;
+  entityType: string;
+}) {
+  const cleanWorkspace = normalizeText(workspace).toLowerCase();
+  const cleanUserType = normalizeText(userType).toUpperCase();
+  const cleanRole = normalizeText(role).toLowerCase();
+  const cleanEntityType = normalizeText(entityType).toLowerCase();
+
+  if (["system", "provider", "center", "customer", "agent", "broker"].includes(cleanWorkspace)) {
+    return cleanWorkspace;
+  }
+
+  if (
+    cleanUserType === "PROVIDER" ||
+    cleanRole === "provider_admin" ||
+    cleanEntityType === "provider"
+  ) {
+    return "provider";
+  }
+
+  if (cleanUserType === "CENTER" || cleanRole === "center_admin" || cleanEntityType === "center") {
+    return "center";
+  }
+
+  if (
+    cleanUserType === "CUSTOMER" ||
+    cleanRole === "customer_user" ||
+    cleanEntityType === "customer"
+  ) {
+    return "customer";
+  }
+
+  if (
+    cleanUserType === "AGENT" ||
+    cleanRole === "agent_user" ||
+    cleanEntityType === "agent"
+  ) {
+    return "agent";
+  }
+
+  if (
+    cleanUserType === "BROKER" ||
+    cleanRole === "broker_user" ||
+    cleanEntityType === "broker"
+  ) {
+    return "broker";
+  }
+
+  return "system";
+}
+
+function normalizeUser(value: unknown): UserRecord {
+  const item = asRecord(value);
+  const profile = normalizeProfile(item.profile);
+  const extra = profile.extra_data;
+
+  const entityRecord = asRecord(
+    item.entity || item.actor || item.linked_actor || item.actor_context,
+  );
+
+  const firstName = normalizeText(item.first_name);
+  const lastName = normalizeText(item.last_name);
+  const fullName = normalizeText(
+    item.full_name || [firstName, lastName].filter(Boolean).join(" "),
+  );
+
+  const entityType = normalizeText(
+    item.entity_type ||
+      item.actor_type ||
+      entityRecord.entity_type ||
+      entityRecord.type ||
+      extra.entity_type ||
+      extra.actor_type ||
+      "",
+  ).toLowerCase();
+
+  const entityId = toNullableNumber(
+    item.entity_id ||
+      item.actor_id ||
+      entityRecord.entity_id ||
+      entityRecord.id ||
+      extra.entity_id ||
+      extra.actor_id,
+  );
+
+  const companyId = toNullableNumber(item.company_id || extra.company_id || extra.company);
+  const providerId = toNullableNumber(
+    item.provider_id ||
+      entityRecord.provider_id ||
+      extra.provider_id ||
+      extra.provider ||
+      extra.service_provider_id,
+  );
+  const centerId = toNullableNumber(
+    item.center_id || entityRecord.center_id || extra.center_id || extra.center,
+  );
+  const customerId = toNullableNumber(
+    item.customer_id || entityRecord.customer_id || extra.customer_id || extra.customer,
+  );
+  const agentId = toNullableNumber(
+    item.agent_id || entityRecord.agent_id || extra.agent_id || extra.agent,
+  );
+  const brokerId = toNullableNumber(
+    item.broker_id || entityRecord.broker_id || extra.broker_id || extra.broker,
+  );
+
+  const phone = normalizeText(
+    item.phone ||
+      item.mobile ||
+      item.phone_number ||
+      item.whatsapp_number ||
+      profile.phone_number ||
+      profile.whatsapp_number,
+  );
+
+  const userType = normalizeText(item.user_type || profile.user_type || "OTHER").toUpperCase();
+  const role = normalizeText(item.role || profile.role || "viewer").toLowerCase();
+
+  const workspace = inferWorkspace({
+    workspace: normalizeText(item.workspace || extra.workspace || extra.scope),
+    userType,
+    role,
+    entityType,
+  });
+
+  return {
+    id: toNumber(item.id),
+    username: normalizeText(item.username),
+    email: normalizeText(item.email),
+    first_name: firstName,
+    last_name: lastName,
+    full_name: fullName,
+    is_active: toBoolean(item.is_active),
+    status: normalizeText(item.status || (toBoolean(item.is_active) ? "ACTIVE" : "INACTIVE")).toUpperCase(),
+    is_staff: toBoolean(item.is_staff),
+    is_superuser: toBoolean(item.is_superuser),
+    last_login: normalizeText(item.last_login) || null,
+    date_joined: normalizeText(item.date_joined) || null,
+    groups: asArray(item.groups).map((group) => normalizeText(group)).filter(Boolean),
+
+    user_type: userType,
+    role,
+    workspace,
+
+    entity_type: entityType,
+    entity_id: entityId,
+    actor_type: normalizeText(item.actor_type || entityType).toLowerCase(),
+    actor_id: toNullableNumber(item.actor_id || entityId),
+    actor_name: normalizeText(item.actor_name || entityRecord.actor_name || getRecordName(entityRecord)),
+    actor_code: normalizeText(item.actor_code || entityRecord.actor_code || getRecordCode(entityRecord)),
+
+    company_id: companyId,
+    provider_id: providerId,
+    center_id: centerId,
+    customer_id: customerId,
+    agent_id: agentId,
+    broker_id: brokerId,
+
+    phone,
+    mobile: phone,
+    phone_number: normalizeText(item.phone_number || profile.phone_number || phone),
+    whatsapp_number: normalizeText(item.whatsapp_number || profile.whatsapp_number),
+    notes: normalizeText(item.notes || extra.notes),
+    profile,
+  };
+}
+
+function extractUsers(payload: UsersApiResponse) {
   if (Array.isArray(payload.results)) return payload.results;
   if (Array.isArray(payload.items)) return payload.items;
-  if (Array.isArray(payload.rows)) return payload.rows;
+  if (Array.isArray(payload.users)) return payload.users;
 
-  if (Array.isArray(data[key])) return data[key] as unknown[];
-  if (Array.isArray(data.results)) return data.results as unknown[];
-  if (Array.isArray(data.items)) return data.items as unknown[];
-  if (Array.isArray(data.rows)) return data.rows as unknown[];
-
-  if (Array.isArray(payload.data)) return payload.data;
+  if (payload.data && typeof payload.data === "object") {
+    if (Array.isArray(payload.data.results)) return payload.data.results;
+    if (Array.isArray(payload.data.items)) return payload.data.items;
+    if (Array.isArray(payload.data.users)) return payload.data.users;
+  }
 
   return [];
 }
 
-function extractSummary(payload: ApiEnvelope<unknown> | null) {
-  if (!payload) return {};
+function extractPagination(payload: UsersApiResponse): PaginationState {
+  const rootPagination = asRecord(payload.pagination);
+  const dataPagination = asRecord(asRecord(payload.data).pagination);
+  const pagination = Object.keys(dataPagination).length ? dataPagination : rootPagination;
 
-  const data = asDict(payload.data);
-
-  return {
-    ...asDict(payload.summary),
-    ...asDict(payload.stats),
-    ...asDict(data.summary),
-    ...asDict(data.stats),
-    ...asDict(data.totals),
-    ...asDict(data),
-  } as Partial<UsersSummary>;
-}
-
-function normalizeStatus(value: unknown, isActive: boolean): UserStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["ACTIVE", "ENABLED", "APPROVED"].includes(clean)) return "ACTIVE";
-  if (["INACTIVE", "DISABLED"].includes(clean)) return "INACTIVE";
-  if (["PENDING", "INVITED", "NEW"].includes(clean)) return "PENDING";
-  if (["BLOCKED", "SUSPENDED", "BANNED"].includes(clean)) return "BLOCKED";
-
-  return isActive ? "ACTIVE" : "INACTIVE";
-}
-
-function normalizeRole(value: unknown): UserRole {
-  const clean = String(value || "").toLowerCase();
-
-  if (["system_admin", "super_admin", "superadmin", "admin"].includes(clean)) {
-    return "SYSTEM_ADMIN";
-  }
-
-  if (["provider_admin", "provider"].includes(clean)) return "PROVIDER_ADMIN";
-  if (["customer_user", "customer"].includes(clean)) return "CUSTOMER_USER";
-  if (["agent_user", "agent"].includes(clean)) return "AGENT_USER";
-  if (["accountant", "finance"].includes(clean)) return "ACCOUNTANT";
-  if (["support", "support_user"].includes(clean)) return "SUPPORT";
-  if (["viewer", "read_only", "readonly"].includes(clean)) return "VIEWER";
-
-  return "UNKNOWN";
-}
-
-function normalizeUser(item: unknown, index: number): SystemUserRow {
-  const obj = asDict(item);
-
-  const isActive = Boolean(
-    getNestedValue(obj, ["is_active", "active", "isActive"]) ?? true,
+  const page = toNumber(pagination.page || payload.page, 1);
+  const perPage = toNumber(
+    pagination.per_page || pagination.page_size || payload.per_page || payload.page_size,
+    PAGE_SIZE,
+  );
+  const total = toNumber(
+    pagination.total || pagination.count || payload.count || asRecord(payload.data).count,
+    0,
+  );
+  const totalPages = Math.max(
+    toNumber(
+      pagination.total_pages ||
+        pagination.pages ||
+        pagination.num_pages ||
+        payload.total_pages ||
+        payload.num_pages ||
+        Math.ceil(total / Math.max(perPage, 1)),
+      1,
+    ),
+    1,
   );
 
-  const roleValue =
-    getNestedValue(obj, ["role", "user_role", "user_type", "type"]) || "";
-
-  const permissionsValue = getNestedValue(obj, [
-    "permissions_count",
-    "permission_count",
-  ]);
-
-  const permissionsArray = getNestedValue(obj, [
-    "permission_codes",
-    "permissions",
-    "profile_permissions",
-  ]);
-
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    full_name: String(
-      getNestedValue(obj, ["full_name", "name", "display_name"]) || "-",
-    ),
-    username: String(getNestedValue(obj, ["username", "login"]) || "-"),
-    email: String(getNestedValue(obj, ["email"]) || ""),
-    phone: String(getNestedValue(obj, ["phone", "mobile", "phone_number"]) || ""),
-    role: normalizeRole(roleValue),
-    user_type: String(getNestedValue(obj, ["user_type", "type"]) || ""),
-    workspace: String(getNestedValue(obj, ["workspace", "space"]) || ""),
-    status: normalizeStatus(getNestedValue(obj, ["status", "state"]), isActive),
-    is_active: isActive,
-    is_staff: Boolean(getNestedValue(obj, ["is_staff", "staff", "isStaff"])),
-    is_superuser: Boolean(
-      getNestedValue(obj, ["is_superuser", "superuser", "isSuperuser"]),
-    ),
-    permissions_count: Array.isArray(permissionsArray)
-      ? permissionsArray.length
-      : toNumber(permissionsValue),
-    last_login: String(getNestedValue(obj, ["last_login", "lastLogin"]) || ""),
-    date_joined: String(
-      getNestedValue(obj, ["date_joined", "joined_at", "created_at"]) || "",
-    ),
-    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
+    page,
+    per_page: perPage,
+    total,
+    total_pages: totalPages,
   };
 }
 
-function buildSummary(
-  rows: SystemUserRow[],
-  apiSummary?: Partial<UsersSummary>,
-): UsersSummary {
-  const fallback: UsersSummary = {
-    total_users: rows.length,
-    active_users: rows.filter((item) => item.status === "ACTIVE").length,
-    inactive_users: rows.filter((item) => item.status === "INACTIVE").length,
-    pending_users: rows.filter((item) => item.status === "PENDING").length,
-    blocked_users: rows.filter((item) => item.status === "BLOCKED").length,
-    system_admins: rows.filter((item) => item.role === "SYSTEM_ADMIN").length,
-    provider_admins: rows.filter((item) => item.role === "PROVIDER_ADMIN").length,
-    customer_users: rows.filter((item) => item.role === "CUSTOMER_USER").length,
-    agent_users: rows.filter((item) => item.role === "AGENT_USER").length,
-    accountants: rows.filter((item) => item.role === "ACCOUNTANT").length,
-    support_users: rows.filter((item) => item.role === "SUPPORT").length,
-    viewers: rows.filter((item) => item.role === "VIEWER").length,
-    staff_users: rows.filter((item) => item.is_staff).length,
-    superusers: rows.filter((item) => item.is_superuser).length,
-  };
+function extractResetUrl(response: ActionApiResponse) {
+  const data = asRecord(response.data);
+  const reset = asRecord(response.reset || data.reset);
 
-  const api = asDict(apiSummary);
-
-  return {
-    total_users:
-      toNumber(api.total_users) ||
-      toNumber(api.users_count) ||
-      toNumber(api.count) ||
-      fallback.total_users,
-    active_users: toNumber(api.active_users) || fallback.active_users,
-    inactive_users: toNumber(api.inactive_users) || fallback.inactive_users,
-    pending_users: toNumber(api.pending_users) || fallback.pending_users,
-    blocked_users: toNumber(api.blocked_users) || fallback.blocked_users,
-    system_admins: toNumber(api.system_admins) || fallback.system_admins,
-    provider_admins: toNumber(api.provider_admins) || fallback.provider_admins,
-    customer_users: toNumber(api.customer_users) || fallback.customer_users,
-    agent_users: toNumber(api.agent_users) || fallback.agent_users,
-    accountants: toNumber(api.accountants) || fallback.accountants,
-    support_users: toNumber(api.support_users) || fallback.support_users,
-    viewers: toNumber(api.viewers) || fallback.viewers,
-    staff_users: toNumber(api.staff_users) || fallback.staff_users,
-    superusers: toNumber(api.superusers) || fallback.superusers,
-  };
+  return normalizeText(reset.reset_url || reset.reset_path);
 }
 
-function statusLabel(status: UserStatus, locale: AppLocale) {
-  const t = dictionary(locale);
+function getUserTypeLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(value).toUpperCase();
 
-  const labels: Record<UserStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
-    PENDING: t.pending,
-    BLOCKED: t.blocked,
-    UNKNOWN: t.unknown,
-  };
+  if (normalized === "SUPER_ADMIN") return t.superAdmin;
+  if (normalized === "SYSTEM") return t.system;
+  if (normalized === "STAFF") return t.staffUser;
+  if (normalized === "ACCOUNTANT") return t.accountant;
+  if (normalized === "PROVIDER") return t.provider;
+  if (normalized === "CENTER") return t.center;
+  if (normalized === "CUSTOMER") return t.customer;
+  if (normalized === "AGENT") return t.agent;
+  if (normalized === "BROKER") return t.broker;
+  if (normalized === "OTHER") return t.other;
 
-  return labels[status];
+  return normalized || t.unknown;
 }
 
-function roleLabel(role: UserRole, locale: AppLocale) {
-  const t = dictionary(locale);
+function getRoleLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(value).toLowerCase();
 
-  const labels: Record<UserRole, string> = {
-    SYSTEM_ADMIN: t.systemAdmin,
-    PROVIDER_ADMIN: t.providerAdmin,
-    CUSTOMER_USER: t.customerUser,
-    AGENT_USER: t.agentUser,
-    ACCOUNTANT: t.accountant,
-    SUPPORT: t.support,
-    VIEWER: t.viewer,
-    UNKNOWN: t.unknown,
-  };
+  if (normalized === "system_admin" || normalized === "admin" || normalized === "super_admin") return t.systemAdmin;
+  if (normalized === "provider_admin" || normalized === "center_admin") return t.providerAdmin;
+  if (normalized === "customer_user" || normalized === "customer") return t.customerUser;
+  if (normalized === "agent_user" || normalized === "agent") return t.agentUser;
+  if (normalized === "broker_user" || normalized === "broker") return t.brokerUser;
+  if (normalized === "accountant" || normalized === "finance") return t.accountant;
+  if (normalized === "support") return t.support;
+  if (normalized === "viewer") return t.viewer;
 
-  return labels[role];
+  return normalized || t.unknown;
 }
 
-function statusBadge(status: UserStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
+function getWorkspaceLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(value).toLowerCase();
 
-  if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+  if (normalized === "system") return t.system;
+  if (normalized === "provider") return t.provider;
+  if (normalized === "center") return t.center;
+  if (normalized === "customer") return t.customer;
+  if (normalized === "agent") return t.agent;
+  if (normalized === "broker") return t.broker;
+
+  return normalized || t.unknown;
+}
+
+function getActorType(user: UserRecord) {
+  const actorType = normalizeText(user.entity_type || user.actor_type).toLowerCase();
+
+  if (user.provider_id || actorType === "provider") return "provider";
+  if (user.center_id || actorType === "center") return "center";
+  if (user.customer_id || actorType === "customer") return "customer";
+  if (user.agent_id || actorType === "agent") return "agent";
+  if (user.broker_id || actorType === "broker") return "broker";
+  if (actorType === "system" || user.workspace === "system") return "system";
+
+  return actorType || "";
+}
+
+function getActorLabel(user: UserRecord, locale: Locale) {
+  const t = translations[locale];
+  const actorType = getActorType(user);
+  const actorId = getActorId(user);
+  const actorName = normalizeText(user.actor_name);
+  const actorCode = normalizeText(user.actor_code);
+
+  let label: string = t.notLinked;
+
+  if (actorType === "provider") label = t.provider;
+  else if (actorType === "center") label = t.center;
+  else if (actorType === "customer") label = t.customer;
+  else if (actorType === "agent") label = t.agent;
+  else if (actorType === "broker") label = t.broker;
+  else if (actorType === "system") label = t.system;
+  else if (actorType) label = actorType;
+
+  if (actorName && actorCode) return `${label}: ${actorName} · ${actorCode}`;
+  if (actorName) return `${label}: ${actorName}`;
+  if (actorCode) return `${label}: ${actorCode}`;
+  if (actorType === "system") return label;
+  if (actorId) return `${label} #${actorId}`;
+
+  if (user.workspace === "system" || user.is_staff || user.is_superuser) {
+    return t.system;
   }
 
-  if (status === "PENDING") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
+  return t.notLinked;
+}
+
+function getActorId(user: UserRecord) {
+  return (
+    user.provider_id ||
+    user.center_id ||
+    user.customer_id ||
+    user.agent_id ||
+    user.broker_id ||
+    user.entity_id ||
+    user.actor_id ||
+    null
+  );
+}
+
+function getActorBadgeClass(user: UserRecord) {
+  const actor = getActorType(user);
+
+  if (actor === "provider" || actor === "center") {
+    return "border-violet-500/30 bg-violet-50 text-violet-700";
   }
 
-  if (status === "INACTIVE" || status === "BLOCKED") {
-    return (
-      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
-        {label}
-      </Badge>
-    );
+  if (actor === "customer") {
+    return "border-blue-500/30 bg-blue-50 text-blue-700";
   }
+
+  if (actor === "agent") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700";
+  }
+
+  if (actor === "broker") {
+    return "border-amber-500/30 bg-amber-50 text-amber-700";
+  }
+
+  if (actor === "system" || user.workspace === "system") {
+    return "border-slate-500/30 bg-slate-50 text-slate-700";
+  }
+
+  return "border-muted bg-muted/40 text-muted-foreground";
+}
+
+function isLinkedAccount(user: UserRecord) {
+  const actorType = getActorType(user);
+  const actorId = getActorId(user);
+
+  return Boolean(actorType && actorType !== "system" && actorId);
+}
+
+function getStatusClass(isActive: boolean) {
+  if (isActive) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+}
+
+function StatusBadge({ user, locale }: { user: UserRecord; locale: Locale }) {
+  const t = translations[locale];
 
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn(
+        "max-w-full rounded-full px-2.5 py-1 text-xs font-medium",
+        getStatusClass(user.is_active),
+      )}
+    >
+      <span className="truncate">{user.is_active ? t.active : t.inactive}</span>
     </Badge>
   );
 }
 
-function isValidId(value: unknown) {
-  const id = String(value || "").trim();
-
-  return id && id !== "-" && id !== "undefined" && id !== "null";
-}
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function PageSkeleton() {
+function KpiCard({
+  title,
+  value,
+  trend,
+  icon: Icon,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <SkeletonLine className="h-8 w-28" />
-              <SkeletonLine className="mt-3 h-4 w-24" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="grid gap-3 p-5 md:grid-cols-2">
-          {Array.from({ length: 2 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-24 w-full rounded-2xl" />
-          ))}
-        </CardContent>
-      </Card>
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
 
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="space-y-3 p-5">
-          <SkeletonLine className="h-7 w-48" />
-          {Array.from({ length: 7 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
+        </div>
+      </CardHeader>
+    </Card>
   );
 }
 
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  title,
-  locale,
-  summary,
-  rows,
+function HeaderSortButton({
+  children,
+  active,
+  onClick,
 }: {
-  filename: string;
-  title: string;
-  locale: AppLocale;
-  summary: UsersSummary;
-  rows: SystemUserRow[];
+  children: React.ReactNode;
+  active?: boolean;
+  onClick: () => void;
 }) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const t = dictionary(locale);
-
-  const rowsHtml = rows
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.full_name)}</td>
-          <td>${escapeHtml(item.username)}</td>
-          <td>${escapeHtml(item.email || "-")}</td>
-          <td>${escapeHtml(item.phone || "-")}</td>
-          <td>${escapeHtml(roleLabel(item.role, locale))}</td>
-          <td>${escapeHtml(item.workspace || "-")}</td>
-          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(formatNumber(item.permissions_count))}</td>
-          <td>${escapeHtml(item.is_staff ? t.staff : "-")}</td>
-          <td>${escapeHtml(item.is_superuser ? t.superuser : "-")}</td>
-          <td>${escapeHtml(formatDate(item.last_login, locale))}</td>
-          <td>${escapeHtml(formatDate(item.date_joined, locale))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-        </style>
-      </head>
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="12">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="12"></td></tr>
-          <tr><td class="section" colspan="12">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalUsers)}</td><td colspan="11">${escapeHtml(formatNumber(summary.total_users))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.activeUsers)}</td><td colspan="11">${escapeHtml(formatNumber(summary.active_users))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.systemAdmins)}</td><td colspan="11">${escapeHtml(formatNumber(summary.system_admins))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.staffUsers)}</td><td colspan="11">${escapeHtml(formatNumber(summary.staff_users))}</td></tr>
-
-          <tr><td colspan="12"></td></tr>
-          <tr>
-            <th>${escapeHtml(t.table.user)}</th>
-            <th>${escapeHtml(t.table.username)}</th>
-            <th>${escapeHtml("Email")}</th>
-            <th>${escapeHtml("Phone")}</th>
-            <th>${escapeHtml(t.table.role)}</th>
-            <th>${escapeHtml(t.table.workspace)}</th>
-            <th>${escapeHtml(t.table.status)}</th>
-            <th>${escapeHtml(t.table.permissions)}</th>
-            <th>${escapeHtml(t.staff)}</th>
-            <th>${escapeHtml(t.superuser)}</th>
-            <th>${escapeHtml(t.table.lastLogin)}</th>
-            <th>${escapeHtml(t.table.joinedAt)}</th>
-          </tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex w-full items-center justify-start gap-1 truncate text-xs font-semibold transition hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      <span className="truncate">{children}</span>
+      <ArrowUpDown className="h-3.5 w-3.5 shrink-0" />
+    </button>
+  );
 }
 
-function buildPrintHtml({
-  locale,
-  title,
-  summary,
-  rows,
+function TableHeaderCell({
+  children,
+  className,
 }: {
-  locale: AppLocale;
-  title: string;
-  summary: UsersSummary;
-  rows: SystemUserRow[];
+  children: React.ReactNode;
+  className: string;
 }) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-
-  const tableRows = rows
-    .slice(0, 40)
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.full_name)}</td>
-          <td>${escapeHtml(item.username)}</td>
-          <td>${escapeHtml(roleLabel(item.role, locale))}</td>
-          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(formatNumber(item.permissions_count))}</td>
-          <td>${escapeHtml(formatDate(item.last_login, locale))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 5px 12px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          .grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .box {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .box span { color: #6b7280; display: block; font-size: 11px; }
-          .box strong { display: block; margin-top: 6px; font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-          th { background: #f3f4f6; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
-          </div>
-          <div class="badge">Primey Care</div>
-        </div>
-
-        <div class="grid">
-          <div class="box"><span>${escapeHtml(t.totalUsers)}</span><strong>${escapeHtml(formatNumber(summary.total_users))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.activeUsers)}</span><strong>${escapeHtml(formatNumber(summary.active_users))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.systemAdmins)}</span><strong>${escapeHtml(formatNumber(summary.system_admins))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.staffUsers)}</span><strong>${escapeHtml(formatNumber(summary.staff_users))}</strong></div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>${escapeHtml(t.table.user)}</th>
-              <th>${escapeHtml(t.table.username)}</th>
-              <th>${escapeHtml(t.table.role)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-              <th>${escapeHtml(t.table.permissions)}</th>
-              <th>${escapeHtml(t.table.lastLogin)}</th>
-            </tr>
-          </thead>
-          <tbody>${tableRows || `<tr><td colspan="6">${escapeHtml(t.emptyTitle)}</td></tr>`}</tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+  return (
+    <TableHead
+      className={cn(
+        "h-11 whitespace-nowrap px-4 text-right align-middle text-xs font-semibold text-muted-foreground",
+        className,
+      )}
+    >
+      {children}
+    </TableHead>
+  );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function TableBodyCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <TableCell
+      className={cn(
+        "h-[62px] overflow-hidden px-4 text-right align-middle",
+        className,
+      )}
+    >
+      {children}
+    </TableCell>
+  );
+}
+
+function getUserDisplayName(user: UserRecord) {
+  return (
+    user.profile.display_name ||
+    user.full_name ||
+    user.first_name ||
+    user.username ||
+    user.email ||
+    `#${user.id}`
+  );
+}
 
 export default function SystemUsersPage() {
-  const auth = useAuth() as unknown;
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [users, setUsers] = React.useState<UserRecord[]>([]);
+  const [pagination, setPagination] = React.useState<PaginationState>({
+    page: 1,
+    per_page: PAGE_SIZE,
+    total: 0,
+    total_pages: 1,
+  });
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [rows, setRows] = useState<SystemUserRow[]>([]);
-  const [summary, setSummary] = useState<UsersSummary>(DEFAULT_SUMMARY);
-  const [query, setQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [actionLoadingId, setActionLoadingId] = React.useState<number | null>(null);
+  const [error, setError] = React.useState("");
+  const [lastPasswordLink, setLastPasswordLink] = React.useState("");
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const [searchInput, setSearchInput] = React.useState("");
+  const [search, setSearch] = React.useState("");
+  const [typeFilter, setTypeFilter] = React.useState<UserTypeFilter>("all");
+  const [roleFilter, setRoleFilter] = React.useState<RoleFilter>("all");
+  const [statusFilter, setStatusFilter] = React.useState<UserStatusFilter>("all");
+  const [sortKey, setSortKey] = React.useState<SortKey>("newest");
+  const [selectedIds, setSelectedIds] = React.useState<Array<number>>([]);
+  const [visibleColumns, setVisibleColumns] =
+    React.useState<Record<ColumnKey, boolean>>(DEFAULT_VISIBLE_COLUMNS);
+  const [page, setPage] = React.useState(1);
 
-  const canView = hasAnyPermission(auth, ["users.view", "users.list"], "view");
-  const canCreate = hasAnyPermission(auth, ["users.create"], "action");
+  const didLoadRef = React.useRef(false);
 
-  const canExport = hasAnyPermission(
-    auth,
-    ["users.export", "reports.export"],
-    "action",
-  );
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
 
-  const canPrint = hasAnyPermission(
-    auth,
-    ["users.print", "reports.print"],
-    "action",
-  );
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const canViewDetails = hasAnyPermission(auth, ["users.view"], "view");
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-  const filteredRows = useMemo(() => {
-    const clean = query.trim().toLowerCase();
+    applyLocale();
 
-    const sorted = [...rows].sort((a, b) =>
-      String(b.created_at || b.date_joined).localeCompare(
-        String(a.created_at || a.date_joined),
-      ),
-    );
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-    if (!clean) return sorted.slice(0, 12);
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
 
-    return sorted
-      .filter((item) =>
-        [
-          item.full_name,
-          item.username,
-          item.email,
-          item.phone,
-          item.user_type,
-          item.workspace,
-          roleLabel(item.role, locale),
-          statusLabel(item.status, locale),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(clean),
-      )
-      .slice(0, 12);
-  }, [locale, query, rows]);
+  React.useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 450);
 
-  const activeSummary = useMemo(() => buildSummary(filteredRows), [filteredRows]);
+    return () => window.clearTimeout(timeout);
+  }, [searchInput]);
 
-  const displaySummary = query.trim() ? activeSummary : summary;
-  const hasData = rows.length > 0;
-  const hasSearch = query.trim().length > 0;
-
-  const loadUsers = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setRows([]);
-        setSummary(DEFAULT_SUMMARY);
-        setIsLoading(false);
-        return;
-      }
+  const loadUsers = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
 
       try {
-        setIsLoading(true);
-        setErrorMessage("");
+        if (!silent) setLoading(true);
 
-        const payload = await loadFirstAvailable([
-          "/api/users/list/?page_size=500",
-          "/api/users/?page_size=500",
-        ]);
+        setRefreshing(true);
+        setError("");
 
-        if (!payload) {
-          throw new Error(t.loadError);
+        const params = new URLSearchParams({
+          page: String(page),
+          per_page: String(PAGE_SIZE),
+          page_size: String(PAGE_SIZE),
+        });
+
+        if (search) {
+          params.set("q", search);
+          params.set("search", search);
         }
 
-        const normalizedRows = extractRows(payload, "users")
-          .map(normalizeUser)
-          .filter((item) => item.id || item.username || item.email);
+        if (typeFilter !== "all") {
+          params.set("user_type", typeFilter);
+        }
 
-        setRows(normalizedRows);
-        setSummary(buildSummary(normalizedRows, extractSummary(payload)));
+        if (roleFilter !== "all") {
+          params.set("role", roleFilter);
+        }
 
-        if (showToast) toast.success(t.loadSuccess);
-      } catch (error) {
-        console.error("Users overview load error:", error);
-        setRows([]);
-        setSummary(DEFAULT_SUMMARY);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
+        if (statusFilter === "active") {
+          params.set("is_active", "true");
+        }
+
+        if (statusFilter === "inactive") {
+          params.set("is_active", "false");
+        }
+
+        const payload = await fetchJson<UsersApiResponse>(
+          makeApiUrl("/api/users/", params),
+          { signal: controller.signal },
+        );
+
+        const nextUsers = extractUsers(payload).map(normalizeUser);
+        const nextPagination = extractPagination(payload);
+
+        setUsers(nextUsers);
+        setPagination(nextPagination);
+        setSelectedIds([]);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setUsers([]);
+        setPagination({
+          page,
+          per_page: PAGE_SIZE,
+          total: 0,
+          total_pages: 1,
+        });
+        setSelectedIds([]);
+        setError(message);
       } finally {
-        setIsLoading(false);
+        setLoading(false);
+        setRefreshing(false);
       }
+
+      return () => controller.abort();
     },
-    [canView, t.loadError, t.loadSuccess],
+    [page, roleFilter, search, statusFilter, t.errorDesc, typeFilter],
   );
 
-  function exportExcel() {
-    if (!canExport) return;
+  React.useEffect(() => {
+    if (!didLoadRef.current) {
+      didLoadRef.current = true;
+      void loadUsers();
+      return;
+    }
 
-    if (!hasData) {
+    void loadUsers({ silent: true });
+  }, [loadUsers]);
+
+  const sortedUsers = React.useMemo(() => {
+    const copy = [...users];
+
+    copy.sort((a, b) => {
+      if (sortKey === "oldest") {
+        return String(a.date_joined || "").localeCompare(String(b.date_joined || ""));
+      }
+
+      if (sortKey === "name") {
+        return getUserDisplayName(a).localeCompare(getUserDisplayName(b));
+      }
+
+      if (sortKey === "username") {
+        return a.username.localeCompare(b.username);
+      }
+
+      if (sortKey === "email") {
+        return a.email.localeCompare(b.email);
+      }
+
+      if (sortKey === "user_type") {
+        return a.user_type.localeCompare(b.user_type);
+      }
+
+      if (sortKey === "role") {
+        return a.role.localeCompare(b.role);
+      }
+
+      if (sortKey === "last_login") {
+        return String(b.last_login || "").localeCompare(String(a.last_login || ""));
+      }
+
+      return String(b.date_joined || "").localeCompare(String(a.date_joined || ""));
+    });
+
+    return copy;
+  }, [sortKey, users]);
+
+  const summary = React.useMemo(() => {
+    const active = users.filter((user) => user.is_active).length;
+    const inactive = users.filter((user) => !user.is_active).length;
+    const linked = users.filter(isLinkedAccount).length;
+    const systemAccounts = users.filter(
+      (user) =>
+        user.is_superuser ||
+        user.is_staff ||
+        user.role === "system_admin" ||
+        user.user_type === "SUPER_ADMIN" ||
+        user.user_type === "SYSTEM" ||
+        user.user_type === "STAFF" ||
+        user.user_type === "ACCOUNTANT",
+    ).length;
+
+    return {
+      total: pagination.total || users.length,
+      active,
+      inactive,
+      linked,
+      systemAccounts,
+    };
+  }, [pagination.total, users]);
+
+  const visibleColumnCount = Object.values(visibleColumns).filter(Boolean).length || 1;
+
+  const hasActiveFilters =
+    Boolean(search.trim()) ||
+    typeFilter !== "all" ||
+    roleFilter !== "all" ||
+    statusFilter !== "all" ||
+    sortKey !== "newest";
+
+  const allPageSelected =
+    sortedUsers.length > 0 && sortedUsers.every((user) => selectedIds.includes(user.id));
+
+  function resetFilters() {
+    setSearchInput("");
+    setSearch("");
+    setTypeFilter("all");
+    setRoleFilter("all");
+    setStatusFilter("all");
+    setSortKey("newest");
+    setSelectedIds([]);
+    setPage(1);
+  }
+
+  function toggleSelectAllPage(checked: boolean) {
+    if (!checked) {
+      setSelectedIds([]);
+      return;
+    }
+
+    setSelectedIds(sortedUsers.map((user) => user.id));
+  }
+
+  function toggleSelectUser(id: number, checked: boolean) {
+    setSelectedIds((current) => {
+      if (checked) return Array.from(new Set([...current, id]));
+      return current.filter((item) => item !== id);
+    });
+  }
+
+  async function copyValue(value: string) {
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t.copied);
+    } catch {
+      toast.error(t.actionFailed);
+    }
+  }
+
+  async function runUserAction(user: UserRecord, action: "activate" | "deactivate") {
+    const confirmation = action === "activate" ? t.confirmActivate : t.confirmDeactivate;
+
+    if (!window.confirm(confirmation)) return;
+
+    setActionLoadingId(user.id);
+
+    try {
+      await fetchJson<ActionApiResponse>(
+        makeApiUrl(`/api/users/${user.id}/${action}/`),
+        {
+          method: "POST",
+          body: {},
+        },
+      );
+
+      toast.success(t.actionSuccess);
+      await loadUsers({ silent: true });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.actionFailed;
+
+      toast.error(message);
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
+
+  async function generatePasswordLink(user: UserRecord) {
+    setActionLoadingId(user.id);
+
+    try {
+      const response = await fetchJson<ActionApiResponse>(
+        makeApiUrl(`/api/users/${user.id}/send-password-link/`),
+        {
+          method: "POST",
+          body: {
+            frontend_base_url: typeof window !== "undefined" ? window.location.origin : "",
+          },
+        },
+      );
+
+      const resetUrl = extractResetUrl(response);
+
+      if (resetUrl) {
+        setLastPasswordLink(resetUrl);
+        await copyValue(resetUrl);
+      }
+
+      toast.success(t.passwordLinkGenerated);
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.actionFailed;
+
+      toast.error(message);
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
+
+  function buildExportRows() {
+    return sortedUsers.map((user) => ({
+      name: getUserDisplayName(user),
+      username: user.username,
+      email: user.email,
+      phone: user.phone || user.whatsapp_number || user.phone_number,
+      userType: getUserTypeLabel(user.user_type, locale),
+      role: getRoleLabel(user.role, locale),
+      workspace: getWorkspaceLabel(user.workspace, locale),
+      actor: getActorLabel(user, locale),
+      groups: user.groups.join(", "),
+      status: user.is_active ? t.active : t.inactive,
+      staff: user.is_superuser ? t.superuser : user.is_staff ? t.yes : t.no,
+      lastLogin: formatDateTime(user.last_login),
+      createdAt: formatDate(user.date_joined),
+    }));
+  }
+
+  function exportExcel() {
+    const rows = buildExportRows();
+
+    if (!rows.length) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    downloadExcel({
-      filename: `primey-care-users-${new Date().toISOString().slice(0, 10)}.xls`,
-      title: t.title,
-      locale,
-      summary: displaySummary,
-      rows: hasSearch ? filteredRows : rows,
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h2>${escapeHtml(t.printTitle)}</h2>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.user)}</th>
+                <th>${escapeHtml(t.contact)}</th>
+                <th>${escapeHtml(t.userType)}</th>
+                <th>${escapeHtml(t.role)}</th>
+                <th>${escapeHtml(t.workspace)}</th>
+                <th>${escapeHtml(t.actor)}</th>
+                <th>${escapeHtml(t.groups)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.staff)}</th>
+                <th>${escapeHtml(t.lastLogin)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.name)}<br />${escapeHtml(row.username)}</td>
+                      <td>${escapeHtml(row.email)}<br />${escapeHtml(row.phone)}</td>
+                      <td>${escapeHtml(row.userType)}</td>
+                      <td>${escapeHtml(row.role)}</td>
+                      <td>${escapeHtml(row.workspace || "—")}</td>
+                      <td>${escapeHtml(row.actor || "—")}</td>
+                      <td>${escapeHtml(row.groups || "—")}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.staff)}</td>
+                      <td>${escapeHtml(row.lastLogin)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
     });
 
-    toast.success(t.exportSuccess);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-login-accounts-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
   function printPage() {
-    if (!canPrint) return;
+    const rows = buildExportRows();
 
-    if (!hasData) {
-      toast.error(t.exportEmpty);
+    if (!rows.length) {
+      toast.error(t.printEmpty);
       return;
     }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.printError);
+      toast.error(t.actionFailed);
       return;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        summary: displaySummary,
-        rows: hasSearch ? filteredRows : rows,
-      }),
-    );
-    printWindow.document.close();
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.showing)}: ${escapeHtml(rows.length)}</p>
+            </div>
+          </div>
 
-    toast.success(t.printSuccess);
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.totalUsers)}</span><strong>${escapeHtml(summary.total)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.activeUsers)}</span><strong>${escapeHtml(summary.active)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.inactiveUsers)}</span><strong>${escapeHtml(summary.inactive)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.linkedAccounts)}</span><strong>${escapeHtml(summary.linked)}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.user)}</th>
+                <th>${escapeHtml(t.contact)}</th>
+                <th>${escapeHtml(t.userType)}</th>
+                <th>${escapeHtml(t.role)}</th>
+                <th>${escapeHtml(t.workspace)}</th>
+                <th>${escapeHtml(t.actor)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.staff)}</th>
+                <th>${escapeHtml(t.lastLogin)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.name)}<br />${escapeHtml(row.username)}</td>
+                      <td>${escapeHtml(row.email || "—")}<br />${escapeHtml(row.phone || "—")}</td>
+                      <td>${escapeHtml(row.userType)}</td>
+                      <td>${escapeHtml(row.role)}</td>
+                      <td>${escapeHtml(row.workspace || "—")}</td>
+                      <td>${escapeHtml(row.actor || "—")}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.staff)}</td>
+                      <td>${escapeHtml(row.lastLogin)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadUsers(false);
-  }, [authResolving, loadUsers]);
-
-  if (!authResolving && !canView) {
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
+      <div className="w-full space-y-4" dir={dir}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-52" />
+            <Skeleton className="h-4 w-96" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-28" />
+          </div>
+        </div>
 
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Card key={index} className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="min-h-[112px] px-6 py-5">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-8 w-32" />
+                <Skeleton className="h-5 w-20" />
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
+
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-80 w-full" />
           </CardContent>
         </Card>
       </div>
@@ -1293,465 +1827,748 @@ export default function SystemUsersPage() {
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="max-w-3xl text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadUsers(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadUsers({ silent: true })}
+            disabled={refreshing}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canExport ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={isLoading || !hasData || Boolean(errorMessage)}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
 
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={isLoading || !hasData || Boolean(errorMessage)}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
+
+          <Button asChild className="h-9 rounded-lg bg-black px-4 text-white hover:bg-black/90">
+            <Link href="/system/users/create">
+              <Plus className="h-4 w-4" />
+              {t.create}
+            </Link>
+          </Button>
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.totalUsers}
+          value={formatInteger(summary.total)}
+          trend={`${t.showing} ${formatInteger(users.length)}`}
+          icon={Users}
+        />
 
+        <KpiCard
+          title={t.activeUsers}
+          value={formatInteger(summary.active)}
+          trend={t.active}
+          icon={CheckCircle2}
+        />
+
+        <KpiCard
+          title={t.inactiveUsers}
+          value={formatInteger(summary.inactive)}
+          trend={t.inactive}
+          icon={XCircle}
+        />
+
+        <KpiCard
+          title={t.linkedAccounts}
+          value={formatInteger(summary.linked)}
+          trend={`${t.admins}: ${formatInteger(summary.systemAccounts)}`}
+          icon={ShieldCheck}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadUsers(true)}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadUsers()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {isLoading ? (
-        <PageSkeleton />
-      ) : (
-        <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <KpiCard
-              title={t.totalUsers}
-              value={formatNumber(displaySummary.total_users)}
-              icon={<Users className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.activeUsers}
-              value={formatNumber(displaySummary.active_users)}
-              icon={<UserCheck className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.systemAdmins}
-              value={formatNumber(displaySummary.system_admins)}
-              icon={<ShieldCheck className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.staffUsers}
-              value={formatNumber(displaySummary.staff_users)}
-              icon={<UserCog className="h-5 w-5" />}
-            />
-          </div>
+      {lastPasswordLink ? (
+        <Card className="rounded-lg border border-emerald-200 bg-emerald-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0 text-right">
+              <p className="font-semibold text-emerald-900">{t.passwordLinkGenerated}</p>
+              <p className="truncate text-sm text-emerald-700" dir="ltr">
+                {lastPasswordLink}
+              </p>
+            </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MiniStat title={t.providerAdmins} value={displaySummary.provider_admins} />
-            <MiniStat title={t.customerUsers} value={displaySummary.customer_users} />
-            <MiniStat title={t.agentUsers} value={displaySummary.agent_users} />
-            <MiniStat title={t.pendingUsers} value={displaySummary.pending_users} />
-          </div>
+            <Button
+              variant="outline"
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void copyValue(lastPasswordLink)}
+            >
+              <Copy className="h-4 w-4" />
+              {t.copyPasswordLink}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base font-bold">
-                {t.shortcutsTitle}
-              </CardTitle>
-              <CardDescription>{t.shortcutsDesc}</CardDescription>
-            </CardHeader>
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-col gap-3">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
+            </div>
 
-            <CardContent>
-              <div className="grid gap-3 md:grid-cols-2">
-                <Link href="/system/users/list">
-                  <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
-                    <CardContent className="flex h-full items-start gap-3 p-4">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                        <FileText className="h-5 w-5" />
-                      </div>
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={typeFilter}
+                  onValueChange={(value) => {
+                    setTypeFilter(value as UserTypeFilter);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[170px]">
+                    <UserCog className="h-4 w-4" />
+                    <SelectValue placeholder={t.userType} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allTypes}</SelectItem>
+                    <SelectItem value="SUPER_ADMIN">{t.superAdmin}</SelectItem>
+                    <SelectItem value="SYSTEM">{t.system}</SelectItem>
+                    <SelectItem value="STAFF">{t.staffUser}</SelectItem>
+                    <SelectItem value="ACCOUNTANT">{t.accountant}</SelectItem>
+                    <SelectItem value="PROVIDER">{t.provider}</SelectItem>
+                    <SelectItem value="CENTER">{t.center}</SelectItem>
+                    <SelectItem value="CUSTOMER">{t.customer}</SelectItem>
+                    <SelectItem value="AGENT">{t.agent}</SelectItem>
+                    <SelectItem value="BROKER">{t.broker}</SelectItem>
+                    <SelectItem value="OTHER">{t.other}</SelectItem>
+                  </SelectContent>
+                </Select>
 
-                      <div className="min-w-0">
-                        <p className="font-semibold">{t.usersList}</p>
-                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                          {isArabic
-                            ? "عرض المستخدمين مع البحث والفلاتر والإجراءات."
-                            : "Open users with search, filters, and actions."}
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
+                <Select
+                  value={roleFilter}
+                  onValueChange={(value) => {
+                    setRoleFilter(value as RoleFilter);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[170px]">
+                    <ShieldCheck className="h-4 w-4" />
+                    <SelectValue placeholder={t.role} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allRoles}</SelectItem>
+                    <SelectItem value="system_admin">{t.systemAdmin}</SelectItem>
+                    <SelectItem value="provider_admin">{t.providerAdmin}</SelectItem>
+                    <SelectItem value="customer_user">{t.customerUser}</SelectItem>
+                    <SelectItem value="agent_user">{t.agentUser}</SelectItem>
+                    <SelectItem value="broker_user">{t.brokerUser}</SelectItem>
+                    <SelectItem value="accountant">{t.accountant}</SelectItem>
+                    <SelectItem value="support">{t.support}</SelectItem>
+                    <SelectItem value="viewer">{t.viewer}</SelectItem>
+                  </SelectContent>
+                </Select>
 
-                {canCreate ? (
-                  <Link href="/system/users/create">
-                    <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
-                      <CardContent className="flex h-full items-start gap-3 p-4">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                          <PlusCircle className="h-5 w-5" />
-                        </div>
-
-                        <div className="min-w-0">
-                          <p className="font-semibold">{t.createUser}</p>
-                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                            {isArabic
-                              ? "إضافة مستخدم جديد وتحديد الدور والصلاحيات."
-                              : "Add a new user and assign role and permissions."}
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                ) : null}
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    setStatusFilter(value as UserStatusFilter);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[135px]">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <SelectValue placeholder={t.status} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allStatuses}</SelectItem>
+                    <SelectItem value="active">{t.active}</SelectItem>
+                    <SelectItem value="inactive">{t.inactive}</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            </CardContent>
-          </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-4">
-              <div className="relative w-full">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {!hasData ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-                <Users className="h-12 w-12 text-muted-foreground/40" />
-                <p className="text-lg font-semibold">{t.emptyTitle}</p>
-                <p className="max-w-md text-sm text-muted-foreground">
-                  {t.emptyText}
-                </p>
-
-                {canCreate ? (
-                  <Link href="/system/users/create">
-                    <Button className="mt-2 rounded-xl">
-                      <PlusCircle className="h-4 w-4" />
-                      {t.createUser}
+              <div className="flex flex-wrap items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background">
+                      <ColumnsIcon className="h-4 w-4" />
+                      {t.columns}
                     </Button>
-                  </Link>
-                ) : null}
-              </CardContent>
-            </Card>
-          ) : null}
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {(
+                      [
+                        ["select", t.selected],
+                        ["user", t.user],
+                        ["contact", t.contact],
+                        ["userType", t.userType],
+                        ["role", t.role],
+                        ["workspace", t.workspace],
+                        ["actor", t.actor],
+                        ["groups", t.groups],
+                        ["status", t.status],
+                        ["staff", t.staff],
+                        ["lastLogin", t.lastLogin],
+                        ["createdAt", t.createdAt],
+                        ["actions", t.actions],
+                      ] as [ColumnKey, string][]
+                    ).map(([key, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={visibleColumns[key]}
+                        onCheckedChange={(checked) =>
+                          setVisibleColumns((current) => ({
+                            ...current,
+                            [key]: Boolean(checked),
+                          }))
+                        }
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
-          {hasData && hasSearch && filteredRows.length === 0 ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-                <Search className="h-12 w-12 text-muted-foreground/40" />
-                <p className="text-lg font-semibold">{t.noResultsTitle}</p>
-                <p className="max-w-md text-sm text-muted-foreground">
-                  {t.noResultsText}
-                </p>
-              </CardContent>
-            </Card>
-          ) : null}
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg bg-background"
+                  onClick={resetFilters}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t.reset}
+                </Button>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle className="text-base font-bold">
-                    {t.latestTitle}
-                  </CardTitle>
-                  <CardDescription>{t.latestDesc}</CardDescription>
-                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background">
+                      <ArrowUpDown className="h-4 w-4" />
+                      {t.sort}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                    {(
+                      [
+                        ["newest", t.newest],
+                        ["oldest", t.oldest],
+                        ["name", t.nameSort],
+                        ["username", t.usernameSort],
+                        ["email", t.emailSort],
+                        ["user_type", t.userTypeSort],
+                        ["role", t.roleSort],
+                        ["last_login", t.lastLoginSort],
+                      ] as [SortKey, string][]
+                    ).map(([key, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={sortKey === key}
+                        onCheckedChange={() => setSortKey(key)}
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
-                <Link href="/system/users/list">
-                  <Button variant="outline" className="h-10 rounded-xl">
-                    <ArrowUpRight className="h-4 w-4" />
-                    {t.usersList}
+                {selectedIds.length > 0 ? (
+                  <Button
+                    variant="outline"
+                    className="h-9 rounded-lg bg-background"
+                    onClick={() => setSelectedIds([])}
+                  >
+                    <XCircle className="h-4 w-4" />
+                    {t.clearSelection} ({formatInteger(selectedIds.length)})
                   </Button>
-                </Link>
+                ) : null}
+
+                {hasActiveFilters ? (
+                  <Badge variant="secondary" className="h-9 rounded-lg px-3 text-xs font-semibold">
+                    {t.activeFilters}
+                  </Badge>
+                ) : null}
               </div>
-            </CardHeader>
+            </div>
+          </div>
 
-            <CardContent>
-              <div className="overflow-hidden rounded-xl border">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="min-w-[230px]">
-                          {t.table.user}
-                        </TableHead>
-                        <TableHead className="min-w-[140px]">
-                          {t.table.username}
-                        </TableHead>
-                        <TableHead className="min-w-[190px]">
-                          {t.table.contact}
-                        </TableHead>
-                        <TableHead className="min-w-[150px]">
-                          {t.table.role}
-                        </TableHead>
-                        <TableHead className="min-w-[130px]">
-                          {t.table.status}
-                        </TableHead>
-                        <TableHead className="min-w-[110px]">
-                          {t.table.permissions}
-                        </TableHead>
-                        <TableHead className="min-w-[130px]">
-                          {t.table.lastLogin}
-                        </TableHead>
-                        {canViewDetails ? (
-                          <TableHead className="min-w-[90px]">
-                            {t.table.action}
-                          </TableHead>
-                        ) : null}
-                      </TableRow>
-                    </TableHeader>
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1180px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    {visibleColumns.select ? (
+                      <TableHeaderCell className="w-[46px] px-3">
+                        <Checkbox
+                          checked={allPageSelected}
+                          onCheckedChange={(checked) =>
+                            toggleSelectAllPage(Boolean(checked))
+                          }
+                          aria-label={t.selected}
+                        />
+                      </TableHeaderCell>
+                    ) : null}
 
-                    <TableBody>
-                      {filteredRows.length > 0 ? (
-                        filteredRows.map((item) => (
-                          <TableRow key={`${item.id}-${item.username}`}>
-                            <TableCell>
-                              <div className="min-w-[210px]">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="font-semibold">{item.full_name}</p>
+                    {visibleColumns.user ? (
+                      <TableHeaderCell className="w-[240px]">
+                        <HeaderSortButton
+                          active={sortKey === "name" || sortKey === "username"}
+                          onClick={() => setSortKey("name")}
+                        >
+                          {t.user}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
 
-                                  {item.is_superuser ? (
-                                    <Badge variant="outline" className="rounded-full">
-                                      <ShieldCheck className="h-3 w-3" />
-                                      {t.superuser}
-                                    </Badge>
-                                  ) : null}
+                    {visibleColumns.contact ? (
+                      <TableHeaderCell className="w-[220px]">
+                        <HeaderSortButton
+                          active={sortKey === "email"}
+                          onClick={() => setSortKey("email")}
+                        >
+                          {t.contact}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
 
-                                  {item.is_staff ? (
-                                    <Badge variant="outline" className="rounded-full">
-                                      <BadgeCheck className="h-3 w-3" />
-                                      {t.staff}
-                                    </Badge>
-                                  ) : null}
+                    {visibleColumns.userType ? (
+                      <TableHeaderCell className="w-[140px]">
+                        <HeaderSortButton
+                          active={sortKey === "user_type"}
+                          onClick={() => setSortKey("user_type")}
+                        >
+                          {t.userType}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.role ? (
+                      <TableHeaderCell className="w-[145px]">
+                        <HeaderSortButton
+                          active={sortKey === "role"}
+                          onClick={() => setSortKey("role")}
+                        >
+                          {t.role}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.workspace ? (
+                      <TableHeaderCell className="w-[115px]">{t.workspace}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.actor ? (
+                      <TableHeaderCell className="w-[170px]">{t.actor}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.groups ? (
+                      <TableHeaderCell className="w-[160px]">{t.groups}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.status ? (
+                      <TableHeaderCell className="w-[105px]">{t.status}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.staff ? (
+                      <TableHeaderCell className="w-[100px]">{t.staff}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.lastLogin ? (
+                      <TableHeaderCell className="w-[140px]">
+                        <HeaderSortButton
+                          active={sortKey === "last_login"}
+                          onClick={() => setSortKey("last_login")}
+                        >
+                          {t.lastLogin}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.createdAt ? (
+                      <TableHeaderCell className="w-[120px]">
+                        <HeaderSortButton
+                          active={sortKey === "newest" || sortKey === "oldest"}
+                          onClick={() => setSortKey("newest")}
+                        >
+                          {t.createdAt}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.actions ? (
+                      <TableHeaderCell className="w-[72px] text-center">
+                        {t.actions}
+                      </TableHeaderCell>
+                    ) : null}
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {sortedUsers.length ? (
+                    sortedUsers.map((user) => {
+                      const displayName = getUserDisplayName(user);
+
+                      return (
+                        <TableRow key={user.id} className="h-[62px]">
+                          {visibleColumns.select ? (
+                            <TableBodyCell className="w-[46px] px-3">
+                              <Checkbox
+                                checked={selectedIds.includes(user.id)}
+                                onCheckedChange={(checked) =>
+                                  toggleSelectUser(user.id, Boolean(checked))
+                                }
+                                aria-label={displayName}
+                              />
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.user ? (
+                            <TableBodyCell className="w-[240px]">
+                              <div className="flex min-w-0 items-center gap-3">
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40">
+                                  <UserCog className="h-4 w-4 text-muted-foreground" />
                                 </div>
 
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {item.workspace || item.user_type || "-"}
-                                </p>
-                              </div>
-                            </TableCell>
-
-                            <TableCell className="font-medium" dir="ltr">
-                              {item.username}
-                            </TableCell>
-
-                            <TableCell>
-                              <div className="min-w-[170px]">
-                                <p
-                                  className="inline-flex items-center gap-1.5 text-sm"
-                                  dir="ltr"
-                                >
-                                  <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-                                  {item.email || "-"}
-                                </p>
-
-                                <p
-                                  className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground"
-                                  dir="ltr"
-                                >
-                                  <Phone className="h-3.5 w-3.5" />
-                                  {item.phone || "-"}
-                                </p>
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              <Badge variant="outline" className="rounded-full">
-                                <KeyRound className="h-3 w-3" />
-                                {roleLabel(item.role, locale)}
-                              </Badge>
-                            </TableCell>
-
-                            <TableCell>{statusBadge(item.status, locale)}</TableCell>
-
-                            <TableCell>
-                              {formatNumber(item.permissions_count)}
-                            </TableCell>
-
-                            <TableCell>
-                              {formatDate(item.last_login, locale)}
-                            </TableCell>
-
-                            {canViewDetails ? (
-                              <TableCell>
-                                {isValidId(item.id) ? (
-                                  <Link href={`/system/users/${item.id}`}>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 rounded-lg"
-                                    >
-                                      <Eye className="h-4 w-4" />
-                                      <span className="sr-only">{t.view}</span>
-                                    </Button>
+                                <div className="min-w-0 flex-1">
+                                  <Link
+                                    href={`/system/users/${user.id}`}
+                                    className="block truncate text-sm font-semibold text-foreground hover:underline"
+                                  >
+                                    {displayName}
                                   </Link>
-                                ) : (
-                                  <span className="text-sm text-muted-foreground">
-                                    -
-                                  </span>
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {user.username || "—"}
+                                  </p>
+                                </div>
+                              </div>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.contact ? (
+                            <TableBodyCell className="w-[220px]">
+                              <div className="min-w-0 space-y-0.5">
+                                <p className="truncate text-sm text-foreground">
+                                  {user.email || t.noContact}
+                                </p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {user.phone || user.whatsapp_number || user.phone_number || "—"}
+                                </p>
+                              </div>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.userType ? (
+                            <TableBodyCell className="w-[140px]">
+                              <Badge
+                                variant="outline"
+                                className="max-w-full rounded-full bg-muted/40 px-2.5 py-1 text-xs font-medium"
+                              >
+                                <span className="truncate">
+                                  {getUserTypeLabel(user.user_type, locale)}
+                                </span>
+                              </Badge>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.role ? (
+                            <TableBodyCell className="w-[145px]">
+                              <span className="block truncate text-sm font-medium">
+                                {getRoleLabel(user.role, locale)}
+                              </span>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.workspace ? (
+                            <TableBodyCell className="w-[115px]">
+                              <span className="block truncate text-sm text-muted-foreground">
+                                {getWorkspaceLabel(user.workspace, locale)}
+                              </span>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.actor ? (
+                            <TableBodyCell className="w-[170px]">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "max-w-full rounded-full px-2.5 py-1 text-xs font-medium",
+                                  getActorBadgeClass(user),
                                 )}
-                              </TableCell>
-                            ) : null}
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell
-                            colSpan={canViewDetails ? 8 : 7}
-                            className="h-32 text-center"
-                          >
-                            <p className="text-sm text-muted-foreground">
-                              {hasSearch ? t.noResultsText : t.emptyText}
-                            </p>
-                          </TableCell>
+                              >
+                                <span className="truncate">{getActorLabel(user, locale)}</span>
+                              </Badge>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.groups ? (
+                            <TableBodyCell className="w-[160px]">
+                              <span className="block truncate text-sm text-muted-foreground">
+                                {user.groups.length ? user.groups.join(", ") : "—"}
+                              </span>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.status ? (
+                            <TableBodyCell className="w-[105px]">
+                              <StatusBadge user={user} locale={locale} />
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.staff ? (
+                            <TableBodyCell className="w-[100px]">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "rounded-full px-2.5 py-1 text-xs font-medium",
+                                  user.is_superuser
+                                    ? "border-violet-500/30 bg-violet-50 text-violet-700"
+                                    : user.is_staff
+                                      ? "border-blue-500/30 bg-blue-50 text-blue-700"
+                                      : "border-muted bg-muted/40 text-muted-foreground",
+                                )}
+                              >
+                                {user.is_superuser ? t.superuser : user.is_staff ? t.yes : t.normal}
+                              </Badge>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.lastLogin ? (
+                            <TableBodyCell className="w-[140px]">
+                              <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                                {formatDateTime(user.last_login)}
+                              </span>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.createdAt ? (
+                            <TableBodyCell className="w-[120px]">
+                              <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                                {formatDate(user.date_joined)}
+                              </span>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.actions ? (
+                            <TableBodyCell className="w-[72px] text-center">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 rounded-lg"
+                                    disabled={actionLoadingId === user.id}
+                                  >
+                                    {actionLoadingId === user.id ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                </DropdownMenuTrigger>
+
+                                <DropdownMenuContent
+                                  align={locale === "ar" ? "start" : "end"}
+                                  className="w-56"
+                                >
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/system/users/${user.id}`}>
+                                      <Eye className="h-4 w-4" />
+                                      {t.view}
+                                    </Link>
+                                  </DropdownMenuItem>
+
+                                  {user.username ? (
+                                    <DropdownMenuItem
+                                      onClick={() => void copyValue(user.username)}
+                                    >
+                                      <Copy className="h-4 w-4" />
+                                      {t.copyUsername}
+                                    </DropdownMenuItem>
+                                  ) : null}
+
+                                  {user.email ? (
+                                    <DropdownMenuItem
+                                      onClick={() => void copyValue(user.email)}
+                                    >
+                                      <Copy className="h-4 w-4" />
+                                      {t.copyEmail}
+                                    </DropdownMenuItem>
+                                  ) : null}
+
+                                  <DropdownMenuSeparator />
+
+                                  <DropdownMenuItem
+                                    onClick={() => void generatePasswordLink(user)}
+                                    disabled={!user.is_active}
+                                  >
+                                    <KeyRound className="h-4 w-4" />
+                                    {t.passwordLink}
+                                  </DropdownMenuItem>
+
+                                  <DropdownMenuSeparator />
+
+                                  <DropdownMenuItem
+                                    onClick={() => void runUserAction(user, "activate")}
+                                    disabled={user.is_active}
+                                  >
+                                    <CheckCircle2 className="h-4 w-4" />
+                                    {t.activate}
+                                  </DropdownMenuItem>
+
+                                  <DropdownMenuItem
+                                    className="text-red-600 focus:text-red-600"
+                                    onClick={() => void runUserAction(user, "deactivate")}
+                                    disabled={!user.is_active}
+                                  >
+                                    <XCircle className="h-4 w-4" />
+                                    {t.deactivate}
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableBodyCell>
+                          ) : null}
                         </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={visibleColumnCount} className="h-72">
+                        <div className="flex flex-col items-center justify-center gap-3 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                            <Users className="h-6 w-6 text-muted-foreground" />
+                          </div>
+
+                          <div className="space-y-1">
+                            <p className="font-semibold text-foreground">
+                              {hasActiveFilters ? t.noResultsTitle : t.noDataTitle}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {hasActiveFilters ? t.noResultsDesc : t.noDataDesc}
+                            </p>
+                          </div>
+
+                          {hasActiveFilters ? (
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-lg"
+                              onClick={resetFilters}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              {t.reset}
+                            </Button>
+                          ) : (
+                            <Button
+                              asChild
+                              className="h-9 rounded-lg bg-black text-white hover:bg-black/90"
+                            >
+                              <Link href="/system/users/create">
+                                <Plus className="h-4 w-4" />
+                                {t.create}
+                              </Link>
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-muted-foreground">
+              {t.showing}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(sortedUsers.length)}
+              </span>{" "}
+              {t.of}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(pagination.total)}
+              </span>{" "}
+              {t.rows}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                disabled={page <= 1 || refreshing}
+                onClick={() => setPage((current) => Math.max(current - 1, 1))}
+              >
+                {t.previous}
+              </Button>
+
+              <div className="rounded-lg border bg-background px-3 py-2 text-sm tabular-nums">
+                {t.page} {formatInteger(page)} {t.of}{" "}
+                {formatInteger(pagination.total_pages)}
               </div>
-            </CardContent>
-          </Card>
-        </>
-      )}
+
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                disabled={page >= pagination.total_pages || refreshing}
+                onClick={() =>
+                  setPage((current) =>
+                    Math.min(current + 1, pagination.total_pages),
+                  )
+                }
+              >
+                {t.next}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
-  );
-}
-
-/* ============================================================
-   Small Components
-============================================================ */
-
-async function loadFirstAvailable(endpoints: string[]) {
-  let lastError = "";
-
-  for (const endpoint of endpoints) {
-    const response = await fetch(apiUrl(endpoint), {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    });
-
-    const payload = (await response.json().catch(() => null)) as
-      | ApiEnvelope<unknown>
-      | null;
-
-    if (response.ok && payload?.ok !== false && payload?.success !== false) {
-      return payload;
-    }
-
-    lastError =
-      payload?.message ||
-      payload?.detail ||
-      payload?.error ||
-      `HTTP ${response.status}`;
-  }
-
-  console.warn("Users endpoint fallback failed:", lastError);
-  return null;
-}
-
-function KpiCard({
-  title,
-  value,
-  icon,
-}: {
-  title: string;
-  value: ReactNode;
-  icon: ReactNode;
-}) {
-  return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-2xl font-bold">{value}</div>
-            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
-          </div>
-
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            {icon}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function MiniStat({ title, value }: { title: string; value: number }) {
-  return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-muted-foreground">{title}</span>
-          <span className="text-lg font-bold">{formatNumber(value)}</span>
-        </div>
-      </CardContent>
-    </Card>
   );
 }

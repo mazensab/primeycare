@@ -1,12 +1,15 @@
 # ============================================================
 # 📂 api/payments/reports.py
-# 🧠 Payments Reports API — Primey Care V2
+# 🧠 Payments Reports API — Primey Care V2.1
 # ------------------------------------------------------------
 # ✅ تقرير ملخص المدفوعات
 # ✅ إجماليات حسب الحالة / الطريقة / المزود
 # ✅ إجماليات الترحيل للمحاسبة والخزينة
 # ✅ أحدث الدفعات مع العلاقات الأساسية
 # ✅ فلاتر حسب التاريخ / العميل / الفاتورة / الطلب / الحالة
+# ✅ بحث آمن حسب بيانات العميل الحالية
+# ✅ يدعم رقم العميل الموحد normalized_phone
+# ✅ Compatible with Customer Portal / OTP customer account fields
 # ✅ Unified response: ok / success / data
 # ✅ Compatible with Accounting / Treasury / Gateways flow
 # ============================================================
@@ -22,6 +25,8 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q, Sum
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
+
+from customers.models import normalize_customer_phone
 
 
 logger = logging.getLogger(__name__)
@@ -130,6 +135,10 @@ def _clean_str(value: Any, default: str = "") -> str:
     return cleaned if cleaned else default
 
 
+def _clean_upper(value: Any, default: str = "") -> str:
+    return _clean_str(value, default).upper()
+
+
 def _to_bool(value: Any, default: bool | None = None) -> bool | None:
     if value in (None, ""):
         return default
@@ -211,6 +220,7 @@ def _base_queryset(Payment, request):
         "invoice",
         "order",
         "customer",
+        "customer__user",
     ).all()
 
     company_id = _extract_company_id(request)
@@ -232,9 +242,9 @@ def _apply_filters(queryset, request):
     invoice_id = _clean_str(request.GET.get("invoice_id"))
     order_id = _clean_str(request.GET.get("order_id"))
 
-    status_filter = _clean_str(request.GET.get("status"))
-    method_filter = _clean_str(request.GET.get("payment_method") or request.GET.get("method"))
-    provider_filter = _clean_str(request.GET.get("provider"))
+    status_filter = _clean_upper(request.GET.get("status"))
+    method_filter = _clean_upper(request.GET.get("payment_method") or request.GET.get("method"))
+    provider_filter = _clean_upper(request.GET.get("provider"))
 
     is_treasury_posted = _to_bool(request.GET.get("is_treasury_posted"), None)
     is_accounting_posted = _to_bool(request.GET.get("is_accounting_posted"), None)
@@ -278,7 +288,9 @@ def _apply_filters(queryset, request):
         queryset = queryset.filter(is_accounting_posted=is_accounting_posted)
 
     if q:
-        queryset = queryset.filter(
+        normalized_phone = normalize_customer_phone(q)
+
+        search_filter = (
             Q(payment_number__icontains=q)
             | Q(external_reference__icontains=q)
             | Q(transaction_id__icontains=q)
@@ -288,12 +300,19 @@ def _apply_filters(queryset, request):
             | Q(treasury_movement_reference__icontains=q)
             | Q(customer__customer_code__icontains=q)
             | Q(customer__display_name__icontains=q)
-            | Q(customer__full_name__icontains=q)
-            | Q(customer__name__icontains=q)
-            | Q(customer__phone__icontains=q)
             | Q(customer__phone_number__icontains=q)
+            | Q(customer__whatsapp_number__icontains=q)
+            | Q(customer__normalized_phone__icontains=q)
             | Q(customer__email__icontains=q)
+            | Q(customer__user__username__icontains=q)
+            | Q(order__order_number__icontains=q)
+            | Q(invoice__invoice_number__icontains=q)
         )
+
+        if normalized_phone:
+            search_filter |= Q(customer__normalized_phone__icontains=normalized_phone)
+
+        queryset = queryset.filter(search_filter)
 
     return queryset
 
@@ -341,10 +360,54 @@ def _serialize_group_rows(rows: list[dict[str, Any]], key: str) -> list[dict[str
     ]
 
 
+def _serialize_latest_customer(customer) -> dict[str, Any] | None:
+    if not customer:
+        return None
+
+    phone_number = (
+        _safe_attr(customer, "phone_number", "")
+        or _safe_attr(customer, "phone", "")
+        or _safe_attr(customer, "mobile", "")
+    )
+    whatsapp_number = _safe_attr(customer, "whatsapp_number", "")
+    user = _safe_attr(customer, "user", None)
+
+    display_name = (
+        _safe_attr(customer, "display_name", "")
+        or _safe_attr(customer, "full_name", "")
+        or _safe_attr(customer, "name", "")
+        or _related_name(customer)
+    )
+
+    return {
+        "id": _safe_attr(customer, "id", None),
+        "customer_code": _safe_attr(customer, "customer_code", ""),
+        "display_name": display_name,
+        "name": display_name,
+        "phone_number": phone_number,
+        "whatsapp_number": whatsapp_number,
+        "primary_contact_number": (
+            whatsapp_number
+            or phone_number
+            or _safe_attr(customer, "alternative_phone_number", "")
+        ),
+        "email": _safe_attr(customer, "email", ""),
+        "status": _safe_attr(customer, "status", ""),
+        "normalized_phone": _safe_attr(customer, "normalized_phone", ""),
+        "user_id": _safe_attr(customer, "user_id", None),
+        "user_username": _safe_attr(user, "username", "") if user else "",
+        "has_customer_account": bool(_safe_attr(customer, "user_id", None)),
+        "is_phone_verified": bool(_safe_attr(customer, "phone_verified_at", None)),
+        "is_whatsapp_verified": bool(_safe_attr(customer, "whatsapp_verified_at", None)),
+        "last_login_at": _iso_datetime(_safe_attr(customer, "last_login_at", None)),
+    }
+
+
 def _serialize_latest_payment(payment) -> dict[str, Any]:
     customer = _safe_attr(payment, "customer", None)
     invoice = _safe_attr(payment, "invoice", None)
     order = _safe_attr(payment, "order", None)
+    customer_payload = _serialize_latest_customer(customer)
 
     return {
         "id": payment.pk,
@@ -366,11 +429,15 @@ def _serialize_latest_payment(payment) -> dict[str, Any]:
         "order_number": _safe_attr(order, "order_number", "") if order else "",
 
         "customer_id": _safe_attr(payment, "customer_id", None),
+        "customer": customer_payload,
         "customer_name": _related_name(customer),
         "customer_phone": (
             _safe_attr(customer, "phone_number", "")
+            or _safe_attr(customer, "whatsapp_number", "")
             or _safe_attr(customer, "phone", "")
         ) if customer else "",
+        "customer_normalized_phone": _safe_attr(customer, "normalized_phone", "") if customer else "",
+        "has_customer_account": bool(_safe_attr(customer, "user_id", None)) if customer else False,
 
         "external_reference": _safe_attr(payment, "external_reference", ""),
         "transaction_id": _safe_attr(payment, "transaction_id", ""),
@@ -397,7 +464,13 @@ def _build_summary(queryset) -> dict[str, Any]:
         pending_accounting_count=Count("id", filter=Q(is_accounting_posted=False)),
         gateway_payments_count=Count(
             "id",
-            filter=Q(external_reference__isnull=False) | Q(transaction_id__isnull=False),
+            filter=(
+                Q(external_reference__isnull=False)
+                & ~Q(external_reference="")
+            ) | (
+                Q(transaction_id__isnull=False)
+                & ~Q(transaction_id="")
+            ),
         ),
     )
 
@@ -525,7 +598,7 @@ def payment_reports_api(request):
 
         latest_payments = list(
             queryset
-            .select_related("invoice", "order", "customer")
+            .select_related("invoice", "order", "customer", "customer__user")
             .order_by("-created_at", "-id")[:10]
         )
 

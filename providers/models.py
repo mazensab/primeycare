@@ -17,6 +17,7 @@
 # ✅ يدعم السجل التجاري والرقم الضريبي
 # ✅ يدعم صورة وشعار مقدم الخدمة عبر Google Drive
 # ✅ يدعم مجلد مستقل ومرفقات لكل مقدم خدمة في Google Drive
+# ✅ يدعم ربط مقدم الخدمة بحساب مستخدم رئيسي عند إنشاء/تفعيل العقد
 # ------------------------------------------------------------
 # ملاحظات مهمة:
 # - name يبقى موجودًا للتوافق الخلفي مع كل الصفحات والـ APIs الحالية.
@@ -24,6 +25,8 @@
 # - code يبقى unique لأنه كود داخلي للنظام.
 # - import_key هو المفتاح الآمن لمنع تكرار سجلات Excel.
 # - ProviderDocument يخزن ملفات مقدم الخدمة بدون تضخيم جدول Provider.
+# - Provider.user اختياري ولا يعني إنشاء الحساب عند إنشاء مقدم الخدمة.
+#   الحساب ينشأ لاحقًا عند إنشاء/تفعيل عقد مقدم الخدمة حسب القاعدة المعتمدة.
 # ============================================================
 
 from django.conf import settings
@@ -59,6 +62,25 @@ class ProviderDocumentType(models.TextChoices):
 
 
 class Provider(models.Model):
+    # ========================================================
+    # 👤 حساب الدخول الرئيسي لمقدم الخدمة
+    # --------------------------------------------------------
+    # لا يتم إنشاء هذا الحساب تلقائيًا عند إنشاء Provider.
+    # القاعدة المعتمدة:
+    # - مقدم الخدمة قد يكون مجرد سجل في الشبكة الطبية.
+    # - حساب الدخول ينشأ لاحقًا عند إنشاء/تفعيل عقد له.
+    # - الحساب هنا يمثل المستخدم الرئيسي لمقدم الخدمة في بوابة النظام.
+    # ========================================================
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="provider_profile",
+        verbose_name="حساب مستخدم مقدم الخدمة",
+        help_text="حساب الدخول الرئيسي لمقدم الخدمة، ينشأ اختياريًا عند إنشاء أو تفعيل العقد.",
+    )
+
     # ========================================================
     # 🆔 البيانات الأساسية
     # ========================================================
@@ -283,6 +305,7 @@ class Provider(models.Model):
         verbose_name_plural = "جهات الخدمة"
         ordering = ["name", "city", "area"]
         indexes = [
+            models.Index(fields=["user"]),
             models.Index(fields=["name"]),
             models.Index(fields=["name_ar"]),
             models.Index(fields=["name_en"]),
@@ -313,6 +336,10 @@ class Provider(models.Model):
     @property
     def display_name_en(self) -> str:
         return self.name_en or self.name or ""
+
+    @property
+    def has_login_user(self) -> bool:
+        return bool(self.user_id)
 
 
 class ProviderDocument(models.Model):

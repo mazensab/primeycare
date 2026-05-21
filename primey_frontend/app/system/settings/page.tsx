@@ -1,37 +1,40 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/settings/page.tsx
-   🧠 Primey Care | System Settings Overview
-
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ نفس النمط المعتمد
-   ✅ w-full space-y-4
-   ✅ بدون main / min-h-screen / max-w
-   ✅ أزرار انتقال لإعدادات النظام المهمة
-   ✅ Skeleton Loading
-   ✅ Error State مستقل
-   ✅ Empty State ذكي
-   ✅ Excel .xls HTML Workbook
-   ✅ Web PDF Print
-   ✅ sonner
-   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
+   📂 primey_frontend/app/system/settings/page.tsx
+   ⚙️ Primey Care — System Settings
+   ------------------------------------------------------------
+   ✅ Same approved Customers / Orders / Users table pattern
+   ✅ Header buttons / KPI cards / toolbar / table unified
+   ✅ Settings directory with internal system links
+   ✅ Excel .xls + Web print
+   ✅ Skeleton loading
+   ✅ Empty state
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ No localhost
+   ✅ No fake API rows
 ============================================================ */
 
+import * as React from "react";
 import Link from "next/link";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowUpRight,
+  ArrowUpDown,
   Bell,
+  CheckCircle2,
+  ColumnsIcon,
   CreditCard,
-  Download,
-  FileText,
-  Landmark,
+  Eye,
+  FileSpreadsheet,
+  Globe2,
+  KeyRound,
   Loader2,
-  LockKeyhole,
   MessageCircle,
+  MoreHorizontal,
+  Palette,
   Printer,
-  RefreshCcw,
+  RefreshCw,
+  RotateCcw,
   Search,
   Settings,
   ShieldCheck,
@@ -43,412 +46,372 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type SettingKey =
+type CategoryFilter =
+  | "all"
   | "users"
-  | "usersCreate"
+  | "security"
   | "notifications"
-  | "whatsapp"
-  | "treasury"
-  | "paymentGateways";
+  | "payments"
+  | "appearance"
+  | "communication"
+  | "system";
 
-type SettingCard = {
-  key: SettingKey;
-  href: string;
-  icon: ReactNode;
-  permissionCodes: string[];
+type StatusFilter = "all" | "ready" | "needsReview";
+
+type SortKey = "default" | "name" | "category" | "status";
+
+type ColumnKey =
+  | "select"
+  | "setting"
+  | "category"
+  | "description"
+  | "status"
+  | "importance"
+  | "actions";
+
+type SettingItem = {
+  id: string;
   titleAr: string;
   titleEn: string;
   descriptionAr: string;
   descriptionEn: string;
-  badgeAr: string;
-  badgeEn: string;
+  category: Exclude<CategoryFilter, "all">;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  status: Exclude<StatusFilter, "all">;
+  importance: "high" | "medium" | "normal";
 };
 
-type SettingsSummary = {
-  total_sections: number;
-  available_sections: number;
-  security_sections: number;
-  finance_sections: number;
-  communication_sections: number;
-  users_sections: number;
+const DEFAULT_VISIBLE_COLUMNS: Record<ColumnKey, boolean> = {
+  select: true,
+  setting: true,
+  category: true,
+  description: true,
+  status: true,
+  importance: true,
+  actions: true,
 };
 
-type ApiEnvelope<T> = {
-  ok?: boolean;
-  success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
-};
+const translations = {
+  ar: {
+    title: "الإعدادات",
+    subtitle: "إدارة إعدادات النظام، المستخدمين، الأمان، الإشعارات، التكاملات، وتجربة الواجهة.",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    searchPlaceholder: "ابحث في الإعدادات...",
+    totalSettings: "إجمالي الإعدادات",
+    readySettings: "جاهزة",
+    needsReview: "تحتاج مراجعة",
+    criticalSettings: "إعدادات مهمة",
+    setting: "الإعداد",
+    category: "التصنيف",
+    description: "الوصف",
+    status: "الحالة",
+    importance: "الأهمية",
+    actions: "الإجراءات",
+    columns: "الأعمدة",
+    sort: "الترتيب",
+    selected: "محدد",
+    allCategories: "كل التصنيفات",
+    users: "المستخدمون",
+    security: "الأمان",
+    notifications: "الإشعارات",
+    payments: "المدفوعات",
+    appearance: "المظهر",
+    communication: "التواصل",
+    system: "النظام",
+    allStatuses: "كل الحالات",
+    ready: "جاهز",
+    needsReviewStatus: "تحتاج مراجعة",
+    high: "عالية",
+    medium: "متوسطة",
+    normal: "عادية",
+    defaultSort: "الترتيب الافتراضي",
+    nameSort: "الاسم",
+    categorySort: "التصنيف",
+    statusSort: "الحالة",
+    activeFilters: "فلاتر مفعلة",
+    clearSelection: "إلغاء التحديد",
+    open: "فتح",
+    noDataTitle: "لا توجد إعدادات",
+    noDataDesc: "ستظهر إعدادات النظام هنا عند توفرها.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض إعدادات أخرى.",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير إعدادات النظام",
+    generatedAt: "تاريخ الطباعة",
+    showing: "عرض",
+    rows: "صفوف",
+    of: "من",
+    copied: "تم النسخ",
+    updated: "تم تحديث الصفحة.",
+    unknown: "غير محدد",
+  },
+  en: {
+    title: "Settings",
+    subtitle: "Manage system settings, users, security, notifications, integrations, and interface experience.",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    searchPlaceholder: "Search settings...",
+    totalSettings: "Total settings",
+    readySettings: "Ready",
+    needsReview: "Needs review",
+    criticalSettings: "Important settings",
+    setting: "Setting",
+    category: "Category",
+    description: "Description",
+    status: "Status",
+    importance: "Importance",
+    actions: "Actions",
+    columns: "Columns",
+    sort: "Sort",
+    selected: "Selected",
+    allCategories: "All categories",
+    users: "Users",
+    security: "Security",
+    notifications: "Notifications",
+    payments: "Payments",
+    appearance: "Appearance",
+    communication: "Communication",
+    system: "System",
+    allStatuses: "All statuses",
+    ready: "Ready",
+    needsReviewStatus: "Needs review",
+    high: "High",
+    medium: "Medium",
+    normal: "Normal",
+    defaultSort: "Default order",
+    nameSort: "Name",
+    categorySort: "Category",
+    statusSort: "Status",
+    activeFilters: "Active filters",
+    clearSelection: "Clear selection",
+    open: "Open",
+    noDataTitle: "No settings",
+    noDataDesc: "System settings will appear here once available.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other settings.",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "System settings report",
+    generatedAt: "Generated at",
+    showing: "Showing",
+    rows: "Rows",
+    of: "of",
+    copied: "Copied",
+    updated: "Page refreshed.",
+    unknown: "Unknown",
+  },
+} as const;
 
-const DEFAULT_SUMMARY: SettingsSummary = {
-  total_sections: 0,
-  available_sections: 0,
-  security_sections: 0,
-  finance_sections: 0,
-  communication_sections: 0,
-  users_sections: 0,
-};
+const SETTINGS_ITEMS: SettingItem[] = [
+  {
+    id: "system-users",
+    titleAr: "مستخدمو النظام",
+    titleEn: "System users",
+    descriptionAr: "إدارة حسابات المستخدمين، الأدوار، حالة الحسابات، وروابط كلمة المرور.",
+    descriptionEn: "Manage user accounts, roles, account status, and password links.",
+    category: "users",
+    href: "/system/users",
+    icon: Users,
+    status: "ready",
+    importance: "high",
+  },
+  {
+    id: "create-user",
+    titleAr: "إضافة مستخدم",
+    titleEn: "Create user",
+    descriptionAr: "إنشاء مستخدم جديد وتحديد الدور والمساحة وبيانات التواصل.",
+    descriptionEn: "Create a new user and set role, workspace, and contact data.",
+    category: "users",
+    href: "/system/users/create",
+    icon: UserCog,
+    status: "ready",
+    importance: "high",
+  },
+  {
+    id: "permissions",
+    titleAr: "الأدوار والصلاحيات",
+    titleEn: "Roles and permissions",
+    descriptionAr: "مراجعة أدوار النظام والصلاحيات المرتبطة بالوحدات والإجراءات.",
+    descriptionEn: "Review system roles and permissions linked to modules and actions.",
+    category: "security",
+    href: "/system/users",
+    icon: ShieldCheck,
+    status: "ready",
+    importance: "high",
+  },
+  {
+    id: "password-security",
+    titleAr: "إعدادات كلمة المرور",
+    titleEn: "Password security",
+    descriptionAr: "إدارة روابط تعيين كلمة المرور وسياسات الوصول للمستخدمين.",
+    descriptionEn: "Manage password setup links and user access policies.",
+    category: "security",
+    href: "/system/users",
+    icon: KeyRound,
+    status: "ready",
+    importance: "medium",
+  },
+  {
+    id: "notifications",
+    titleAr: "مركز الإشعارات",
+    titleEn: "Notification center",
+    descriptionAr: "متابعة الإشعارات الداخلية وإعدادات التنبيه للمستخدمين.",
+    descriptionEn: "Monitor internal notifications and user alert settings.",
+    category: "notifications",
+    href: "/system/notifications",
+    icon: Bell,
+    status: "ready",
+    importance: "medium",
+  },
+  {
+    id: "whatsapp",
+    titleAr: "واتساب",
+    titleEn: "WhatsApp",
+    descriptionAr: "إعداد اتصال واتساب ومراجعة حالة الربط والإرسال.",
+    descriptionEn: "Configure WhatsApp connection and review gateway status.",
+    category: "communication",
+    href: "/system/whatsapp",
+    icon: MessageCircle,
+    status: "ready",
+    importance: "high",
+  },
+  {
+    id: "payment-gateways",
+    titleAr: "بوابات الدفع",
+    titleEn: "Payment gateways",
+    descriptionAr: "إدارة إعدادات بوابات الدفع والربط مع مزودي الدفع.",
+    descriptionEn: "Manage gateway settings and payment provider integrations.",
+    category: "payments",
+    href: "/system/payment-gateways",
+    icon: CreditCard,
+    status: "needsReview",
+    importance: "high",
+  },
+  {
+    id: "payments",
+    titleAr: "المدفوعات",
+    titleEn: "Payments",
+    descriptionAr: "مراجعة إعدادات المدفوعات والعمليات المالية المرتبطة بالنظام.",
+    descriptionEn: "Review payment settings and related financial operations.",
+    category: "payments",
+    href: "/system/payments",
+    icon: WalletCards,
+    status: "ready",
+    importance: "medium",
+  },
+  {
+    id: "profile",
+    titleAr: "الملف الشخصي",
+    titleEn: "Profile",
+    descriptionAr: "إدارة بيانات الحساب الحالي وتفضيلات المستخدم.",
+    descriptionEn: "Manage current account data and user preferences.",
+    category: "appearance",
+    href: "/system/profile",
+    icon: UserCog,
+    status: "ready",
+    importance: "normal",
+  },
+  {
+    id: "appearance",
+    titleAr: "المظهر واللغة",
+    titleEn: "Appearance and language",
+    descriptionAr: "مراجعة لغة الواجهة واتجاه العرض والهوية البصرية المعتمدة.",
+    descriptionEn: "Review interface language, direction, and approved visual identity.",
+    category: "appearance",
+    href: "/system/profile",
+    icon: Palette,
+    status: "ready",
+    importance: "normal",
+  },
+  {
+    id: "general-system",
+    titleAr: "إعدادات عامة",
+    titleEn: "General settings",
+    descriptionAr: "نقطة مركزية للوصول إلى إعدادات النظام الأساسية.",
+    descriptionEn: "Central access point for core system configuration.",
+    category: "system",
+    href: "/system/settings",
+    icon: Settings,
+    status: "ready",
+    importance: "normal",
+  },
+  {
+    id: "locale",
+    titleAr: "اللغة والمنطقة",
+    titleEn: "Language and region",
+    descriptionAr: "متابعة إعدادات اللغة والمنطقة الزمنية وتجربة العرض.",
+    descriptionEn: "Review language, timezone, and display experience settings.",
+    category: "system",
+    href: "/system/profile",
+    icon: Globe2,
+    status: "ready",
+    importance: "normal",
+  },
+];
 
-/* ============================================================
-   Locale / API
-============================================================ */
-
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
-
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasAnyPermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "support"].includes(role),
-    );
-  }
-
-  return true;
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "إعدادات النظام" : "System Settings",
-    subtitle: isArabic
-      ? "لوحة موحدة لإدارة المستخدمين والصلاحيات والتنبيهات وواتساب والخزينة وبوابات الدفع."
-      : "A unified hub for users, permissions, notifications, WhatsApp, treasury, and payment gateway settings.",
-
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-
-    totalSections: isArabic ? "إجمالي الأقسام" : "Total Sections",
-    availableSections: isArabic ? "الأقسام المتاحة" : "Available Sections",
-    securitySections: isArabic ? "الأمان والصلاحيات" : "Security",
-    financeSections: isArabic ? "الإعدادات المالية" : "Finance",
-    communicationSections: isArabic ? "الاتصال والتنبيهات" : "Communication",
-    usersSections: isArabic ? "المستخدمون" : "Users",
-
-    searchPlaceholder: isArabic
-      ? "ابحث في إعدادات النظام..."
-      : "Search system settings...",
-
-    settingsTitle: isArabic ? "اختصارات الإعدادات" : "Settings Shortcuts",
-    settingsDesc: isArabic
-      ? "اختر القسم المطلوب لإدارة إعداداته."
-      : "Choose the section you want to configure.",
-
-    openSettings: isArabic ? "فتح الإعداد" : "Open Settings",
-    available: isArabic ? "متاح" : "Available",
-
-    noSettingsTitle: isArabic ? "لا توجد إعدادات مطابقة" : "No matching settings",
-    noSettingsText: isArabic
-      ? "جرّب تغيير كلمات البحث أو راجع الصلاحيات."
-      : "Try changing your search terms or review permissions.",
-
-    accessDeniedTitle: isArabic
-      ? "غير مصرح بعرض إعدادات النظام"
-      : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض إعدادات النظام. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view system settings. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحديث ملخص الإعدادات."
-      : "Unable to refresh settings summary.",
-    loadErrorHint: isArabic
-      ? "يمكنك الاستمرار بفتح أقسام الإعدادات المتاحة أو إعادة المحاولة."
-      : "You can still open available settings sections or retry.",
-    loadSuccess: isArabic
-      ? "تم تحديث ملخص الإعدادات."
-      : "Settings summary refreshed.",
-
-    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: unknown): string {
+function formatInteger(value: number) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(toNumber(value));
+  }).format(value);
 }
 
-function escapeHtml(value: string | number) {
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -457,576 +420,553 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function settingTitle(setting: SettingCard, locale: AppLocale) {
-  return locale === "ar" ? setting.titleAr : setting.titleEn;
+function getItemTitle(item: SettingItem, locale: Locale) {
+  return locale === "ar" ? item.titleAr : item.titleEn;
 }
 
-function settingDescription(setting: SettingCard, locale: AppLocale) {
-  return locale === "ar" ? setting.descriptionAr : setting.descriptionEn;
+function getItemDescription(item: SettingItem, locale: Locale) {
+  return locale === "ar" ? item.descriptionAr : item.descriptionEn;
 }
 
-function settingBadge(setting: SettingCard, locale: AppLocale) {
-  return locale === "ar" ? setting.badgeAr : setting.badgeEn;
-}
+function getCategoryLabel(category: SettingItem["category"] | CategoryFilter, locale: Locale) {
+  const t = translations[locale];
 
-function buildSummary(settings: SettingCard[]): SettingsSummary {
-  return {
-    total_sections: settings.length,
-    available_sections: settings.length,
-    security_sections: settings.filter((item) =>
-      ["users", "usersCreate"].includes(item.key),
-    ).length,
-    finance_sections: settings.filter((item) =>
-      ["treasury", "paymentGateways"].includes(item.key),
-    ).length,
-    communication_sections: settings.filter((item) =>
-      ["notifications", "whatsapp"].includes(item.key),
-    ).length,
-    users_sections: settings.filter((item) =>
-      ["users", "usersCreate"].includes(item.key),
-    ).length,
+  const labels: Record<CategoryFilter, string> = {
+    all: t.allCategories,
+    users: t.users,
+    security: t.security,
+    notifications: t.notifications,
+    payments: t.payments,
+    appearance: t.appearance,
+    communication: t.communication,
+    system: t.system,
   };
+
+  return labels[category as CategoryFilter] || t.unknown;
 }
 
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
+function getStatusLabel(status: SettingItem["status"], locale: Locale) {
+  const t = translations[locale];
+  return status === "ready" ? t.ready : t.needsReviewStatus;
 }
 
-function PageSkeleton() {
+function getImportanceLabel(importance: SettingItem["importance"], locale: Locale) {
+  const t = translations[locale];
+
+  if (importance === "high") return t.high;
+  if (importance === "medium") return t.medium;
+
+  return t.normal;
+}
+
+function getStatusClass(status: SettingItem["status"]) {
+  if (status === "ready") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function getImportanceClass(importance: SettingItem["importance"]) {
+  if (importance === "high") {
+    return "border-violet-500/30 bg-violet-50 text-violet-700 hover:bg-violet-50";
+  }
+
+  if (importance === "medium") {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  return "border-muted bg-muted/40 text-muted-foreground hover:bg-muted/40";
+}
+
+function KpiCard({
+  title,
+  value,
+  trend,
+  icon: Icon,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <SkeletonLine className="h-8 w-28" />
-              <SkeletonLine className="mt-3 h-4 w-24" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-28 w-full rounded-2xl" />
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
+        </div>
+      </CardHeader>
+    </Card>
   );
 }
 
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  title,
-  locale,
-  summary,
-  settings,
+function HeaderSortButton({
+  children,
+  active,
+  onClick,
 }: {
-  filename: string;
-  title: string;
-  locale: AppLocale;
-  summary: SettingsSummary;
-  settings: SettingCard[];
+  children: React.ReactNode;
+  active?: boolean;
+  onClick: () => void;
 }) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const t = dictionary(locale);
-
-  const rowsHtml = settings
-    .map(
-      (setting) => `
-        <tr>
-          <td>${escapeHtml(settingTitle(setting, locale))}</td>
-          <td>${escapeHtml(settingDescription(setting, locale))}</td>
-          <td>${escapeHtml(settingBadge(setting, locale))}</td>
-          <td>${escapeHtml(setting.href)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-        </style>
-      </head>
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="4">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="4"></td></tr>
-          <tr><td class="section" colspan="4">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalSections)}</td><td colspan="3">${escapeHtml(formatNumber(summary.total_sections))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.availableSections)}</td><td colspan="3">${escapeHtml(formatNumber(summary.available_sections))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.securitySections)}</td><td colspan="3">${escapeHtml(formatNumber(summary.security_sections))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.financeSections)}</td><td colspan="3">${escapeHtml(formatNumber(summary.finance_sections))}</td></tr>
-
-          <tr><td colspan="4"></td></tr>
-          <tr>
-            <th>${escapeHtml(t.settingsTitle)}</th>
-            <th>${escapeHtml("Description")}</th>
-            <th>${escapeHtml("Category")}</th>
-            <th>${escapeHtml("Page")}</th>
-          </tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex w-full items-center justify-start gap-1 truncate text-xs font-semibold transition hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      <span className="truncate">{children}</span>
+      <ArrowUpDown className="h-3.5 w-3.5 shrink-0" />
+    </button>
+  );
 }
 
-function buildPrintHtml({
-  locale,
-  title,
-  summary,
-  settings,
+function TableHeaderCell({
+  children,
+  className,
 }: {
-  locale: AppLocale;
-  title: string;
-  summary: SettingsSummary;
-  settings: SettingCard[];
+  children: React.ReactNode;
+  className: string;
 }) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-
-  const rows = settings
-    .map(
-      (setting) => `
-        <tr>
-          <td>${escapeHtml(settingTitle(setting, locale))}</td>
-          <td>${escapeHtml(settingDescription(setting, locale))}</td>
-          <td>${escapeHtml(settingBadge(setting, locale))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 5px 12px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          .grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .box {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .box span { color: #6b7280; display: block; font-size: 11px; }
-          .box strong { display: block; margin-top: 6px; font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-          th { background: #f3f4f6; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
-          </div>
-          <div class="badge">Primey Care</div>
-        </div>
-
-        <div class="grid">
-          <div class="box"><span>${escapeHtml(t.totalSections)}</span><strong>${escapeHtml(formatNumber(summary.total_sections))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.availableSections)}</span><strong>${escapeHtml(formatNumber(summary.available_sections))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.securitySections)}</span><strong>${escapeHtml(formatNumber(summary.security_sections))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.financeSections)}</span><strong>${escapeHtml(formatNumber(summary.finance_sections))}</strong></div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>${escapeHtml(t.settingsTitle)}</th>
-              <th>${escapeHtml("Description")}</th>
-              <th>${escapeHtml("Category")}</th>
-            </tr>
-          </thead>
-          <tbody>${rows || `<tr><td colspan="3">${escapeHtml(t.noSettingsTitle)}</td></tr>`}</tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+  return (
+    <TableHead
+      className={cn(
+        "h-11 whitespace-nowrap px-4 text-right align-middle text-xs font-semibold text-muted-foreground",
+        className,
+      )}
+    >
+      {children}
+    </TableHead>
+  );
 }
 
-/* ============================================================
-   Settings Cards
-============================================================ */
-
-function getSettingCards(): SettingCard[] {
-  return [
-    {
-      key: "users",
-      href: "/system/users",
-      icon: <Users className="h-5 w-5" />,
-      permissionCodes: ["settings.view", "users.view", "users.list"],
-      titleAr: "إدارة المستخدمين",
-      titleEn: "User Management",
-      descriptionAr: "إدارة المستخدمين والأدوار والصلاحيات وحالة التفعيل.",
-      descriptionEn: "Manage users, roles, permissions, and activation status.",
-      badgeAr: "الأمان",
-      badgeEn: "Security",
-    },
-    {
-      key: "usersCreate",
-      href: "/system/users/create",
-      icon: <UserCog className="h-5 w-5" />,
-      permissionCodes: ["settings.view", "users.create"],
-      titleAr: "إنشاء مستخدم",
-      titleEn: "Create User",
-      descriptionAr: "إضافة مستخدم جديد وربطه بالدور والمساحة المناسبة.",
-      descriptionEn: "Add a new user and link them to the proper role and workspace.",
-      badgeAr: "المستخدمون",
-      badgeEn: "Users",
-    },
-    {
-      key: "notifications",
-      href: "/system/notifications/settings",
-      icon: <Bell className="h-5 w-5" />,
-      permissionCodes: [
-        "settings.view",
-        "notifications.view",
-        "notifications.settings",
-        "notifications.settings.view",
-      ],
-      titleAr: "إعدادات الإشعارات",
-      titleEn: "Notification Settings",
-      descriptionAr: "ضبط قنوات الإشعار والتنبيهات الداخلية للمستخدمين.",
-      descriptionEn: "Configure notification channels and internal alerts.",
-      badgeAr: "التنبيهات",
-      badgeEn: "Notifications",
-    },
-    {
-      key: "whatsapp",
-      href: "/system/whatsapp/settings",
-      icon: <MessageCircle className="h-5 w-5" />,
-      permissionCodes: [
-        "settings.view",
-        "whatsapp.view",
-        "whatsapp.settings",
-        "whatsapp.settings.view",
-      ],
-      titleAr: "إعدادات واتساب",
-      titleEn: "WhatsApp Settings",
-      descriptionAr: "إدارة إعدادات واتساب والقوالب والربط التشغيلي.",
-      descriptionEn: "Manage WhatsApp configuration, templates, and operational linking.",
-      badgeAr: "الاتصال",
-      badgeEn: "Communication",
-    },
-    {
-      key: "treasury",
-      href: "/system/treasury/settings",
-      icon: <Landmark className="h-5 w-5" />,
-      permissionCodes: [
-        "settings.view",
-        "treasury.view",
-        "treasury.settings",
-        "treasury.settings.view",
-      ],
-      titleAr: "إعدادات الخزينة",
-      titleEn: "Treasury Settings",
-      descriptionAr: "ضبط إعدادات الصناديق والبنوك والحركات المالية.",
-      descriptionEn: "Configure cashboxes, banks, and treasury movements.",
-      badgeAr: "المالية",
-      badgeEn: "Finance",
-    },
-    {
-      key: "paymentGateways",
-      href: "/system/payment-gateways",
-      icon: <CreditCard className="h-5 w-5" />,
-      permissionCodes: [
-        "settings.view",
-        "payment_gateways.view",
-        "payment_gateways.settings",
-        "payments.view",
-      ],
-      titleAr: "بوابات الدفع",
-      titleEn: "Payment Gateways",
-      descriptionAr: "إدارة بوابات الدفع والربط مع مزودي الدفع الإلكتروني.",
-      descriptionEn: "Manage payment gateways and electronic payment providers.",
-      badgeAr: "الدفع",
-      badgeEn: "Payments",
-    },
-  ];
+function TableBodyCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <TableCell
+      className={cn(
+        "h-[62px] overflow-hidden px-4 text-right align-middle",
+        className,
+      )}
+    >
+      {children}
+    </TableCell>
+  );
 }
-
-/* ============================================================
-   Page
-============================================================ */
 
 export default function SystemSettingsPage() {
-  const auth = useAuth() as unknown;
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [hydrated, setHydrated] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [summary, setSummary] = useState<SettingsSummary>(DEFAULT_SUMMARY);
-  const [query, setQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [searchInput, setSearchInput] = React.useState("");
+  const [categoryFilter, setCategoryFilter] = React.useState<CategoryFilter>("all");
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
+  const [sortKey, setSortKey] = React.useState<SortKey>("default");
+  const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
+  const [visibleColumns, setVisibleColumns] =
+    React.useState<Record<ColumnKey, boolean>>(DEFAULT_VISIBLE_COLUMNS);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
 
-  const canView = hasAnyPermission(
-    auth,
-    ["settings.view", "users.view", "notifications.view", "whatsapp.view"],
-    "view",
-  );
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const canExport = hasAnyPermission(
-    auth,
-    ["settings.export", "reports.export"],
-    "action",
-  );
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-  const canPrint = hasAnyPermission(
-    auth,
-    ["settings.print", "reports.print"],
-    "action",
-  );
+    applyLocale();
+    setHydrated(true);
 
-  const allSettings = useMemo(() => getSettingCards(), []);
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-  const permittedSettings = useMemo(
-    () =>
-      allSettings.filter((setting) =>
-        hasAnyPermission(auth, setting.permissionCodes, "view"),
-      ),
-    [allSettings, auth],
-  );
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
 
-  const filteredSettings = useMemo(() => {
-    const clean = query.trim().toLowerCase();
+  const filteredItems = React.useMemo(() => {
+    const query = searchInput.trim().toLowerCase();
 
-    if (!clean) return permittedSettings;
+    let nextItems = SETTINGS_ITEMS.filter((item) => {
+      const title = getItemTitle(item, locale).toLowerCase();
+      const description = getItemDescription(item, locale).toLowerCase();
+      const category = getCategoryLabel(item.category, locale).toLowerCase();
 
-    return permittedSettings.filter((setting) =>
-      [
-        setting.titleAr,
-        setting.titleEn,
-        setting.descriptionAr,
-        setting.descriptionEn,
-        setting.badgeAr,
-        setting.badgeEn,
-        setting.key,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(clean),
-    );
-  }, [permittedSettings, query]);
+      const matchesSearch =
+        !query ||
+        title.includes(query) ||
+        description.includes(query) ||
+        category.includes(query);
 
-  const hasSettings = filteredSettings.length > 0;
+      const matchesCategory =
+        categoryFilter === "all" || item.category === categoryFilter;
 
-  const loadSettings = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setSummary(DEFAULT_SUMMARY);
-        setIsLoading(false);
-        return;
+      const matchesStatus =
+        statusFilter === "all" || item.status === statusFilter;
+
+      return matchesSearch && matchesCategory && matchesStatus;
+    });
+
+    nextItems = [...nextItems].sort((a, b) => {
+      if (sortKey === "name") {
+        return getItemTitle(a, locale).localeCompare(getItemTitle(b, locale));
       }
 
-      try {
-        setIsLoading(true);
-        setErrorMessage("");
-
-        await fetch(apiUrl("/api/auth/whoami/"), {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-        }).catch(() => null);
-
-        setSummary(buildSummary(permittedSettings));
-
-        if (showToast) toast.success(t.loadSuccess);
-      } catch (error) {
-        console.error("Settings overview load error:", error);
-        setSummary(buildSummary(permittedSettings));
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoading(false);
+      if (sortKey === "category") {
+        return getCategoryLabel(a.category, locale).localeCompare(
+          getCategoryLabel(b.category, locale),
+        );
       }
-    },
-    [canView, permittedSettings, t.loadError, t.loadSuccess],
-  );
+
+      if (sortKey === "status") {
+        return getStatusLabel(a.status, locale).localeCompare(
+          getStatusLabel(b.status, locale),
+        );
+      }
+
+      return SETTINGS_ITEMS.findIndex((item) => item.id === a.id) -
+        SETTINGS_ITEMS.findIndex((item) => item.id === b.id);
+    });
+
+    return nextItems;
+  }, [categoryFilter, locale, searchInput, sortKey, statusFilter]);
+
+  const summary = React.useMemo(() => {
+    const ready = SETTINGS_ITEMS.filter((item) => item.status === "ready").length;
+    const needsReview = SETTINGS_ITEMS.filter((item) => item.status === "needsReview").length;
+    const critical = SETTINGS_ITEMS.filter((item) => item.importance === "high").length;
+
+    return {
+      total: SETTINGS_ITEMS.length,
+      ready,
+      needsReview,
+      critical,
+    };
+  }, []);
+
+  const visibleColumnCount = Object.values(visibleColumns).filter(Boolean).length || 1;
+
+  const hasActiveFilters =
+    Boolean(searchInput.trim()) ||
+    categoryFilter !== "all" ||
+    statusFilter !== "all" ||
+    sortKey !== "default";
+
+  const allPageSelected =
+    filteredItems.length > 0 && filteredItems.every((item) => selectedIds.includes(item.id));
+
+  function resetFilters() {
+    setSearchInput("");
+    setCategoryFilter("all");
+    setStatusFilter("all");
+    setSortKey("default");
+    setSelectedIds([]);
+  }
+
+  function refreshPage() {
+    setRefreshing(true);
+
+    window.setTimeout(() => {
+      setRefreshing(false);
+      toast.success(t.updated);
+    }, 350);
+  }
+
+  function toggleSelectAllPage(checked: boolean) {
+    if (!checked) {
+      setSelectedIds([]);
+      return;
+    }
+
+    setSelectedIds(filteredItems.map((item) => item.id));
+  }
+
+  function toggleSelectItem(id: string, checked: boolean) {
+    setSelectedIds((current) => {
+      if (checked) return Array.from(new Set([...current, id]));
+      return current.filter((item) => item !== id);
+    });
+  }
+
+  function buildExportRows() {
+    return filteredItems.map((item) => ({
+      title: getItemTitle(item, locale),
+      category: getCategoryLabel(item.category, locale),
+      description: getItemDescription(item, locale),
+      status: getStatusLabel(item.status, locale),
+      importance: getImportanceLabel(item.importance, locale),
+    }));
+  }
 
   function exportExcel() {
-    if (!canExport) return;
+    const rows = buildExportRows();
 
-    if (filteredSettings.length === 0) {
+    if (!rows.length) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    downloadExcel({
-      filename: `primey-care-settings-${new Date().toISOString().slice(0, 10)}.xls`,
-      title: t.title,
-      locale,
-      summary,
-      settings: filteredSettings,
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h2>${escapeHtml(t.printTitle)}</h2>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.setting)}</th>
+                <th>${escapeHtml(t.category)}</th>
+                <th>${escapeHtml(t.description)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.importance)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.title)}</td>
+                      <td>${escapeHtml(row.category)}</td>
+                      <td>${escapeHtml(row.description)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.importance)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
     });
 
-    toast.success(t.exportSuccess);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-settings-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
   function printPage() {
-    if (!canPrint) return;
+    const rows = buildExportRows();
 
-    if (filteredSettings.length === 0) {
-      toast.error(t.exportEmpty);
+    if (!rows.length) {
+      toast.error(t.printEmpty);
       return;
     }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.printError);
+      toast.error(t.printEmpty);
       return;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        summary,
-        settings: filteredSettings,
-      }),
-    );
-    printWindow.document.close();
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.showing)}: ${escapeHtml(rows.length)}</p>
+            </div>
+          </div>
 
-    toast.success(t.printSuccess);
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.totalSettings)}</span><strong>${escapeHtml(summary.total)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.readySettings)}</span><strong>${escapeHtml(summary.ready)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.needsReview)}</span><strong>${escapeHtml(summary.needsReview)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.criticalSettings)}</span><strong>${escapeHtml(summary.critical)}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.setting)}</th>
+                <th>${escapeHtml(t.category)}</th>
+                <th>${escapeHtml(t.description)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.importance)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.title)}</td>
+                      <td>${escapeHtml(row.category)}</td>
+                      <td>${escapeHtml(row.description)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.importance)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadSettings(false);
-  }, [authResolving, loadSettings]);
-
-  if (!authResolving && !canView) {
+  if (!hydrated) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
+      <div className="w-full space-y-4" dir={dir}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-52" />
+            <Skeleton className="h-4 w-96" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-28" />
+          </div>
+        </div>
 
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Card key={index} className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="min-h-[112px] px-6 py-5">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-8 w-32" />
+                <Skeleton className="h-5 w-20" />
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
+
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-80 w-full" />
           </CardContent>
         </Card>
       </div>
@@ -1034,253 +974,462 @@ export default function SystemSettingsPage() {
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadSettings(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={refreshPage}
+            disabled={refreshing}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canExport ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={isLoading || !hasSettings}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
 
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={isLoading || !hasSettings}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.totalSettings}
+          value={formatInteger(summary.total)}
+          trend={`${t.showing} ${formatInteger(filteredItems.length)}`}
+          icon={Settings}
+        />
 
-              <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
-              </div>
+        <KpiCard
+          title={t.readySettings}
+          value={formatInteger(summary.ready)}
+          trend={t.ready}
+          icon={CheckCircle2}
+        />
+
+        <KpiCard
+          title={t.needsReview}
+          value={formatInteger(summary.needsReview)}
+          trend={t.needsReviewStatus}
+          icon={SlidersHorizontal}
+        />
+
+        <KpiCard
+          title={t.criticalSettings}
+          value={formatInteger(summary.critical)}
+          trend={t.high}
+          icon={ShieldCheck}
+        />
+      </div>
+
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-col gap-3">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
             </div>
 
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadSettings(true)}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={categoryFilter}
+                  onValueChange={(value) => setCategoryFilter(value as CategoryFilter)}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[160px]">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    <SelectValue placeholder={t.category} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allCategories}</SelectItem>
+                    <SelectItem value="users">{t.users}</SelectItem>
+                    <SelectItem value="security">{t.security}</SelectItem>
+                    <SelectItem value="notifications">{t.notifications}</SelectItem>
+                    <SelectItem value="payments">{t.payments}</SelectItem>
+                    <SelectItem value="appearance">{t.appearance}</SelectItem>
+                    <SelectItem value="communication">{t.communication}</SelectItem>
+                    <SelectItem value="system">{t.system}</SelectItem>
+                  </SelectContent>
+                </Select>
 
-      {isLoading ? (
-        <PageSkeleton />
-      ) : (
-        <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <KpiCard
-              title={t.totalSections}
-              value={formatNumber(summary.total_sections)}
-              icon={<Settings className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.availableSections}
-              value={formatNumber(summary.available_sections)}
-              icon={<SlidersHorizontal className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.securitySections}
-              value={formatNumber(summary.security_sections)}
-              icon={<LockKeyhole className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.financeSections}
-              value={formatNumber(summary.finance_sections)}
-              icon={<WalletCards className="h-5 w-5" />}
-            />
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[145px]">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <SelectValue placeholder={t.status} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allStatuses}</SelectItem>
+                    <SelectItem value="ready">{t.ready}</SelectItem>
+                    <SelectItem value="needsReview">{t.needsReviewStatus}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background">
+                      <ColumnsIcon className="h-4 w-4" />
+                      {t.columns}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {(
+                      [
+                        ["select", t.selected],
+                        ["setting", t.setting],
+                        ["category", t.category],
+                        ["description", t.description],
+                        ["status", t.status],
+                        ["importance", t.importance],
+                        ["actions", t.actions],
+                      ] as [ColumnKey, string][]
+                    ).map(([key, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={visibleColumns[key]}
+                        onCheckedChange={(checked) =>
+                          setVisibleColumns((current) => ({
+                            ...current,
+                            [key]: Boolean(checked),
+                          }))
+                        }
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg bg-background"
+                  onClick={resetFilters}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t.reset}
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background">
+                      <ArrowUpDown className="h-4 w-4" />
+                      {t.sort}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                    {(
+                      [
+                        ["default", t.defaultSort],
+                        ["name", t.nameSort],
+                        ["category", t.categorySort],
+                        ["status", t.statusSort],
+                      ] as [SortKey, string][]
+                    ).map(([key, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={sortKey === key}
+                        onCheckedChange={() => setSortKey(key)}
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {selectedIds.length > 0 ? (
+                  <Button
+                    variant="outline"
+                    className="h-9 rounded-lg bg-background"
+                    onClick={() => setSelectedIds([])}
+                  >
+                    <XCircle className="h-4 w-4" />
+                    {t.clearSelection} ({formatInteger(selectedIds.length)})
+                  </Button>
+                ) : null}
+
+                {hasActiveFilters ? (
+                  <Badge variant="secondary" className="h-9 rounded-lg px-3 text-xs font-semibold">
+                    {t.activeFilters}
+                  </Badge>
+                ) : null}
+              </div>
+            </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MiniStat title={t.communicationSections} value={summary.communication_sections} />
-            <MiniStat title={t.usersSections} value={summary.users_sections} />
-            <MiniStat title={t.securitySections} value={summary.security_sections} />
-            <MiniStat title={t.financeSections} value={summary.finance_sections} />
-          </div>
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[980px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    {visibleColumns.select ? (
+                      <TableHeaderCell className="w-[46px] px-3">
+                        <Checkbox
+                          checked={allPageSelected}
+                          onCheckedChange={(checked) => toggleSelectAllPage(Boolean(checked))}
+                          aria-label={t.selected}
+                        />
+                      </TableHeaderCell>
+                    ) : null}
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-4">
-              <div className="relative w-full">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                />
-              </div>
-            </CardContent>
-          </Card>
+                    {visibleColumns.setting ? (
+                      <TableHeaderCell className="w-[260px]">
+                        <HeaderSortButton
+                          active={sortKey === "name"}
+                          onClick={() => setSortKey("name")}
+                        >
+                          {t.setting}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <CardTitle className="text-base font-bold">
-                    {t.settingsTitle}
-                  </CardTitle>
-                  <CardDescription>{t.settingsDesc}</CardDescription>
-                </div>
+                    {visibleColumns.category ? (
+                      <TableHeaderCell className="w-[150px]">
+                        <HeaderSortButton
+                          active={sortKey === "category"}
+                          onClick={() => setSortKey("category")}
+                        >
+                          {t.category}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
 
-                <Badge variant="outline" className="rounded-full">
-                  <FileText className="h-3.5 w-3.5" />
-                  {formatNumber(filteredSettings.length)} {t.available}
-                </Badge>
-              </div>
-            </CardHeader>
+                    {visibleColumns.description ? (
+                      <TableHeaderCell className="w-[320px]">{t.description}</TableHeaderCell>
+                    ) : null}
 
-            <CardContent>
-              {filteredSettings.length > 0 ? (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {filteredSettings.map((setting) => (
-                    <Link key={setting.key} href={setting.href}>
-                      <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
-                        <CardContent className="flex h-full flex-col gap-4 p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                              {setting.icon}
-                            </div>
+                    {visibleColumns.status ? (
+                      <TableHeaderCell className="w-[130px]">
+                        <HeaderSortButton
+                          active={sortKey === "status"}
+                          onClick={() => setSortKey("status")}
+                        >
+                          {t.status}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
 
-                            <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
+                    {visibleColumns.importance ? (
+                      <TableHeaderCell className="w-[120px]">{t.importance}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.actions ? (
+                      <TableHeaderCell className="w-[72px] text-center">
+                        {t.actions}
+                      </TableHeaderCell>
+                    ) : null}
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {filteredItems.length ? (
+                    filteredItems.map((item) => {
+                      const Icon = item.icon;
+                      const title = getItemTitle(item, locale);
+                      const description = getItemDescription(item, locale);
+
+                      return (
+                        <TableRow key={item.id} className="h-[62px]">
+                          {visibleColumns.select ? (
+                            <TableBodyCell className="w-[46px] px-3">
+                              <Checkbox
+                                checked={selectedIds.includes(item.id)}
+                                onCheckedChange={(checked) =>
+                                  toggleSelectItem(item.id, Boolean(checked))
+                                }
+                                aria-label={title}
+                              />
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.setting ? (
+                            <TableBodyCell className="w-[260px]">
+                              <div className="flex min-w-0 items-center gap-3">
+                                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40">
+                                  <Icon className="h-4 w-4 text-muted-foreground" />
+                                </div>
+
+                                <div className="min-w-0 flex-1">
+                                  <Link
+                                    href={item.href}
+                                    className="block truncate text-sm font-semibold text-foreground hover:underline"
+                                  >
+                                    {title}
+                                  </Link>
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {getCategoryLabel(item.category, locale)}
+                                  </p>
+                                </div>
+                              </div>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.category ? (
+                            <TableBodyCell className="w-[150px]">
+                              <Badge
+                                variant="outline"
+                                className="max-w-full rounded-full bg-muted/40 px-2.5 py-1 text-xs font-medium"
+                              >
+                                <span className="truncate">
+                                  {getCategoryLabel(item.category, locale)}
+                                </span>
+                              </Badge>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.description ? (
+                            <TableBodyCell className="w-[320px]">
+                              <p className="line-clamp-2 text-sm text-muted-foreground">
+                                {description}
+                              </p>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.status ? (
+                            <TableBodyCell className="w-[130px]">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "rounded-full px-2.5 py-1 text-xs font-medium",
+                                  getStatusClass(item.status),
+                                )}
+                              >
+                                {getStatusLabel(item.status, locale)}
+                              </Badge>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.importance ? (
+                            <TableBodyCell className="w-[120px]">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "rounded-full px-2.5 py-1 text-xs font-medium",
+                                  getImportanceClass(item.importance),
+                                )}
+                              >
+                                {getImportanceLabel(item.importance, locale)}
+                              </Badge>
+                            </TableBodyCell>
+                          ) : null}
+
+                          {visibleColumns.actions ? (
+                            <TableBodyCell className="w-[72px] text-center">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 rounded-lg"
+                                  >
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+
+                                <DropdownMenuContent
+                                  align={locale === "ar" ? "start" : "end"}
+                                  className="w-44"
+                                >
+                                  <DropdownMenuItem asChild>
+                                    <Link href={item.href}>
+                                      <Eye className="h-4 w-4" />
+                                      {t.open}
+                                    </Link>
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableBodyCell>
+                          ) : null}
+                        </TableRow>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={visibleColumnCount} className="h-72">
+                        <div className="flex flex-col items-center justify-center gap-3 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                            <Settings className="h-6 w-6 text-muted-foreground" />
                           </div>
 
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-semibold">
-                                {settingTitle(setting, locale)}
-                              </p>
-                              <Badge variant="outline" className="rounded-full">
-                                {settingBadge(setting, locale)}
-                              </Badge>
-                            </div>
-
-                            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                              {settingDescription(setting, locale)}
+                          <div className="space-y-1">
+                            <p className="font-semibold text-foreground">
+                              {hasActiveFilters ? t.noResultsTitle : t.noDataTitle}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {hasActiveFilters ? t.noResultsDesc : t.noDataDesc}
                             </p>
                           </div>
 
-                          <div className="mt-auto flex items-center justify-between gap-3 rounded-xl bg-muted/40 px-3 py-2 text-sm">
-                            <span className="text-muted-foreground">
-                              {t.openSettings}
-                            </span>
-                            <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </Link>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-                  <Settings className="h-12 w-12 text-muted-foreground/40" />
-                  <p className="text-lg font-semibold">{t.noSettingsTitle}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {t.noSettingsText}
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
+                          {hasActiveFilters ? (
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-lg"
+                              onClick={resetFilters}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              {t.reset}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-muted-foreground">
+              {t.showing}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(filteredItems.length)}
+              </span>{" "}
+              {t.of}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(SETTINGS_ITEMS.length)}
+              </span>{" "}
+              {t.rows}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
-  );
-}
-
-/* ============================================================
-   Small Components
-============================================================ */
-
-function KpiCard({
-  title,
-  value,
-  icon,
-}: {
-  title: string;
-  value: ReactNode;
-  icon: ReactNode;
-}) {
-  return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-2xl font-bold">{value}</div>
-            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
-          </div>
-
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            {icon}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function MiniStat({ title, value }: { title: string; value: number }) {
-  return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-muted-foreground">{title}</span>
-          <span className="text-lg font-bold">{formatNumber(value)}</span>
-        </div>
-      </CardContent>
-    </Card>
   );
 }

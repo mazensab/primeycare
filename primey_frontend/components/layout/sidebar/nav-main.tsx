@@ -1,21 +1,9 @@
 "use client";
 
 /* =====================================================
-   📂 components/nav-main.tsx
+   📂 components/layout/sidebar/nav-main.tsx
    🧠 Primey Care — Main Sidebar Navigation
-
-   التعديل الحالي:
-   - اعتماد مقدمي الخدمة Providers كموديول رسمي لشبكة الخدمة.
-   - إزالة المراكز Centers من السايدر لأنها ليست موديول باكند مستقل.
-   - إبقاء aliases القديمة /center و /company لمساحة مقدم الخدمة لتجنب كسر الروابط.
-   - تنظيف السايدر من روابط القائمة والإنشاء داخل الموديولات التشغيلية.
-   - العمليات تعرض فقط لوحات الموديولات الرئيسية.
-   - شبكة الخدمة تعرض فقط: مقدمو الخدمة، العقود، المندوبون.
-   - المالية تعرض فقط: الخزينة، المحاسبة.
-   - الإشعارات والتواصل تعرض فقط: الإشعارات، واتساب.
-   - النظام يعرض فقط: مستخدمو النظام، الإعدادات.
-   - الصفحات الداخلية تكون أزرار داخل صفحة لوحة كل موديول.
-   - عدم إضافة صفحات التفاصيل [id] للسايدر.
+   Premium sidebar navigation items
 ===================================================== */
 
 import { useEffect, useMemo, useState } from "react";
@@ -49,6 +37,7 @@ import {
   ChevronRight,
   CreditCard,
   FileText,
+  Gift,
   Home,
   MessageCircle,
   Package,
@@ -76,6 +65,7 @@ import {
   PERMISSIONS,
   type PermissionCheckInput,
 } from "@/lib/permissions";
+import { cn } from "@/lib/utils";
 
 /* =====================================================
    TYPES
@@ -193,6 +183,13 @@ const systemNavItems: NavGroup[] = [
             href: "/system/contracts",
             icon: FileText,
             permission: PERMISSIONS.CONTRACTS_VIEW,
+            workspaces: ["system"],
+          },
+          {
+            title: { ar: "الوسطاء", en: "Brokers" },
+            href: "/system/brokers",
+            icon: Users,
+            permission: PERMISSIONS.AGENTS_VIEW,
             workspaces: ["system"],
           },
           {
@@ -371,10 +368,7 @@ const systemNavItems: NavGroup[] = [
         title: { ar: "النظام", en: "System" },
         href: "/system/users",
         icon: UserCog,
-        anyPermissions: [
-          PERMISSIONS.USERS_VIEW,
-          PERMISSIONS.SYSTEM_SETTINGS,
-        ],
+        anyPermissions: [PERMISSIONS.USERS_VIEW, PERMISSIONS.SYSTEM_SETTINGS],
         workspaces: ["system"],
         items: [
           {
@@ -509,54 +503,58 @@ const customerNavItems: NavGroup[] = [
         workspaces: ["customer"],
       },
       {
+        title: { ar: "العروض والخصومات", en: "Offers & Discounts" },
+        href: "/customer/offers",
+        icon: Gift,
+        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
+        workspaces: ["customer"],
+      },
+      {
+        title: { ar: "الشبكة الطبية", en: "Medical Network" },
+        href: "/customer/network",
+        icon: Stethoscope,
+        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
+        workspaces: ["customer"],
+      },
+      {
         title: { ar: "طلباتي", en: "My Orders" },
         href: "/customer/orders",
         icon: ShoppingCart,
-        anyPermissions: [
-          PERMISSIONS.CUSTOMER_ORDERS_VIEW,
-          PERMISSIONS.ORDERS_VIEW,
-        ],
+        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
         workspaces: ["customer"],
       },
       {
         title: { ar: "فواتيري", en: "My Invoices" },
         href: "/customer/invoices",
         icon: ReceiptText,
-        permission: PERMISSIONS.INVOICES_VIEW,
+        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
         workspaces: ["customer"],
       },
       {
         title: { ar: "مدفوعاتي", en: "My Payments" },
         href: "/customer/payments",
         icon: CreditCard,
-        permission: PERMISSIONS.PAYMENTS_VIEW,
+        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
         workspaces: ["customer"],
       },
       {
-        title: { ar: "الباقات والخدمات", en: "Plans & Services" },
-        href: "/customer/products",
+        title: { ar: "بطاقاتي", en: "My Cards" },
+        href: "/customer/cards",
         icon: Package,
         permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
         workspaces: ["customer"],
       },
       {
-        title: { ar: "الدعم والمحادثات", en: "Support & Chats" },
+        title: { ar: "الدعم", en: "Support" },
         href: "/customer/support",
         icon: MessageCircle,
         permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
         workspaces: ["customer"],
       },
       {
-        title: { ar: "حسابي", en: "My Account" },
-        href: "/customer/account",
+        title: { ar: "حسابي", en: "My Profile" },
+        href: "/customer/profile",
         icon: ShieldCheck,
-        permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
-        workspaces: ["customer"],
-      },
-      {
-        title: { ar: "الإعدادات", en: "Settings" },
-        href: "/customer/settings",
-        icon: Settings,
         permission: PERMISSIONS.CUSTOMER_WORKSPACE_VIEW,
         workspaces: ["customer"],
       },
@@ -652,6 +650,7 @@ function normalizePath(path: string): string {
 function matchesHref(pathname: string, href: string): boolean {
   const normalizedPathname = normalizePath(pathname);
   const normalizedHref = normalizePath(href);
+
   const rootRoutes = [
     "/system",
     "/company",
@@ -813,6 +812,15 @@ function inferPermissionInputByHref(item: NavItem): PermissionCheckInput {
       permission: href.includes("/create")
         ? PERMISSIONS.CUSTOMERS_CREATE
         : PERMISSIONS.CUSTOMERS_VIEW,
+      workspaces: ["system"],
+    };
+  }
+
+  if (href.startsWith("/system/brokers")) {
+    return {
+      permission: href.includes("/create")
+        ? PERMISSIONS.AGENTS_CREATE
+        : PERMISSIONS.AGENTS_VIEW,
       workspaces: ["system"],
     };
   }
@@ -1101,6 +1109,51 @@ export function NavMain({ type }: NavMainProps) {
     );
   }, [type, authSession, currentRole, enabledApps]);
 
+  const getRowClassName = (level: number) =>
+    cn(
+      "group/nav-row flex w-full min-w-0 items-center gap-2",
+      isArabic ? "flex-row-reverse text-right" : "flex-row text-left",
+      level === 0 ? "px-0" : "px-0",
+    );
+
+  const renderIconWrap = (
+    Icon: LucideIcon | undefined,
+    active: boolean,
+    level: number,
+  ) => {
+    if (!Icon) return null;
+
+    return (
+      <span
+        className={cn(
+          "flex shrink-0 items-center justify-center rounded-xl transition",
+          level === 0 ? "size-8" : "size-7",
+          active
+            ? "bg-primary/12 text-primary"
+            : "bg-slate-100/70 text-muted-foreground group-hover/nav-row:bg-primary/10 group-hover/nav-row:text-primary",
+          "dark:bg-white/[0.055] dark:group-hover/nav-row:bg-primary/15",
+        )}
+      >
+        <Icon className={cn(level === 0 ? "size-4" : "size-3.5")} />
+      </span>
+    );
+  };
+
+  const renderNewBadge = (item: NavItem) => {
+    if (!item.isNew && !item.isDataBadge) return null;
+
+    return (
+      <SidebarMenuBadge
+        className={cn(
+          "rounded-full border border-primary/15 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary",
+          "dark:border-primary/20 dark:bg-primary/15",
+        )}
+      >
+        {item.isDataBadge || (isArabic ? "جديد" : "New")}
+      </SidebarMenuBadge>
+    );
+  };
+
   const renderNavNode = (item: NavItem, level = 0) => {
     const Icon = item.icon;
     const itemTitle = isArabic ? item.title.ar : item.title.en;
@@ -1108,9 +1161,7 @@ export function NavMain({ type }: NavMainProps) {
     const activeParent = active || hasActiveChild(pathname, item);
     const hasChildren = Boolean(item.items?.length);
 
-    const rowClassName = `flex w-full items-center gap-2 ${
-      isArabic ? "flex-row-reverse text-right" : "flex-row text-left"
-    }`;
+    const rowClassName = getRowClassName(level);
 
     if (hasChildren) {
       if (level === 0) {
@@ -1118,25 +1169,45 @@ export function NavMain({ type }: NavMainProps) {
           <SidebarMenuItem key={`${item.href}-${item.title.en}`}>
             <Collapsible defaultOpen={activeParent}>
               <CollapsibleTrigger asChild>
-                <SidebarMenuButton tooltip={itemTitle} isActive={activeParent}>
+                <SidebarMenuButton
+                  tooltip={itemTitle}
+                  isActive={activeParent}
+                  className={cn(
+                    "h-11 rounded-2xl px-2 transition-all",
+                    "text-muted-foreground hover:bg-white/76 hover:text-foreground hover:shadow-sm",
+                    "data-[active=true]:bg-gradient-to-b data-[active=true]:from-primary/14 data-[active=true]:to-primary/7 data-[active=true]:text-primary data-[active=true]:shadow-sm",
+                    "dark:hover:bg-white/[0.065] dark:data-[active=true]:from-primary/20 dark:data-[active=true]:to-primary/10",
+                  )}
+                >
                   <div className={rowClassName}>
-                    {Icon ? <Icon className="shrink-0" /> : null}
+                    {renderIconWrap(Icon, activeParent, level)}
 
-                    <span className="flex-1 truncate">{itemTitle}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                      {itemTitle}
+                    </span>
 
-                    {item.isNew ? (
-                      <SidebarMenuBadge>
-                        {isArabic ? "جديد" : "New"}
-                      </SidebarMenuBadge>
-                    ) : null}
+                    {renderNewBadge(item)}
 
-                    <ChevronIcon className="h-4 w-4 shrink-0" />
+                    <ChevronIcon
+                      className={cn(
+                        "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
+                        activeParent ? "text-primary" : "",
+                      )}
+                    />
                   </div>
                 </SidebarMenuButton>
               </CollapsibleTrigger>
 
               <CollapsibleContent>
-                <SidebarMenuSub>
+                <SidebarMenuSub
+                  className={cn(
+                    "my-1 space-y-1 border-slate-200/70 py-1",
+                    isArabic
+                      ? "mr-4 border-r pr-2"
+                      : "ml-4 border-l pl-2",
+                    "dark:border-white/10",
+                  )}
+                >
                   {item.items?.map((child) => renderNavNode(child, level + 1))}
                 </SidebarMenuSub>
               </CollapsibleContent>
@@ -1149,25 +1220,42 @@ export function NavMain({ type }: NavMainProps) {
         <SidebarMenuSubItem key={`${item.href}-${item.title.en}`}>
           <Collapsible defaultOpen={activeParent}>
             <CollapsibleTrigger asChild>
-              <SidebarMenuSubButton isActive={activeParent}>
+              <SidebarMenuSubButton
+                isActive={activeParent}
+                className={cn(
+                  "h-10 rounded-xl px-2 transition-all",
+                  "text-muted-foreground hover:bg-white/70 hover:text-foreground hover:shadow-sm",
+                  "data-[active=true]:bg-primary/10 data-[active=true]:text-primary",
+                  "dark:hover:bg-white/[0.055] dark:data-[active=true]:bg-primary/15",
+                )}
+              >
                 <div className={rowClassName}>
-                  {Icon ? <Icon className="h-4 w-4 shrink-0" /> : null}
+                  {renderIconWrap(Icon, activeParent, level)}
 
-                  <span className="flex-1 truncate">{itemTitle}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    {itemTitle}
+                  </span>
 
-                  {item.isNew ? (
-                    <SidebarMenuBadge>
-                      {isArabic ? "جديد" : "New"}
-                    </SidebarMenuBadge>
-                  ) : null}
+                  {renderNewBadge(item)}
 
-                  <ChevronIcon className="h-4 w-4 shrink-0" />
+                  <ChevronIcon
+                    className={cn(
+                      "size-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
+                      activeParent ? "text-primary" : "",
+                    )}
+                  />
                 </div>
               </SidebarMenuSubButton>
             </CollapsibleTrigger>
 
             <CollapsibleContent>
-              <SidebarMenuSub className={isArabic ? "mr-3" : "ml-3"}>
+              <SidebarMenuSub
+                className={cn(
+                  "my-1 space-y-1 border-slate-200/70 py-1",
+                  isArabic ? "mr-3 border-r pr-2" : "ml-3 border-l pl-2",
+                  "dark:border-white/10",
+                )}
+              >
                 {item.items?.map((child) => renderNavNode(child, level + 1))}
               </SidebarMenuSub>
             </CollapsibleContent>
@@ -1179,40 +1267,59 @@ export function NavMain({ type }: NavMainProps) {
     if (level === 0) {
       return (
         <SidebarMenuItem key={`${item.href}-${item.title.en}`}>
-          <SidebarMenuButton tooltip={itemTitle} isActive={active} asChild>
+          <SidebarMenuButton
+            tooltip={itemTitle}
+            isActive={active}
+            asChild
+            className={cn(
+              "h-11 rounded-2xl px-2 transition-all",
+              "text-muted-foreground hover:bg-white/76 hover:text-foreground hover:shadow-sm",
+              "data-[active=true]:bg-gradient-to-b data-[active=true]:from-primary/14 data-[active=true]:to-primary/7 data-[active=true]:text-primary data-[active=true]:shadow-sm",
+              "dark:hover:bg-white/[0.065] dark:data-[active=true]:from-primary/20 dark:data-[active=true]:to-primary/10",
+            )}
+          >
             <Link
               href={item.href}
               target={item.newTab ? "_blank" : undefined}
               className={rowClassName}
             >
-              {Icon ? <Icon className="shrink-0" /> : null}
+              {renderIconWrap(Icon, active, level)}
 
-              <span className="flex-1 truncate">{itemTitle}</span>
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                {itemTitle}
+              </span>
+
+              {renderNewBadge(item)}
             </Link>
           </SidebarMenuButton>
-
-          {item.isNew ? (
-            <SidebarMenuBadge>{isArabic ? "جديد" : "New"}</SidebarMenuBadge>
-          ) : null}
         </SidebarMenuItem>
       );
     }
 
     return (
       <SidebarMenuSubItem key={`${item.href}-${item.title.en}`}>
-        <SidebarMenuSubButton asChild isActive={active}>
+        <SidebarMenuSubButton
+          asChild
+          isActive={active}
+          className={cn(
+            "h-10 rounded-xl px-2 transition-all",
+            "text-muted-foreground hover:bg-white/70 hover:text-foreground hover:shadow-sm",
+            "data-[active=true]:bg-primary/10 data-[active=true]:text-primary",
+            "dark:hover:bg-white/[0.055] dark:data-[active=true]:bg-primary/15",
+          )}
+        >
           <Link
             href={item.href}
             target={item.newTab ? "_blank" : undefined}
             className={rowClassName}
           >
-            {Icon ? <Icon className="h-4 w-4 shrink-0" /> : null}
+            {renderIconWrap(Icon, active, level)}
 
-            <span className="flex-1 truncate">{itemTitle}</span>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">
+              {itemTitle}
+            </span>
 
-            {item.isNew ? (
-              <SidebarMenuBadge>{isArabic ? "جديد" : "New"}</SidebarMenuBadge>
-            ) : null}
+            {renderNewBadge(item)}
           </Link>
         </SidebarMenuSubButton>
       </SidebarMenuSubItem>
@@ -1225,13 +1332,23 @@ export function NavMain({ type }: NavMainProps) {
         const groupTitle = isArabic ? nav.title.ar : nav.title.en;
 
         return (
-          <SidebarGroup key={nav.title.en || "primey-main-navigation"}>
+          <SidebarGroup
+            key={nav.title.en || "primey-main-navigation"}
+            className="px-0 py-1"
+          >
             {groupTitle ? (
-              <SidebarGroupLabel>{groupTitle}</SidebarGroupLabel>
+              <SidebarGroupLabel
+                className={cn(
+                  "mb-2 px-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground/70",
+                  isArabic ? "text-right" : "text-left",
+                )}
+              >
+                {groupTitle}
+              </SidebarGroupLabel>
             ) : null}
 
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="space-y-1.5">
                 {nav.items.map((item) => renderNavNode(item))}
               </SidebarMenu>
             </SidebarGroupContent>

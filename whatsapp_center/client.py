@@ -30,8 +30,24 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
+# 🔒 Constants
+# ============================================================
+
+DEFAULT_API_VERSION = "v22.0"
+DEFAULT_SESSION_NAME = "primey-care-system-session"
+DEFAULT_GATEWAY_TIMEOUT = 20
+
+SESSION_PROVIDERS = {
+    "whatsapp_web_session",
+    "web_session",
+    "WEB_SESSION",
+}
+
+
+# ============================================================
 # 📦 Send Result
 # ============================================================
+
 @dataclass
 class WhatsAppSendResult:
     success: bool
@@ -45,6 +61,7 @@ class WhatsAppSendResult:
 # ============================================================
 # 📦 Session Result
 # ============================================================
+
 @dataclass
 class WhatsAppSessionResult:
     success: bool
@@ -61,8 +78,76 @@ class WhatsAppSessionResult:
 
 
 # ============================================================
+# 🔧 Small Helpers
+# ============================================================
+
+def _safe_str(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+
+    text = str(value).strip()
+    return text or default
+
+
+def _safe_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+
+    if value is None:
+        return default
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+
+    if isinstance(value, int):
+        return value == 1
+
+    return default
+
+
+def _safe_int(value: Any, default: int = DEFAULT_GATEWAY_TIMEOUT) -> int:
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else default
+    except Exception:
+        return default
+
+
+def _extract_message(data: dict[str, Any], fallback: str = "") -> str:
+    if not isinstance(data, dict):
+        return fallback
+
+    details = data.get("details")
+
+    if isinstance(details, dict):
+        detail_message = (
+            details.get("message")
+            or details.get("error")
+            or details.get("detail")
+            or details.get("raw_response")
+        )
+    else:
+        detail_message = details
+
+    return _safe_str(
+        data.get("message")
+        or data.get("error")
+        or data.get("error_message")
+        or detail_message,
+        fallback,
+    )
+
+
+# ============================================================
 # 💬 WhatsApp Client
 # ============================================================
+
 class WhatsAppClient:
     """
     عميل إرسال واتساب.
@@ -70,13 +155,17 @@ class WhatsAppClient:
     يدعم:
     - Stub افتراضي للمزودات غير المربوطة بعد
     - WhatsApp Web Session Gateway
+
+    متغيرات البيئة المدعومة:
+    - WHATSAPP_SESSION_GATEWAY_URL
+    - WHATSAPP_GATEWAY_URL
+    - WHATSAPP_WEB_SESSION_GATEWAY_URL
+
+    مثال:
+    WHATSAPP_SESSION_GATEWAY_URL=http://127.0.0.1:3100
     """
 
-    SESSION_PROVIDERS = {
-        "whatsapp_web_session",
-        "web_session",
-        "WEB_SESSION",
-    }
+    SESSION_PROVIDERS = SESSION_PROVIDERS
 
     def __init__(
         self,
@@ -84,45 +173,64 @@ class WhatsAppClient:
         provider: str,
         access_token: str = "",
         phone_number_id: str = "",
-        api_version: str = "v22.0",
+        api_version: str = DEFAULT_API_VERSION,
         session_name: str = "",
     ):
-        self.provider = (provider or "").strip()
-        self.access_token = (access_token or "").strip()
-        self.phone_number_id = (phone_number_id or "").strip()
-        self.api_version = (api_version or "v22.0").strip()
-        self.session_name = (session_name or "primey-care-system-session").strip()
+        self.provider = _safe_str(provider)
+        self.access_token = _safe_str(access_token)
+        self.phone_number_id = _safe_str(phone_number_id)
+        self.api_version = _safe_str(api_version, DEFAULT_API_VERSION)
+        self.session_name = _safe_str(session_name, DEFAULT_SESSION_NAME)
 
     # --------------------------------------------------------
     # ⚙️ Gateway Config
     # --------------------------------------------------------
     @property
     def gateway_base_url(self) -> str:
-        return (os.getenv("WHATSAPP_SESSION_GATEWAY_URL") or "").strip().rstrip("/")
+        """
+        رابط خدمة WhatsApp Session Gateway.
+
+        الأولوية:
+        1) WHATSAPP_SESSION_GATEWAY_URL
+        2) WHATSAPP_GATEWAY_URL
+        3) WHATSAPP_WEB_SESSION_GATEWAY_URL
+        """
+        return _safe_str(
+            os.getenv("WHATSAPP_SESSION_GATEWAY_URL")
+            or os.getenv("WHATSAPP_GATEWAY_URL")
+            or os.getenv("WHATSAPP_WEB_SESSION_GATEWAY_URL")
+        ).rstrip("/")
 
     @property
     def gateway_token(self) -> str:
-        return (os.getenv("WHATSAPP_SESSION_GATEWAY_TOKEN") or "").strip()
+        return _safe_str(
+            os.getenv("WHATSAPP_SESSION_GATEWAY_TOKEN")
+            or os.getenv("WHATSAPP_GATEWAY_TOKEN")
+            or os.getenv("WHATSAPP_WEB_SESSION_GATEWAY_TOKEN")
+        )
 
     @property
     def gateway_timeout(self) -> int:
-        raw = (os.getenv("WHATSAPP_SESSION_GATEWAY_TIMEOUT") or "20").strip()
-        try:
-            timeout = int(raw)
-            return timeout if timeout > 0 else 20
-        except (TypeError, ValueError):
-            return 20
+        return _safe_int(
+            os.getenv("WHATSAPP_SESSION_GATEWAY_TIMEOUT")
+            or os.getenv("WHATSAPP_GATEWAY_TIMEOUT")
+            or os.getenv("WHATSAPP_WEB_SESSION_GATEWAY_TIMEOUT"),
+            DEFAULT_GATEWAY_TIMEOUT,
+        )
 
     # --------------------------------------------------------
     # 🧠 Internal Helpers
     # --------------------------------------------------------
     def _normalized_provider(self) -> str:
-        return (self.provider or "").strip().lower()
+        return _safe_str(self.provider).lower()
 
     def _is_web_session_provider(self) -> bool:
-        return self.provider in self.SESSION_PROVIDERS or self._normalized_provider() in {
+        normalized = self._normalized_provider()
+
+        return self.provider in self.SESSION_PROVIDERS or normalized in {
             "whatsapp_web_session",
             "web_session",
+            "web-session",
         }
 
     def _gateway_headers(self) -> dict[str, str]:
@@ -130,8 +238,10 @@ class WhatsAppClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+
         if self.gateway_token:
             headers["Authorization"] = f"Bearer {self.gateway_token}"
+
         return headers
 
     def _build_request(
@@ -142,6 +252,7 @@ class WhatsAppClient:
         payload: Optional[dict[str, Any]] = None,
     ) -> Request:
         data = None
+
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
 
@@ -163,6 +274,26 @@ class WhatsAppClient:
                 "raw_response": raw,
             }
 
+    def _gateway_not_configured_payload(self) -> dict[str, Any]:
+        message = (
+            "WHATSAPP_SESSION_GATEWAY_URL is not configured. "
+            "Set it in the backend .env, for example: "
+            "WHATSAPP_SESSION_GATEWAY_URL=http://127.0.0.1:3100"
+        )
+
+        return {
+            "success": False,
+            "status_code": 500,
+            "provider_status": "gateway_not_configured",
+            "message": message,
+            "error_message": message,
+            "session_status": "failed",
+            "connected": False,
+            "session_name": self.session_name,
+            "provider": self.provider,
+            "missing_env": "WHATSAPP_SESSION_GATEWAY_URL",
+        }
+
     # --------------------------------------------------------
     # 🌐 Gateway Core Request
     # --------------------------------------------------------
@@ -177,14 +308,11 @@ class WhatsAppClient:
         استدعاء موحد للـ Session Gateway الخارجي.
         """
         if not self.gateway_base_url:
-            logger.warning("WhatsApp gateway base URL is not configured")
-            return {
-                "success": False,
-                "status_code": 500,
-                "message": "WHATSAPP_SESSION_GATEWAY_URL is not configured",
-            }
+            logger.warning("WhatsApp session gateway URL is not configured")
+            return self._gateway_not_configured_payload()
 
         target_url = urljoin(f"{self.gateway_base_url}/", path.lstrip("/"))
+
         request_obj = self._build_request(
             url=target_url,
             method=method,
@@ -202,6 +330,12 @@ class WhatsAppClient:
                 if "status_code" not in data:
                     data["status_code"] = getattr(response, "status", 200)
 
+                if "session_name" not in data:
+                    data["session_name"] = self.session_name
+
+                if "provider" not in data:
+                    data["provider"] = self.provider
+
                 return data
 
         except HTTPError as exc:
@@ -211,49 +345,119 @@ class WhatsAppClient:
             except Exception:
                 parsed = {}
 
+            message = _extract_message(parsed, f"Gateway HTTPError {exc.code}")
+
             logger.exception("WhatsApp gateway HTTPError: %s", exc.code)
+
             return {
                 "success": False,
                 "status_code": exc.code,
-                "message": parsed.get("message") or f"Gateway HTTPError {exc.code}",
+                "provider_status": "gateway_http_error",
+                "message": message,
+                "error_message": message,
                 "details": parsed,
+                "session_status": parsed.get("session_status") or "failed",
+                "connected": _safe_bool(parsed.get("connected"), False),
+                "session_name": self.session_name,
+                "provider": self.provider,
             }
 
         except URLError as exc:
+            reason = _safe_str(getattr(exc, "reason", ""), "unknown")
+            message = f"Gateway connection failed: {reason}"
+
             logger.exception("WhatsApp gateway URLError")
+
             return {
                 "success": False,
                 "status_code": 503,
-                "message": f"Gateway connection failed: {exc.reason}",
+                "provider_status": "gateway_connection_failed",
+                "message": message,
+                "error_message": message,
+                "session_status": "failed",
+                "connected": False,
+                "session_name": self.session_name,
+                "provider": self.provider,
             }
 
         except Exception as exc:
+            message = f"Unexpected gateway error: {str(exc)}"
+
             logger.exception("Unexpected WhatsApp gateway error")
+
             return {
                 "success": False,
                 "status_code": 500,
-                "message": f"Unexpected gateway error: {str(exc)}",
+                "provider_status": "gateway_unexpected_error",
+                "message": message,
+                "error_message": message,
+                "session_status": "failed",
+                "connected": False,
+                "session_name": self.session_name,
+                "provider": self.provider,
             }
 
     def _gateway_post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._gateway_request(path=path, method="POST", payload=payload)
+        return self._gateway_request(
+            path=path,
+            method="POST",
+            payload=payload,
+        )
 
     # --------------------------------------------------------
     # 🧩 Result Builders
     # --------------------------------------------------------
     def _build_session_result(self, data: dict[str, Any]) -> WhatsAppSessionResult:
+        if not isinstance(data, dict):
+            data = {
+                "success": False,
+                "status_code": 500,
+                "message": "Invalid gateway response",
+                "session_status": "failed",
+                "connected": False,
+            }
+
+        success = _safe_bool(data.get("success"), False)
+        message = _extract_message(data, "")
+
         return WhatsAppSessionResult(
-            success=bool(data.get("success")),
-            status_code=int(data.get("status_code", 200 if data.get("success") else 400)),
-            session_status=str(data.get("session_status") or "disconnected"),
-            connected=bool(data.get("connected", False)),
-            connected_phone=str(data.get("connected_phone") or ""),
-            device_label=str(data.get("device_label") or ""),
-            qr_code=str(data.get("qr_code") or ""),
-            pairing_code=str(data.get("pairing_code") or ""),
-            last_connected_at=str(data.get("last_connected_at") or ""),
+            success=success,
+            status_code=_safe_int(
+                data.get("status_code"),
+                200 if success else 400,
+            ),
+            session_status=_safe_str(
+                data.get("session_status") or data.get("status"),
+                "connected" if _safe_bool(data.get("connected"), False) else "disconnected",
+            ),
+            connected=_safe_bool(data.get("connected"), False),
+            connected_phone=_safe_str(
+                data.get("connected_phone")
+                or data.get("phone_number")
+                or data.get("phone")
+            ),
+            device_label=_safe_str(
+                data.get("device_label")
+                or data.get("device_name")
+                or data.get("browser")
+            ),
+            qr_code=_safe_str(
+                data.get("qr_code")
+                or data.get("qr")
+                or data.get("qrDataUrl")
+                or data.get("qr_data_url")
+            ),
+            pairing_code=_safe_str(
+                data.get("pairing_code")
+                or data.get("pairingCode")
+                or data.get("code")
+            ),
+            last_connected_at=_safe_str(
+                data.get("last_connected_at")
+                or data.get("connected_at")
+            ),
             response_data=data,
-            error_message=str(data.get("message") or ""),
+            error_message=message if not success else "",
         )
 
     def _build_send_error_result(
@@ -275,10 +479,16 @@ class WhatsAppClient:
     def _build_send_success_result(self, data: dict[str, Any]) -> WhatsAppSendResult:
         return WhatsAppSendResult(
             success=True,
-            status_code=int(data.get("status_code", 200)),
-            provider_status=str(data.get("provider_status") or "accepted"),
-            external_message_id=str(
-                data.get("external_message_id", "") or data.get("message_id", "")
+            status_code=_safe_int(data.get("status_code"), 200),
+            provider_status=_safe_str(
+                data.get("provider_status")
+                or data.get("status")
+                or "accepted",
+            ),
+            external_message_id=_safe_str(
+                data.get("external_message_id")
+                or data.get("message_id")
+                or data.get("id")
             ),
             response_data=data,
             error_message="",
@@ -304,6 +514,7 @@ class WhatsAppClient:
                 "mode": "qr",
             },
         )
+
         return self._build_session_result(data)
 
     # --------------------------------------------------------
@@ -319,7 +530,8 @@ class WhatsAppClient:
                 response_data={},
             )
 
-        clean_phone = (phone_number or "").strip()
+        clean_phone = _safe_str(phone_number)
+
         if not clean_phone:
             return WhatsAppSessionResult(
                 success=False,
@@ -337,6 +549,7 @@ class WhatsAppClient:
                 "mode": "pairing_code",
             },
         )
+
         return self._build_session_result(data)
 
     # --------------------------------------------------------
@@ -363,6 +576,7 @@ class WhatsAppClient:
                 "session_name": self.session_name,
             },
         )
+
         return self._build_session_result(data)
 
     # --------------------------------------------------------
@@ -384,14 +598,15 @@ class WhatsAppClient:
                 "session_name": self.session_name,
             },
         )
+
         return self._build_session_result(data)
 
     # --------------------------------------------------------
     # 💬 Send Text Message
     # --------------------------------------------------------
     def send_text_message(self, *, to_phone: str, body: str) -> WhatsAppSendResult:
-        clean_phone = (to_phone or "").strip()
-        clean_body = (body or "").strip()
+        clean_phone = _safe_str(to_phone)
+        clean_body = _safe_str(body)
 
         if not clean_phone or not clean_body:
             return self._build_send_error_result(
@@ -416,9 +631,12 @@ class WhatsAppClient:
 
             if not data.get("success"):
                 return self._build_send_error_result(
-                    status_code=int(data.get("status_code", 400)),
-                    provider_status=str(data.get("provider_status") or "gateway_failed"),
-                    message=str(data.get("message") or "Session gateway failed"),
+                    status_code=_safe_int(data.get("status_code"), 400),
+                    provider_status=_safe_str(
+                        data.get("provider_status"),
+                        "gateway_failed",
+                    ),
+                    message=_extract_message(data, "Session gateway failed"),
                     data=data,
                 )
 
@@ -451,10 +669,10 @@ class WhatsAppClient:
         caption: str = "",
         filename: str = "",
     ) -> WhatsAppSendResult:
-        clean_phone = (to_phone or "").strip()
-        clean_document_url = (document_url or "").strip()
-        clean_caption = (caption or "").strip()
-        clean_filename = (filename or "").strip()
+        clean_phone = _safe_str(to_phone)
+        clean_document_url = _safe_str(document_url)
+        clean_caption = _safe_str(caption)
+        clean_filename = _safe_str(filename)
 
         if not clean_phone or not clean_document_url:
             return self._build_send_error_result(
@@ -481,9 +699,12 @@ class WhatsAppClient:
 
             if not data.get("success"):
                 return self._build_send_error_result(
-                    status_code=int(data.get("status_code", 400)),
-                    provider_status=str(data.get("provider_status") or "gateway_failed"),
-                    message=str(data.get("message") or "Session gateway failed"),
+                    status_code=_safe_int(data.get("status_code"), 400),
+                    provider_status=_safe_str(
+                        data.get("provider_status"),
+                        "gateway_failed",
+                    ),
+                    message=_extract_message(data, "Session gateway failed"),
                     data=data,
                 )
 

@@ -1,9 +1,14 @@
 # ============================================================
 # 📂 api/reports/overview.py
-# 🧠 Primey Care | Reports Overview API V2
+# 🧠 Primey Care | Reports Overview API V2.5
 # ------------------------------------------------------------
 # ✅ Central reports overview
 # ✅ Customers / Providers / Orders / Invoices / Payments totals
+# ✅ Orders lifecycle indicators:
+#    - COD
+#    - Cash collection
+#    - Delivery lifecycle
+#    - Delivery agent coverage
 # ✅ Accounting / Treasury operational indicators
 # ✅ Compatible with rebuilt Accounting / Treasury / Payments flow
 # ✅ Unified response through reports._utils.json_success
@@ -59,12 +64,12 @@ def _field_names(queryset) -> set[str]:
         return set()
 
 
-def _safe_count_filter(queryset, **filters) -> int:
+def _safe_count_filter(queryset, *q_objects, **filters) -> int:
     if queryset is None:
         return 0
 
     try:
-        return int(queryset.filter(**filters).count() or 0)
+        return int(queryset.filter(*q_objects, **filters).count() or 0)
     except Exception:
         return 0
 
@@ -106,6 +111,15 @@ def _latest_count(queryset, limit: int = 5) -> int:
         return 0
 
 
+def _remaining_amount(total_amount: Any, paid_amount: Any) -> Decimal:
+    remaining = _money(total_amount) - _money(paid_amount)
+
+    if remaining < Decimal("0.00"):
+        return Decimal("0.00")
+
+    return _money(remaining)
+
+
 # ============================================================
 # Summary Builders
 # ============================================================
@@ -127,6 +141,7 @@ def _build_providers_summary(providers) -> dict[str, Any]:
 
 def _build_orders_summary(orders) -> dict[str, Any]:
     total_orders = safe_count(orders)
+
     total_amount = safe_sum(
         orders,
         ["total_amount", "grand_total", "amount", "net_amount", "subtotal"],
@@ -134,6 +149,10 @@ def _build_orders_summary(orders) -> dict[str, Any]:
     paid_amount = safe_sum(
         orders,
         ["amount_paid", "paid_amount"],
+    )
+    cash_collected_amount = _safe_sum_field(
+        orders,
+        "cash_collected_amount",
     )
 
     fields = _field_names(orders)
@@ -150,19 +169,157 @@ def _build_orders_summary(orders) -> dict[str, Any]:
         if "status" in fields
         else 0
     )
+    delivered = (
+        _safe_count_filter(orders, status="delivered")
+        or _safe_count_filter(orders, status="DELIVERED")
+        if "status" in fields
+        else 0
+    )
+
+    card_ready = (
+        _safe_count_filter(orders, status="card_ready")
+        or _safe_count_filter(orders, fulfillment_status="ready")
+        if "status" in fields or "fulfillment_status" in fields
+        else 0
+    )
+    assigned_for_delivery = (
+        _safe_count_filter(orders, status="assigned_for_delivery")
+        or _safe_count_filter(orders, fulfillment_status="assigned")
+        if "status" in fields or "fulfillment_status" in fields
+        else 0
+    )
+    out_for_delivery = (
+        _safe_count_filter(orders, status="out_for_delivery")
+        or _safe_count_filter(orders, fulfillment_status="out_for_delivery")
+        if "status" in fields or "fulfillment_status" in fields
+        else 0
+    )
+
+    paid_orders = (
+        _safe_count_filter(orders, payment_status="PAID")
+        or _safe_count_filter(orders, payment_status="paid")
+        if "payment_status" in fields
+        else 0
+    )
+    unpaid_orders = (
+        _safe_count_filter(orders, payment_status="UNPAID")
+        or _safe_count_filter(orders, payment_status="unpaid")
+        if "payment_status" in fields
+        else 0
+    )
+    partially_paid_orders = (
+        _safe_count_filter(orders, payment_status="PARTIALLY_PAID")
+        or _safe_count_filter(orders, payment_status="partially_paid")
+        if "payment_status" in fields
+        else 0
+    )
+    cod_pending_orders = (
+        _safe_count_filter(orders, payment_status="cod_pending")
+        if "payment_status" in fields
+        else 0
+    )
+
+    cash_on_delivery_orders = (
+        _safe_count_filter(orders, payment_method="cash_on_delivery")
+        if "payment_method" in fields
+        else 0
+    )
+
+    cash_collected_orders = (
+        _safe_count_filter(
+            orders,
+            Q(cash_collected_amount__gt=Decimal("0.00")) | Q(cash_collected_at__isnull=False),
+        )
+        if "cash_collected_amount" in fields
+        else 0
+    )
+
+    cash_pending_collection_orders = max(cash_on_delivery_orders - cash_collected_orders, 0)
+
+    orders_with_agent = (
+        _safe_count_filter(orders, agent_id__isnull=False)
+        if "agent" in fields
+        else 0
+    )
+    orders_with_delivery_agent = (
+        _safe_count_filter(orders, delivery_agent_id__isnull=False)
+        if "delivery_agent" in fields
+        else 0
+    )
+    orders_without_delivery_agent = (
+        _safe_count_filter(orders, delivery_agent_id__isnull=True)
+        if "delivery_agent" in fields
+        else 0
+    )
+
+    card_orders = (
+        _safe_count_filter(orders, order_kind="card")
+        if "order_kind" in fields
+        else 0
+    )
+    program_orders = (
+        _safe_count_filter(orders, order_kind="program")
+        if "order_kind" in fields
+        else 0
+    )
+    service_orders = (
+        _safe_count_filter(orders, order_kind="service")
+        if "order_kind" in fields
+        else 0
+    )
+    subscription_orders = (
+        _safe_count_filter(orders, order_kind="subscription")
+        if "order_kind" in fields
+        else 0
+    )
+
+    remaining_amount = _remaining_amount(total_amount, paid_amount)
 
     return {
         "count": total_orders,
+
         "total_amount": _normalize_money(total_amount),
         "paid_amount": _normalize_money(paid_amount),
-        "remaining_amount": _normalize_money(_money(total_amount) - _money(paid_amount)),
+        "cash_collected_amount": _normalize_money(cash_collected_amount),
+        "remaining_amount": _normalize_money(remaining_amount),
+
         "completed_count": completed,
         "cancelled_count": cancelled,
+        "delivered_count": delivered,
+
+        "card_ready_count": card_ready,
+        "assigned_for_delivery_count": assigned_for_delivery,
+        "out_for_delivery_count": out_for_delivery,
+
+        "paid_count": paid_orders,
+        "unpaid_count": unpaid_orders,
+        "partially_paid_count": partially_paid_orders,
+        "cod_pending_count": cod_pending_orders,
+
+        "cash_on_delivery_count": cash_on_delivery_orders,
+        "cash_collected_count": cash_collected_orders,
+        "cash_pending_collection_count": cash_pending_collection_orders,
+
+        "orders_with_agent": orders_with_agent,
+        "orders_with_delivery_agent": orders_with_delivery_agent,
+        "orders_without_delivery_agent": orders_without_delivery_agent,
+
+        "card_orders": card_orders,
+        "program_orders": program_orders,
+        "service_orders": service_orders,
+        "subscription_orders": subscription_orders,
+
         "completion_rate": _percentage(completed, total_orders),
+        "delivery_rate": _percentage(delivered, total_orders),
+        "delivery_agent_coverage_rate": _percentage(orders_with_delivery_agent, total_orders),
         "collection_rate": _percentage(paid_amount, total_amount),
+        "cod_collection_rate": _percentage(cash_collected_orders, cash_on_delivery_orders),
+
         "by_status": safe_group_count(orders, ["status", "order_status"]),
         "by_payment_status": safe_group_count(orders, ["payment_status"]),
         "by_fulfillment_status": safe_group_count(orders, ["fulfillment_status"]),
+        "by_order_kind": safe_group_count(orders, ["order_kind"]),
+        "by_payment_method": safe_group_count(orders, ["payment_method"]),
     }
 
 
@@ -369,6 +526,7 @@ def _build_system_health(
     payments_summary: dict[str, Any],
     accounting_summary: dict[str, Any],
     treasury_summary: dict[str, Any],
+    orders_summary: dict[str, Any],
 ) -> dict[str, Any]:
     accounting_pending = int(invoices_summary.get("accounting_pending_count") or 0) + int(
         payments_summary.get("accounting_pending_count") or 0
@@ -397,6 +555,26 @@ def _build_system_health(
             }
         )
 
+    if int(orders_summary.get("cash_pending_collection_count") or 0):
+        warnings.append(
+            {
+                "key": "cod_pending_collection",
+                "message_ar": "توجد طلبات دفع عند الاستلام لم يتم تحصيلها.",
+                "message_en": "Some COD orders are pending cash collection.",
+                "count": int(orders_summary.get("cash_pending_collection_count") or 0),
+            }
+        )
+
+    if int(orders_summary.get("out_for_delivery_count") or 0):
+        warnings.append(
+            {
+                "key": "orders_out_for_delivery",
+                "message_ar": "توجد طلبات خارج التوصيل تحتاج متابعة.",
+                "message_en": "Some orders are currently out for delivery.",
+                "count": int(orders_summary.get("out_for_delivery_count") or 0),
+            }
+        )
+
     if not accounting_summary.get("is_balanced", True):
         warnings.append(
             {
@@ -416,6 +594,11 @@ def _build_system_health(
             "treasury_pending": treasury_pending,
             "accounting_posting_rate": payments_summary.get("accounting_posting_rate", 0),
             "treasury_posting_rate": payments_summary.get("treasury_posting_rate", 0),
+        },
+        "operations": {
+            "cod_pending_collection": int(orders_summary.get("cash_pending_collection_count") or 0),
+            "out_for_delivery": int(orders_summary.get("out_for_delivery_count") or 0),
+            "ready_for_delivery": int(orders_summary.get("card_ready_count") or 0),
         },
         "balance": {
             "accounting_is_balanced": bool(accounting_summary.get("is_balanced", True)),
@@ -471,9 +654,23 @@ def reports_overview(request):
             "invoices_total": invoices_summary["total_amount"],
             "payments_total": payments_summary["paid_amount"],
 
-            # مؤشرات جديدة
+            # مؤشرات الطلبات
             "orders_paid_amount": orders_summary["paid_amount"],
             "orders_remaining_amount": orders_summary["remaining_amount"],
+            "orders_cash_collected_amount": orders_summary["cash_collected_amount"],
+            "orders_completed_count": orders_summary["completed_count"],
+            "orders_delivered_count": orders_summary["delivered_count"],
+            "orders_card_ready_count": orders_summary["card_ready_count"],
+            "orders_assigned_for_delivery_count": orders_summary["assigned_for_delivery_count"],
+            "orders_out_for_delivery_count": orders_summary["out_for_delivery_count"],
+            "orders_cash_on_delivery_count": orders_summary["cash_on_delivery_count"],
+            "orders_cod_pending_count": orders_summary["cod_pending_count"],
+            "orders_cash_collected_count": orders_summary["cash_collected_count"],
+            "orders_cash_pending_collection_count": orders_summary["cash_pending_collection_count"],
+            "orders_with_delivery_agent": orders_summary["orders_with_delivery_agent"],
+            "orders_without_delivery_agent": orders_summary["orders_without_delivery_agent"],
+
+            # مؤشرات مالية
             "invoices_paid_amount": invoices_summary["paid_amount"],
             "invoices_due_amount": invoices_summary["due_amount"],
             "payments_net_collected_amount": payments_summary["net_collected_amount"],
@@ -500,6 +697,7 @@ def reports_overview(request):
             payments_summary=payments_summary,
             accounting_summary=accounting_summary,
             treasury_summary=treasury_summary,
+            orders_summary=orders_summary,
         ),
         "quick_counts": {
             "latest_customers": _latest_count(customers),
@@ -533,6 +731,8 @@ def reports_overview(request):
                 "api": "/api/reports/orders/",
                 "count": orders_summary["count"],
                 "amount": orders_summary["total_amount"],
+                "delivered_count": orders_summary["delivered_count"],
+                "cod_pending_count": orders_summary["cod_pending_count"],
             },
             {
                 "key": "invoices",

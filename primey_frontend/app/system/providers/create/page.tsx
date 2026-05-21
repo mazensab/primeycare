@@ -1,93 +1,88 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/providers/create/page.tsx
-   🧠 Primey Care | Create Provider
+   📂 primey_frontend/app/system/providers/create/page.tsx
+   🏥 Primey Care — Create Provider V2 Login-User Ready
    ------------------------------------------------------------
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ Providers هو الموديول الرسمي
-   ✅ Full Width Layout
-   ✅ Main Form + Sidebar Summary
-   ✅ دعم الاسم العربي والإنجليزي بشكل مستقل
-   ✅ دعم السجل التجاري والرقم الضريبي
-   ✅ دعم حقول الشبكة الطبية والاستيراد
-   ✅ حماية زر الإنشاء وطلبات الحفظ حسب الصلاحيات
-   ✅ fallback آمن لـ system_admin / superuser
-   ✅ Error Alert داخلي
-   ✅ Field-level validation
-   ✅ beforeunload protection
-   ✅ حفظ واستعادة مسودة محلية
-   ✅ تعطيل الحقول أثناء الحفظ
-   ✅ تنظيف البيانات قبل الإرسال
-   ✅ استخدام toast من sonner
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ استخدام رمز العملة /currency/sar.svg في أي قيمة مالية مستقبلية
-   ✅ بدون localhost hardcoded
-   ✅ لا توجد روابط تقارير داخل الوحدة
-   ✅ لا توجد نصوص تقنية ظاهرة في الواجهة
-   ✅ الأرقام تبقى بالإنجليزية
+   ✅ Same approved Customers / Agents / Providers visual pattern
+   ✅ Main form + sidebar summary
+   ✅ Real API only: POST /api/providers/create/
+   ✅ Creates optional login user for provider:
+      create_login_user / login_username / login_email / login_password
+      login_display_name / login_phone / login_whatsapp
+   ✅ Provider user rule:
+      Provider.user -> auth.User
+      user_type = PROVIDER
+      role = provider_admin
+      workspace = provider
+   ✅ No localhost
+   ✅ No fake data
+   ✅ Local draft protection
+   ✅ Field validation
+   ✅ sonner toast
+   ✅ SAR icon path kept for system consistency
+   ✅ RTL/LTR via primey-locale
 ============================================================ */
 
+import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ComponentType, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   Building2,
   CheckCircle2,
-  ClipboardList,
   FileText,
   Globe2,
-  Hospital,
+  KeyRound,
+  Landmark,
   Layers3,
   Loader2,
-  Mail,
+  LockKeyhole,
   MapPin,
-  Phone,
+  RotateCcw,
   Save,
   ShieldCheck,
   Sparkles,
-  Stethoscope,
-  Trash2,
-  XCircle,
+  TriangleAlert,
+  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
-/* ============================================================
-   Types
-============================================================ */
-
-type AppLocale = "ar" | "en";
-type AuthRecord = Record<string, unknown>;
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
 type ProviderStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED" | "DRAFT";
-
 type ProviderType =
   | "HOSPITAL"
   | "MEDICAL_CENTER"
   | "PHARMACY"
-  | "PARTNER"
   | "LAB"
   | "CLINIC"
+  | "PARTNER"
   | "OTHER";
 
-type ProviderFormData = {
+type FormState = {
   name: string;
   name_ar: string;
   name_en: string;
@@ -95,1748 +90,1584 @@ type ProviderFormData = {
   provider_type: ProviderType;
   status: ProviderStatus;
 
-  commercial_registration: string;
-  tax_number: string;
+  region: string;
+  area: string;
+  city: string;
+  district: string;
+  street: string;
+  address: string;
 
-  contact_person: string;
   phone: string;
   mobile: string;
   email: string;
   website: string;
 
-  region: string;
-  city: string;
-  area: string;
-  street: string;
-  address: string;
-  google_maps_link: string;
+  create_login_user: boolean;
+  login_username: string;
+  login_email: string;
+  login_password: string;
+  login_display_name: string;
+  login_phone: string;
+  login_whatsapp: string;
 
   source_category: string;
   import_source: string;
   external_reference: string;
-
-  notes: string;
   is_featured: boolean;
+  commercial_registration: string;
+  tax_number: string;
+  notes: string;
 };
 
-type ProviderFormErrors = Partial<Record<keyof ProviderFormData, string>>;
-
-type CreateProviderApiResponse = {
+type ApiResponse = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
-  detail?: string;
-  error?: string;
-  errors?: Record<string, string[] | string> | string[] | string;
-  id?: number | string;
-  provider?: {
-    id?: number | string;
-  };
-  data?: {
-    id?: number | string;
-    provider?: {
-      id?: number | string;
-    };
-  };
+  data?: unknown;
+  item?: unknown;
+  provider?: unknown;
+  id?: number;
 };
 
-const DRAFT_STORAGE_KEY = "primey-care-provider-create-draft-v2";
+const SAR_ICON = "/currency/sar.svg";
+const DRAFT_KEY = "primey-care.provider-create.v2.login-user.draft";
 
-/* ============================================================
-   Locale Helpers
-============================================================ */
+const translations = {
+  ar: {
+    title: "إضافة مقدم خدمة",
+    subtitle:
+      "إضافة مقدم خدمة جديد إلى الشبكة الطبية مع حساب دخول اختياري، بيانات التواصل، التصنيف، والبيانات النظامية.",
+    back: "رجوع",
+    saveDraft: "حفظ مسودة",
+    clear: "مسح",
+    submit: "حفظ مقدم الخدمة",
+    saving: "جاري الحفظ",
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+    basicInfo: "بيانات مقدم الخدمة",
+    contactInfo: "بيانات التواصل",
+    loginInfo: "حساب دخول مقدم الخدمة",
+    addressInfo: "العنوان والموقع",
+    legalInfo: "البيانات النظامية",
+    networkInfo: "بيانات الشبكة",
+    notesInfo: "الملاحظات",
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+    name: "الاسم العام",
+    nameAr: "الاسم العربي",
+    nameEn: "الاسم الإنجليزي",
+    code: "الكود",
+    type: "التصنيف",
+    status: "الحالة",
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+    region: "المنطقة",
+    area: "النطاق",
+    city: "المدينة",
+    district: "الحي",
+    street: "الشارع",
+    address: "العنوان",
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
-    return "ar";
-  }
+    phone: "الهاتف",
+    mobile: "الجوال",
+    email: "البريد الإلكتروني",
+    website: "الموقع الإلكتروني",
+
+    createLoginUser: "إنشاء حساب دخول لمقدم الخدمة",
+    loginUsername: "اسم مستخدم الدخول",
+    loginEmail: "بريد الدخول",
+    loginPassword: "كلمة مرور الدخول",
+    loginDisplayName: "اسم العرض في الحساب",
+    loginPhone: "جوال حساب الدخول",
+    loginWhatsapp: "واتساب حساب الدخول",
+    loginHint:
+      "عند تفعيل هذا الخيار سيتم إنشاء User وربطه مباشرة بمقدم الخدمة Provider.user مع user_type=PROVIDER و role=provider_admin.",
+    passwordHint:
+      "اترك كلمة المرور فارغة إذا كان الباكند سيولد كلمة مؤقتة أو سيتم إرسال رابط كلمة مرور لاحقًا.",
+
+    sourceCategory: "تصنيف المصدر",
+    importSource: "مصدر الاستيراد",
+    externalReference: "المرجع الخارجي",
+    featured: "مميز",
+    commercialRegistration: "السجل التجاري",
+    taxNumber: "الرقم الضريبي",
+    notes: "ملاحظات",
+
+    active: "نشط",
+    inactive: "غير نشط",
+    suspended: "موقوف",
+    draft: "مسودة",
+
+    hospital: "مستشفى",
+    medicalCenter: "مركز طبي",
+    pharmacy: "صيدلية",
+    lab: "مختبر",
+    clinic: "عيادة",
+    partner: "شريك",
+    other: "أخرى",
+
+    yes: "نعم",
+    no: "لا",
+
+    summary: "ملخص مقدم الخدمة",
+    readiness: "جاهزية البيانات",
+    requiredFields: "الحقول المطلوبة",
+    optionalFields: "الحقول الاختيارية",
+    loginReadiness: "جاهزية حساب الدخول",
+    networkReadiness: "جاهزية الشبكة",
+    legalReadiness: "جاهزية النظامية",
+    complete: "مكتمل",
+    incomplete: "غير مكتمل",
+
+    requiredName: "اسم مقدم الخدمة مطلوب.",
+    invalidEmail: "صيغة البريد الإلكتروني غير صحيحة.",
+    invalidLoginEmail: "صيغة بريد الدخول غير صحيحة.",
+    shortPassword: "كلمة المرور يجب ألا تقل عن 8 أحرف.",
+
+    saved: "تم إنشاء مقدم الخدمة بنجاح.",
+    draftSaved: "تم حفظ المسودة محليًا.",
+    draftLoaded: "تم استعادة المسودة.",
+    cleared: "تم مسح النموذج.",
+    errorTitle: "تعذر تنفيذ العملية",
+    submitError: "تعذر إنشاء مقدم الخدمة.",
+    confirmClear: "هل تريد مسح النموذج الحالي؟",
+    unsaved: "لديك تغييرات غير محفوظة.",
+    viewProvider: "فتح مقدم الخدمة",
+
+    placeholderNameAr: "مثال: مستشفى برايمي",
+    placeholderNameEn: "Example: Primey Hospital",
+    placeholderWebsite: "https://example.com",
+    sourceManual: "إدخال يدوي",
+    sourceImported: "مستوردة من الشبكة",
+  },
+  en: {
+    title: "Add Provider",
+    subtitle:
+      "Add a new provider to the medical network with optional login account, contact, category, and legal information.",
+    back: "Back",
+    saveDraft: "Save draft",
+    clear: "Clear",
+    submit: "Save provider",
+    saving: "Saving",
+
+    basicInfo: "Provider info",
+    contactInfo: "Contact info",
+    loginInfo: "Provider login account",
+    addressInfo: "Address & location",
+    legalInfo: "Legal info",
+    networkInfo: "Network info",
+    notesInfo: "Notes",
+
+    name: "General name",
+    nameAr: "Arabic name",
+    nameEn: "English name",
+    code: "Code",
+    type: "Type",
+    status: "Status",
+
+    region: "Region",
+    area: "Area",
+    city: "City",
+    district: "District",
+    street: "Street",
+    address: "Address",
+
+    phone: "Phone",
+    mobile: "Mobile",
+    email: "Email",
+    website: "Website",
+
+    createLoginUser: "Create provider login account",
+    loginUsername: "Login username",
+    loginEmail: "Login email",
+    loginPassword: "Login password",
+    loginDisplayName: "Login display name",
+    loginPhone: "Login phone",
+    loginWhatsapp: "Login WhatsApp",
+    loginHint:
+      "When enabled, a User will be created and linked to Provider.user with user_type=PROVIDER and role=provider_admin.",
+    passwordHint:
+      "Leave password empty if backend should generate a temporary password or a password setup link will be used later.",
+
+    sourceCategory: "Source category",
+    importSource: "Import source",
+    externalReference: "External reference",
+    featured: "Featured",
+    commercialRegistration: "Commercial registration",
+    taxNumber: "Tax number",
+    notes: "Notes",
+
+    active: "Active",
+    inactive: "Inactive",
+    suspended: "Suspended",
+    draft: "Draft",
+
+    hospital: "Hospital",
+    medicalCenter: "Medical center",
+    pharmacy: "Pharmacy",
+    lab: "Lab",
+    clinic: "Clinic",
+    partner: "Partner",
+    other: "Other",
+
+    yes: "Yes",
+    no: "No",
+
+    summary: "Provider summary",
+    readiness: "Data readiness",
+    requiredFields: "Required fields",
+    optionalFields: "Optional fields",
+    loginReadiness: "Login readiness",
+    networkReadiness: "Network readiness",
+    legalReadiness: "Legal readiness",
+    complete: "Complete",
+    incomplete: "Incomplete",
+
+    requiredName: "Provider name is required.",
+    invalidEmail: "Email format is invalid.",
+    invalidLoginEmail: "Login email format is invalid.",
+    shortPassword: "Password must be at least 8 characters.",
+
+    saved: "Provider created successfully.",
+    draftSaved: "Draft saved locally.",
+    draftLoaded: "Draft restored.",
+    cleared: "Form cleared.",
+    errorTitle: "Unable to complete operation",
+    submitError: "Unable to create provider.",
+    confirmClear: "Do you want to clear the current form?",
+    unsaved: "You have unsaved changes.",
+    viewProvider: "Open provider",
+
+    placeholderNameAr: "Example: Primey Hospital",
+    placeholderNameEn: "Example: Primey Hospital",
+    placeholderWebsite: "https://example.com",
+    sourceManual: "Manual entry",
+    sourceImported: "Imported from network",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/* ============================================================
-   API Helpers
-============================================================ */
-
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-function readCookie(name: string) {
-  if (typeof document === "undefined") return "";
-
-  const match = document.cookie
-    .split("; ")
-    .find((cookie) => cookie.startsWith(`${name}=`));
-
-  return match ? decodeURIComponent(match.split("=")[1] || "") : "";
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
 }
 
-/* ============================================================
-   Permission Helpers
-============================================================ */
+function toEnglishDigits(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "";
 
-function asRecord(value: unknown): AuthRecord {
-  return value && typeof value === "object" ? (value as AuthRecord) : {};
+  return String(value)
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
 }
-
-function getNestedRecord(source: AuthRecord, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as AuthRecord;
-    }
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as AuthRecord;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as AuthRecord;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown): AuthRecord {
-  const auth = asRecord(authValue);
-
-  return getNestedRecord(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asRecord(auth.permissions);
-  const userPermissions = asRecord(user.permissions);
-  const authProfilePermissions = asRecord(auth.profile_permissions);
-  const userProfilePermissions = asRecord(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asRecord(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasKnownPermissionSignal(authValue: unknown) {
-  return (
-    getAuthRoles(authValue).length > 0 ||
-    getAuthPermissionCodes(authValue).length > 0
-  );
-}
-
-function hasPermissionCode(authValue: unknown, codes: string[]) {
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length === 0) return undefined;
-
-  return codes.some((code) => permissions.includes(code));
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const explicitPermission = hasPermissionCode(authValue, codes);
-
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "support",
-          "accountant",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin"].includes(role),
-    );
-  }
-
-  if (!hasKnownPermissionSignal(authValue)) {
-    return true;
-  }
-
-  return mode === "view";
-}
-
-/* ============================================================
-   Defaults
-============================================================ */
-
-const initialFormData: ProviderFormData = {
-  name: "",
-  name_ar: "",
-  name_en: "",
-  code: "",
-  provider_type: "MEDICAL_CENTER",
-  status: "ACTIVE",
-
-  commercial_registration: "",
-  tax_number: "",
-
-  contact_person: "",
-  phone: "",
-  mobile: "",
-  email: "",
-  website: "",
-
-  region: "",
-  city: "",
-  area: "",
-  street: "",
-  address: "",
-  google_maps_link: "",
-
-  source_category: "",
-  import_source: "",
-  external_reference: "",
-
-  notes: "",
-  is_featured: false,
-};
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "إنشاء مقدم خدمة جديد" : "Create New Provider",
-    subtitle: isArabic
-      ? "إضافة جهة مقدمة للخدمة مع الاسم العربي والإنجليزي والبيانات النظامية قبل ربطها بالعقود والخدمات والطلبات."
-      : "Create a provider with Arabic/English names and legal data before linking contracts, services, and orders.",
-
-    back: isArabic ? "العودة لمقدمي الخدمة" : "Back to Providers",
-    providersList: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
-    importProviders: isArabic ? "استيراد الشبكة الطبية" : "Import Medical Network",
-    create: isArabic ? "إنشاء مقدم الخدمة" : "Create Provider",
-    saving: isArabic ? "جاري الحفظ..." : "Saving...",
-    saveDraft: isArabic ? "حفظ كمسودة محلية" : "Save Local Draft",
-    restoreDraft: isArabic ? "استعادة المسودة" : "Restore Draft",
-    clearForm: isArabic ? "تفريغ النموذج" : "Clear Form",
-
-    basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
-    basicDesc: isArabic
-      ? "الاسم العربي والإنجليزي، الكود، التصنيف، وحالة التشغيل."
-      : "Arabic and English names, code, type, and operational status.",
-
-    legalInfo: isArabic ? "البيانات النظامية والضريبية" : "Legal & Tax Data",
-    legalDesc: isArabic
-      ? "السجل التجاري والرقم الضريبي لمقدم الخدمة."
-      : "Commercial registration and tax number for the provider.",
-
-    contactInfo: isArabic ? "بيانات التواصل" : "Contact Information",
-    contactDesc: isArabic
-      ? "مسؤول التواصل، الهاتف، الجوال، البريد، والموقع الإلكتروني."
-      : "Contact person, phone, mobile, email, and website.",
-
-    locationInfo: isArabic ? "بيانات الموقع" : "Location Information",
-    locationDesc: isArabic
-      ? "المنطقة، المدينة، الحي، الشارع، العنوان، ورابط الخريطة."
-      : "Region, city, area, street, address, and map link.",
-
-    networkInfo: isArabic ? "بيانات الشبكة الطبية" : "Medical Network Data",
-    networkDesc: isArabic
-      ? "حقول اختيارية تساعد في تتبع المصدر أو المرجع الخارجي."
-      : "Optional fields used for source tracking or external references.",
-
-    operationalInfo: isArabic ? "بيانات تشغيلية" : "Operational Information",
-    operationalDesc: isArabic
-      ? "تمييز مقدم الخدمة والملاحظات التشغيلية."
-      : "Featured status and operational notes.",
-
-    summaryTitle: isArabic ? "ملخص مقدم الخدمة" : "Provider Summary",
-    summaryDesc: isArabic
-      ? "مراجعة سريعة للبيانات قبل الحفظ."
-      : "Quick review before saving.",
-
-    stepsTitle: isArabic ? "إرشادات قبل الحفظ" : "Before Saving",
-    stepsDesc: isArabic
-      ? "نقاط مهمة تساعدك على إنشاء مقدم خدمة صحيح."
-      : "Important points to help you create a correct provider.",
-
-    formErrorTitle: isArabic ? "تعذر حفظ البيانات" : "Unable to save data",
-
-    accessDeniedTitle: isArabic
-      ? "غير مصرح بإنشاء مقدم خدمة"
-      : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية إنشاء مقدمي الخدمة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to create providers. Contact your system administrator if you need access.",
-
-    labels: {
-      name: isArabic ? "الاسم العام / التوافقي" : "General / Legacy Name",
-      nameAr: isArabic ? "اسم مقدم الخدمة بالعربي" : "Arabic Provider Name",
-      nameEn: isArabic ? "اسم مقدم الخدمة بالإنجليزي" : "English Provider Name",
-      code: isArabic ? "كود مقدم الخدمة" : "Provider Code",
-      providerType: isArabic ? "التصنيف" : "Provider Type",
-      status: isArabic ? "الحالة" : "Status",
-      commercialRegistration: isArabic ? "السجل التجاري" : "Commercial Registration",
-      taxNumber: isArabic ? "الرقم الضريبي" : "Tax Number",
-      contactPerson: isArabic ? "مسؤول التواصل" : "Contact Person",
-      phone: isArabic ? "رقم الهاتف" : "Phone",
-      mobile: isArabic ? "رقم الجوال" : "Mobile",
-      email: isArabic ? "البريد الإلكتروني" : "Email",
-      website: isArabic ? "الموقع الإلكتروني" : "Website",
-      region: isArabic ? "المنطقة" : "Region",
-      city: isArabic ? "المدينة" : "City",
-      area: isArabic ? "الحي / المنطقة" : "Area",
-      street: isArabic ? "الشارع" : "Street",
-      address: isArabic ? "العنوان" : "Address",
-      googleMaps: isArabic ? "رابط الخريطة" : "Map Link",
-      sourceCategory: isArabic ? "تصنيف المصدر" : "Source Category",
-      importSource: isArabic ? "مصدر الاستيراد" : "Import Source",
-      externalReference: isArabic ? "المرجع الخارجي" : "External Reference",
-      notes: isArabic ? "ملاحظات" : "Notes",
-      featured: isArabic ? "مقدم خدمة مميز" : "Featured Provider",
-    },
-
-    placeholders: {
-      name: isArabic
-        ? "يُملأ تلقائيًا من الاسم العربي أو الإنجليزي عند الحفظ"
-        : "Auto-filled from Arabic or English name on save",
-      nameAr: isArabic
-        ? "مثال: مستشفى برايمي الطبي"
-        : "Example: مستشفى برايمي الطبي",
-      nameEn: isArabic
-        ? "مثال: Primey Medical Hospital"
-        : "Example: Primey Medical Hospital",
-      code: isArabic
-        ? "اتركه فارغًا للتوليد التلقائي"
-        : "Leave blank for auto generation",
-      commercialRegistration: isArabic ? "مثال: 1010123456" : "Example: 1010123456",
-      taxNumber: isArabic ? "مثال: 300123456700003" : "Example: 300123456700003",
-      contactPerson: isArabic ? "مثال: محمد أحمد" : "Example: Mohammed Ahmed",
-      phone: isArabic ? "011xxxxxxx" : "011xxxxxxx",
-      mobile: isArabic ? "05xxxxxxxx" : "05xxxxxxxx",
-      email: isArabic ? "provider@example.com" : "provider@example.com",
-      website: isArabic ? "https://example.com" : "https://example.com",
-      region: isArabic ? "مثال: منطقة مكة المكرمة" : "Example: Makkah Region",
-      city: isArabic ? "مثال: جدة" : "Example: Jeddah",
-      area: isArabic ? "مثال: الروضة" : "Example: Al Rawdah",
-      street: isArabic ? "مثال: شارع التحلية" : "Example: Tahlia Street",
-      address: isArabic ? "اكتب العنوان التفصيلي" : "Enter full address",
-      googleMaps: isArabic
-        ? "https://maps.google.com/..."
-        : "https://maps.google.com/...",
-      sourceCategory: isArabic ? "مثال: مجمع طبي" : "Example: Medical Complex",
-      importSource: isArabic ? "مثال: medical_network_excel" : "Example: medical_network_excel",
-      externalReference: isArabic ? "مثال: 125" : "Example: 125",
-      notes: isArabic
-        ? "أي ملاحظات تشغيلية عن مقدم الخدمة..."
-        : "Any operational notes about the provider...",
-    },
-
-    providerTypes: {
-      HOSPITAL: isArabic ? "مستشفى" : "Hospital",
-      MEDICAL_CENTER: isArabic ? "مركز طبي" : "Medical Center",
-      PHARMACY: isArabic ? "صيدلية" : "Pharmacy",
-      PARTNER: isArabic ? "شريك" : "Partner",
-      LAB: isArabic ? "مختبر" : "Lab",
-      CLINIC: isArabic ? "عيادة" : "Clinic",
-      OTHER: isArabic ? "أخرى" : "Other",
-    } satisfies Record<ProviderType, string>,
-
-    statuses: {
-      ACTIVE: isArabic ? "نشط" : "Active",
-      INACTIVE: isArabic ? "غير نشط" : "Inactive",
-      SUSPENDED: isArabic ? "موقوف" : "Suspended",
-      DRAFT: isArabic ? "مسودة" : "Draft",
-    } satisfies Record<ProviderStatus, string>,
-
-    validation: {
-      name: isArabic
-        ? "يجب إدخال الاسم العربي أو الإنجليزي لمقدم الخدمة."
-        : "Arabic or English provider name is required.",
-      codeLength: isArabic
-        ? "الكود يجب ألا يتجاوز 50 حرفًا."
-        : "Code must not exceed 50 characters.",
-      commercialRegistrationLength: isArabic
-        ? "السجل التجاري يجب ألا يتجاوز 100 حرف."
-        : "Commercial registration must not exceed 100 characters.",
-      taxNumberLength: isArabic
-        ? "الرقم الضريبي يجب ألا يتجاوز 100 حرف."
-        : "Tax number must not exceed 100 characters.",
-      email: isArabic
-        ? "صيغة البريد الإلكتروني غير صحيحة."
-        : "Email format is invalid.",
-      website: isArabic
-        ? "رابط الموقع يجب أن يبدأ بـ http:// أو https://."
-        : "Website URL must start with http:// or https://.",
-      maps: isArabic
-        ? "رابط الخريطة يجب أن يبدأ بـ http:// أو https://."
-        : "Map link must start with http:// or https://.",
-      phone: isArabic
-        ? "رقم التواصل يجب أن يحتوي أرقامًا فقط مع السماح بعلامة +."
-        : "Contact number must contain digits only, with optional +.",
-    },
-
-    success: isArabic
-      ? "تم إنشاء مقدم الخدمة بنجاح."
-      : "Provider created successfully.",
-    draftSaved: isArabic ? "تم حفظ المسودة محليًا." : "Draft saved locally.",
-    draftRestored: isArabic ? "تمت استعادة المسودة." : "Draft restored.",
-    noDraft: isArabic ? "لا توجد مسودة محفوظة." : "No saved draft found.",
-    formCleared: isArabic ? "تم تفريغ النموذج." : "Form cleared.",
-    apiError: isArabic
-      ? "تعذر إنشاء مقدم الخدمة. تحقق من البيانات وحاول مرة أخرى."
-      : "Unable to create provider. Please check the data and try again.",
-    validationToast: isArabic
-      ? "يرجى تصحيح الحقول المطلوبة قبل المتابعة."
-      : "Please fix the required fields before continuing.",
-    confirmLeave: isArabic
-      ? "لديك بيانات غير محفوظة. هل تريد المغادرة؟"
-      : "You have unsaved changes. Do you want to leave?",
-    confirmClear: isArabic
-      ? "سيتم تفريغ النموذج الحالي. هل تريد المتابعة؟"
-      : "The current form will be cleared. Do you want to continue?",
-
-    completion: isArabic ? "نسبة الاكتمال" : "Completion",
-    ready: isArabic ? "جاهز للحفظ" : "Ready to save",
-    missingData: isArabic ? "ينقصه بيانات أساسية" : "Missing required data",
-
-    yes: isArabic ? "نعم" : "Yes",
-    no: isArabic ? "لا" : "No",
-
-    featuredDescription: isArabic
-      ? "استخدم هذا الخيار لإبراز مقدم الخدمة في الواجهات والعروض."
-      : "Use this option to highlight the provider in pages and offers.",
-
-    afterCreateHint: isArabic
-      ? "بعد إنشاء مقدم الخدمة سيتم فتح صفحة التفاصيل، ومنها يمكنك رفع الشعار والصورة ومرفقات Google Drive."
-      : "After creation, the detail page opens so you can upload the logo, image, and Google Drive files.",
-
-    quickNotes: [
-      isArabic
-        ? "الاسم العربي أو الإنجليزي مطلوب، وسيتم حفظ الاسم العام تلقائيًا للتوافق مع الصفحات القديمة."
-        : "Arabic or English name is required. The general name is saved automatically for backward compatibility.",
-      isArabic
-        ? "يمكن ترك الكود فارغًا ليتم توليده من الباكند تلقائيًا."
-        : "Code can be left blank and generated automatically by the backend.",
-      isArabic
-        ? "السجل التجاري والرقم الضريبي مهمان لتقرير مقدم الخدمة والطباعة."
-        : "Commercial registration and tax number are important for provider reports and printing.",
-      isArabic
-        ? "الشعار والصورة والمرفقات يتم رفعها بعد الإنشاء من صفحة تفاصيل مقدم الخدمة."
-        : "Logo, image, and documents are uploaded after creation from the provider detail page.",
-    ],
-  };
-}
-
-/* ============================================================
-   Data Helpers
-============================================================ */
 
 function normalizePhone(value: string) {
-  return value.replace(/[^\d+]/g, "").trim();
+  return toEnglishDigits(value).replace(/[^\d+]/g, "").trim();
 }
 
 function normalizeCode(value: string) {
-  return value.trim().replace(/\s+/g, "-").toUpperCase();
-}
-
-function normalizeIdentifier(value: string) {
-  return value.trim().replace(/\s+/g, "");
-}
-
-function normalizeUrl(value: string) {
-  return value.trim();
-}
-
-function isValidUrl(value: string) {
-  if (!value.trim()) return true;
-
-  return /^https?:\/\/.+/i.test(value.trim());
+  return value
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^\p{L}\p{N}-]/gu, "")
+    .toUpperCase();
 }
 
 function isValidEmail(value: string) {
   if (!value.trim()) return true;
-
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-function isValidPhone(value: string) {
-  if (!value.trim()) return true;
-
-  return /^\+?\d{6,18}$/.test(normalizePhone(value));
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-function hasFormChanges(formData: ProviderFormData) {
-  return JSON.stringify(formData) !== JSON.stringify(initialFormData);
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
+  }
+
+  return envBase;
 }
 
-function resolveGeneralName(formData: ProviderFormData) {
-  return formData.name.trim() || formData.name_ar.trim() || formData.name_en.trim();
+function makeApiUrl(path: string) {
+  const base = getApiBaseUrl();
+  return `${base}${path}`;
 }
 
-function normalizePayload(formData: ProviderFormData) {
-  const generalName = resolveGeneralName(formData);
-  const nameAr = formData.name_ar.trim();
-  const nameEn = formData.name_en.trim();
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
 
+  const found = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${name}=`));
+
+  return found ? decodeURIComponent(found.split("=").slice(1).join("=")) : "";
+}
+
+async function fetchJson<T>(
+  url: string,
+  options?: {
+    method?: "POST" | "GET";
+    body?: unknown;
+    signal?: AbortSignal;
+  },
+): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
+
+  const response = await fetch(url, {
+    method: options?.method || "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal: options?.signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options?.method === "POST" ? { "Content-Type": "application/json" } : {}),
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body:
+      options?.method === "POST"
+        ? JSON.stringify(options.body || {})
+        : undefined,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      payload?.errors ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(
+      typeof message === "string" ? message : JSON.stringify(message),
+    );
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
+}
+
+function extractCreatedId(payload: unknown): number | null {
+  const root = asRecord(payload);
+  const data = asRecord(root.data);
+
+  const candidates = [
+    data.id,
+    asRecord(data.provider).id,
+    asRecord(data.item).id,
+    root.id,
+    asRecord(root.provider).id,
+    asRecord(root.item).id,
+  ];
+
+  for (const candidate of candidates) {
+    const id = Number(candidate);
+    if (Number.isFinite(id) && id > 0) return id;
+  }
+
+  return null;
+}
+
+function createInitialForm(): FormState {
   return {
-    name: generalName,
-    name_ar: nameAr || generalName,
-    name_en: nameEn,
-    code: normalizeCode(formData.code),
-    provider_type: formData.provider_type,
-    status: formData.status,
+    name: "",
+    name_ar: "",
+    name_en: "",
+    code: "",
+    provider_type: "MEDICAL_CENTER",
+    status: "ACTIVE",
 
-    commercial_registration: normalizeIdentifier(formData.commercial_registration),
-    tax_number: normalizeIdentifier(formData.tax_number),
+    region: "",
+    area: "",
+    city: "",
+    district: "",
+    street: "",
+    address: "",
 
-    contact_person: formData.contact_person.trim(),
-    phone: normalizePhone(formData.phone),
-    mobile: normalizePhone(formData.mobile),
-    email: formData.email.trim().toLowerCase(),
-    website: normalizeUrl(formData.website),
+    phone: "",
+    mobile: "",
+    email: "",
+    website: "",
 
-    region: formData.region.trim(),
-    city: formData.city.trim(),
-    area: formData.area.trim(),
-    street: formData.street.trim(),
-    address: formData.address.trim(),
-    google_maps_link: normalizeUrl(formData.google_maps_link),
+    create_login_user: true,
+    login_username: "",
+    login_email: "",
+    login_password: "",
+    login_display_name: "",
+    login_phone: "",
+    login_whatsapp: "",
 
-    source_category: formData.source_category.trim(),
-    import_source: formData.import_source.trim(),
-    external_reference: formData.external_reference.trim(),
-
-    notes: formData.notes.trim(),
-    is_featured: formData.is_featured,
+    source_category: "manual",
+    import_source: "",
+    external_reference: "",
+    is_featured: false,
+    commercial_registration: "",
+    tax_number: "",
+    notes: "",
   };
 }
 
-function resolveCreatedId(result: CreateProviderApiResponse) {
-  return (
-    result.provider?.id ||
-    result.data?.provider?.id ||
-    result.data?.id ||
-    result.id ||
-    null
-  );
+function buildPayload(form: FormState) {
+  const name =
+    form.name.trim() ||
+    form.name_ar.trim() ||
+    form.name_en.trim();
+
+  const phone = normalizePhone(form.phone);
+  const mobile = normalizePhone(form.mobile);
+
+  const loginEmail = normalizeText(form.login_email) || normalizeText(form.email);
+  const loginPhone =
+    normalizeText(form.login_phone) ||
+    normalizeText(form.mobile) ||
+    normalizeText(form.phone);
+  const loginWhatsapp =
+    normalizeText(form.login_whatsapp) ||
+    normalizeText(form.mobile) ||
+    normalizeText(form.phone);
+  const loginDisplayName =
+    normalizeText(form.login_display_name) ||
+    name;
+
+  return {
+    name,
+    display_name: name,
+    name_ar: form.name_ar.trim(),
+    name_en: form.name_en.trim(),
+    code: normalizeCode(form.code),
+    provider_type: form.provider_type,
+    type: form.provider_type,
+    status: form.status,
+
+    region: form.region.trim(),
+    area: form.area.trim(),
+    city: form.city.trim(),
+    district: form.district.trim(),
+    street: form.street.trim(),
+    address: form.address.trim(),
+
+    phone,
+    phone_number: phone,
+    mobile,
+    mobile_number: mobile,
+    email: form.email.trim(),
+    website: form.website.trim(),
+
+    create_login_user: form.create_login_user,
+    create_user: form.create_login_user,
+    create_account: form.create_login_user,
+    login_username: normalizeText(form.login_username) || undefined,
+    username: normalizeText(form.login_username) || undefined,
+    login_email: loginEmail || undefined,
+    user_email: loginEmail || undefined,
+    login_password: normalizeText(form.login_password) || undefined,
+    password: normalizeText(form.login_password) || undefined,
+    login_display_name: loginDisplayName || undefined,
+    login_phone: loginPhone || undefined,
+    login_phone_number: loginPhone || undefined,
+    login_whatsapp: loginWhatsapp || undefined,
+    login_whatsapp_number: loginWhatsapp || undefined,
+
+    source_category: form.source_category.trim(),
+    import_source: form.import_source.trim(),
+    external_reference: form.external_reference.trim(),
+    is_featured: form.is_featured,
+    commercial_registration: form.commercial_registration.trim(),
+    tax_number: form.tax_number.trim(),
+    notes: form.notes.trim(),
+  };
 }
 
-function normalizeApiErrors(errors: CreateProviderApiResponse["errors"]) {
-  if (!errors) return "";
+function providerTypeLabel(type: ProviderType, locale: Locale) {
+  const t = translations[locale];
 
-  if (typeof errors === "string") return errors;
+  const labels: Record<ProviderType, string> = {
+    HOSPITAL: t.hospital,
+    MEDICAL_CENTER: t.medicalCenter,
+    PHARMACY: t.pharmacy,
+    LAB: t.lab,
+    CLINIC: t.clinic,
+    PARTNER: t.partner,
+    OTHER: t.other,
+  };
 
-  if (Array.isArray(errors)) {
-    return errors.filter(Boolean).join("، ");
-  }
-
-  return Object.entries(errors)
-    .map(([key, value]) => {
-      const message = Array.isArray(value) ? value.join("، ") : value;
-      return `${key}: ${message}`;
-    })
-    .join("، ");
+  return labels[type];
 }
 
-function mapApiFieldErrors(
-  errors: CreateProviderApiResponse["errors"],
-): ProviderFormErrors {
-  const nextErrors: ProviderFormErrors = {};
+function statusLabel(status: ProviderStatus, locale: Locale) {
+  const t = translations[locale];
 
-  if (!errors || typeof errors === "string" || Array.isArray(errors)) {
-    return nextErrors;
-  }
+  const labels: Record<ProviderStatus, string> = {
+    ACTIVE: t.active,
+    INACTIVE: t.inactive,
+    SUSPENDED: t.suspended,
+    DRAFT: t.draft,
+  };
 
-  Object.entries(errors).forEach(([key, value]) => {
-    const message = Array.isArray(value) ? value[0] : value;
-
-    if (!message) return;
-
-    if (key in initialFormData) {
-      nextErrors[key as keyof ProviderFormData] = String(message);
-    }
-  });
-
-  return nextErrors;
+  return labels[status];
 }
 
-/* ============================================================
-   UI Helpers
-============================================================ */
-
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0";
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(numericValue);
-}
-
-function providerTypeIcon(
-  type: ProviderType,
-): ComponentType<{ className?: string }> {
-  if (type === "HOSPITAL") return Hospital;
-  if (type === "MEDICAL_CENTER") return Stethoscope;
-  if (type === "PHARMACY") return ShieldCheck;
-  if (type === "LAB") return Layers3;
-  if (type === "CLINIC") return Stethoscope;
-
-  return Building2;
-}
-
-function FieldBlock({
-  label,
-  error,
-  required,
-  children,
+function KpiCard({
+  title,
+  value,
+  trend,
+  icon: Icon,
 }: {
-  label: string;
-  error?: string;
-  required?: boolean;
-  children: ReactNode;
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="space-y-2">
-      <Label className="text-sm font-medium">
-        {label}
-        {required ? <span className="ms-1 text-destructive">*</span> : null}
-      </Label>
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-      {children}
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
 
-      {error ? (
-        <p className="text-xs font-medium text-destructive">{error}</p>
-      ) : null}
-    </div>
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
+        </div>
+      </CardHeader>
+    </Card>
   );
 }
 
-function SummaryItem({
-  icon: Icon,
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label className="text-sm font-medium text-foreground">{children}</label>;
+}
+
+function InfoRow({
   label,
   value,
 }: {
-  icon: ComponentType<{ className?: string }>;
   label: string;
-  value: ReactNode;
+  value: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border bg-background p-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <Icon className="h-4 w-4" />
-      </div>
-
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <div className="mt-1 truncate text-sm font-semibold">
-          {value || "-"}
-        </div>
+    <div className="flex items-center justify-between gap-3 border-b py-3 last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="min-w-0 text-left text-sm font-medium text-foreground">
+        {value}
       </div>
     </div>
   );
 }
 
-function ToggleBox({
-  checked,
-  disabled,
-  title,
-  description,
-  onChange,
-}: {
-  checked: boolean;
-  disabled?: boolean;
-  title: string;
-  description: string;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-xl border bg-background p-4">
-      <Checkbox
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={(value) => onChange(Boolean(value))}
-      />
-
-      <div>
-        <p className="text-sm font-semibold">{title}</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          {description}
-        </p>
-      </div>
-    </label>
-  );
-}
-
-/* ============================================================
-   Page
-============================================================ */
-
-export default function SystemCreateProviderPage() {
+export default function SystemProviderCreatePage() {
   const router = useRouter();
-  const auth = useAuth() as unknown;
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [formData, setFormData] = useState<ProviderFormData>(initialFormData);
-  const [errors, setErrors] = useState<ProviderFormErrors>({});
-  const [submitError, setSubmitError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [form, setForm] = React.useState<FormState>(() => createInitialForm());
+  const [saving, setSaving] = React.useState(false);
+  const [dirty, setDirty] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [createdId, setCreatedId] = React.useState<number | null>(null);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const canCreateProviders = hasSafePermission(
-    auth,
-    ["providers.create"],
-    "action",
+  const providerName =
+    form.name.trim() ||
+    form.name_ar.trim() ||
+    form.name_en.trim();
+
+  const requiredComplete = Boolean(providerName);
+
+  const loginComplete =
+    !form.create_login_user ||
+    Boolean(
+      form.login_username.trim() ||
+        form.login_email.trim() ||
+        form.email.trim() ||
+        form.mobile.trim() ||
+        form.phone.trim(),
+    );
+
+  const optionalComplete = Boolean(
+    form.phone.trim() ||
+      form.mobile.trim() ||
+      form.email.trim() ||
+      form.region.trim() ||
+      form.city.trim() ||
+      form.address.trim(),
   );
 
-  const canImportProviders = hasSafePermission(
-    auth,
-    ["providers.import", "providers.create"],
-    "action",
+  const legalComplete = Boolean(
+    form.commercial_registration.trim() || form.tax_number.trim(),
   );
 
-  const canViewProviders = hasSafePermission(
-    auth,
-    ["providers.view", "providers.list"],
-    "view",
+  const networkComplete = Boolean(
+    form.provider_type ||
+      form.source_category.trim() ||
+      form.external_reference.trim() ||
+      form.import_source.trim(),
   );
 
-  const isDirty = useMemo(() => hasFormChanges(formData), [formData]);
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const ProviderIcon = providerTypeIcon(formData.provider_type);
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-  const completedFields = useMemo(() => {
-    const keys: Array<keyof ProviderFormData> = [
-      "name_ar",
-      "name_en",
-      "code",
-      "provider_type",
-      "status",
-      "commercial_registration",
-      "tax_number",
-      "phone",
-      "mobile",
-      "email",
-      "region",
-      "city",
-      "area",
-      "street",
-      "address",
-      "contact_person",
-      "source_category",
-      "external_reference",
-    ];
+    applyLocale();
 
-    return keys.filter((key) => String(formData[key] || "").trim().length > 0)
-      .length;
-  }, [formData]);
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-  const progressPercent = Math.min(
-    100,
-    Math.round((completedFields / 18) * 100),
-  );
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
 
-  const isReadyToSave =
-    formData.name_ar.trim().length > 0 ||
-    formData.name_en.trim().length > 0 ||
-    formData.name.trim().length > 0;
+  React.useEffect(() => {
+    const handler = (event: BeforeUnloadEvent) => {
+      if (!dirty || saving) return;
 
-  function updateField<K extends keyof ProviderFormData>(
-    key: K,
-    value: ProviderFormData[K],
-  ) {
-    setFormData((current) => ({
+      event.preventDefault();
+      event.returnValue = t.unsaved;
+    };
+
+    window.addEventListener("beforeunload", handler);
+
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty, saving, t.unsaved]);
+
+  React.useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(DRAFT_KEY);
+
+      if (saved) {
+        const parsed = JSON.parse(saved) as Partial<FormState>;
+
+        if (parsed && parsed.provider_type) {
+          setForm({
+            ...createInitialForm(),
+            ...parsed,
+            provider_type: parsed.provider_type as ProviderType,
+            status: (parsed.status as ProviderStatus) || "ACTIVE",
+            create_login_user:
+              typeof parsed.create_login_user === "boolean"
+                ? parsed.create_login_user
+                : true,
+          });
+          setDirty(true);
+          toast.success(t.draftLoaded);
+        }
+      }
+    } catch {
+      window.localStorage.removeItem(DRAFT_KEY);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function updateForm<T extends keyof FormState>(key: T, value: FormState[T]) {
+    setForm((current) => ({
       ...current,
       [key]: value,
     }));
 
-    setErrors((current) => ({
-      ...current,
-      [key]: undefined,
-    }));
-
-    if (submitError) {
-      setSubmitError("");
-    }
+    setDirty(true);
   }
 
-  function validateForm() {
-    const nextErrors: ProviderFormErrors = {};
+  function updateNameField<T extends "name" | "name_ar" | "name_en">(
+    key: T,
+    value: string,
+  ) {
+    setForm((current) => {
+      const next = {
+        ...current,
+        [key]: value,
+      };
 
-    if (!isReadyToSave) {
-      nextErrors.name_ar = t.validation.name;
-    }
+      const nextName =
+        next.name.trim() ||
+        next.name_ar.trim() ||
+        next.name_en.trim();
 
-    if (formData.code.trim().length > 50) {
-      nextErrors.code = t.validation.codeLength;
-    }
-
-    if (formData.commercial_registration.trim().length > 100) {
-      nextErrors.commercial_registration =
-        t.validation.commercialRegistrationLength;
-    }
-
-    if (formData.tax_number.trim().length > 100) {
-      nextErrors.tax_number = t.validation.taxNumberLength;
-    }
-
-    if (!isValidEmail(formData.email)) {
-      nextErrors.email = t.validation.email;
-    }
-
-    if (!isValidUrl(formData.website)) {
-      nextErrors.website = t.validation.website;
-    }
-
-    if (!isValidUrl(formData.google_maps_link)) {
-      nextErrors.google_maps_link = t.validation.maps;
-    }
-
-    if (!isValidPhone(formData.phone)) {
-      nextErrors.phone = t.validation.phone;
-    }
-
-    if (!isValidPhone(formData.mobile)) {
-      nextErrors.mobile = t.validation.phone;
-    }
-
-    setErrors(nextErrors);
-
-    return Object.keys(nextErrors).length === 0;
-  }
-
-  async function submitForm() {
-    setSubmitError("");
-
-    if (!validateForm()) {
-      toast.error(t.validationToast);
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-
-      const csrfToken = readCookie("csrftoken");
-
-      const response = await fetch(apiUrl("/api/providers/"), {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-        },
-        body: JSON.stringify(normalizePayload(formData)),
-      });
-
-      const result = (await response.json().catch(() => null)) as
-        | CreateProviderApiResponse
-        | null;
-
-      if (!response.ok || result?.ok === false) {
-        const apiErrors = mapApiFieldErrors(result?.errors);
-        const message =
-          normalizeApiErrors(result?.errors) ||
-          result?.message ||
-          result?.detail ||
-          result?.error ||
-          t.apiError;
-
-        setErrors((current) => ({
-          ...current,
-          ...apiErrors,
-        }));
-
-        setSubmitError(message);
-        toast.error(t.apiError, {
-          description: message,
-        });
-        return;
+      if (!current.login_display_name) {
+        next.login_display_name = nextName;
       }
 
-      const createdId = result ? resolveCreatedId(result) : null;
+      return next;
+    });
 
-      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
-      toast.success(t.success);
-
-      if (createdId) {
-        router.push(`/system/providers/${createdId}`);
-        return;
-      }
-
-      router.push("/system/providers/list");
-    } catch (error) {
-      console.error("Create provider error:", error);
-      setSubmitError(t.apiError);
-      toast.error(t.apiError);
-    } finally {
-      setIsSubmitting(false);
-    }
+    setDirty(true);
   }
 
   function saveDraft() {
-    try {
-      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(formData));
-      toast.success(t.draftSaved);
-    } catch (error) {
-      console.error("Save provider draft error:", error);
-      toast.error(t.apiError);
-    }
-  }
-
-  function restoreDraft() {
-    try {
-      const rawDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
-
-      if (!rawDraft) {
-        toast.error(t.noDraft);
-        return;
-      }
-
-      const parsed = JSON.parse(rawDraft) as Partial<ProviderFormData>;
-
-      setFormData({
-        ...initialFormData,
-        ...parsed,
-      });
-
-      setErrors({});
-      setSubmitError("");
-      toast.success(t.draftRestored);
-    } catch (error) {
-      console.error("Restore provider draft error:", error);
-      toast.error(t.apiError);
-    }
+    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+    setDirty(false);
+    toast.success(t.draftSaved);
   }
 
   function clearForm() {
-    if (isDirty && !window.confirm(t.confirmClear)) return;
+    if (!window.confirm(t.confirmClear)) return;
 
-    setFormData(initialFormData);
-    setErrors({});
-    setSubmitError("");
-    toast.success(t.formCleared);
+    setForm(createInitialForm());
+    setDirty(false);
+    setCreatedId(null);
+    setError("");
+    window.localStorage.removeItem(DRAFT_KEY);
+    toast.success(t.cleared);
   }
 
-  function confirmNavigate(path: string) {
-    if (isSubmitting) return;
-
-    if (isDirty && !window.confirm(t.confirmLeave)) {
-      return;
+  function validate() {
+    if (!requiredComplete) {
+      toast.error(t.requiredName);
+      return false;
     }
 
-    router.push(path);
+    if (!isValidEmail(form.email)) {
+      toast.error(t.invalidEmail);
+      return false;
+    }
+
+    if (form.create_login_user && form.login_email.trim() && !isValidEmail(form.login_email)) {
+      toast.error(t.invalidLoginEmail);
+      return false;
+    }
+
+    if (
+      form.create_login_user &&
+      form.login_password.trim() &&
+      form.login_password.trim().length < 8
+    ) {
+      toast.error(t.shortPassword);
+      return false;
+    }
+
+    return true;
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
+  async function submitProvider() {
+    if (!validate()) return;
 
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
+    setSaving(true);
+    setError("");
 
-    const syncAfterPaint = () => {
-      syncLocale();
+    try {
+      const response = await fetchJson<ApiResponse>(makeApiUrl("/api/providers/create/"), {
+        method: "POST",
+        body: buildPayload(form),
+      });
 
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
+      const providerId = extractCreatedId(response);
 
-    syncAfterPaint();
+      setCreatedId(providerId);
+      setDirty(false);
+      window.localStorage.removeItem(DRAFT_KEY);
+      toast.success(t.saved);
 
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+      if (providerId) {
+        router.push(`/system/providers/${providerId}`);
+      }
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.submitError;
 
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!isDirty || isSubmitting) return;
-
-      event.preventDefault();
-      event.returnValue = t.confirmLeave;
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [isDirty, isSubmitting, t.confirmLeave]);
-
-  if (!authResolving && !canCreateProviders) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={() => confirmNavigate("/system/providers")}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            <span>{t.back}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" className="h-9 rounded-lg" onClick={() => router.back()}>
+            <BackIcon className="h-4 w-4" />
+            {t.back}
           </Button>
 
-          {canViewProviders ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-              disabled={isSubmitting}
-              onClick={() => confirmNavigate("/system/providers/list")}
-            >
-              <ClipboardList className="h-4 w-4" />
-              <span>{t.providersList}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={saveDraft}>
+            <Save className="h-4 w-4" />
+            {t.saveDraft}
+          </Button>
 
-          {canImportProviders ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-              disabled={isSubmitting}
-              onClick={() => confirmNavigate("/system/providers/import")}
-            >
-              <FileText className="h-4 w-4" />
-              <span>{t.importProviders}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={clearForm}>
+            <RotateCcw className="h-4 w-4" />
+            {t.clear}
+          </Button>
+
+          <Button
+            className="h-9 rounded-lg bg-black px-4 text-white hover:bg-black/90"
+            disabled={saving}
+            onClick={() => void submitProvider()}
+          >
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            {saving ? t.saving : t.submit}
+          </Button>
         </div>
       </div>
 
-      {submitError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-4">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4 text-right">
+            <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
             <div>
-              <p className="font-semibold text-destructive">
-                {t.formErrorTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {submitError}
-              </p>
+              <p className="font-semibold text-red-900">{t.errorTitle}</p>
+              <p className="text-sm text-red-700">{error}</p>
             </div>
           </CardContent>
         </Card>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Building2 className="h-5 w-5" />
-                {t.basicInfo}
-              </CardTitle>
-              <CardDescription>{t.basicDesc}</CardDescription>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              title={t.requiredFields}
+              value={requiredComplete ? t.complete : t.incomplete}
+              trend={requiredComplete ? t.complete : t.incomplete}
+              icon={ShieldCheck}
+            />
+
+            <KpiCard
+              title={t.loginReadiness}
+              value={loginComplete ? t.complete : t.incomplete}
+              trend={form.create_login_user ? t.createLoginUser : t.no}
+              icon={LockKeyhole}
+            />
+
+            <KpiCard
+              title={t.legalReadiness}
+              value={legalComplete ? t.complete : t.incomplete}
+              trend={legalComplete ? t.complete : t.incomplete}
+              icon={Landmark}
+            />
+
+            <KpiCard
+              title={t.networkReadiness}
+              value={networkComplete ? t.complete : t.incomplete}
+              trend={providerTypeLabel(form.provider_type, locale)}
+              icon={Layers3}
+            />
+          </div>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div>
+                <CardTitle>{t.basicInfo}</CardTitle>
+                <CardDescription>{t.nameAr}</CardDescription>
+              </div>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock label={t.labels.nameAr} error={errors.name_ar} required>
-                <Input
-                  value={formData.name_ar}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.nameAr}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("name_ar", event.target.value)}
-                />
-              </FieldBlock>
+            <CardContent className="space-y-5 px-6 pb-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-2 md:col-span-2">
+                  <FieldLabel>{t.nameAr}</FieldLabel>
+                  <Input
+                    value={form.name_ar}
+                    onChange={(event) => updateNameField("name_ar", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.placeholderNameAr}
+                    disabled={saving}
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.nameEn} error={errors.name_en}>
-                <Input
-                  value={formData.name_en}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.nameEn}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("name_en", event.target.value)}
-                />
-              </FieldBlock>
+                <div className="space-y-2 md:col-span-2">
+                  <FieldLabel>{t.nameEn}</FieldLabel>
+                  <Input
+                    value={form.name_en}
+                    onChange={(event) => updateNameField("name_en", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.placeholderNameEn}
+                    disabled={saving}
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.name} error={errors.name}>
-                <Input
-                  value={formData.name}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.name}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("name", event.target.value)}
-                />
-              </FieldBlock>
+                <div className="space-y-2 md:col-span-2">
+                  <FieldLabel>{t.name}</FieldLabel>
+                  <Input
+                    value={form.name}
+                    onChange={(event) => updateNameField("name", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.name}
+                    disabled={saving}
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.code} error={errors.code}>
-                <Input
-                  value={formData.code}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.code}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("code", event.target.value)}
-                />
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.code}</FieldLabel>
+                  <Input
+                    value={form.code}
+                    onChange={(event) => updateForm("code", normalizeCode(event.target.value))}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.code}
+                    disabled={saving}
+                    dir="ltr"
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.providerType} error={errors.provider_type}>
-                <select
-                  value={formData.provider_type}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  onChange={(event) =>
-                    updateField("provider_type", event.target.value as ProviderType)
-                  }
-                >
-                  {Object.entries(t.providerTypes).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.featured}</FieldLabel>
+                  <Select
+                    value={form.is_featured ? "yes" : "no"}
+                    onValueChange={(value) => updateForm("is_featured", value === "yes")}
+                    disabled={saving}
+                  >
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yes">{t.yes}</SelectItem>
+                      <SelectItem value="no">{t.no}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <FieldBlock label={t.labels.status} error={errors.status}>
-                <select
-                  value={formData.status}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  onChange={(event) =>
-                    updateField("status", event.target.value as ProviderStatus)
-                  }
-                >
-                  {Object.entries(t.statuses).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.type}</FieldLabel>
+                  <Select
+                    value={form.provider_type}
+                    onValueChange={(value) => updateForm("provider_type", value as ProviderType)}
+                    disabled={saving}
+                  >
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="HOSPITAL">{t.hospital}</SelectItem>
+                      <SelectItem value="MEDICAL_CENTER">{t.medicalCenter}</SelectItem>
+                      <SelectItem value="PHARMACY">{t.pharmacy}</SelectItem>
+                      <SelectItem value="LAB">{t.lab}</SelectItem>
+                      <SelectItem value="CLINIC">{t.clinic}</SelectItem>
+                      <SelectItem value="PARTNER">{t.partner}</SelectItem>
+                      <SelectItem value="OTHER">{t.other}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.status}</FieldLabel>
+                  <Select
+                    value={form.status}
+                    onValueChange={(value) => updateForm("status", value as ProviderStatus)}
+                    disabled={saving}
+                  >
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ACTIVE">{t.active}</SelectItem>
+                      <SelectItem value="INACTIVE">{t.inactive}</SelectItem>
+                      <SelectItem value="SUSPENDED">{t.suspended}</SelectItem>
+                      <SelectItem value="DRAFT">{t.draft}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5" />
-                {t.legalInfo}
-              </CardTitle>
-              <CardDescription>{t.legalDesc}</CardDescription>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div>
+                <CardTitle>{t.loginInfo}</CardTitle>
+                <CardDescription>{t.loginHint}</CardDescription>
+              </div>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock
-                label={t.labels.commercialRegistration}
-                error={errors.commercial_registration}
-              >
-                <Input
-                  value={formData.commercial_registration}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.commercialRegistration}
-                  className="rounded-xl"
-                  onChange={(event) =>
-                    updateField("commercial_registration", event.target.value)
-                  }
+            <CardContent className="space-y-4 px-6 pb-6">
+              <label className="flex items-start gap-3 rounded-lg border bg-background p-3">
+                <Checkbox
+                  checked={form.create_login_user}
+                  onCheckedChange={(checked) => updateForm("create_login_user", Boolean(checked))}
+                  disabled={saving}
                 />
-              </FieldBlock>
+                <span className="space-y-1 text-start">
+                  <span className="block text-sm font-medium text-foreground">
+                    {t.createLoginUser}
+                  </span>
+                  <span className="block text-xs leading-5 text-muted-foreground">
+                    {t.loginHint}
+                  </span>
+                </span>
+              </label>
 
-              <FieldBlock label={t.labels.taxNumber} error={errors.tax_number}>
-                <Input
-                  value={formData.tax_number}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.taxNumber}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("tax_number", event.target.value)}
-                />
-              </FieldBlock>
+              <div className={cn("grid gap-4 md:grid-cols-2 xl:grid-cols-4", !form.create_login_user && "opacity-60")}>
+                <div className="space-y-2">
+                  <FieldLabel>{t.loginUsername}</FieldLabel>
+                  <Input
+                    value={form.login_username}
+                    onChange={(event) => updateForm("login_username", event.target.value.trim())}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={saving || !form.create_login_user}
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.loginEmail}</FieldLabel>
+                  <Input
+                    value={form.login_email}
+                    onChange={(event) => updateForm("login_email", event.target.value.trim())}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={saving || !form.create_login_user}
+                    placeholder={form.email}
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.loginDisplayName}</FieldLabel>
+                  <Input
+                    value={form.login_display_name}
+                    onChange={(event) => updateForm("login_display_name", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={saving || !form.create_login_user}
+                    placeholder={providerName}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.loginPassword}</FieldLabel>
+                  <Input
+                    type="password"
+                    value={form.login_password}
+                    onChange={(event) => updateForm("login_password", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={saving || !form.create_login_user}
+                    placeholder={t.passwordHint}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.loginPhone}</FieldLabel>
+                  <Input
+                    value={form.login_phone}
+                    onChange={(event) => updateForm("login_phone", normalizePhone(event.target.value))}
+                    className="h-10 rounded-lg bg-background text-right tabular-nums"
+                    disabled={saving || !form.create_login_user}
+                    placeholder={form.mobile || form.phone}
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.loginWhatsapp}</FieldLabel>
+                  <Input
+                    value={form.login_whatsapp}
+                    onChange={(event) => updateForm("login_whatsapp", normalizePhone(event.target.value))}
+                    className="h-10 rounded-lg bg-background text-right tabular-nums"
+                    disabled={saving || !form.create_login_user}
+                    placeholder={form.mobile || form.phone}
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="md:col-span-2 xl:col-span-2">
+                  <div className="flex h-full min-h-10 items-center gap-3 rounded-lg border bg-muted/30 p-3">
+                    <KeyRound className="h-4 w-4 text-muted-foreground" />
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {t.passwordHint}
+                    </p>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Phone className="h-5 w-5" />
-                {t.contactInfo}
-              </CardTitle>
-              <CardDescription>{t.contactDesc}</CardDescription>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div>
+                <CardTitle>{t.contactInfo}</CardTitle>
+                <CardDescription>{t.phone}</CardDescription>
+              </div>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock
-                label={t.labels.contactPerson}
-                error={errors.contact_person}
-              >
-                <Input
-                  value={formData.contact_person}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.contactPerson}
-                  className="rounded-xl"
-                  onChange={(event) =>
-                    updateField("contact_person", event.target.value)
-                  }
-                />
-              </FieldBlock>
+            <CardContent className="space-y-5 px-6 pb-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-2">
+                  <FieldLabel>{t.phone}</FieldLabel>
+                  <Input
+                    value={form.phone}
+                    onChange={(event) => {
+                      const value = normalizePhone(event.target.value);
+                      updateForm("phone", value);
 
-              <FieldBlock label={t.labels.phone} error={errors.phone}>
-                <Input
-                  value={formData.phone}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.phone}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("phone", event.target.value)}
-                />
-              </FieldBlock>
+                      if (!form.login_phone) updateForm("login_phone", value);
+                      if (!form.login_whatsapp) updateForm("login_whatsapp", value);
+                    }}
+                    className="h-10 rounded-lg bg-background text-right tabular-nums"
+                    placeholder={t.phone}
+                    disabled={saving}
+                    dir="ltr"
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.mobile} error={errors.mobile}>
-                <Input
-                  value={formData.mobile}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.mobile}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("mobile", event.target.value)}
-                />
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.mobile}</FieldLabel>
+                  <Input
+                    value={form.mobile}
+                    onChange={(event) => {
+                      const value = normalizePhone(event.target.value);
+                      updateForm("mobile", value);
 
-              <FieldBlock label={t.labels.email} error={errors.email}>
-                <Input
-                  value={formData.email}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.email}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("email", event.target.value)}
-                />
-              </FieldBlock>
+                      if (!form.login_phone) updateForm("login_phone", value);
+                      if (!form.login_whatsapp) updateForm("login_whatsapp", value);
+                    }}
+                    className="h-10 rounded-lg bg-background text-right tabular-nums"
+                    placeholder={t.mobile}
+                    disabled={saving}
+                    dir="ltr"
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.website} error={errors.website}>
-                <Input
-                  value={formData.website}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.website}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("website", event.target.value)}
-                />
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.email}</FieldLabel>
+                  <Input
+                    value={form.email}
+                    onChange={(event) => {
+                      updateForm("email", event.target.value);
+                      if (!form.login_email) {
+                        updateForm("login_email", event.target.value);
+                      }
+                    }}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.email}
+                    disabled={saving}
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.website}</FieldLabel>
+                  <Input
+                    value={form.website}
+                    onChange={(event) => updateForm("website", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.placeholderWebsite}
+                    disabled={saving}
+                    dir="ltr"
+                  />
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MapPin className="h-5 w-5" />
-                {t.locationInfo}
-              </CardTitle>
-              <CardDescription>{t.locationDesc}</CardDescription>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div>
+                <CardTitle>{t.addressInfo}</CardTitle>
+                <CardDescription>{t.city}</CardDescription>
+              </div>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock label={t.labels.region} error={errors.region}>
-                <Input
-                  value={formData.region}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.region}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("region", event.target.value)}
-                />
-              </FieldBlock>
+            <CardContent className="space-y-5 px-6 pb-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-2">
+                  <FieldLabel>{t.region}</FieldLabel>
+                  <Input
+                    value={form.region}
+                    onChange={(event) => updateForm("region", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.region}
+                    disabled={saving}
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.city} error={errors.city}>
-                <Input
-                  value={formData.city}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.city}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("city", event.target.value)}
-                />
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.area}</FieldLabel>
+                  <Input
+                    value={form.area}
+                    onChange={(event) => updateForm("area", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.area}
+                    disabled={saving}
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.area} error={errors.area}>
-                <Input
-                  value={formData.area}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.area}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("area", event.target.value)}
-                />
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.city}</FieldLabel>
+                  <Input
+                    value={form.city}
+                    onChange={(event) => updateForm("city", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.city}
+                    disabled={saving}
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.street} error={errors.street}>
-                <Input
-                  value={formData.street}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.street}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("street", event.target.value)}
-                />
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.district}</FieldLabel>
+                  <Input
+                    value={form.district}
+                    onChange={(event) => updateForm("district", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.district}
+                    disabled={saving}
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.address} error={errors.address}>
-                <Input
-                  value={formData.address}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.address}
-                  className="rounded-xl"
-                  onChange={(event) => updateField("address", event.target.value)}
-                />
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.street}</FieldLabel>
+                  <Input
+                    value={form.street}
+                    onChange={(event) => updateForm("street", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.street}
+                    disabled={saving}
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.googleMaps} error={errors.google_maps_link}>
-                <Input
-                  value={formData.google_maps_link}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.googleMaps}
-                  className="rounded-xl"
-                  onChange={(event) =>
-                    updateField("google_maps_link", event.target.value)
-                  }
-                />
-              </FieldBlock>
+                <div className="space-y-2 md:col-span-2 xl:col-span-3">
+                  <FieldLabel>{t.address}</FieldLabel>
+                  <Input
+                    value={form.address}
+                    onChange={(event) => updateForm("address", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.address}
+                    disabled={saving}
+                  />
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Globe2 className="h-5 w-5" />
-                {t.networkInfo}
-              </CardTitle>
-              <CardDescription>{t.networkDesc}</CardDescription>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div>
+                <CardTitle>{t.legalInfo}</CardTitle>
+                <CardDescription>{t.commercialRegistration}</CardDescription>
+              </div>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock
-                label={t.labels.sourceCategory}
-                error={errors.source_category}
-              >
-                <Input
-                  value={formData.source_category}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.sourceCategory}
-                  className="rounded-xl"
-                  onChange={(event) =>
-                    updateField("source_category", event.target.value)
-                  }
-                />
-              </FieldBlock>
+            <CardContent className="space-y-5 px-6 pb-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-2">
+                  <FieldLabel>{t.commercialRegistration}</FieldLabel>
+                  <Input
+                    value={form.commercial_registration}
+                    onChange={(event) =>
+                      updateForm("commercial_registration", toEnglishDigits(event.target.value))
+                    }
+                    className="h-10 rounded-lg bg-background text-right tabular-nums"
+                    placeholder={t.commercialRegistration}
+                    disabled={saving}
+                    dir="ltr"
+                  />
+                </div>
 
-              <FieldBlock label={t.labels.importSource} error={errors.import_source}>
-                <Input
-                  value={formData.import_source}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.importSource}
-                  className="rounded-xl"
-                  onChange={(event) =>
-                    updateField("import_source", event.target.value)
-                  }
-                />
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.taxNumber}</FieldLabel>
+                  <Input
+                    value={form.tax_number}
+                    onChange={(event) => updateForm("tax_number", toEnglishDigits(event.target.value))}
+                    className="h-10 rounded-lg bg-background text-right tabular-nums"
+                    placeholder={t.taxNumber}
+                    disabled={saving}
+                    dir="ltr"
+                  />
+                </div>
 
-              <FieldBlock
-                label={t.labels.externalReference}
-                error={errors.external_reference}
-              >
-                <Input
-                  value={formData.external_reference}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.externalReference}
-                  className="rounded-xl"
-                  onChange={(event) =>
-                    updateField("external_reference", event.target.value)
-                  }
-                />
-              </FieldBlock>
+                <div className="space-y-2">
+                  <FieldLabel>{t.sourceCategory}</FieldLabel>
+                  <Input
+                    value={form.source_category}
+                    onChange={(event) => updateForm("source_category", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.sourceCategory}
+                    disabled={saving}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.externalReference}</FieldLabel>
+                  <Input
+                    value={form.external_reference}
+                    onChange={(event) => updateForm("external_reference", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.externalReference}
+                    disabled={saving}
+                  />
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5" />
-                {t.operationalInfo}
-              </CardTitle>
-              <CardDescription>{t.operationalDesc}</CardDescription>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div>
+                <CardTitle>{t.networkInfo}</CardTitle>
+                <CardDescription>{t.importSource}</CardDescription>
+              </div>
             </CardHeader>
 
-            <CardContent className="space-y-4">
-              <ToggleBox
-                checked={formData.is_featured}
-                disabled={isSubmitting}
-                title={t.labels.featured}
-                description={t.featuredDescription}
-                onChange={(value) => updateField("is_featured", value)}
+            <CardContent className="space-y-5 px-6 pb-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <FieldLabel>{t.importSource}</FieldLabel>
+                  <Select
+                    value={form.import_source ? "imported" : "manual"}
+                    onValueChange={(value) => {
+                      if (value === "manual") {
+                        updateForm("import_source", "");
+                        updateForm("source_category", "manual");
+                        return;
+                      }
+
+                      updateForm("import_source", "network");
+                      updateForm("source_category", "network");
+                    }}
+                    disabled={saving}
+                  >
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manual">{t.sourceManual}</SelectItem>
+                      <SelectItem value="imported">{t.sourceImported}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <FieldLabel>{t.importSource}</FieldLabel>
+                  <Input
+                    value={form.import_source}
+                    onChange={(event) => updateForm("import_source", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    placeholder={t.importSource}
+                    disabled={saving}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div>
+                <CardTitle>{t.notesInfo}</CardTitle>
+                <CardDescription>{t.notes}</CardDescription>
+              </div>
+            </CardHeader>
+
+            <CardContent className="px-6 pb-6">
+              <textarea
+                value={form.notes}
+                onChange={(event) => updateForm("notes", event.target.value)}
+                className="min-h-[120px] w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                placeholder={t.notes}
+                disabled={saving}
               />
-
-              <FieldBlock label={t.labels.notes} error={errors.notes}>
-                <Textarea
-                  value={formData.notes}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.notes}
-                  className="min-h-28 rounded-xl"
-                  onChange={(event) => updateField("notes", event.target.value)}
-                />
-              </FieldBlock>
             </CardContent>
           </Card>
         </div>
 
         <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ProviderIcon className="h-5 w-5" />
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle>{t.summary}</CardTitle>
+                  <CardDescription>{t.readiness}</CardDescription>
+                </div>
+
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background">
+                  <Building2 className="h-5 w-5 text-muted-foreground" />
+                </div>
+              </div>
             </CardHeader>
 
-            <CardContent className="space-y-3">
-              <SummaryItem
-                icon={Building2}
-                label={t.labels.nameAr}
-                value={formData.name_ar || "-"}
-              />
-
-              <SummaryItem
-                icon={Globe2}
-                label={t.labels.nameEn}
-                value={formData.name_en || "-"}
-              />
-
-              <SummaryItem
-                icon={ClipboardList}
-                label={t.labels.code}
-                value={formData.code || t.placeholders.code}
-              />
-
-              <SummaryItem
-                icon={ProviderIcon}
-                label={t.labels.providerType}
-                value={t.providerTypes[formData.provider_type]}
-              />
-
-              <SummaryItem
-                icon={ShieldCheck}
-                label={t.labels.commercialRegistration}
-                value={formData.commercial_registration || "-"}
-              />
-
-              <SummaryItem
-                icon={FileText}
-                label={t.labels.taxNumber}
-                value={formData.tax_number || "-"}
-              />
-
-              <SummaryItem
-                icon={MapPin}
-                label={t.labels.city}
+            <CardContent className="space-y-2 px-6 pb-6">
+              <InfoRow label={t.nameAr} value={form.name_ar || "—"} />
+              <InfoRow label={t.nameEn} value={form.name_en || "—"} />
+              <InfoRow label={t.name} value={form.name || "—"} />
+              <InfoRow label={t.type} value={providerTypeLabel(form.provider_type, locale)} />
+              <InfoRow label={t.status} value={statusLabel(form.status, locale)} />
+              <InfoRow label={t.city} value={form.city || "—"} />
+              <InfoRow label={t.region} value={form.region || "—"} />
+              <InfoRow label={t.phone} value={form.phone || form.mobile || "—"} />
+              <InfoRow label={t.email} value={form.email || "—"} />
+              <InfoRow
+                label={t.loginInfo}
                 value={
-                  [formData.region, formData.city, formData.area]
-                    .filter(Boolean)
-                    .join(" / ") || "-"
+                  form.create_login_user
+                    ? form.login_username ||
+                      form.login_email ||
+                      form.email ||
+                      form.mobile ||
+                      form.phone ||
+                      t.createLoginUser
+                    : t.no
                 }
               />
+              <InfoRow label={t.featured} value={form.is_featured ? t.yes : t.no} />
 
-              <SummaryItem
-                icon={Mail}
-                label={t.labels.email}
-                value={formData.email || "-"}
-              />
+              <div className="grid gap-2 pt-4">
+                <Button
+                  className="h-10 rounded-lg bg-black text-white hover:bg-black/90"
+                  disabled={saving}
+                  onClick={() => void submitProvider()}
+                >
+                  {saving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4" />
+                  )}
+                  {saving ? t.saving : t.submit}
+                </Button>
 
-              <div className="rounded-xl border bg-background p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold">{t.completion}</p>
-                  <Badge variant={isReadyToSave ? "secondary" : "outline"}>
-                    {isReadyToSave ? t.ready : t.missingData}
-                  </Badge>
-                </div>
+                <Button
+                  variant="outline"
+                  className="h-10 rounded-lg bg-background"
+                  disabled={saving}
+                  onClick={saveDraft}
+                >
+                  <Save className="h-4 w-4" />
+                  {t.saveDraft}
+                </Button>
 
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {formatNumber(progressPercent)}%
-                </p>
+                {createdId ? (
+                  <Button asChild variant="outline" className="h-10 rounded-lg bg-background">
+                    <Link href={`/system/providers/${createdId}`}>
+                      <FileText className="h-4 w-4" />
+                      {t.viewProvider}
+                    </Link>
+                  </Button>
+                ) : null}
               </div>
-
-              <p className="rounded-xl border bg-muted/40 p-3 text-xs leading-6 text-muted-foreground">
-                {t.afterCreateHint}
-              </p>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle>{t.stepsTitle}</CardTitle>
-              <CardDescription>{t.stepsDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              {t.quickNotes.map((note) => (
-                <div key={note} className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  </div>
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {note}
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="grid gap-3 p-4">
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{t.requiredFields}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {requiredComplete ? t.complete : t.incomplete}
                   </p>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
+              </div>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-2 p-4">
-              <Button
-                type="button"
-                className="h-11 w-full rounded-xl"
-                disabled={isSubmitting}
-                onClick={submitForm}
-              >
-                {isSubmitting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4" />
-                )}
-                <span>{isSubmitting ? t.saving : t.create}</span>
-              </Button>
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <UserRound className="h-5 w-5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{t.loginReadiness}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {loginComplete ? t.complete : t.incomplete}
+                  </p>
+                </div>
+              </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 w-full rounded-xl"
-                disabled={isSubmitting}
-                onClick={saveDraft}
-              >
-                <FileText className="h-4 w-4" />
-                <span>{t.saveDraft}</span>
-              </Button>
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <MapPin className="h-5 w-5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{t.addressInfo}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {form.city || form.region || t.incomplete}
+                  </p>
+                </div>
+              </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 w-full rounded-xl"
-                disabled={isSubmitting}
-                onClick={restoreDraft}
-              >
-                <ClipboardList className="h-4 w-4" />
-                <span>{t.restoreDraft}</span>
-              </Button>
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <Landmark className="h-5 w-5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{t.legalReadiness}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {legalComplete ? t.complete : t.incomplete}
+                  </p>
+                </div>
+              </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 w-full rounded-xl text-destructive hover:text-destructive"
-                disabled={isSubmitting}
-                onClick={clearForm}
-              >
-                <Trash2 className="h-4 w-4" />
-                <span>{t.clearForm}</span>
-              </Button>
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <Sparkles className="h-5 w-5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{t.featured}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {form.is_featured ? t.yes : t.no}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <img src={SAR_ICON} alt="" className="h-5 w-5 object-contain opacity-70" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">SAR</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    /currency/sar.svg
+                  </p>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

@@ -2,1523 +2,1335 @@
 
 /* ============================================================
    📂 app/system/accounting/cost-centers/create/page.tsx
-   🧠 Primey Care | Create Accounting Cost Center Page
-
-   ✅ المسار:
-      app/system/accounting/cost-centers/create/page.tsx
-
-   ✅ العمل:
-      صفحة إنشاء مركز تكلفة داخل مديول المحاسبة.
-      تتيح إنشاء مركز تكلفة جديد مع كود تلقائي، نوع المركز، المركز الأب، المسؤول، الميزانية، والحالة.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Accounting Cost Center Create Build
-
-   ✅ يعتمد على:
-      - /api/accounting/cost-centers/
-      - /api/accounting/cost-centers/create/ كـ fallback آمن
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Accounting cost centers page
-      - Accounting accounts create page
-      - Accounting journals approved pattern
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - إنشاء مركز تكلفة جديد.
-      - توليد كود مركز التكلفة تلقائيًا بالتسلسل.
-      - منع كتابة الكود يدويًا.
-      - تحميل مراكز التكلفة الحالية لاختيار المركز الأب.
-      - دعم الأنواع: تشغيلي، إداري، مبيعات، خدمة، أخرى.
-      - دعم الحالة النشطة وغير النشطة.
-      - دعم المسؤول والميزانية التقديرية والوصف.
-      - حماية مغادرة الصفحة عند وجود تغييرات غير محفوظة.
-      - مسح النموذج بتأكيد.
-      - Error State مستقل.
-      - Skeleton Loading للمراكز الأب.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - أرقام إنجليزية دائمًا.
-      - رمز SAR من /currency/sar.svg بعد الرقم.
-
+   🧾 Primey Care — Create Accounting Cost Center
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - بناء صفحة إنشاء مركز تكلفة فعلية بدل الصفحة المؤقتة.
-      - الالتزام بالقاعدة: w-full space-y-4 بدون main/min-h-screen/max-w.
-      - إزالة أي عبارات مؤقتة أو تقنية من الواجهة.
-      - إزالة localhost و API_BASE_URL الثابت.
-      - استخدام sonner للتنبيهات.
-      - الحفاظ على نمط صفحات النظام المعتمد.
+   ✅ Approved Products / Customers / Orders form pattern
+   ✅ Real API:
+      GET  /api/accounting/cost-centers/?page=1&page_size=500
+      POST /api/accounting/cost-centers/
+      fallback:
+      POST /api/accounting/cost-centers/create/
+      POST /api/accounting/cost_centers/
+   ✅ Premium form + side readiness summary
+   ✅ Auto-generated cost center code
+   ✅ Parent cost center selector
+   ✅ CSRF
+   ✅ Field validation
+   ✅ Unsaved changes protection
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  ArrowRight,
   Building2,
   CheckCircle2,
   FileText,
-  Layers3,
+  FolderTree,
   Loader2,
-  RefreshCcw,
+  RefreshCw,
   RotateCcw,
   Save,
   ShieldCheck,
+  TriangleAlert,
   WalletCards,
-  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type CostCenterKind =
-  | "OPERATIONAL"
-  | "ADMINISTRATIVE"
-  | "SALES"
-  | "SERVICE"
-  | "OTHER";
-
-type ParentCostCenter = {
-  id: string;
-  code: string;
-  name: string;
-  kind: string;
-  parentId: string;
-  isActive: boolean;
-};
-
-type FormState = {
-  code: string;
-  name: string;
-  kind: CostCenterKind;
-  parentId: string;
-  managerName: string;
-  estimatedBudget: string;
-  description: string;
-  isActive: boolean;
-};
-
-type ApiEnvelope<T> = {
+type ApiResponse = {
   ok?: boolean;
   success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
+  id?: unknown;
+  pk?: unknown;
+  uuid?: unknown;
+  data?: unknown;
+  item?: unknown;
+  cost_center?: unknown;
+  costCenter?: unknown;
+  result?: unknown;
   results?: unknown[];
   items?: unknown[];
   rows?: unknown[];
-  cost_centers?: unknown[];
-  tree?: unknown[];
+  message?: string;
+  detail?: string;
+  error?: string;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
+type CostCenterType =
+  | "department"
+  | "branch"
+  | "project"
+  | "provider"
+  | "agent"
+  | "operation"
+  | "other";
 
-function makeDefaultForm(): FormState {
-  return {
-    code: "",
-    name: "",
-    kind: "OPERATIONAL",
-    parentId: "",
-    managerName: "",
-    estimatedBudget: "",
-    description: "",
-    isActive: true,
-  };
+type CostCenterStatus = "active" | "inactive" | "draft" | "archived";
+
+type CostCenterOption = {
+  id: string;
+  code: string;
+  name: string;
+  type: CostCenterType;
+  status: string;
+};
+
+type FormState = {
+  name: string;
+  code: string;
+  type: CostCenterType;
+  status: CostCenterStatus;
+  parent_id: string;
+  manager_name: string;
+  budget_amount: string;
+  notes: string;
+};
+
+type FieldErrors = Partial<Record<keyof FormState, string>>;
+
+const initialForm: FormState = {
+  name: "",
+  code: "",
+  type: "operation",
+  status: "active",
+  parent_id: "",
+  manager_name: "",
+  budget_amount: "",
+  notes: "",
+};
+
+const translations = {
+  ar: {
+    title: "إنشاء مركز تكلفة",
+    subtitle: "أضف مركز تكلفة جديد لاستخدامه في التقارير والحركات المحاسبية.",
+    back: "مراكز التكلفة",
+    save: "حفظ مركز التكلفة",
+    saving: "جاري الحفظ...",
+    clear: "تفريغ",
+    refresh: "تحديث المراكز",
+    generateCode: "توليد الكود",
+
+    formTitle: "بيانات مركز التكلفة",
+    formDesc: "أدخل البيانات الأساسية لمركز التكلفة.",
+    optionsTitle: "الربط والتشغيل",
+    optionsDesc: "اربط المركز بمركز أب ومسؤول داخلي عند الحاجة.",
+    summaryTitle: "ملخص الجاهزية",
+    summaryDesc: "تحقق سريع قبل الحفظ.",
+
+    name: "اسم مركز التكلفة",
+    namePlaceholder: "مثال: عمليات البطاقات",
+    code: "كود المركز",
+    codePlaceholder: "مثال: CC-0001",
+    type: "نوع المركز",
+    status: "الحالة",
+    parent: "المركز الأب",
+    parentPlaceholder: "بدون مركز أب",
+    manager: "المسؤول",
+    managerPlaceholder: "اسم المسؤول أو القسم",
+    budget: "الميزانية التقديرية",
+    budgetPlaceholder: "0.00",
+    notes: "الوصف / الملاحظات",
+    notesPlaceholder: "اكتب وصفًا أو ملاحظات داخلية عن مركز التكلفة...",
+
+    department: "قسم",
+    branch: "فرع",
+    project: "مشروع",
+    provider: "مقدم خدمة",
+    agent: "مندوب",
+    operation: "تشغيلي",
+    other: "أخرى",
+
+    active: "نشط",
+    inactive: "غير نشط",
+    draft: "مسودة",
+    archived: "مؤرشف",
+
+    ready: "جاهز للحفظ",
+    notReady: "بيانات مطلوبة",
+    basicData: "البيانات الأساسية",
+    typeReady: "نوع المركز",
+    statusReady: "الحالة",
+    budgetReady: "الميزانية",
+
+    requiredName: "اسم مركز التكلفة مطلوب.",
+    requiredCode: "كود مركز التكلفة مطلوب.",
+    invalidBudget: "الميزانية يجب أن تكون رقمًا صحيحًا.",
+    saveSuccess: "تم إنشاء مركز التكلفة بنجاح.",
+    saveError: "تعذر إنشاء مركز التكلفة.",
+    loadParentsError: "تعذر تحميل مراكز التكلفة.",
+    unsavedConfirm: "لديك تغييرات غير محفوظة. هل تريد المغادرة؟",
+    clearConfirm: "هل تريد تفريغ النموذج؟",
+    tryAgain: "إعادة المحاولة",
+    noParents: "لا توجد مراكز تكلفة متاحة كأب.",
+    sar: "ر.س",
+    unknown: "غير محدد",
+  },
+  en: {
+    title: "Create Cost Center",
+    subtitle: "Add a new cost center for reports and accounting transactions.",
+    back: "Cost centers",
+    save: "Save cost center",
+    saving: "Saving...",
+    clear: "Clear",
+    refresh: "Refresh centers",
+    generateCode: "Generate code",
+
+    formTitle: "Cost center details",
+    formDesc: "Enter the main cost center information.",
+    optionsTitle: "Linking and operation",
+    optionsDesc: "Link the center to a parent center and internal manager when needed.",
+    summaryTitle: "Readiness summary",
+    summaryDesc: "Quick check before saving.",
+
+    name: "Cost center name",
+    namePlaceholder: "Example: Card operations",
+    code: "Center code",
+    codePlaceholder: "Example: CC-0001",
+    type: "Center type",
+    status: "Status",
+    parent: "Parent center",
+    parentPlaceholder: "No parent center",
+    manager: "Manager",
+    managerPlaceholder: "Manager or department name",
+    budget: "Estimated budget",
+    budgetPlaceholder: "0.00",
+    notes: "Description / notes",
+    notesPlaceholder: "Write a description or internal notes about this cost center...",
+
+    department: "Department",
+    branch: "Branch",
+    project: "Project",
+    provider: "Provider",
+    agent: "Agent",
+    operation: "Operation",
+    other: "Other",
+
+    active: "Active",
+    inactive: "Inactive",
+    draft: "Draft",
+    archived: "Archived",
+
+    ready: "Ready to save",
+    notReady: "Required data",
+    basicData: "Basic data",
+    typeReady: "Center type",
+    statusReady: "Status",
+    budgetReady: "Budget",
+
+    requiredName: "Cost center name is required.",
+    requiredCode: "Cost center code is required.",
+    invalidBudget: "Budget must be a valid number.",
+    saveSuccess: "Cost center created successfully.",
+    saveError: "Unable to create cost center.",
+    loadParentsError: "Unable to load cost centers.",
+    unsavedConfirm: "You have unsaved changes. Do you want to leave?",
+    clearConfirm: "Do you want to clear the form?",
+    tryAgain: "Try again",
+    noParents: "No parent cost centers available.",
+    sar: "SAR",
+    unknown: "Unknown",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-/* ============================================================
-   Locale / API
-============================================================ */
-
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
-
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
 }
 
-function getCookie(name: string) {
-  try {
-    if (typeof document === "undefined") return "";
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
 
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-
-    if (parts.length === 2) {
-      return parts.pop()?.split(";").shift() || "";
-    }
-
-    return "";
-  } catch {
-    return "";
-  }
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as Dict;
-    }
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
-  }
-
-  return true;
+  return fallback;
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "إنشاء مركز تكلفة" : "Create Cost Center",
-    subtitle: isArabic
-      ? "أضف مركز تكلفة جديدًا لتتبع المصروفات والإيرادات والحركات المحاسبية حسب الإدارة أو النشاط."
-      : "Add a new cost center to track expenses, revenues, and accounting movements by department or activity.",
-
-    back: isArabic ? "مراكز التكلفة" : "Cost Centers",
-    refresh: isArabic ? "تحديث المراكز" : "Refresh Centers",
-    save: isArabic ? "حفظ مركز التكلفة" : "Save Cost Center",
-    saving: isArabic ? "جاري الحفظ..." : "Saving...",
-    clear: isArabic ? "مسح النموذج" : "Clear Form",
-
-    mainInfo: isArabic ? "بيانات مركز التكلفة" : "Cost Center Details",
-    mainInfoDesc: isArabic
-      ? "المعلومات الأساسية لمركز التكلفة."
-      : "Basic cost center information.",
-    classification: isArabic ? "تصنيف مركز التكلفة" : "Cost Center Classification",
-    classificationDesc: isArabic
-      ? "حدد نوع المركز وموقعه داخل شجرة مراكز التكلفة."
-      : "Set the center type and its position in the cost center tree.",
-    summaryTitle: isArabic ? "ملخص مركز التكلفة" : "Cost Center Summary",
-    summaryDesc: isArabic
-      ? "مراجعة بيانات مركز التكلفة قبل الحفظ."
-      : "Review cost center data before saving.",
-
-    code: isArabic ? "كود مركز التكلفة" : "Cost Center Code",
-    autoCode: isArabic ? "يتولد تلقائيًا" : "Generated automatically",
-    name: isArabic ? "اسم مركز التكلفة" : "Cost Center Name",
-    kind: isArabic ? "نوع المركز" : "Center Type",
-    parentCenter: isArabic ? "المركز الأب" : "Parent Center",
-    withoutParent: isArabic ? "بدون مركز أب" : "No Parent Center",
-    managerName: isArabic ? "المسؤول" : "Manager",
-    estimatedBudget: isArabic ? "الميزانية التقديرية" : "Estimated Budget",
-    description: isArabic ? "الوصف" : "Description",
-
-    isActive: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-
-    operational: isArabic ? "تشغيلي" : "Operational",
-    administrative: isArabic ? "إداري" : "Administrative",
-    sales: isArabic ? "مبيعات" : "Sales",
-    service: isArabic ? "خدمة" : "Service",
-    other: isArabic ? "أخرى" : "Other",
-
-    parentCentersCount: isArabic ? "المراكز المتاحة كأب" : "Available Parent Centers",
-    selectedKind: isArabic ? "النوع المحدد" : "Selected Type",
-    selectedParent: isArabic ? "المركز الأب المحدد" : "Selected Parent",
-    selectedStatus: isArabic ? "الحالة المحددة" : "Selected Status",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بإنشاء مركز تكلفة" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية إنشاء مراكز تكلفة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to create cost centers. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل مراكز التكلفة الحالية."
-      : "Unable to load current cost centers.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث مراكز التكلفة الحالية."
-      : "Current cost centers refreshed.",
-    saveSuccess: isArabic
-      ? "تم إنشاء مركز التكلفة بنجاح."
-      : "Cost center created successfully.",
-    saveError: isArabic
-      ? "تعذر حفظ مركز التكلفة."
-      : "Unable to save cost center.",
-
-    validationTitle: isArabic ? "راجع بيانات مركز التكلفة" : "Review cost center data",
-    requiredCode: isArabic
-      ? "كود مركز التكلفة لم يتولد بعد."
-      : "Cost center code has not been generated yet.",
-    requiredName: isArabic
-      ? "اسم مركز التكلفة مطلوب."
-      : "Cost center name is required.",
-    invalidBudget: isArabic
-      ? "الميزانية التقديرية يجب أن تكون رقمًا صحيحًا."
-      : "Estimated budget must be a valid number.",
-    confirmClear: isArabic
-      ? "هل تريد مسح النموذج الحالي؟"
-      : "Clear the current form?",
-    unsavedChanges: isArabic
-      ? "لديك تغييرات غير محفوظة. هل تريد المغادرة؟"
-      : "You have unsaved changes. Do you want to leave?",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
-}
-
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function escapeNumberInput(value: string) {
-  return value
-    .replace(/[^\d.-]/g, "")
-    .replace(/(?!^)-/g, "")
-    .replace(/(\..*)\./g, "$1");
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-function extractArray(payload: unknown): unknown[] {
-  const obj = asDict(payload);
-  const data = asDict(obj.data);
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
 
-  if (Array.isArray(obj.results)) return obj.results;
-  if (Array.isArray(obj.items)) return obj.items;
-  if (Array.isArray(obj.rows)) return obj.rows;
-  if (Array.isArray(obj.cost_centers)) return obj.cost_centers;
-  if (Array.isArray(obj.tree)) return obj.tree;
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
+}
+
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const query = params?.toString();
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
+}
+
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  return (
+    document.cookie
+      .split("; ")
+      .find((row) => row.startsWith(`${name}=`))
+      ?.split("=")[1] || ""
+  );
+}
+
+async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
+
+  const response = await fetch(url, {
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    ...options,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(csrfToken ? { "X-CSRFToken": decodeURIComponent(csrfToken) } : {}),
+      ...(options.headers || {}),
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  return (payload || {}) as T;
+}
+
+function extractArray(payload: ApiResponse) {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.rows)) return payload.rows;
+
+  const data = asRecord(payload.data);
 
   if (Array.isArray(data.results)) return data.results;
   if (Array.isArray(data.items)) return data.items;
   if (Array.isArray(data.rows)) return data.rows;
   if (Array.isArray(data.cost_centers)) return data.cost_centers;
-  if (Array.isArray(data.tree)) return data.tree;
-
-  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(data.costCenters)) return data.costCenters;
+  if (Array.isArray(data.centers)) return data.centers;
 
   return [];
 }
 
-function flattenUnknownRows(items: unknown[]): unknown[] {
-  return items.flatMap((item) => {
-    const obj = asDict(item);
-    const children = Array.isArray(obj.children)
-      ? obj.children
-      : Array.isArray(obj.items)
-        ? obj.items
-        : Array.isArray(obj.cost_centers)
-          ? obj.cost_centers
-          : [];
+function extractCreatedId(payload: ApiResponse) {
+  const data = asRecord(payload.data);
+  const item = asRecord(
+    payload.item ||
+      payload.cost_center ||
+      payload.costCenter ||
+      payload.result,
+  );
 
-    return [item, ...flattenUnknownRows(children)];
-  });
+  return normalizeText(
+    payload.id ||
+      payload.pk ||
+      payload.uuid ||
+      data.id ||
+      data.pk ||
+      data.uuid ||
+      item.id ||
+      item.pk ||
+      item.uuid,
+  );
 }
 
-function normalizeParentCostCenter(item: unknown): ParentCostCenter {
-  const obj = asDict(item);
-  const center = asDict(obj.cost_center || obj.costCenter || obj.center);
-  const parent = asDict(obj.parent || obj.parent_cost_center);
+function normalizeType(value: unknown): CostCenterType {
+  const type = normalizeText(value).toLowerCase();
+
+  if (["department", "dept", "section"].includes(type)) return "department";
+  if (["branch", "location"].includes(type)) return "branch";
+  if (["project", "program"].includes(type)) return "project";
+  if (["provider", "center", "service_provider"].includes(type)) return "provider";
+  if (["agent", "sales_agent", "delivery_agent"].includes(type)) return "agent";
+  if (["operation", "operational", "ops"].includes(type)) return "operation";
+
+  return "other";
+}
+
+function normalizeOption(value: unknown): CostCenterOption {
+  const item = asRecord(value);
+  const id = normalizeText(item.id || item.pk || item.uuid);
 
   return {
-    id: String(obj.id || obj.uuid || obj.pk || center.id || ""),
-    code: String(obj.code || obj.cost_center_code || center.code || ""),
-    name: String(
-      obj.name ||
-        obj.cost_center_name ||
-        obj.title ||
-        obj.name_ar ||
-        center.name ||
-        "",
-    ),
-    kind: String(obj.kind || obj.type || obj.category || center.kind || ""),
-    parentId: String(
-      obj.parent_id ||
-        obj.parent_cost_center_id ||
-        center.parent_id ||
-        parent.id ||
-        "",
-    ),
-    isActive:
-      obj.is_active === undefined &&
-      obj.active === undefined &&
-      center.is_active === undefined
-        ? true
-        : Boolean(obj.is_active ?? obj.active ?? center.is_active),
+    id,
+    code: normalizeText(item.code || item.cost_center_code || item.center_code || item.number),
+    name:
+      normalizeText(item.name || item.title || item.cost_center_name || item.name_ar || item.name_en) ||
+      (id ? `#${id}` : ""),
+    type: normalizeType(item.type || item.center_type || item.cost_center_type || item.category),
+    status: normalizeText(item.status || item.center_status || "active"),
   };
 }
 
-function kindLabel(kind: CostCenterKind, locale: AppLocale) {
-  const t = dictionary(locale);
+function typeLabel(type: CostCenterType, locale: Locale) {
+  const t = translations[locale];
 
-  const labels: Record<CostCenterKind, string> = {
-    OPERATIONAL: t.operational,
-    ADMINISTRATIVE: t.administrative,
-    SALES: t.sales,
-    SERVICE: t.service,
-    OTHER: t.other,
-  };
+  if (type === "department") return t.department;
+  if (type === "branch") return t.branch;
+  if (type === "project") return t.project;
+  if (type === "provider") return t.provider;
+  if (type === "agent") return t.agent;
+  if (type === "operation") return t.operation;
 
-  return labels[kind];
+  return t.other;
 }
 
-function kindPrefix(kind: CostCenterKind) {
-  const prefixes: Record<CostCenterKind, string> = {
-    OPERATIONAL: "CC1",
-    ADMINISTRATIVE: "CC2",
-    SALES: "CC3",
-    SERVICE: "CC4",
-    OTHER: "CC5",
-  };
+function statusLabel(status: CostCenterStatus, locale: Locale) {
+  const t = translations[locale];
 
-  return prefixes[kind];
+  if (status === "active") return t.active;
+  if (status === "inactive") return t.inactive;
+  if (status === "draft") return t.draft;
+
+  return t.archived;
 }
 
-function nextSequentialCode(codes: string[], baseCode: string, minLength: number) {
-  const numericCodes = codes
-    .map((code) => String(code || "").replace(/\D/g, ""))
-    .filter(Boolean)
-    .map((code) => Number(code))
-    .filter((value) => Number.isFinite(value));
+function getStatusClass(status: CostCenterStatus) {
+  if (status === "active") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
 
-  const baseNumber = Number(baseCode.replace(/\D/g, ""));
-  const maxNumber =
-    numericCodes.length > 0 ? Math.max(...numericCodes) : baseNumber;
+  if (status === "inactive") {
+    return "border-slate-500/30 bg-slate-50 text-slate-700 hover:bg-slate-50";
+  }
 
-  const next = maxNumber + 1;
-  return String(next).padStart(minLength, "0");
+  if (status === "draft") {
+    return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+  }
+
+  return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
 }
 
-function generateSequentialCostCenterCode({
-  centers,
-  parentId,
-  kind,
+function getTypeClass(type: CostCenterType) {
+  if (type === "department") {
+    return "border-violet-500/30 bg-violet-50 text-violet-700 hover:bg-violet-50";
+  }
+
+  if (type === "branch") {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  if (type === "project") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  if (type === "provider") {
+    return "border-cyan-500/30 bg-cyan-50 text-cyan-700 hover:bg-cyan-50";
+  }
+
+  if (type === "agent") {
+    return "border-orange-500/30 bg-orange-50 text-orange-700 hover:bg-orange-50";
+  }
+
+  if (type === "operation") {
+    return "border-indigo-500/30 bg-indigo-50 text-indigo-700 hover:bg-indigo-50";
+  }
+
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function generateCostCenterCode(existingCenters: CostCenterOption[]) {
+  const maxNumber = existingCenters.reduce((max, center) => {
+    const match = center.code.match(/CC[-_ ]?(\d+)/i);
+    if (!match) return max;
+
+    const value = Number(match[1]);
+    return Number.isFinite(value) ? Math.max(max, value) : max;
+  }, 0);
+
+  return `CC-${String(maxNumber + 1).padStart(4, "0")}`;
+}
+
+function ReadinessItem({
+  ready,
+  label,
 }: {
-  centers: ParentCostCenter[];
-  parentId: string;
-  kind: CostCenterKind;
+  ready: boolean;
+  label: string;
 }) {
-  const activeCenters = centers.filter((center) => center.code);
-
-  if (parentId) {
-    const parent = activeCenters.find((center) => center.id === parentId);
-    const parentCode = parent?.code?.trim() || "";
-
-    if (!parentCode) return "";
-
-    const directChildren = activeCenters.filter(
-      (center) => center.parentId === parentId,
-    );
-
-    const childCodes = directChildren.map((center) => center.code);
-
-    if (childCodes.length > 0) {
-      const nextNumber = nextSequentialCode(
-        childCodes,
-        `${parentCode}00`,
-        parentCode.replace(/\D/g, "").length + 2,
-      );
-
-      return `${parentCode}-${nextNumber.slice(-2)}`;
-    }
-
-    return `${parentCode}-01`;
-  }
-
-  const prefix = kindPrefix(kind);
-  const rootCenters = activeCenters.filter((center) => {
-    const code = center.code.trim();
-    const hasNoParent = !center.parentId;
-
-    return hasNoParent && code.startsWith(prefix);
-  });
-
-  const rootCodes = rootCenters.map((center) => center.code);
-
-  if (rootCodes.length > 0) {
-    const nextNumber = nextSequentialCode(rootCodes, `${prefix}000`, 3);
-    return `${prefix}-${nextNumber.slice(-3)}`;
-  }
-
-  return `${prefix}-001`;
-}
-
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
+    <div className="flex items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      {ready ? (
+        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+      ) : (
+        <TriangleAlert className="h-4 w-4 text-amber-600" />
+      )}
+    </div>
   );
 }
 
-function MoneyText({ value }: { value: unknown }) {
+function CreateSkeleton() {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-4 p-6">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <Skeleton key={index} className="h-11 w-full" />
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-6">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={index} className="h-12 w-full" />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
-
-/* ============================================================
-   Page
-============================================================ */
 
 export default function CreateAccountingCostCenterPage() {
-  const auth = useAuth() as unknown;
+  const router = useRouter();
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [form, setForm] = useState<FormState>(() => makeDefaultForm());
-  const [parentCenters, setParentCenters] = useState<ParentCostCenter[]>([]);
-  const [isLoadingParents, setIsLoadingParents] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const [submitError, setSubmitError] = useState("");
-  const [isDirty, setIsDirty] = useState(false);
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [form, setForm] = React.useState<FormState>(initialForm);
+  const [parentCenters, setParentCenters] = React.useState<CostCenterOption[]>([]);
+  const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({});
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const [loadingParents, setLoadingParents] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [loadError, setLoadError] = React.useState("");
+  const [submitError, setSubmitError] = React.useState("");
+  const [dirty, setDirty] = React.useState(false);
 
-  const canCreate = hasSafePermission(
-    auth,
-    [
-      "accounting.create",
-      "accounting.cost_centers.create",
-      "accounting.manage",
-    ],
-    "action",
-  );
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const activeParentCenters = useMemo(
-    () =>
-      parentCenters
-        .filter((item) => item.id && item.name && item.isActive)
-        .sort((a, b) => `${a.code} ${a.name}`.localeCompare(`${b.code} ${b.name}`)),
-    [parentCenters],
-  );
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const selectedParent = useMemo(
-    () => activeParentCenters.find((item) => item.id === form.parentId),
-    [activeParentCenters, form.parentId],
-  );
-
-  const generatedCode = useMemo(
-    () =>
-      generateSequentialCostCenterCode({
-        centers: activeParentCenters,
-        parentId: form.parentId,
-        kind: form.kind,
-      }),
-    [activeParentCenters, form.kind, form.parentId],
-  );
-
-  const estimatedBudgetNumber = useMemo(
-    () => toNumber(form.estimatedBudget || 0),
-    [form.estimatedBudget],
-  );
-
-  const canSubmit = canCreate && !isSaving && Boolean(form.code);
-
-  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({
-      ...current,
-      [key]: value,
-    }));
-    setIsDirty(true);
-  }
-
-  function handleKindChange(value: CostCenterKind) {
-    setForm((current) => ({
-      ...current,
-      kind: value,
-      parentId: "",
-    }));
-    setIsDirty(true);
-  }
-
-  function clearForm() {
-    if (isDirty && !window.confirm(t.confirmClear)) return;
-
-    setForm(makeDefaultForm());
-    setSubmitError("");
-    setIsDirty(false);
-  }
-
-  function validateForm() {
-    const errors: string[] = [];
-
-    if (!form.code.trim()) errors.push(t.requiredCode);
-    if (!form.name.trim()) errors.push(t.requiredName);
-
-    if (
-      form.estimatedBudget.trim() &&
-      !Number.isFinite(Number(form.estimatedBudget))
-    ) {
-      errors.push(t.invalidBudget);
-    }
-
-    return Array.from(new Set(errors));
-  }
-
-  function buildPayload() {
-    return {
-      code: form.code.trim(),
-      cost_center_code: form.code.trim(),
-      name: form.name.trim(),
-      cost_center_name: form.name.trim(),
-      kind: form.kind,
-      type: form.kind,
-      category: form.kind,
-      parent_id: form.parentId || null,
-      parent: form.parentId || null,
-      manager_name: form.managerName.trim(),
-      responsible_name: form.managerName.trim(),
-      estimated_budget: estimatedBudgetNumber,
-      budget_amount: estimatedBudgetNumber,
-      description: form.description.trim(),
-      notes: form.description.trim(),
-      is_active: form.isActive,
-      active: form.isActive,
-      status: form.isActive ? "ACTIVE" : "INACTIVE",
-    };
-  }
-
-  const loadParentCenters = useCallback(
-    async (showToast = false) => {
-      try {
-        setIsLoadingParents(true);
-        setLoadError("");
-
-        const endpoints = [
-          "/api/accounting/cost-centers/?page_size=500",
-          "/api/accounting/reports/cost-centers/?page_size=500",
-        ];
-
-        let loadedRows: ParentCostCenter[] = [];
-        let loaded = false;
-        let lastError = "";
-
-        for (const endpoint of endpoints) {
-          const response = await fetch(apiUrl(endpoint), {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-          });
-
-          const payload = (await response.json().catch(() => null)) as
-            | ApiEnvelope<unknown>
-            | null;
-
-          if ([400, 404, 405].includes(response.status)) {
-            lastError =
-              payload?.message ||
-              payload?.detail ||
-              payload?.error ||
-              `HTTP ${response.status}`;
-            continue;
-          }
-
-          if (
-            !response.ok ||
-            payload?.ok === false ||
-            payload?.success === false
-          ) {
-            throw new Error(
-              payload?.message ||
-                payload?.detail ||
-                payload?.error ||
-                `HTTP ${response.status}`,
-            );
-          }
-
-          loadedRows = flattenUnknownRows(extractArray(payload))
-            .map(normalizeParentCostCenter)
-            .filter((item) => item.id && item.name && item.code);
-
-          loaded = true;
-          break;
-        }
-
-        if (!loaded) {
-          throw new Error(lastError || t.loadError);
-        }
-
-        setParentCenters(loadedRows);
-
-        if (showToast) {
-          toast.success(t.loadSuccess);
-        }
-      } catch (error) {
-        console.error("Parent cost centers load error:", error);
-        setParentCenters([]);
-        setLoadError(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoadingParents(false);
-      }
-    },
-    [t.loadError, t.loadSuccess],
-  );
-
-  async function submitForm() {
-    if (!canCreate) return;
-
-    const errors = validateForm();
-
-    if (errors.length > 0) {
-      setSubmitError(errors.join("\n"));
-      toast.error(t.validationTitle);
-      return;
-    }
-
-    try {
-      setIsSaving(true);
-      setSubmitError("");
-
-      const payload = buildPayload();
-      const csrfToken = getCookie("csrftoken");
-
-      const endpoints = [
-        "/api/accounting/cost-centers/create/",
-        "/api/accounting/cost-centers/",
-      ];
-
-      let saved = false;
-      let lastMessage = "";
-
-      for (const endpoint of endpoints) {
-        const response = await fetch(apiUrl(endpoint), {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-          },
-          body: JSON.stringify(payload),
-        });
-
-        const responsePayload = (await response.json().catch(() => null)) as
-          | ApiEnvelope<unknown>
-          | null;
-
-        if ([400, 404, 405].includes(response.status)) {
-          lastMessage =
-            responsePayload?.message ||
-            responsePayload?.detail ||
-            responsePayload?.error ||
-            `HTTP ${response.status}`;
-
-          if (response.status === 400) break;
-
-          continue;
-        }
-
-        if (
-          !response.ok ||
-          responsePayload?.ok === false ||
-          responsePayload?.success === false
-        ) {
-          throw new Error(
-            responsePayload?.message ||
-              responsePayload?.detail ||
-              responsePayload?.error ||
-              `HTTP ${response.status}`,
-          );
-        }
-
-        saved = true;
-        break;
-      }
-
-      if (!saved) {
-        throw new Error(lastMessage || t.saveError);
-      }
-
-      toast.success(t.saveSuccess);
-      setForm(makeDefaultForm());
-      setIsDirty(false);
-      await loadParentCenters(false);
-    } catch (error) {
-      console.error("Create cost center submit error:", error);
-      const message = error instanceof Error ? error.message : t.saveError;
-
-      setSubmitError(message || t.saveError);
-      toast.error(t.saveError);
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
       setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
     };
 
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
+    applyLocale();
 
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
     };
   }, []);
 
-  useEffect(() => {
-    if (authResolving) return;
-    loadParentCenters(false);
-  }, [authResolving, loadParentCenters]);
-
-  useEffect(() => {
-    if (!generatedCode) return;
-
-    setForm((current) => {
-      if (current.code === generatedCode) return current;
-
-      return {
-        ...current,
-        code: generatedCode,
-      };
-    });
-  }, [generatedCode]);
-
-  useEffect(() => {
-    const handler = (event: BeforeUnloadEvent) => {
-      if (!isDirty || isSaving) return;
+  React.useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty || saving) return;
 
       event.preventDefault();
       event.returnValue = "";
     };
 
-    window.addEventListener("beforeunload", handler);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirty, saving]);
 
-    return () => {
-      window.removeEventListener("beforeunload", handler);
+  const loadParentCenters = React.useCallback(async () => {
+    const controller = new AbortController();
+
+    try {
+      setLoadingParents(true);
+      setLoadError("");
+
+      const params = new URLSearchParams({
+        page: "1",
+        page_size: "500",
+      });
+
+      const endpoints = [
+        "/api/accounting/cost-centers/",
+        "/api/accounting/reports/cost-centers/",
+        "/api/accounting/cost_centers/",
+      ];
+
+      let payload: ApiResponse | null = null;
+      let lastError: unknown = null;
+
+      for (const endpoint of endpoints) {
+        try {
+          payload = await fetchJson<ApiResponse>(makeApiUrl(endpoint, params), {
+            method: "GET",
+            signal: controller.signal,
+          });
+          break;
+        } catch (caughtError) {
+          lastError = caughtError;
+        }
+      }
+
+      if (!payload) {
+        throw lastError instanceof Error ? lastError : new Error(t.loadParentsError);
+      }
+
+      const centers = extractArray(payload)
+        .map(normalizeOption)
+        .filter((center) => center.id || center.name || center.code)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      setParentCenters(centers);
+
+      setForm((current) => {
+        if (current.code.trim()) return current;
+
+        return {
+          ...current,
+          code: generateCostCenterCode(centers),
+        };
+      });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.loadParentsError;
+
+      setLoadError(message);
+      setParentCenters([]);
+
+      setForm((current) => {
+        if (current.code.trim()) return current;
+        return { ...current, code: "CC-0001" };
+      });
+    } finally {
+      setLoadingParents(false);
+    }
+
+    return () => controller.abort();
+  }, [t.loadParentsError]);
+
+  React.useEffect(() => {
+    void loadParentCenters();
+  }, [loadParentCenters]);
+
+  const selectedParent = React.useMemo(() => {
+    return parentCenters.find((center) => center.id === form.parent_id) || null;
+  }, [form.parent_id, parentCenters]);
+
+  const readiness = React.useMemo(() => {
+    const budgetValue = form.budget_amount.trim()
+      ? Number(form.budget_amount.replace(/,/g, ""))
+      : 0;
+
+    const basicData = Boolean(form.name.trim()) && Boolean(form.code.trim());
+    const typeReady = Boolean(form.type);
+    const statusReady = Boolean(form.status);
+    const budgetReady =
+      !form.budget_amount.trim() ||
+      (Number.isFinite(budgetValue) && budgetValue >= 0);
+
+    return {
+      basicData,
+      typeReady,
+      statusReady,
+      budgetReady,
+      ready: basicData && typeReady && statusReady && budgetReady,
     };
-  }, [isDirty, isSaving]);
+  }, [form]);
 
-  if (!authResolving && !canCreate) {
+  function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+
+    setDirty(true);
+    setSubmitError("");
+
+    setFieldErrors((current) => ({
+      ...current,
+      [key]: undefined,
+    }));
+  }
+
+  function validateForm() {
+    const nextErrors: FieldErrors = {};
+    const budgetValue = form.budget_amount.trim()
+      ? Number(form.budget_amount.replace(/,/g, ""))
+      : 0;
+
+    if (!form.name.trim()) nextErrors.name = t.requiredName;
+    if (!form.code.trim()) nextErrors.code = t.requiredCode;
+
+    if (form.budget_amount.trim() && (!Number.isFinite(budgetValue) || budgetValue < 0)) {
+      nextErrors.budget_amount = t.invalidBudget;
+    }
+
+    setFieldErrors(nextErrors);
+
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  function buildPayload() {
+    const budgetValue = form.budget_amount.trim()
+      ? Number(form.budget_amount.replace(/,/g, ""))
+      : 0;
+
+    return {
+      name: form.name.trim(),
+      title: form.name.trim(),
+      cost_center_name: form.name.trim(),
+      code: form.code.trim(),
+      cost_center_code: form.code.trim(),
+      center_code: form.code.trim(),
+      type: form.type,
+      center_type: form.type,
+      cost_center_type: form.type,
+      category: form.type,
+      status: form.status,
+      center_status: form.status,
+      is_active: form.status === "active",
+      active: form.status === "active",
+      enabled: form.status === "active",
+      parent_id: form.parent_id || null,
+      parent_cost_center_id: form.parent_id || null,
+      parent_center_id: form.parent_id || null,
+      manager_name: form.manager_name.trim(),
+      responsible_name: form.manager_name.trim(),
+      owner_name: form.manager_name.trim(),
+      budget_amount: budgetValue,
+      estimated_budget: budgetValue,
+      budget: budgetValue,
+      notes: form.notes.trim(),
+      description: form.notes.trim(),
+      internal_notes: form.notes.trim(),
+    };
+  }
+
+  async function submitForm(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+
+    if (!validateForm()) return;
+
+    setSaving(true);
+    setSubmitError("");
+
+    const payload = buildPayload();
+
+    const endpoints = [
+      "/api/accounting/cost-centers/",
+      "/api/accounting/cost-centers/create/",
+      "/api/accounting/cost_centers/",
+    ];
+
+    let createdId = "";
+    let lastError: unknown = null;
+
+    try {
+      for (const endpoint of endpoints) {
+        try {
+          const responsePayload = await fetchJson<ApiResponse>(makeApiUrl(endpoint), {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+
+          createdId = extractCreatedId(responsePayload);
+          break;
+        } catch (caughtError) {
+          lastError = caughtError;
+        }
+      }
+
+      if (!createdId && lastError) {
+        throw lastError instanceof Error ? lastError : new Error(t.saveError);
+      }
+
+      toast.success(t.saveSuccess);
+      setDirty(false);
+
+      if (createdId) {
+        router.push(`/system/accounting/cost-centers/${createdId}`);
+      } else {
+        router.push("/system/accounting/cost-centers");
+      }
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.saveError;
+
+      setSubmitError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function regenerateCode() {
+    updateField("code", generateCostCenterCode(parentCenters));
+  }
+
+  function clearForm() {
+    if (dirty && !window.confirm(t.clearConfirm)) return;
+
+    setForm({
+      ...initialForm,
+      code: generateCostCenterCode(parentCenters),
+    });
+    setFieldErrors({});
+    setSubmitError("");
+    setDirty(false);
+  }
+
+  function goBack(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (!dirty || saving) return;
+
+    const confirmed = window.confirm(t.unsavedConfirm);
+
+    if (!confirmed) {
+      event.preventDefault();
+    }
+  }
+
+  if (loadingParents) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="w-full space-y-4" dir={dir}>
+        <CreateSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link
-            href="/system/accounting/cost-centers"
-            onClick={(event) => {
-              if (isDirty && !window.confirm(t.unsavedChanges)) {
-                event.preventDefault();
-              }
-            }}
-          >
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadParentCenters(true)}
-            disabled={isLoadingParents || isSaving}
-          >
-            {isLoadingParents ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            <span>{t.refresh}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/accounting/cost-centers" onClick={goBack}>
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
           </Button>
 
           <Button
-            type="button"
             variant="outline"
-            className="h-10 rounded-xl"
+            className="h-9 rounded-lg"
+            onClick={() => void loadParentCenters()}
+            disabled={saving || loadingParents}
+          >
+            <RefreshCw className={cn("h-4 w-4", loadingParents && "animate-spin")} />
+            {t.refresh}
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-9 rounded-lg"
             onClick={clearForm}
-            disabled={isSaving}
+            disabled={saving}
           >
             <RotateCcw className="h-4 w-4" />
-            <span>{t.clear}</span>
+            {t.clear}
           </Button>
 
           <Button
-            type="button"
-            className="h-10 rounded-xl"
-            onClick={submitForm}
-            disabled={!canSubmit}
+            className="h-9 rounded-lg bg-black text-white hover:bg-black/90"
+            onClick={() => void submitForm()}
+            disabled={saving}
           >
-            {isSaving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
-            <span>{isSaving ? t.saving : t.save}</span>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? t.saving : t.save}
           </Button>
         </div>
       </div>
 
       {loadError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
-
+        <Card className="rounded-lg border border-amber-200 bg-amber-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
               <div>
-                <p className="font-semibold text-destructive">{loadError}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
+                <p className="font-semibold text-amber-900">{t.loadParentsError}</p>
+                <p className="text-sm text-amber-700">{loadError}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadParentCenters(true)}
-              disabled={isLoadingParents}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadParentCenters()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.refresh}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
       {submitError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4 text-right">
+            <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
             <div>
-              <p className="font-semibold text-destructive">
-                {t.validationTitle}
-              </p>
-              <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">
-                {submitError}
-              </p>
+              <p className="font-semibold text-red-900">{t.saveError}</p>
+              <p className="text-sm text-red-700">{submitError}</p>
             </div>
           </CardContent>
         </Card>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <FileText className="h-4 w-4" />
-                {t.mainInfo}
-              </CardTitle>
-              <CardDescription>{t.mainInfoDesc}</CardDescription>
-            </CardHeader>
+      <form onSubmit={submitForm}>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-4">
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>{t.formTitle}</CardTitle>
+                    <CardDescription>{t.formDesc}</CardDescription>
+                  </div>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.code}</label>
-                <Input
-                  value={form.code}
-                  readOnly
-                  disabled={isSaving || isLoadingParents}
-                  dir="ltr"
-                  className="h-11 rounded-xl bg-muted/40"
-                />
-                <p className="text-xs text-muted-foreground">{t.autoCode}</p>
-              </div>
+                  <CardAction>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background">
+                      <FolderTree className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  </CardAction>
+                </div>
+              </CardHeader>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.name}</label>
-                <Input
-                  value={form.name}
-                  onChange={(event) => updateForm("name", event.target.value)}
-                  disabled={isSaving}
-                  className="h-11 rounded-xl"
-                />
-              </div>
+              <CardContent className="space-y-5 px-6 pb-6">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.name}</label>
+                    <Input
+                      value={form.name}
+                      onChange={(event) => updateField("name", event.target.value)}
+                      placeholder={t.namePlaceholder}
+                      disabled={saving}
+                      className={cn(
+                        "h-10 rounded-lg bg-background",
+                        fieldErrors.name && "border-red-300",
+                      )}
+                    />
+                    {fieldErrors.name ? (
+                      <p className="text-xs text-red-600">{fieldErrors.name}</p>
+                    ) : null}
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.managerName}</label>
-                <Input
-                  value={form.managerName}
-                  onChange={(event) =>
-                    updateForm("managerName", event.target.value)
-                  }
-                  disabled={isSaving}
-                  className="h-11 rounded-xl"
-                />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.code}</label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={form.code}
+                        onChange={(event) => updateField("code", event.target.value.toUpperCase())}
+                        placeholder={t.codePlaceholder}
+                        disabled={saving}
+                        className={cn(
+                          "h-10 rounded-lg bg-background tabular-nums",
+                          fieldErrors.code && "border-red-300",
+                        )}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 shrink-0 rounded-lg"
+                        onClick={regenerateCode}
+                        disabled={saving}
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                        {t.generateCode}
+                      </Button>
+                    </div>
+                    {fieldErrors.code ? (
+                      <p className="text-xs text-red-600">{fieldErrors.code}</p>
+                    ) : null}
+                  </div>
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  {t.estimatedBudget}
-                </label>
-                <div className="relative">
-                  <Input
-                    inputMode="decimal"
-                    value={form.estimatedBudget}
-                    onChange={(event) =>
-                      updateForm(
-                        "estimatedBudget",
-                        escapeNumberInput(event.target.value),
-                      )
-                    }
-                    disabled={isSaving}
-                    dir="ltr"
-                    className="h-11 rounded-xl pe-10"
-                  />
-                  <SarIcon
-                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "left-3" : "right-3"
-                    }`}
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.type}</label>
+                    <Select
+                      value={form.type}
+                      onValueChange={(value) => updateField("type", value as CostCenterType)}
+                      disabled={saving}
+                    >
+                      <SelectTrigger className="h-10 rounded-lg bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="department">{t.department}</SelectItem>
+                        <SelectItem value="branch">{t.branch}</SelectItem>
+                        <SelectItem value="project">{t.project}</SelectItem>
+                        <SelectItem value="provider">{t.provider}</SelectItem>
+                        <SelectItem value="agent">{t.agent}</SelectItem>
+                        <SelectItem value="operation">{t.operation}</SelectItem>
+                        <SelectItem value="other">{t.other}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.status}</label>
+                    <Select
+                      value={form.status}
+                      onValueChange={(value) => updateField("status", value as CostCenterStatus)}
+                      disabled={saving}
+                    >
+                      <SelectTrigger className="h-10 rounded-lg bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="active">{t.active}</SelectItem>
+                        <SelectItem value="inactive">{t.inactive}</SelectItem>
+                        <SelectItem value="draft">{t.draft}</SelectItem>
+                        <SelectItem value="archived">{t.archived}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.parent}</label>
+                    <Select
+                      value={form.parent_id || "none"}
+                      onValueChange={(value) => updateField("parent_id", value === "none" ? "" : value)}
+                      disabled={saving}
+                    >
+                      <SelectTrigger className="h-10 rounded-lg bg-background">
+                        <SelectValue placeholder={t.parentPlaceholder} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">{t.parentPlaceholder}</SelectItem>
+                        {parentCenters.map((center) => (
+                          <SelectItem
+                            key={center.id || center.code || center.name}
+                            value={center.id || center.code || center.name}
+                          >
+                            {center.code ? `${center.code} — ${center.name}` : center.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!parentCenters.length ? (
+                      <p className="text-xs text-muted-foreground">{t.noParents}</p>
+                    ) : null}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>{t.optionsTitle}</CardTitle>
+                    <CardDescription>{t.optionsDesc}</CardDescription>
+                  </div>
+
+                  <CardAction>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background">
+                      <Building2 className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  </CardAction>
+                </div>
+              </CardHeader>
+
+              <CardContent className="space-y-5 px-6 pb-6">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.manager}</label>
+                    <Input
+                      value={form.manager_name}
+                      onChange={(event) => updateField("manager_name", event.target.value)}
+                      placeholder={t.managerPlaceholder}
+                      disabled={saving}
+                      className="h-10 rounded-lg bg-background"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.budget}</label>
+                    <div className="relative">
+                      <Input
+                        inputMode="decimal"
+                        value={form.budget_amount}
+                        onChange={(event) => updateField("budget_amount", event.target.value)}
+                        placeholder={t.budgetPlaceholder}
+                        disabled={saving}
+                        className={cn(
+                          "h-10 rounded-lg bg-background tabular-nums",
+                          locale === "ar" ? "pl-9" : "pr-9",
+                          fieldErrors.budget_amount && "border-red-300",
+                        )}
+                      />
+                      <img
+                        src="/currency/sar.svg"
+                        alt={t.sar}
+                        className={cn(
+                          "absolute top-1/2 h-4 w-4 -translate-y-1/2",
+                          locale === "ar" ? "left-3" : "right-3",
+                        )}
+                      />
+                    </div>
+                    {fieldErrors.budget_amount ? (
+                      <p className="text-xs text-red-600">{fieldErrors.budget_amount}</p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">{t.notes}</label>
+                  <textarea
+                    value={form.notes}
+                    onChange={(event) => updateField("notes", event.target.value)}
+                    placeholder={t.notesPlaceholder}
+                    disabled={saving}
+                    rows={5}
+                    className="min-h-[128px] w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
-              </div>
+              </CardContent>
+            </Card>
+          </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">{t.description}</label>
-                <textarea
-                  value={form.description}
-                  onChange={(event) =>
-                    updateForm("description", event.target.value)
-                  }
-                  disabled={isSaving}
-                  rows={3}
-                  className="w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </div>
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>{t.summaryTitle}</CardTitle>
+                    <CardDescription>{t.summaryDesc}</CardDescription>
+                  </div>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Building2 className="h-4 w-4" />
-                {t.classification}
-              </CardTitle>
-              <CardDescription>{t.classificationDesc}</CardDescription>
-            </CardHeader>
+                  <CardAction>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background">
+                      <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  </CardAction>
+                </div>
+              </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.kind}</label>
-                <select
-                  value={form.kind}
-                  onChange={(event) =>
-                    handleKindChange(event.target.value as CostCenterKind)
-                  }
-                  disabled={isSaving}
-                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              <CardContent className="space-y-3 px-6 pb-6">
+                <div className="rounded-lg border bg-background p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-foreground">
+                      {readiness.ready ? t.ready : t.notReady}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-xs font-medium",
+                        getStatusClass(form.status),
+                      )}
+                    >
+                      {statusLabel(form.status, locale)}
+                    </Badge>
+                  </div>
+                </div>
+
+                <ReadinessItem ready={readiness.basicData} label={t.basicData} />
+                <ReadinessItem ready={readiness.typeReady} label={t.typeReady} />
+                <ReadinessItem ready={readiness.statusReady} label={t.statusReady} />
+                <ReadinessItem ready={readiness.budgetReady} label={t.budgetReady} />
+
+                <div className="rounded-lg border bg-background p-4 text-sm">
+                  <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    {form.name || t.name}
+                  </div>
+
+                  <div className="space-y-2 text-muted-foreground">
+                    <p>
+                      {t.code}:{" "}
+                      <span className="font-medium text-foreground tabular-nums">
+                        {form.code || "—"}
+                      </span>
+                    </p>
+
+                    <div className="flex items-center gap-2">
+                      <span>{t.type}:</span>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-xs font-medium",
+                          getTypeClass(form.type),
+                        )}
+                      >
+                        {typeLabel(form.type, locale)}
+                      </Badge>
+                    </div>
+
+                    <p>
+                      {t.parent}:{" "}
+                      <span className="font-medium text-foreground">
+                        {selectedParent?.name || "—"}
+                      </span>
+                    </p>
+
+                    <p>
+                      {t.manager}:{" "}
+                      <span className="font-medium text-foreground">
+                        {form.manager_name || "—"}
+                      </span>
+                    </p>
+
+                    <p className="flex items-center gap-1">
+                      <span>{t.budget}:</span>
+                      <span className="font-medium text-foreground tabular-nums">
+                        {formatMoney(form.budget_amount || 0)}
+                      </span>
+                      <img src="/currency/sar.svg" alt={t.sar} className="h-3.5 w-3.5" />
+                    </p>
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  className="h-10 w-full rounded-lg bg-black text-white hover:bg-black/90"
+                  onClick={() => void submitForm()}
+                  disabled={saving}
                 >
-                  <option value="OPERATIONAL">{t.operational}</option>
-                  <option value="ADMINISTRATIVE">{t.administrative}</option>
-                  <option value="SALES">{t.sales}</option>
-                  <option value="SERVICE">{t.service}</option>
-                  <option value="OTHER">{t.other}</option>
-                </select>
-              </div>
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {saving ? t.saving : t.save}
+                </Button>
+              </CardContent>
+            </Card>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.parentCenter}</label>
-                {isLoadingParents ? (
-                  <div className="h-11 animate-pulse rounded-xl bg-muted" />
-                ) : (
-                  <select
-                    value={form.parentId}
-                    onChange={(event) =>
-                      updateForm("parentId", event.target.value)
-                    }
-                    disabled={isSaving}
-                    className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">{t.withoutParent}</option>
-                    {activeParentCenters.map((center) => (
-                      <option key={center.id} value={center.id}>
-                        {[center.code, center.name].filter(Boolean).join(" - ")}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <CardTitle>{t.parent}</CardTitle>
+                <CardDescription>{t.optionsDesc}</CardDescription>
+              </CardHeader>
 
-              <div className="md:col-span-2">
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl border bg-background p-3 text-sm">
-                  <Checkbox
-                    checked={form.isActive}
-                    onCheckedChange={(checked) =>
-                      updateForm("isActive", Boolean(checked))
-                    }
-                    disabled={isSaving}
-                  />
-                  <span>{t.isActive}</span>
-                </label>
-              </div>
-            </CardContent>
-          </Card>
+              <CardContent className="space-y-3 px-6 pb-6">
+                <div className="rounded-lg border bg-background p-4">
+                  <p className="text-sm font-medium text-foreground">
+                    {selectedParent?.name || t.parentPlaceholder}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                    {selectedParent?.code || "—"}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border bg-background p-4">
+                  <p className="text-sm font-medium text-foreground">
+                    {t.type}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {typeLabel(form.type, locale)}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border bg-background p-4">
+                  <p className="text-sm font-medium text-foreground">
+                    {t.status}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {statusLabel(form.status, locale)}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </div>
-
-        <aside className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <CheckCircle2 className="h-4 w-4" />
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.code}</p>
-                <p className="mt-2 font-semibold" dir="ltr">
-                  {form.code || "-"}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.name}</p>
-                <p className="mt-2 font-semibold">{form.name || "-"}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.selectedKind}
-                  </p>
-                  <p className="mt-2 font-semibold">
-                    {kindLabel(form.kind, locale)}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.selectedStatus}
-                  </p>
-                  <p className="mt-2 font-semibold">
-                    {form.isActive ? t.isActive : t.inactive}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">
-                  {t.selectedParent}
-                </p>
-                <p className="mt-2 text-sm font-semibold leading-6">
-                  {selectedParent
-                    ? [selectedParent.code, selectedParent.name]
-                        .filter(Boolean)
-                        .join(" - ")
-                    : t.withoutParent}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">
-                  {t.estimatedBudget}
-                </p>
-                <div className="mt-2 text-xl font-bold">
-                  <MoneyText value={estimatedBudgetNumber} />
-                </div>
-              </div>
-
-              <div className="grid gap-2 pt-2">
-                <Button
-                  type="button"
-                  className="h-11 rounded-2xl"
-                  onClick={submitForm}
-                  disabled={!canSubmit}
-                >
-                  {isSaving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  {isSaving ? t.saving : t.save}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 rounded-2xl"
-                  onClick={clearForm}
-                  disabled={isSaving}
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  {t.clear}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Layers3 className="h-4 w-4" />
-                {t.parentCentersCount}
-              </div>
-
-              <div className="text-2xl font-bold">
-                {isLoadingParents
-                  ? "..."
-                  : formatNumber(activeParentCenters.length)}
-              </div>
-
-              <p className="text-sm leading-6 text-muted-foreground">
-                {selectedParent
-                  ? [selectedParent.code, selectedParent.name]
-                      .filter(Boolean)
-                      .join(" - ")
-                  : t.withoutParent}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <ShieldCheck className="h-4 w-4" />
-                {form.isActive ? t.isActive : t.inactive}
-              </div>
-
-              <p className="text-sm leading-6 text-muted-foreground">
-                {kindLabel(form.kind, locale)}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <WalletCards className="h-4 w-4" />
-                {t.estimatedBudget}
-              </div>
-
-              <div className="text-2xl font-bold">
-                <MoneyText value={estimatedBudgetNumber} />
-              </div>
-            </CardContent>
-          </Card>
-        </aside>
-      </div>
+      </form>
     </div>
   );
 }

@@ -1,11 +1,14 @@
 # ============================================================
 # 📂 api/treasury/urls.py
-# 🧠 Primey Care | Treasury API URLs V2
+# 🧠 Primey Care | Treasury API URLs V3
 # ------------------------------------------------------------
 # ✅ Treasury Accounts
 # ✅ Cashboxes aliases
 # ✅ Banks aliases
 # ✅ Treasury Transactions
+# ✅ Receipt vouchers aliases
+# ✅ Payment vouchers aliases
+# ✅ Transfers aliases
 # ✅ Confirm transaction
 # ✅ Cancel transaction
 # ✅ Account statement
@@ -17,6 +20,7 @@
 #   api/treasury/list.py
 #   api/treasury/detail.py
 # - حافظنا على نفس المسارات الحالية حتى لا ينكسر الربط مع الفرونت.
+# - مسارات السندات والتحويلات aliases تمر على نفس treasury_transactions.
 # ============================================================
 
 from django.urls import path
@@ -99,6 +103,99 @@ urlpatterns = [
         "transactions/<int:transaction_id>/cancel/",
         treasury_transaction_cancel,
         name="treasury_transaction_cancel",
+    ),
+
+    # ========================================================
+    # 🧾 Receipt Vouchers Aliases
+    # --------------------------------------------------------
+    # سندات القبض تستخدم نفس منطق حركات الخزينة.
+    # عند الإنشاء يرسل الفرونت:
+    # transaction_type=INCOME
+    # source=MANUAL
+    # counterparty_ledger_account_id
+    # post_to_accounting=true عند الحاجة
+    # ========================================================
+    path(
+        "vouchers/receipt/",
+        treasury_transactions,
+        name="treasury_receipt_vouchers",
+    ),
+    path(
+        "vouchers/receipt/<int:transaction_id>/",
+        treasury_transaction_detail,
+        name="treasury_receipt_voucher_detail",
+    ),
+    path(
+        "vouchers/receipt/<int:transaction_id>/confirm/",
+        treasury_transaction_confirm,
+        name="treasury_receipt_voucher_confirm",
+    ),
+    path(
+        "vouchers/receipt/<int:transaction_id>/cancel/",
+        treasury_transaction_cancel,
+        name="treasury_receipt_voucher_cancel",
+    ),
+
+    # ========================================================
+    # 💸 Payment Vouchers Aliases
+    # --------------------------------------------------------
+    # سندات الصرف تستخدم نفس منطق حركات الخزينة.
+    # عند الإنشاء يرسل الفرونت:
+    # transaction_type=EXPENSE
+    # source=MANUAL
+    # counterparty_ledger_account_id
+    # post_to_accounting=true عند الحاجة
+    # ========================================================
+    path(
+        "vouchers/payment/",
+        treasury_transactions,
+        name="treasury_payment_vouchers",
+    ),
+    path(
+        "vouchers/payment/<int:transaction_id>/",
+        treasury_transaction_detail,
+        name="treasury_payment_voucher_detail",
+    ),
+    path(
+        "vouchers/payment/<int:transaction_id>/confirm/",
+        treasury_transaction_confirm,
+        name="treasury_payment_voucher_confirm",
+    ),
+    path(
+        "vouchers/payment/<int:transaction_id>/cancel/",
+        treasury_transaction_cancel,
+        name="treasury_payment_voucher_cancel",
+    ),
+
+    # ========================================================
+    # 🔄 Transfers Aliases
+    # --------------------------------------------------------
+    # التحويلات تستخدم نفس منطق حركات الخزينة.
+    # عند الإنشاء يرسل الفرونت:
+    # transaction_type=TRANSFER
+    # treasury_account_id
+    # destination_account_id
+    # post_to_accounting=true عند الحاجة
+    # ========================================================
+    path(
+        "transfers/",
+        treasury_transactions,
+        name="treasury_transfers",
+    ),
+    path(
+        "transfers/<int:transaction_id>/",
+        treasury_transaction_detail,
+        name="treasury_transfer_detail",
+    ),
+    path(
+        "transfers/<int:transaction_id>/confirm/",
+        treasury_transaction_confirm,
+        name="treasury_transfer_confirm",
+    ),
+    path(
+        "transfers/<int:transaction_id>/cancel/",
+        treasury_transaction_cancel,
+        name="treasury_transfer_cancel",
     ),
 
     # ========================================================

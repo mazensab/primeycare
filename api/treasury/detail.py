@@ -1,16 +1,18 @@
 # ============================================================
 # 📂 api/treasury/detail.py
-# 🧠 Primey Care | Treasury API - Detail/Actions V2
+# 🧠 Primey Care | Treasury API - Detail/Actions V3
 # ------------------------------------------------------------
 # ✅ تفاصيل حساب خزينة
 # ✅ تعديل حساب خزينة / بنك / بوابة دفع / محفظة
 # ✅ تعطيل حساب خزينة بدل الحذف الخطير
 # ✅ تفاصيل حركة خزينة
 # ✅ تعديل حركة خزينة مسودة فقط
+# ✅ دعم الحساب المحاسبي المقابل للحركة
 # ✅ إلغاء حركة خزينة رسميًا مع عكس الأثر إن كانت مؤكدة
 # ✅ تأكيد حركة خزينة مع تطبيق أثر الرصيد
+# ✅ تأكيد حركة خزينة مع ترحيل محاسبي اختياري/تلقائي
 # ✅ كشف حساب خزينة / بنك
-# ✅ متوافق مع Treasury Backend الجديد
+# ✅ متوافق مع Treasury + Accounting Backend الجديد
 # ============================================================
 
 from __future__ import annotations
@@ -165,6 +167,13 @@ def _to_bool(value: Any, *, default: bool = False) -> bool:
     return bool(value)
 
 
+def _optional_bool(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+
+    return _to_bool(value, default=False)
+
+
 def _validate_choice(value: str, choices, *, field_name: str, message: str) -> None:
     valid_values = {choice_value for choice_value, _label in choices}
 
@@ -191,25 +200,40 @@ def _resolve_actor(request: HttpRequest):
     return None
 
 
-def _resolve_ledger_account(value: Any) -> Account | None:
+def _model_has_field(model_or_instance: Any, field_name: str) -> bool:
+    try:
+        model_or_instance._meta.get_field(field_name)
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_ledger_account(
+    value: Any,
+    *,
+    field_name: str = "ledger_account_id",
+    required: bool = False,
+) -> Account | None:
     if value in (None, "", 0, "0"):
+        if required:
+            raise ValidationError({field_name: "الحساب المحاسبي مطلوب."})
         return None
 
     try:
         account_id = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValidationError({"ledger_account_id": "معرّف الحساب المحاسبي غير صحيح."}) from exc
+        raise ValidationError({field_name: "معرّف الحساب المحاسبي غير صحيح."}) from exc
 
     account = Account.objects.filter(pk=account_id).first()
 
     if not account:
-        raise ValidationError({"ledger_account_id": "الحساب المحاسبي غير موجود."})
+        raise ValidationError({field_name: "الحساب المحاسبي غير موجود."})
 
     if getattr(account, "is_group", False):
-        raise ValidationError({"ledger_account_id": "لا يمكن ربط حساب خزينة بحساب محاسبي تجميعي."})
+        raise ValidationError({field_name: "لا يمكن استخدام حساب محاسبي تجميعي."})
 
     if not getattr(account, "is_active", True):
-        raise ValidationError({"ledger_account_id": "لا يمكن ربط حساب خزينة بحساب محاسبي غير نشط."})
+        raise ValidationError({field_name: "لا يمكن استخدام حساب محاسبي غير نشط."})
 
     return account
 
@@ -282,6 +306,53 @@ def _parse_optional_date(raw_value: str, *, field_name: str):
     return parsed
 
 
+def _treasury_transaction_queryset():
+    queryset = TreasuryTransaction.objects.select_related(
+        "treasury_account",
+        "treasury_account__ledger_account",
+        "destination_account",
+        "destination_account__ledger_account",
+        "journal_entry",
+        "created_by",
+        "confirmed_by",
+        "cancelled_by",
+    )
+
+    if _model_has_field(TreasuryTransaction, "counterparty_ledger_account"):
+        queryset = queryset.select_related("counterparty_ledger_account")
+
+    return queryset
+
+
+def _should_force_accounting_from_payload(payload: dict[str, Any]) -> bool | None:
+    if "post_to_accounting" not in payload:
+        return None
+
+    return _optional_bool(payload.get("post_to_accounting"))
+
+
+def _is_transfer_transaction(txn: TreasuryTransaction) -> bool:
+    return str(getattr(txn, "transaction_type", "")) == str(TreasuryTransactionType.TRANSFER)
+
+
+def _validate_transaction_accounts(txn: TreasuryTransaction) -> None:
+    if not txn.treasury_account_id:
+        raise ValidationError({"treasury_account_id": "حساب الخزينة مطلوب."})
+
+    if txn.treasury_account.status != TreasuryAccountStatus.ACTIVE:
+        raise ValidationError({"treasury_account_id": "حساب الخزينة غير نشط."})
+
+    if _is_transfer_transaction(txn):
+        if not txn.destination_account_id:
+            raise ValidationError({"destination_account_id": "حساب الوجهة مطلوب للتحويل."})
+
+        if txn.destination_account_id == txn.treasury_account_id:
+            raise ValidationError({"destination_account_id": "لا يمكن التحويل إلى نفس حساب الخزينة."})
+
+        if txn.destination_account.status != TreasuryAccountStatus.ACTIVE:
+            raise ValidationError({"destination_account_id": "حساب الوجهة غير نشط."})
+
+
 # ============================================================
 # Apply Updates
 # ============================================================
@@ -329,7 +400,10 @@ def _apply_account_payload(
         account.status = status_value
 
     if "ledger_account_id" in payload:
-        account.ledger_account = _resolve_ledger_account(payload.get("ledger_account_id"))
+        account.ledger_account = _resolve_ledger_account(
+            payload.get("ledger_account_id"),
+            field_name="ledger_account_id",
+        )
 
     if "opening_balance" in payload:
         if protected_balance:
@@ -479,6 +553,17 @@ def _apply_transaction_payload(
             field_name="destination_account_id",
         )
 
+    if "counterparty_ledger_account_id" in payload:
+        if not _model_has_field(TreasuryTransaction, "counterparty_ledger_account"):
+            raise ValidationError({
+                "counterparty_ledger_account_id": "حقل الحساب المحاسبي المقابل غير متاح في نموذج الخزينة."
+            })
+
+        txn.counterparty_ledger_account = _resolve_ledger_account(
+            payload.get("counterparty_ledger_account_id"),
+            field_name="counterparty_ledger_account_id",
+        )
+
     if "amount" in payload:
         txn.amount = _to_decimal(payload.get("amount"), field_name="amount")
 
@@ -501,6 +586,9 @@ def _apply_transaction_payload(
     if "amount" in payload or "fees_amount" in payload:
         if "net_amount" not in payload:
             txn.net_amount = txn.amount - txn.fees_amount
+
+    if txn.amount <= Decimal("0.00"):
+        raise ValidationError({"amount": "مبلغ الحركة يجب أن يكون أكبر من صفر."})
 
     if txn.fees_amount < Decimal("0.00"):
         raise ValidationError({"fees_amount": "مبلغ الرسوم لا يمكن أن يكون سالبًا."})
@@ -552,6 +640,8 @@ def _apply_transaction_payload(
 
     if "metadata" in payload:
         txn.metadata = _parse_metadata(payload.get("metadata"))
+
+    _validate_transaction_accounts(txn)
 
     return txn
 
@@ -656,16 +746,7 @@ def treasury_account_detail(request: HttpRequest, account_id: int) -> JsonRespon
 @require_http_methods(["GET", "PATCH", "PUT", "DELETE"])
 def treasury_transaction_detail(request: HttpRequest, transaction_id: int) -> JsonResponse:
     txn = get_object_or_404(
-        TreasuryTransaction.objects.select_related(
-            "treasury_account",
-            "treasury_account__ledger_account",
-            "destination_account",
-            "destination_account__ledger_account",
-            "journal_entry",
-            "created_by",
-            "confirmed_by",
-            "cancelled_by",
-        ),
+        _treasury_transaction_queryset(),
         pk=transaction_id,
     )
 
@@ -745,23 +826,21 @@ def treasury_transaction_detail(request: HttpRequest, transaction_id: int) -> Js
 @require_http_methods(["POST"])
 def treasury_transaction_confirm(request: HttpRequest, transaction_id: int) -> JsonResponse:
     txn = get_object_or_404(
-        TreasuryTransaction.objects.select_related(
-            "treasury_account",
-            "treasury_account__ledger_account",
-            "destination_account",
-            "destination_account__ledger_account",
-            "journal_entry",
-            "created_by",
-            "confirmed_by",
-            "cancelled_by",
-        ),
+        _treasury_transaction_queryset(),
         pk=transaction_id,
     )
 
     try:
+        payload = {}
+        if request.body:
+            payload = _read_json_body(request)
+
+        post_to_accounting = _should_force_accounting_from_payload(payload)
+
         confirmed_txn = confirm_treasury_transaction(
             txn,
             actor=_resolve_actor(request),
+            post_to_accounting=post_to_accounting,
         )
 
         return _json_response(
@@ -796,16 +875,7 @@ def treasury_transaction_confirm(request: HttpRequest, transaction_id: int) -> J
 @require_http_methods(["POST"])
 def treasury_transaction_cancel(request: HttpRequest, transaction_id: int) -> JsonResponse:
     txn = get_object_or_404(
-        TreasuryTransaction.objects.select_related(
-            "treasury_account",
-            "treasury_account__ledger_account",
-            "destination_account",
-            "destination_account__ledger_account",
-            "journal_entry",
-            "created_by",
-            "confirmed_by",
-            "cancelled_by",
-        ),
+        _treasury_transaction_queryset(),
         pk=transaction_id,
     )
 

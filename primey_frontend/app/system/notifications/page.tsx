@@ -1,67 +1,78 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/notifications/page.tsx
-   🧠 Primey Care | Notifications Overview
-
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ نفس النمط المعتمد
-   ✅ w-full space-y-4
-   ✅ بدون main / min-h-screen / max-w
-   ✅ أزرار انتقال للصفحات التي أزلناها من السايدر
-   ✅ Skeleton Loading
-   ✅ Error State مستقل
-   ✅ Empty State ذكي
-   ✅ Excel .xls HTML Workbook
-   ✅ Web PDF Print
-   ✅ sonner
-   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
-   ✅ بدون localhost hardcoded
-   ✅ لا توجد نصوص تقنية ظاهرة في الواجهة
+   📂 primey_frontend/app/system/notifications/page.tsx
+   🔔 Primey Care — Notifications
+   ------------------------------------------------------------
+   ✅ Same approved Customers / Orders / Users table pattern
+   ✅ Real API only with safe notification-center endpoint fallbacks
+   ✅ Inbox list/count/latest + mark_read/mark_unread/mark_all_read/bulk_mark_read
+   ✅ Header buttons / KPI cards / toolbar / table unified
+   ✅ Search / read filter / severity filter / type filter / date range
+   ✅ Link to notification details: /system/notifications/[id]
+   ✅ Link to notification settings: /system/notifications/settings
+   ✅ Excel .xls + Web print
+   ✅ Skeleton loading
+   ✅ Error / Empty states
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
+import * as React from "react";
 import Link from "next/link";
 import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import {
-  ArrowUpRight,
-  BadgeCheck,
+  ArrowUpDown,
   Bell,
-  BellRing,
-  Download,
+  CheckCircle2,
+  ColumnsIcon,
   Eye,
-  FileText,
+  FileSpreadsheet,
   Inbox,
   Loader2,
-  Mail,
-  MessageCircle,
+  MailCheck,
+  MoreHorizontal,
   Printer,
-  RefreshCcw,
+  RefreshCw,
+  RotateCcw,
   Search,
   Settings,
-  ShieldCheck,
-  Smartphone,
-  UserRound,
+  ShieldAlert,
+  TriangleAlert,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -71,501 +82,336 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
+type ReadFilter = "all" | "unread" | "read";
+type SeverityFilter =
+  | "all"
+  | "info"
+  | "success"
+  | "warning"
+  | "error"
+  | "critical";
+type TypeFilter =
+  | "all"
+  | "system"
+  | "order"
+  | "invoice"
+  | "payment"
+  | "whatsapp"
+  | "customer"
+  | "provider";
+type SortKey = "newest" | "oldest" | "title" | "severity" | "type" | "read";
 
-type NotificationStatus =
-  | "UNREAD"
-  | "READ"
-  | "SENT"
-  | "FAILED"
-  | "PENDING"
-  | "UNKNOWN";
+type ColumnKey =
+  | "select"
+  | "notification"
+  | "type"
+  | "severity"
+  | "status"
+  | "createdAt"
+  | "readAt"
+  | "link"
+  | "actions";
 
-type NotificationChannel =
-  | "IN_APP"
-  | "EMAIL"
-  | "WHATSAPP"
-  | "SMS"
-  | "SYSTEM"
-  | "UNKNOWN";
-
-type NotificationSeverity =
-  | "SUCCESS"
-  | "INFO"
-  | "WARNING"
-  | "ERROR"
-  | "CRITICAL"
-  | "UNKNOWN";
-
-type NotificationRow = {
-  id: string;
+type NotificationRecord = {
+  id: number;
   title: string;
   message: string;
-  recipient_name: string;
-  recipient_email: string;
-  recipient_phone: string;
-  status: NotificationStatus;
-  channel: NotificationChannel;
-  severity: NotificationSeverity;
-  event_name: string;
-  source: string;
-  created_at: string;
-  read_at: string;
-  sent_at: string;
+  notification_type: string;
+  severity: string;
+  link: string;
+  is_read: boolean;
+  read_at: string | null;
+  created_at: string | null;
+  recipient_id: number | null;
+  event_id: number | null;
 };
 
-type NotificationsSummary = {
-  total_notifications: number;
-  unread_notifications: number;
-  read_notifications: number;
-  sent_notifications: number;
-  failed_notifications: number;
-  pending_notifications: number;
-  in_app_notifications: number;
-  email_notifications: number;
-  whatsapp_notifications: number;
-  sms_notifications: number;
-  success_notifications: number;
-  warning_notifications: number;
-  error_notifications: number;
+type NotificationCounts = {
+  total: number;
+  unread: number;
+  read: number;
+  info: number;
+  success: number;
+  warning: number;
+  error: number;
+  critical: number;
 };
 
-type ApiEnvelope<T> = {
+type PaginationState = {
+  page: number;
+  page_size: number;
+  total_pages: number;
+  total_items: number;
+  has_next: boolean;
+  has_previous: boolean;
+};
+
+type InboxApiResponse = {
   ok?: boolean;
   success?: boolean;
   message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
+  data?: unknown;
   results?: unknown[];
-  items?: unknown[];
-  rows?: unknown[];
-  notifications?: unknown[];
-  inbox?: unknown[];
-  summary?: Partial<NotificationsSummary>;
-  stats?: Partial<NotificationsSummary>;
+  count?: number;
+  meta?: unknown;
 };
 
-const DEFAULT_SUMMARY: NotificationsSummary = {
-  total_notifications: 0,
-  unread_notifications: 0,
-  read_notifications: 0,
-  sent_notifications: 0,
-  failed_notifications: 0,
-  pending_notifications: 0,
-  in_app_notifications: 0,
-  email_notifications: 0,
-  whatsapp_notifications: 0,
-  sms_notifications: 0,
-  success_notifications: 0,
-  warning_notifications: 0,
-  error_notifications: 0,
+const PAGE_SIZE = 12;
+
+const API_BASE_CANDIDATES = [
+  "/api/notifications",
+  "/api/notification-center",
+  "/api/notification_center",
+  "/api/notification-center-api",
+];
+
+const DEFAULT_VISIBLE_COLUMNS: Record<ColumnKey, boolean> = {
+  select: true,
+  notification: true,
+  type: true,
+  severity: true,
+  status: true,
+  createdAt: true,
+  readAt: true,
+  link: true,
+  actions: true,
 };
 
-/* ============================================================
-   Locale / API
-============================================================ */
+const translations = {
+  ar: {
+    title: "الإشعارات",
+    subtitle: "متابعة إشعارات المستخدم الحالي، الرسائل غير المقروءة، والتنبيهات المهمة.",
+    settings: "الإعدادات",
+    details: "عرض التفاصيل",
+    refresh: "تحديث",
+    markAllRead: "تحديد الكل كمقروء",
+    markSelectedRead: "تحديد المحدد كمقروء",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    searchPlaceholder: "ابحث بعنوان الإشعار أو الرسالة أو النوع...",
+    total: "إجمالي الإشعارات",
+    unread: "غير مقروءة",
+    read: "مقروءة",
+    alerts: "تنبيهات مهمة",
+    notification: "الإشعار",
+    type: "النوع",
+    severity: "الشدة",
+    status: "الحالة",
+    createdAt: "تاريخ الإنشاء",
+    readAt: "تاريخ القراءة",
+    link: "الرابط",
+    actions: "الإجراءات",
+    columns: "الأعمدة",
+    sort: "الترتيب",
+    selected: "محدد",
+    allStatuses: "كل الحالات",
+    allSeverities: "كل الشدات",
+    allTypes: "كل الأنواع",
+    info: "معلومة",
+    success: "نجاح",
+    warning: "تحذير",
+    error: "خطأ",
+    critical: "حرج",
+    system: "النظام",
+    order: "طلب",
+    invoice: "فاتورة",
+    payment: "مدفوعات",
+    whatsapp: "واتساب",
+    customer: "عميل",
+    provider: "مقدم خدمة",
+    readStatus: "مقروء",
+    unreadStatus: "غير مقروء",
+    from: "من",
+    to: "إلى",
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    titleSort: "العنوان",
+    severitySort: "الشدة",
+    typeSort: "النوع",
+    readSort: "حالة القراءة",
+    activeFilters: "فلاتر مفعلة",
+    clearSelection: "إلغاء التحديد",
+    openLink: "فتح الرابط",
+    markRead: "تحديد كمقروء",
+    markUnread: "تحديد كغير مقروء",
+    actionSuccess: "تم تنفيذ العملية بنجاح.",
+    actionFailed: "تعذر تنفيذ العملية.",
+    noDataTitle: "لا توجد إشعارات بعد",
+    noDataDesc: "عند وصول إشعارات جديدة ستظهر هنا.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض إشعارات أخرى.",
+    errorTitle: "تعذر تحميل الإشعارات",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير الإشعارات",
+    generatedAt: "تاريخ الطباعة",
+    showing: "عرض",
+    rows: "صفوف",
+    page: "صفحة",
+    of: "من",
+    next: "التالي",
+    previous: "السابق",
+    unknown: "غير محدد",
+    noLink: "لا يوجد رابط",
+  },
+  en: {
+    title: "Notifications",
+    subtitle: "Monitor current user notifications, unread messages, and important alerts.",
+    settings: "Settings",
+    details: "View details",
+    refresh: "Refresh",
+    markAllRead: "Mark all as read",
+    markSelectedRead: "Mark selected as read",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    searchPlaceholder: "Search title, message, or type...",
+    total: "Total notifications",
+    unread: "Unread",
+    read: "Read",
+    alerts: "Important alerts",
+    notification: "Notification",
+    type: "Type",
+    severity: "Severity",
+    status: "Status",
+    createdAt: "Created at",
+    readAt: "Read at",
+    link: "Link",
+    actions: "Actions",
+    columns: "Columns",
+    sort: "Sort",
+    selected: "Selected",
+    allStatuses: "All statuses",
+    allSeverities: "All severities",
+    allTypes: "All types",
+    info: "Info",
+    success: "Success",
+    warning: "Warning",
+    error: "Error",
+    critical: "Critical",
+    system: "System",
+    order: "Order",
+    invoice: "Invoice",
+    payment: "Payment",
+    whatsapp: "WhatsApp",
+    customer: "Customer",
+    provider: "Provider",
+    readStatus: "Read",
+    unreadStatus: "Unread",
+    from: "From",
+    to: "To",
+    newest: "Newest",
+    oldest: "Oldest",
+    titleSort: "Title",
+    severitySort: "Severity",
+    typeSort: "Type",
+    readSort: "Read status",
+    activeFilters: "Active filters",
+    clearSelection: "Clear selection",
+    openLink: "Open link",
+    markRead: "Mark as read",
+    markUnread: "Mark as unread",
+    actionSuccess: "Action completed successfully.",
+    actionFailed: "Unable to complete action.",
+    noDataTitle: "No notifications yet",
+    noDataDesc: "New notifications will appear here once received.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other notifications.",
+    errorTitle: "Unable to load notifications",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "Notifications report",
+    generatedAt: "Generated at",
+    showing: "Showing",
+    rows: "Rows",
+    page: "Page",
+    of: "of",
+    next: "Next",
+    previous: "Previous",
+    unknown: "Unknown",
+    noLink: "No link",
+  },
+} as const;
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
-
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
 }
 
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
 
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasAnyPermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  const roles = getAuthRoles(authValue);
+  return fallback;
+}
 
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
+function toBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "support"].includes(role),
-    );
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "read", "مقروء"].includes(value.toLowerCase());
   }
 
-  return true;
+  return Boolean(value);
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "الإشعارات" : "Notifications",
-    subtitle: isArabic
-      ? "لوحة متابعة الإشعارات الداخلية وحالات القراءة والإرسال وقنوات التواصل."
-      : "Overview for internal notifications, read status, delivery status, and channels.",
-
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-
-    notificationsList: isArabic ? "قائمة الإشعارات" : "Notifications List",
-    notificationSettings: isArabic
-      ? "إعدادات الإشعارات"
-      : "Notification Settings",
-
-    totalNotifications: isArabic ? "إجمالي الإشعارات" : "Total Notifications",
-    unreadNotifications: isArabic ? "غير مقروءة" : "Unread",
-    sentNotifications: isArabic ? "مرسلة" : "Sent",
-    failedNotifications: isArabic ? "فاشلة" : "Failed",
-    pendingNotifications: isArabic ? "قيد الانتظار" : "Pending",
-    emailNotifications: isArabic ? "البريد الإلكتروني" : "Email",
-    whatsappNotifications: isArabic ? "واتساب" : "WhatsApp",
-    smsNotifications: isArabic ? "رسائل SMS" : "SMS",
-    warningNotifications: isArabic ? "تنبيهات تحذيرية" : "Warnings",
-    errorNotifications: isArabic ? "تنبيهات خطأ" : "Errors",
-
-    shortcutsTitle: isArabic ? "اختصارات الإشعارات" : "Notification Shortcuts",
-    shortcutsDesc: isArabic
-      ? "الوصول السريع لقائمة الإشعارات وإعدادات الإشعارات بعد تنظيف السايدر."
-      : "Quick access to notification list and notification settings after sidebar cleanup.",
-
-    latestTitle: isArabic ? "أحدث الإشعارات" : "Latest Notifications",
-    latestDesc: isArabic
-      ? "آخر الإشعارات مع القناة والحالة والمستلم."
-      : "Latest notifications with channel, status, and recipient.",
-
-    searchPlaceholder: isArabic
-      ? "ابحث في الإشعارات بالعنوان أو الرسالة أو المستلم..."
-      : "Search notifications by title, message, or recipient...",
-
-    table: {
-      notification: isArabic ? "الإشعار" : "Notification",
-      recipient: isArabic ? "المستلم" : "Recipient",
-      channel: isArabic ? "القناة" : "Channel",
-      status: isArabic ? "الحالة" : "Status",
-      severity: isArabic ? "الأهمية" : "Severity",
-      source: isArabic ? "المصدر" : "Source",
-      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    unread: isArabic ? "غير مقروء" : "Unread",
-    read: isArabic ? "مقروء" : "Read",
-    sent: isArabic ? "مرسل" : "Sent",
-    failed: isArabic ? "فشل" : "Failed",
-    pending: isArabic ? "قيد الانتظار" : "Pending",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    inApp: isArabic ? "داخل النظام" : "In App",
-    email: isArabic ? "بريد إلكتروني" : "Email",
-    whatsapp: isArabic ? "واتساب" : "WhatsApp",
-    sms: isArabic ? "SMS" : "SMS",
-    system: isArabic ? "النظام" : "System",
-
-    success: isArabic ? "نجاح" : "Success",
-    info: isArabic ? "معلومة" : "Info",
-    warning: isArabic ? "تحذير" : "Warning",
-    error: isArabic ? "خطأ" : "Error",
-    critical: isArabic ? "حرج" : "Critical",
-
-    view: isArabic ? "عرض" : "View",
-
-    emptyTitle: isArabic ? "لا توجد إشعارات" : "No notifications",
-    emptyText: isArabic
-      ? "ستظهر الإشعارات هنا عند وصول أول إشعار."
-      : "Notifications will appear here when the first notification arrives.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث."
-      : "Try changing your search terms.",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الإشعارات" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض الإشعارات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view notifications. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل بيانات الإشعارات."
-      : "Unable to load notifications.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث بيانات الإشعارات."
-      : "Notifications refreshed.",
-
-    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: unknown): string {
+function formatInteger(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(toNumber(value));
 }
 
-function formatDate(value: string, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const parsed = new Date(value);
 
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).slice(0, 10);
+  }
+
+  return parsed.toISOString().slice(0, 10);
 }
 
-function escapeHtml(value: string | number) {
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).replace("T", " ").slice(0, 16);
+  }
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -574,1243 +420,294 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
 
-    if (value !== undefined && value !== null && value !== "") return value;
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
   }
 
-  for (const container of [
-    "notification",
-    "recipient",
-    "user",
-    "profile",
-    "data",
-    "payload",
-  ]) {
-    const nested = obj[container];
+  return envBase;
+}
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+function makeApiUrl(basePath: string, suffix: string, params?: URLSearchParams) {
+  const base = getApiBaseUrl();
+  const query = params?.toString();
 
-      if (value !== undefined && value !== null && value !== "") return value;
+  return `${base}${basePath}${suffix}${query ? `?${query}` : ""}`;
+}
+
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const found = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${name}=`));
+
+  return found ? decodeURIComponent(found.split("=").slice(1).join("=")) : "";
+}
+
+async function fetchJson<T>(
+  url: string,
+  options?: {
+    signal?: AbortSignal;
+    method?: "GET" | "POST";
+    body?: unknown;
+  },
+): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
+
+  const response = await fetch(url, {
+    method: options?.method || "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal: options?.signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options?.method === "POST" ? { "Content-Type": "application/json" } : {}),
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body:
+      options?.method === "POST"
+        ? JSON.stringify(options.body || {})
+        : undefined,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
 }
 
-function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
-  if (!payload) return [];
+async function requestNotificationApi<T>(
+  suffix: string,
+  options?: {
+    params?: URLSearchParams;
+    signal?: AbortSignal;
+    method?: "GET" | "POST";
+    body?: unknown;
+  },
+): Promise<T> {
+  let lastError: unknown = null;
 
-  const data = asDict(payload.data);
-  const directValue = (payload as Dict)[key];
+  for (const basePath of API_BASE_CANDIDATES) {
+    try {
+      return await fetchJson<T>(makeApiUrl(basePath, suffix, options?.params), {
+        signal: options?.signal,
+        method: options?.method,
+        body: options?.body,
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
 
-  if (Array.isArray(directValue)) return directValue;
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Notification API request failed.");
+}
+
+function extractResults(payload: InboxApiResponse) {
   if (Array.isArray(payload.results)) return payload.results;
-  if (Array.isArray(payload.items)) return payload.items;
-  if (Array.isArray(payload.rows)) return payload.rows;
-  if (Array.isArray(payload.notifications)) return payload.notifications;
-  if (Array.isArray(payload.inbox)) return payload.inbox;
-
-  if (Array.isArray(data[key])) return data[key] as unknown[];
-  if (Array.isArray(data.results)) return data.results as unknown[];
-  if (Array.isArray(data.items)) return data.items as unknown[];
-  if (Array.isArray(data.rows)) return data.rows as unknown[];
-  if (Array.isArray(data.notifications)) return data.notifications as unknown[];
-  if (Array.isArray(data.inbox)) return data.inbox as unknown[];
-
   if (Array.isArray(payload.data)) return payload.data;
+
+  const data = asRecord(payload.data);
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.items)) return data.items;
 
   return [];
 }
 
-function extractSummary(payload: ApiEnvelope<unknown> | null) {
-  if (!payload) return {};
+function extractMeta(payload: InboxApiResponse) {
+  return asRecord(payload.meta);
+}
 
-  const data = asDict(payload.data);
+function normalizeCounts(value: unknown): NotificationCounts {
+  const item = asRecord(value);
 
   return {
-    ...asDict(payload.summary),
-    ...asDict(payload.stats),
-    ...asDict(data.summary),
-    ...asDict(data.stats),
-    ...asDict(data.totals),
-    ...asDict(data),
-  } as Partial<NotificationsSummary>;
+    total: toNumber(item.total),
+    unread: toNumber(item.unread),
+    read: toNumber(item.read),
+    info: toNumber(item.info),
+    success: toNumber(item.success),
+    warning: toNumber(item.warning),
+    error: toNumber(item.error),
+    critical: toNumber(item.critical),
+  };
 }
 
-function normalizeStatus(value: unknown): NotificationStatus {
-  const clean = String(value || "").toUpperCase();
+function extractCounts(payload: InboxApiResponse): NotificationCounts {
+  const meta = asRecord(payload.meta);
+  const data = asRecord(payload.data);
 
-  if (["UNREAD", "NEW"].includes(clean)) return "UNREAD";
-  if (["READ", "SEEN"].includes(clean)) return "READ";
-  if (["SENT", "DELIVERED"].includes(clean)) return "SENT";
-  if (["FAILED", "ERROR"].includes(clean)) return "FAILED";
-  if (["PENDING", "QUEUED", "WAITING"].includes(clean)) return "PENDING";
-
-  return "UNKNOWN";
+  return normalizeCounts(meta.counts || data.counts || {});
 }
 
-function normalizeChannel(value: unknown): NotificationChannel {
-  const clean = String(value || "").toUpperCase();
-
-  if (["IN_APP", "INAPP", "APP", "INBOX"].includes(clean)) return "IN_APP";
-  if (["EMAIL", "MAIL"].includes(clean)) return "EMAIL";
-  if (["WHATSAPP", "WA"].includes(clean)) return "WHATSAPP";
-  if (["SMS"].includes(clean)) return "SMS";
-  if (["SYSTEM"].includes(clean)) return "SYSTEM";
-
-  return "UNKNOWN";
-}
-
-function normalizeSeverity(value: unknown): NotificationSeverity {
-  const clean = String(value || "").toUpperCase();
-
-  if (["SUCCESS", "DONE"].includes(clean)) return "SUCCESS";
-  if (["INFO", "INFORMATION"].includes(clean)) return "INFO";
-  if (["WARNING", "WARN"].includes(clean)) return "WARNING";
-  if (["ERROR", "FAILED"].includes(clean)) return "ERROR";
-  if (["CRITICAL", "HIGH"].includes(clean)) return "CRITICAL";
-
-  return "UNKNOWN";
-}
-
-function normalizeNotification(item: unknown, index: number): NotificationRow {
-  const obj = asDict(item);
-
-  const title =
-    getNestedValue(obj, ["title", "subject", "heading"]) ||
-    getNestedValue(obj, ["event_name", "event", "type"]);
+function extractPagination(payload: InboxApiResponse): PaginationState {
+  const meta = extractMeta(payload);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    title: String(title || "-"),
-    message: String(getNestedValue(obj, ["message", "body", "content"]) || ""),
-    recipient_name: String(
-      getNestedValue(obj, ["recipient_name", "user_name", "name"]) || "",
-    ),
-    recipient_email: String(
-      getNestedValue(obj, ["recipient_email", "email"]) || "",
-    ),
-    recipient_phone: String(
-      getNestedValue(obj, ["recipient_phone", "phone", "mobile"]) || "",
-    ),
-    status: normalizeStatus(getNestedValue(obj, ["status", "state"])),
-    channel: normalizeChannel(getNestedValue(obj, ["channel", "delivery_channel"])),
-    severity: normalizeSeverity(getNestedValue(obj, ["severity", "level"])),
-    event_name: String(getNestedValue(obj, ["event_name", "event", "type"]) || ""),
-    source: String(getNestedValue(obj, ["source", "module", "app_label"]) || ""),
-    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
-    read_at: String(getNestedValue(obj, ["read_at", "seen_at"]) || ""),
-    sent_at: String(getNestedValue(obj, ["sent_at", "delivered_at"]) || ""),
+    page: toNumber(meta.page, 1),
+    page_size: toNumber(meta.page_size, PAGE_SIZE),
+    total_pages: Math.max(toNumber(meta.total_pages, 1), 1),
+    total_items: toNumber(meta.total_items, toNumber(payload.count)),
+    has_next: toBoolean(meta.has_next),
+    has_previous: toBoolean(meta.has_previous),
   };
 }
 
-function buildSummary(
-  rows: NotificationRow[],
-  apiSummary?: Partial<NotificationsSummary>,
-): NotificationsSummary {
-  const fallback: NotificationsSummary = {
-    total_notifications: rows.length,
-    unread_notifications: rows.filter((item) => item.status === "UNREAD").length,
-    read_notifications: rows.filter((item) => item.status === "READ").length,
-    sent_notifications: rows.filter((item) => item.status === "SENT").length,
-    failed_notifications: rows.filter((item) => item.status === "FAILED").length,
-    pending_notifications: rows.filter((item) => item.status === "PENDING").length,
-    in_app_notifications: rows.filter((item) => item.channel === "IN_APP").length,
-    email_notifications: rows.filter((item) => item.channel === "EMAIL").length,
-    whatsapp_notifications: rows.filter((item) => item.channel === "WHATSAPP")
-      .length,
-    sms_notifications: rows.filter((item) => item.channel === "SMS").length,
-    success_notifications: rows.filter((item) => item.severity === "SUCCESS")
-      .length,
-    warning_notifications: rows.filter((item) => item.severity === "WARNING")
-      .length,
-    error_notifications: rows.filter(
-      (item) => item.severity === "ERROR" || item.severity === "CRITICAL",
-    ).length,
-  };
-
-  const api = asDict(apiSummary);
+function normalizeNotification(value: unknown): NotificationRecord {
+  const item = asRecord(value);
 
   return {
-    total_notifications:
-      toNumber(api.total_notifications) ||
-      toNumber(api.notifications_count) ||
-      toNumber(api.count) ||
-      fallback.total_notifications,
-    unread_notifications:
-      toNumber(api.unread_notifications) ||
-      toNumber(api.unread_count) ||
-      fallback.unread_notifications,
-    read_notifications:
-      toNumber(api.read_notifications) ||
-      toNumber(api.read_count) ||
-      fallback.read_notifications,
-    sent_notifications:
-      toNumber(api.sent_notifications) ||
-      toNumber(api.sent_count) ||
-      fallback.sent_notifications,
-    failed_notifications:
-      toNumber(api.failed_notifications) ||
-      toNumber(api.failed_count) ||
-      fallback.failed_notifications,
-    pending_notifications:
-      toNumber(api.pending_notifications) ||
-      toNumber(api.pending_count) ||
-      fallback.pending_notifications,
-    in_app_notifications:
-      toNumber(api.in_app_notifications) ||
-      toNumber(api.in_app_count) ||
-      fallback.in_app_notifications,
-    email_notifications:
-      toNumber(api.email_notifications) ||
-      toNumber(api.email_count) ||
-      fallback.email_notifications,
-    whatsapp_notifications:
-      toNumber(api.whatsapp_notifications) ||
-      toNumber(api.whatsapp_count) ||
-      fallback.whatsapp_notifications,
-    sms_notifications:
-      toNumber(api.sms_notifications) ||
-      toNumber(api.sms_count) ||
-      fallback.sms_notifications,
-    success_notifications:
-      toNumber(api.success_notifications) || fallback.success_notifications,
-    warning_notifications:
-      toNumber(api.warning_notifications) || fallback.warning_notifications,
-    error_notifications:
-      toNumber(api.error_notifications) || fallback.error_notifications,
+    id: toNumber(item.id),
+    title: normalizeText(item.title),
+    message: normalizeText(item.message),
+    notification_type: normalizeText(item.notification_type || item.type || "system"),
+    severity: normalizeText(item.severity || "info").toLowerCase(),
+    link: normalizeText(item.link),
+    is_read: toBoolean(item.is_read),
+    read_at: normalizeText(item.read_at) || null,
+    created_at: normalizeText(item.created_at) || null,
+    recipient_id:
+      item.recipient_id === null || item.recipient_id === undefined
+        ? null
+        : toNumber(item.recipient_id),
+    event_id:
+      item.event_id === null || item.event_id === undefined
+        ? null
+        : toNumber(item.event_id),
   };
 }
 
-function statusLabel(status: NotificationStatus, locale: AppLocale) {
-  const t = dictionary(locale);
+function getSeverityLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const severity = normalizeText(value).toLowerCase();
 
-  const labels: Record<NotificationStatus, string> = {
-    UNREAD: t.unread,
-    READ: t.read,
-    SENT: t.sent,
-    FAILED: t.failed,
-    PENDING: t.pending,
-    UNKNOWN: t.unknown,
-  };
+  if (severity === "success") return t.success;
+  if (severity === "warning") return t.warning;
+  if (severity === "error") return t.error;
+  if (severity === "critical") return t.critical;
 
-  return labels[status];
+  return t.info;
 }
 
-function channelLabel(channel: NotificationChannel, locale: AppLocale) {
-  const t = dictionary(locale);
+function getSeverityClass(value: string) {
+  const severity = normalizeText(value).toLowerCase();
 
-  const labels: Record<NotificationChannel, string> = {
-    IN_APP: t.inApp,
-    EMAIL: t.email,
-    WHATSAPP: t.whatsapp,
-    SMS: t.sms,
-    SYSTEM: t.system,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[channel];
-}
-
-function severityLabel(severity: NotificationSeverity, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<NotificationSeverity, string> = {
-    SUCCESS: t.success,
-    INFO: t.info,
-    WARNING: t.warning,
-    ERROR: t.error,
-    CRITICAL: t.critical,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[severity];
-}
-
-function statusBadge(status: NotificationStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "UNREAD" || status === "SENT") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+  if (severity === "success") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
-  if (status === "PENDING") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
+  if (severity === "warning") {
+    return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
   }
 
-  if (status === "FAILED") {
-    return (
-      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
-        {label}
-      </Badge>
-    );
+  if (severity === "error") {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
   }
 
+  if (severity === "critical") {
+    return "border-violet-500/30 bg-violet-50 text-violet-700 hover:bg-violet-50";
+  }
+
+  return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+}
+
+function getTypeLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const type = normalizeText(value).toLowerCase();
+
+  if (type.includes("order")) return t.order;
+  if (type.includes("invoice")) return t.invoice;
+  if (type.includes("payment")) return t.payment;
+  if (type.includes("whatsapp")) return t.whatsapp;
+  if (type.includes("customer")) return t.customer;
+  if (type.includes("provider")) return t.provider;
+
+  return type ? type : t.system;
+}
+
+function SeverityBadge({
+  severity,
+  locale,
+}: {
+  severity: string;
+  locale: Locale;
+}) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full px-2.5 py-1 text-xs font-medium",
+        getSeverityClass(severity),
+      )}
+    >
+      {getSeverityLabel(severity, locale)}
     </Badge>
   );
 }
 
-function isValidId(value: unknown) {
-  const id = String(value || "").trim();
-
-  return id && id !== "-" && id !== "undefined" && id !== "null";
-}
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function PageSkeleton() {
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <SkeletonLine className="h-8 w-28" />
-              <SkeletonLine className="mt-3 h-4 w-24" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="grid gap-3 p-5 md:grid-cols-2">
-          {Array.from({ length: 2 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-24 w-full rounded-2xl" />
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="space-y-3 p-5">
-          <SkeletonLine className="h-7 w-48" />
-          {Array.from({ length: 7 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
-          ))}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  title,
+function ReadBadge({
+  isRead,
   locale,
-  summary,
-  rows,
 }: {
-  filename: string;
-  title: string;
-  locale: AppLocale;
-  summary: NotificationsSummary;
-  rows: NotificationRow[];
+  isRead: boolean;
+  locale: Locale;
 }) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const t = dictionary(locale);
-
-  const rowsHtml = rows
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.title)}</td>
-          <td>${escapeHtml(item.message || "-")}</td>
-          <td>${escapeHtml(item.recipient_name || "-")}</td>
-          <td>${escapeHtml(channelLabel(item.channel, locale))}</td>
-          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(severityLabel(item.severity, locale))}</td>
-          <td>${escapeHtml(item.source || "-")}</td>
-          <td>${escapeHtml(formatDate(item.created_at, locale))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-        </style>
-      </head>
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="8">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="8"></td></tr>
-          <tr><td class="section" colspan="8">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalNotifications)}</td><td colspan="7">${escapeHtml(formatNumber(summary.total_notifications))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.unreadNotifications)}</td><td colspan="7">${escapeHtml(formatNumber(summary.unread_notifications))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.sentNotifications)}</td><td colspan="7">${escapeHtml(formatNumber(summary.sent_notifications))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.failedNotifications)}</td><td colspan="7">${escapeHtml(formatNumber(summary.failed_notifications))}</td></tr>
-
-          <tr><td colspan="8"></td></tr>
-          <tr>
-            <th>${escapeHtml(t.table.notification)}</th>
-            <th>${escapeHtml("Message")}</th>
-            <th>${escapeHtml(t.table.recipient)}</th>
-            <th>${escapeHtml(t.table.channel)}</th>
-            <th>${escapeHtml(t.table.status)}</th>
-            <th>${escapeHtml(t.table.severity)}</th>
-            <th>${escapeHtml(t.table.source)}</th>
-            <th>${escapeHtml(t.table.createdAt)}</th>
-          </tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  summary,
-  rows,
-}: {
-  locale: AppLocale;
-  title: string;
-  summary: NotificationsSummary;
-  rows: NotificationRow[];
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-
-  const tableRows = rows
-    .slice(0, 40)
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.title)}</td>
-          <td>${escapeHtml(item.recipient_name || "-")}</td>
-          <td>${escapeHtml(channelLabel(item.channel, locale))}</td>
-          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(formatDate(item.created_at, locale))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 5px 12px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          .grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .box {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .box span { color: #6b7280; display: block; font-size: 11px; }
-          .box strong { display: block; margin-top: 6px; font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-          th { background: #f3f4f6; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
-          </div>
-          <div class="badge">Primey Care</div>
-        </div>
-
-        <div class="grid">
-          <div class="box"><span>${escapeHtml(t.totalNotifications)}</span><strong>${escapeHtml(formatNumber(summary.total_notifications))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.unreadNotifications)}</span><strong>${escapeHtml(formatNumber(summary.unread_notifications))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.sentNotifications)}</span><strong>${escapeHtml(formatNumber(summary.sent_notifications))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.failedNotifications)}</span><strong>${escapeHtml(formatNumber(summary.failed_notifications))}</strong></div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>${escapeHtml(t.table.notification)}</th>
-              <th>${escapeHtml(t.table.recipient)}</th>
-              <th>${escapeHtml(t.table.channel)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-              <th>${escapeHtml(t.table.createdAt)}</th>
-            </tr>
-          </thead>
-          <tbody>${tableRows || `<tr><td colspan="5">${escapeHtml(t.emptyTitle)}</td></tr>`}</tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
-}
-
-/* ============================================================
-   Page
-============================================================ */
-
-export default function SystemNotificationsPage() {
-  const auth = useAuth() as unknown;
-
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [rows, setRows] = useState<NotificationRow[]>([]);
-  const [summary, setSummary] =
-    useState<NotificationsSummary>(DEFAULT_SUMMARY);
-  const [query, setQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
-
-  const canView = hasAnyPermission(
-    auth,
-    ["notifications.view", "notification_center.view", "system.view"],
-    "view",
-  );
-
-  const canViewList = hasAnyPermission(
-    auth,
-    ["notifications.view", "notification_center.view"],
-    "view",
-  );
-
-  const canViewSettings = hasAnyPermission(
-    auth,
-    [
-      "notifications.settings",
-      "notifications.settings.view",
-      "notification_center.settings",
-      "system.settings",
-    ],
-    "view",
-  );
-
-  const canExport = hasAnyPermission(
-    auth,
-    ["notifications.export", "reports.export"],
-    "action",
-  );
-
-  const canPrint = hasAnyPermission(
-    auth,
-    ["notifications.print", "reports.print"],
-    "action",
-  );
-
-  const canViewDetails = hasAnyPermission(
-    auth,
-    ["notifications.view", "notification_center.view"],
-    "view",
-  );
-
-  const filteredRows = useMemo(() => {
-    const clean = query.trim().toLowerCase();
-
-    const sorted = [...rows].sort((a, b) =>
-      String(b.created_at).localeCompare(String(a.created_at)),
-    );
-
-    if (!clean) return sorted.slice(0, 12);
-
-    return sorted
-      .filter((item) =>
-        [
-          item.title,
-          item.message,
-          item.recipient_name,
-          item.recipient_email,
-          item.recipient_phone,
-          item.event_name,
-          item.source,
-          statusLabel(item.status, locale),
-          channelLabel(item.channel, locale),
-          severityLabel(item.severity, locale),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(clean),
-      )
-      .slice(0, 12);
-  }, [locale, query, rows]);
-
-  const activeSummary = useMemo(
-    () => buildSummary(filteredRows),
-    [filteredRows],
-  );
-
-  const displaySummary = query.trim() ? activeSummary : summary;
-  const hasData = rows.length > 0;
-  const hasSearch = query.trim().length > 0;
-
-  const loadNotifications = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setRows([]);
-        setSummary(DEFAULT_SUMMARY);
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        setIsLoading(true);
-        setErrorMessage("");
-
-        const payload = await loadFirstAvailable([
-          "/api/notifications/inbox/?page_size=500",
-          "/api/notifications/?page_size=500",
-          "/api/notification-center/inbox/?page_size=500",
-        ]);
-
-        if (!payload) {
-          throw new Error(t.loadError);
-        }
-
-        const normalizedRows = [
-          ...extractRows(payload, "notifications"),
-          ...extractRows(payload, "inbox"),
-        ]
-          .map(normalizeNotification)
-          .filter((item) => item.id || item.title);
-
-        const dedupedRows = Array.from(
-          new Map(normalizedRows.map((item) => [String(item.id), item])).values(),
-        );
-
-        setRows(dedupedRows);
-        setSummary(buildSummary(dedupedRows, extractSummary(payload)));
-
-        if (showToast) toast.success(t.loadSuccess);
-      } catch (error) {
-        console.error("Notifications overview load error:", error);
-        setRows([]);
-        setSummary(DEFAULT_SUMMARY);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [canView, t.loadError, t.loadSuccess],
-  );
-
-  function exportExcel() {
-    if (!canExport) return;
-
-    if (!hasData) {
-      toast.error(t.exportEmpty);
-      return;
-    }
-
-    downloadExcel({
-      filename: `primey-care-notifications-${new Date().toISOString().slice(0, 10)}.xls`,
-      title: t.title,
-      locale,
-      summary: displaySummary,
-      rows: hasSearch ? filteredRows : rows,
-    });
-
-    toast.success(t.exportSuccess);
-  }
-
-  function printPage() {
-    if (!canPrint) return;
-
-    if (!hasData) {
-      toast.error(t.exportEmpty);
-      return;
-    }
-
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
-
-    if (!printWindow) {
-      toast.error(t.printError);
-      return;
-    }
-
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        summary: displaySummary,
-        rows: hasSearch ? filteredRows : rows,
-      }),
-    );
-    printWindow.document.close();
-
-    toast.success(t.printSuccess);
-  }
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadNotifications(false);
-  }, [authResolving, loadNotifications]);
-
-  if (!authResolving && !canView) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const t = translations[locale];
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.title}
-          </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadNotifications(true)}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            <span>{t.refresh}</span>
-          </Button>
-
-          {canExport ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={isLoading || !hasData || Boolean(errorMessage)}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
-
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={isLoading || !hasData || Boolean(errorMessage)}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadNotifications(true)}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {isLoading ? (
-        <PageSkeleton />
-      ) : (
-        <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <KpiCard
-              title={t.totalNotifications}
-              value={formatNumber(displaySummary.total_notifications)}
-              icon={<BellRing className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.unreadNotifications}
-              value={formatNumber(displaySummary.unread_notifications)}
-              icon={<Inbox className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.sentNotifications}
-              value={formatNumber(displaySummary.sent_notifications)}
-              icon={<BadgeCheck className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.failedNotifications}
-              value={formatNumber(displaySummary.failed_notifications)}
-              icon={<XCircle className="h-5 w-5" />}
-            />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MiniStat
-              title={t.emailNotifications}
-              value={displaySummary.email_notifications}
-            />
-            <MiniStat
-              title={t.whatsappNotifications}
-              value={displaySummary.whatsapp_notifications}
-            />
-            <MiniStat
-              title={t.pendingNotifications}
-              value={displaySummary.pending_notifications}
-            />
-            <MiniStat
-              title={t.errorNotifications}
-              value={displaySummary.error_notifications}
-            />
-          </div>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base font-bold">
-                {t.shortcutsTitle}
-              </CardTitle>
-              <CardDescription>{t.shortcutsDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <div className="grid gap-3 md:grid-cols-2">
-                {canViewList ? (
-                  <Link href="/system/notifications/list">
-                    <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
-                      <CardContent className="flex h-full items-start gap-3 p-4">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                          <FileText className="h-5 w-5" />
-                        </div>
-
-                        <div className="min-w-0">
-                          <p className="font-semibold">{t.notificationsList}</p>
-                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                            {isArabic
-                              ? "عرض الإشعارات مع البحث والفلاتر والإجراءات."
-                              : "Open notifications with search, filters, and actions."}
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                ) : null}
-
-                {canViewSettings ? (
-                  <Link href="/system/notifications/settings">
-                    <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
-                      <CardContent className="flex h-full items-start gap-3 p-4">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                          <Settings className="h-5 w-5" />
-                        </div>
-
-                        <div className="min-w-0">
-                          <p className="font-semibold">
-                            {t.notificationSettings}
-                          </p>
-                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                            {isArabic
-                              ? "ضبط قنوات الإشعارات وسلوك التنبيهات."
-                              : "Configure notification channels and alert behavior."}
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-4">
-              <div className="relative w-full">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {!hasData ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-                <Bell className="h-12 w-12 text-muted-foreground/40" />
-                <p className="text-lg font-semibold">{t.emptyTitle}</p>
-                <p className="max-w-md text-sm text-muted-foreground">
-                  {t.emptyText}
-                </p>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {hasData && hasSearch && filteredRows.length === 0 ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-                <Search className="h-12 w-12 text-muted-foreground/40" />
-                <p className="text-lg font-semibold">{t.noResultsTitle}</p>
-                <p className="max-w-md text-sm text-muted-foreground">
-                  {t.noResultsText}
-                </p>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle className="text-base font-bold">
-                    {t.latestTitle}
-                  </CardTitle>
-                  <CardDescription>{t.latestDesc}</CardDescription>
-                </div>
-
-                {canViewList ? (
-                  <Link href="/system/notifications/list">
-                    <Button variant="outline" className="h-10 rounded-xl">
-                      <ArrowUpRight className="h-4 w-4" />
-                      {t.notificationsList}
-                    </Button>
-                  </Link>
-                ) : null}
-              </div>
-            </CardHeader>
-
-            <CardContent>
-              <div className="overflow-hidden rounded-xl border">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="min-w-[250px]">
-                          {t.table.notification}
-                        </TableHead>
-                        <TableHead className="min-w-[180px]">
-                          {t.table.recipient}
-                        </TableHead>
-                        <TableHead className="min-w-[120px]">
-                          {t.table.channel}
-                        </TableHead>
-                        <TableHead className="min-w-[120px]">
-                          {t.table.status}
-                        </TableHead>
-                        <TableHead className="min-w-[120px]">
-                          {t.table.severity}
-                        </TableHead>
-                        <TableHead className="min-w-[160px]">
-                          {t.table.createdAt}
-                        </TableHead>
-                        {canViewDetails ? (
-                          <TableHead className="min-w-[90px]">
-                            {t.table.action}
-                          </TableHead>
-                        ) : null}
-                      </TableRow>
-                    </TableHeader>
-
-                    <TableBody>
-                      {filteredRows.length > 0 ? (
-                        filteredRows.map((item) => (
-                          <TableRow key={`${item.id}-${item.title}`}>
-                            <TableCell>
-                              <div className="min-w-[230px]">
-                                <p className="font-semibold">{item.title}</p>
-                                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                                  {item.message || item.event_name || "-"}
-                                </p>
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              <div className="min-w-[160px]">
-                                <p className="inline-flex items-center gap-1.5 text-sm font-medium">
-                                  <UserRound className="h-3.5 w-3.5 text-muted-foreground" />
-                                  {item.recipient_name || "-"}
-                                </p>
-
-                                <p
-                                  className="mt-1 text-xs text-muted-foreground"
-                                  dir="ltr"
-                                >
-                                  {item.recipient_email ||
-                                    item.recipient_phone ||
-                                    "-"}
-                                </p>
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              <ChannelBadge channel={item.channel} locale={locale} />
-                            </TableCell>
-
-                            <TableCell>{statusBadge(item.status, locale)}</TableCell>
-
-                            <TableCell>
-                              <Badge variant="outline" className="rounded-full">
-                                {severityLabel(item.severity, locale)}
-                              </Badge>
-                            </TableCell>
-
-                            <TableCell>
-                              {formatDate(item.created_at, locale)}
-                            </TableCell>
-
-                            {canViewDetails ? (
-                              <TableCell>
-                                {isValidId(item.id) ? (
-                                  <Link href={`/system/notifications/${item.id}`}>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 rounded-lg"
-                                    >
-                                      <Eye className="h-4 w-4" />
-                                      <span className="sr-only">{t.view}</span>
-                                    </Button>
-                                  </Link>
-                                ) : (
-                                  <span className="text-sm text-muted-foreground">
-                                    -
-                                  </span>
-                                )}
-                              </TableCell>
-                            ) : null}
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell
-                            colSpan={canViewDetails ? 7 : 6}
-                            className="h-32 text-center"
-                          >
-                            <p className="text-sm text-muted-foreground">
-                              {hasSearch ? t.noResultsText : t.emptyText}
-                            </p>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </>
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full px-2.5 py-1 text-xs font-medium",
+        isRead
+          ? "border-muted bg-muted/40 text-muted-foreground hover:bg-muted/40"
+          : "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50",
       )}
-    </div>
-  );
-}
-
-/* ============================================================
-   Small Components
-============================================================ */
-
-async function loadFirstAvailable(endpoints: string[]) {
-  let lastError = "";
-
-  for (const endpoint of endpoints) {
-    const response = await fetch(apiUrl(endpoint), {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    });
-
-    const payload = (await response.json().catch(() => null)) as
-      | ApiEnvelope<unknown>
-      | null;
-
-    if (response.ok && payload?.ok !== false && payload?.success !== false) {
-      return payload;
-    }
-
-    lastError =
-      payload?.message ||
-      payload?.detail ||
-      payload?.error ||
-      `HTTP ${response.status}`;
-  }
-
-  console.warn("Notifications endpoint fallback failed:", lastError);
-  return null;
-}
-
-function ChannelBadge({
-  channel,
-  locale,
-}: {
-  channel: NotificationChannel;
-  locale: AppLocale;
-}) {
-  const iconMap: Record<NotificationChannel, ReactNode> = {
-    IN_APP: <Inbox className="h-3.5 w-3.5" />,
-    EMAIL: <Mail className="h-3.5 w-3.5" />,
-    WHATSAPP: <MessageCircle className="h-3.5 w-3.5" />,
-    SMS: <Smartphone className="h-3.5 w-3.5" />,
-    SYSTEM: <ShieldCheck className="h-3.5 w-3.5" />,
-    UNKNOWN: <Bell className="h-3.5 w-3.5" />,
-  };
-
-  return (
-    <Badge variant="outline" className="rounded-full">
-      {iconMap[channel]}
-      {channelLabel(channel, locale)}
+    >
+      {isRead ? t.readStatus : t.unreadStatus}
     </Badge>
   );
 }
@@ -1818,39 +715,1317 @@ function ChannelBadge({
 function KpiCard({
   title,
   value,
-  icon,
+  trend,
+  icon: Icon,
 }: {
   title: string;
-  value: ReactNode;
-  icon: ReactNode;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-2xl font-bold">{value}</div>
-            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
-          </div>
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            {icon}
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
           </div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
         </div>
-      </CardContent>
+      </CardHeader>
     </Card>
   );
 }
 
-function MiniStat({ title, value }: { title: string; value: number }) {
+function HeaderSortButton({
+  children,
+  active,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  onClick: () => void;
+}) {
   return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-muted-foreground">{title}</span>
-          <span className="text-lg font-bold">{formatNumber(value)}</span>
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex w-full items-center justify-start gap-1 truncate text-xs font-semibold transition hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      <span className="truncate">{children}</span>
+      <ArrowUpDown className="h-3.5 w-3.5 shrink-0" />
+    </button>
+  );
+}
+
+function TableHeaderCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <TableHead
+      className={cn(
+        "h-11 whitespace-nowrap px-4 text-right align-middle text-xs font-semibold text-muted-foreground",
+        className,
+      )}
+    >
+      {children}
+    </TableHead>
+  );
+}
+
+function TableBodyCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <TableCell
+      className={cn(
+        "h-[62px] overflow-hidden px-4 text-right align-middle",
+        className,
+      )}
+    >
+      {children}
+    </TableCell>
+  );
+}
+
+export default function SystemNotificationsPage() {
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [notifications, setNotifications] = React.useState<NotificationRecord[]>([]);
+  const [counts, setCounts] = React.useState<NotificationCounts>(() => normalizeCounts({}));
+  const [pagination, setPagination] = React.useState<PaginationState>({
+    page: 1,
+    page_size: PAGE_SIZE,
+    total_pages: 1,
+    total_items: 0,
+    has_next: false,
+    has_previous: false,
+  });
+
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [actionLoading, setActionLoading] = React.useState("");
+  const [error, setError] = React.useState("");
+
+  const [searchInput, setSearchInput] = React.useState("");
+  const [search, setSearch] = React.useState("");
+  const [readFilter, setReadFilter] = React.useState<ReadFilter>("all");
+  const [severityFilter, setSeverityFilter] = React.useState<SeverityFilter>("all");
+  const [typeFilter, setTypeFilter] = React.useState<TypeFilter>("all");
+  const [sortKey, setSortKey] = React.useState<SortKey>("newest");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
+  const [selectedIds, setSelectedIds] = React.useState<number[]>([]);
+  const [visibleColumns, setVisibleColumns] =
+    React.useState<Record<ColumnKey, boolean>>(DEFAULT_VISIBLE_COLUMNS);
+  const [page, setPage] = React.useState(1);
+
+  const didLoadRef = React.useRef(false);
+
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
+
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
+
+    applyLocale();
+
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
+
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 450);
+
+    return () => window.clearTimeout(timeout);
+  }, [searchInput]);
+
+  const loadNotifications = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
+
+      try {
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setError("");
+
+        const params = new URLSearchParams({
+          page: String(page),
+          page_size: String(PAGE_SIZE),
+        });
+
+        if (search) params.set("search", search);
+
+        if (severityFilter !== "all") {
+          params.set("severity", severityFilter);
+        }
+
+        if (typeFilter !== "all") {
+          params.set("notification_type", typeFilter);
+        }
+
+        if (readFilter === "read") {
+          params.set("is_read", "true");
+        }
+
+        if (readFilter === "unread") {
+          params.set("is_read", "false");
+        }
+
+        const payload = await requestNotificationApi<InboxApiResponse>("/inbox/", {
+          params,
+          signal: controller.signal,
+        });
+
+        const nextItems = extractResults(payload).map(normalizeNotification);
+        const nextCounts = extractCounts(payload);
+        const nextPagination = extractPagination(payload);
+
+        setNotifications(nextItems);
+        setCounts(nextCounts);
+        setPagination(nextPagination);
+        setSelectedIds([]);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setNotifications([]);
+        setCounts(normalizeCounts({}));
+        setPagination({
+          page,
+          page_size: PAGE_SIZE,
+          total_pages: 1,
+          total_items: 0,
+          has_next: false,
+          has_previous: false,
+        });
+        setSelectedIds([]);
+        setError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+
+      return () => controller.abort();
+    },
+    [page, readFilter, search, severityFilter, t.errorDesc, typeFilter],
+  );
+
+  React.useEffect(() => {
+    if (!didLoadRef.current) {
+      didLoadRef.current = true;
+      void loadNotifications();
+      return;
+    }
+
+    void loadNotifications({ silent: true });
+  }, [loadNotifications]);
+
+  const filteredNotifications = React.useMemo(() => {
+    let items = [...notifications];
+
+    if (dateFrom) {
+      items = items.filter((item) => {
+        const created = formatDate(item.created_at);
+        return created !== "—" && created >= dateFrom;
+      });
+    }
+
+    if (dateTo) {
+      items = items.filter((item) => {
+        const created = formatDate(item.created_at);
+        return created !== "—" && created <= dateTo;
+      });
+    }
+
+    items.sort((a, b) => {
+      if (sortKey === "oldest") {
+        return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+      }
+
+      if (sortKey === "title") {
+        return a.title.localeCompare(b.title);
+      }
+
+      if (sortKey === "severity") {
+        return a.severity.localeCompare(b.severity);
+      }
+
+      if (sortKey === "type") {
+        return a.notification_type.localeCompare(b.notification_type);
+      }
+
+      if (sortKey === "read") {
+        return Number(a.is_read) - Number(b.is_read);
+      }
+
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    });
+
+    return items;
+  }, [dateFrom, dateTo, notifications, sortKey]);
+
+  const visibleColumnCount = Object.values(visibleColumns).filter(Boolean).length || 1;
+
+  const importantAlerts = counts.warning + counts.error + counts.critical;
+
+  const hasActiveFilters =
+    Boolean(search.trim()) ||
+    readFilter !== "all" ||
+    severityFilter !== "all" ||
+    typeFilter !== "all" ||
+    sortKey !== "newest" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
+
+  const allPageSelected =
+    filteredNotifications.length > 0 &&
+    filteredNotifications.every((item) => selectedIds.includes(item.id));
+
+  function resetFilters() {
+    setSearchInput("");
+    setSearch("");
+    setReadFilter("all");
+    setSeverityFilter("all");
+    setTypeFilter("all");
+    setSortKey("newest");
+    setDateFrom("");
+    setDateTo("");
+    setSelectedIds([]);
+    setPage(1);
+  }
+
+  function toggleSelectAllPage(checked: boolean) {
+    if (!checked) {
+      setSelectedIds([]);
+      return;
+    }
+
+    setSelectedIds(filteredNotifications.map((item) => item.id));
+  }
+
+  function toggleSelectNotification(id: number, checked: boolean) {
+    setSelectedIds((current) => {
+      if (checked) return Array.from(new Set([...current, id]));
+      return current.filter((item) => item !== id);
+    });
+  }
+
+  async function runInboxAction(
+    action: "mark_read" | "mark_unread" | "mark_all_read" | "bulk_mark_read",
+    payload: ApiRecord = {},
+  ) {
+    setActionLoading(action);
+
+    try {
+      await requestNotificationApi<InboxApiResponse>("/inbox/", {
+        method: "POST",
+        body: {
+          action,
+          ...payload,
+        },
+      });
+
+      toast.success(t.actionSuccess);
+      await loadNotifications({ silent: true });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.actionFailed;
+
+      toast.error(message);
+    } finally {
+      setActionLoading("");
+    }
+  }
+
+  function openNotificationLink(link: string) {
+    if (!link) return;
+
+    if (link.startsWith("http://") || link.startsWith("https://")) {
+      window.open(link, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    window.location.href = link;
+  }
+
+  function buildExportRows() {
+    return filteredNotifications.map((item) => ({
+      title: item.title,
+      message: item.message,
+      type: getTypeLabel(item.notification_type, locale),
+      severity: getSeverityLabel(item.severity, locale),
+      status: item.is_read ? t.readStatus : t.unreadStatus,
+      createdAt: formatDateTime(item.created_at),
+      readAt: formatDateTime(item.read_at),
+      link: item.link || "—",
+    }));
+  }
+
+  function exportExcel() {
+    const rows = buildExportRows();
+
+    if (!rows.length) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h2>${escapeHtml(t.printTitle)}</h2>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.notification)}</th>
+                <th>${escapeHtml(t.type)}</th>
+                <th>${escapeHtml(t.severity)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+                <th>${escapeHtml(t.readAt)}</th>
+                <th>${escapeHtml(t.link)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.title)}<br />${escapeHtml(row.message)}</td>
+                      <td>${escapeHtml(row.type)}</td>
+                      <td>${escapeHtml(row.severity)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                      <td>${escapeHtml(row.readAt)}</td>
+                      <td>${escapeHtml(row.link)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-notifications-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
+
+  function printPage() {
+    const rows = buildExportRows();
+
+    if (!rows.length) {
+      toast.error(t.printEmpty);
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(t.actionFailed);
+      return;
+    }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.showing)}: ${escapeHtml(rows.length)}</p>
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.total)}</span><strong>${escapeHtml(counts.total)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.unread)}</span><strong>${escapeHtml(counts.unread)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.read)}</span><strong>${escapeHtml(counts.read)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.alerts)}</span><strong>${escapeHtml(importantAlerts)}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.notification)}</th>
+                <th>${escapeHtml(t.type)}</th>
+                <th>${escapeHtml(t.severity)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+                <th>${escapeHtml(t.readAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.title)}<br />${escapeHtml(row.message)}</td>
+                      <td>${escapeHtml(row.type)}</td>
+                      <td>${escapeHtml(row.severity)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                      <td>${escapeHtml(row.readAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+  }
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-52" />
+            <Skeleton className="h-4 w-96" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-28" />
+          </div>
         </div>
-      </CardContent>
-    </Card>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Card key={index} className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="min-h-[112px] px-6 py-5">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-8 w-32" />
+                <Skeleton className="h-5 w-20" />
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
+
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-80 w-full" />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+            {t.title}
+          </h1>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            className="h-9 rounded-lg"
+            onClick={() => void loadNotifications({ silent: true })}
+            disabled={refreshing || Boolean(actionLoading)}
+          >
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            {t.refresh}
+          </Button>
+
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/notifications/settings">
+              <Settings className="h-4 w-4" />
+              {t.settings}
+            </Link>
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-9 rounded-lg"
+            onClick={() => void runInboxAction("mark_all_read")}
+            disabled={Boolean(actionLoading) || counts.unread <= 0}
+          >
+            {actionLoading === "mark_all_read" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <MailCheck className="h-4 w-4" />
+            )}
+            {t.markAllRead}
+          </Button>
+
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
+
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.total}
+          value={formatInteger(counts.total || pagination.total_items)}
+          trend={`${t.showing} ${formatInteger(filteredNotifications.length)}`}
+          icon={Inbox}
+        />
+
+        <KpiCard
+          title={t.unread}
+          value={formatInteger(counts.unread)}
+          trend={t.unreadStatus}
+          icon={Bell}
+        />
+
+        <KpiCard
+          title={t.read}
+          value={formatInteger(counts.read)}
+          trend={t.readStatus}
+          icon={CheckCircle2}
+        />
+
+        <KpiCard
+          title={t.alerts}
+          value={formatInteger(importantAlerts)}
+          trend={`${t.error}: ${formatInteger(counts.error)}`}
+          icon={ShieldAlert}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+              <div>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadNotifications()}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-col gap-3">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={readFilter}
+                  onValueChange={(value) => {
+                    setReadFilter(value as ReadFilter);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[145px]">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <SelectValue placeholder={t.status} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allStatuses}</SelectItem>
+                    <SelectItem value="unread">{t.unreadStatus}</SelectItem>
+                    <SelectItem value="read">{t.readStatus}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={severityFilter}
+                  onValueChange={(value) => {
+                    setSeverityFilter(value as SeverityFilter);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[145px]">
+                    <ShieldAlert className="h-4 w-4" />
+                    <SelectValue placeholder={t.severity} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allSeverities}</SelectItem>
+                    <SelectItem value="info">{t.info}</SelectItem>
+                    <SelectItem value="success">{t.success}</SelectItem>
+                    <SelectItem value="warning">{t.warning}</SelectItem>
+                    <SelectItem value="error">{t.error}</SelectItem>
+                    <SelectItem value="critical">{t.critical}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={typeFilter}
+                  onValueChange={(value) => {
+                    setTypeFilter(value as TypeFilter);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[145px]">
+                    <Bell className="h-4 w-4" />
+                    <SelectValue placeholder={t.type} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allTypes}</SelectItem>
+                    <SelectItem value="system">{t.system}</SelectItem>
+                    <SelectItem value="order">{t.order}</SelectItem>
+                    <SelectItem value="invoice">{t.invoice}</SelectItem>
+                    <SelectItem value="payment">{t.payment}</SelectItem>
+                    <SelectItem value="whatsapp">{t.whatsapp}</SelectItem>
+                    <SelectItem value="customer">{t.customer}</SelectItem>
+                    <SelectItem value="provider">{t.provider}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <span className="text-xs text-muted-foreground">{t.from}</span>
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(event) => setDateFrom(event.target.value)}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
+
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <span className="text-xs text-muted-foreground">{t.to}</span>
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(event) => setDateTo(event.target.value)}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background">
+                      <ColumnsIcon className="h-4 w-4" />
+                      {t.columns}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {(
+                      [
+                        ["select", t.selected],
+                        ["notification", t.notification],
+                        ["type", t.type],
+                        ["severity", t.severity],
+                        ["status", t.status],
+                        ["createdAt", t.createdAt],
+                        ["readAt", t.readAt],
+                        ["link", t.link],
+                        ["actions", t.actions],
+                      ] as [ColumnKey, string][]
+                    ).map(([key, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={visibleColumns[key]}
+                        onCheckedChange={(checked) =>
+                          setVisibleColumns((current) => ({
+                            ...current,
+                            [key]: Boolean(checked),
+                          }))
+                        }
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg bg-background"
+                  onClick={resetFilters}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t.reset}
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background">
+                      <ArrowUpDown className="h-4 w-4" />
+                      {t.sort}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                    {(
+                      [
+                        ["newest", t.newest],
+                        ["oldest", t.oldest],
+                        ["title", t.titleSort],
+                        ["severity", t.severitySort],
+                        ["type", t.typeSort],
+                        ["read", t.readSort],
+                      ] as [SortKey, string][]
+                    ).map(([key, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={sortKey === key}
+                        onCheckedChange={() => setSortKey(key)}
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {selectedIds.length > 0 ? (
+                  <>
+                    <Button
+                      variant="outline"
+                      className="h-9 rounded-lg bg-background"
+                      disabled={Boolean(actionLoading)}
+                      onClick={() =>
+                        void runInboxAction("bulk_mark_read", {
+                          ids: selectedIds,
+                        })
+                      }
+                    >
+                      {actionLoading === "bulk_mark_read" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <MailCheck className="h-4 w-4" />
+                      )}
+                      {t.markSelectedRead} ({formatInteger(selectedIds.length)})
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      className="h-9 rounded-lg bg-background"
+                      onClick={() => setSelectedIds([])}
+                    >
+                      <XCircle className="h-4 w-4" />
+                      {t.clearSelection}
+                    </Button>
+                  </>
+                ) : null}
+
+                {hasActiveFilters ? (
+                  <Badge variant="secondary" className="h-9 rounded-lg px-3 text-xs font-semibold">
+                    {t.activeFilters}
+                  </Badge>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1160px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    {visibleColumns.select ? (
+                      <TableHeaderCell className="w-[46px] px-3">
+                        <Checkbox
+                          checked={allPageSelected}
+                          onCheckedChange={(checked) => toggleSelectAllPage(Boolean(checked))}
+                          aria-label={t.selected}
+                        />
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.notification ? (
+                      <TableHeaderCell className="w-[360px]">
+                        <HeaderSortButton
+                          active={sortKey === "title"}
+                          onClick={() => setSortKey("title")}
+                        >
+                          {t.notification}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.type ? (
+                      <TableHeaderCell className="w-[125px]">
+                        <HeaderSortButton
+                          active={sortKey === "type"}
+                          onClick={() => setSortKey("type")}
+                        >
+                          {t.type}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.severity ? (
+                      <TableHeaderCell className="w-[125px]">
+                        <HeaderSortButton
+                          active={sortKey === "severity"}
+                          onClick={() => setSortKey("severity")}
+                        >
+                          {t.severity}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.status ? (
+                      <TableHeaderCell className="w-[120px]">
+                        <HeaderSortButton
+                          active={sortKey === "read"}
+                          onClick={() => setSortKey("read")}
+                        >
+                          {t.status}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.createdAt ? (
+                      <TableHeaderCell className="w-[145px]">
+                        <HeaderSortButton
+                          active={sortKey === "newest" || sortKey === "oldest"}
+                          onClick={() => setSortKey("newest")}
+                        >
+                          {t.createdAt}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.readAt ? (
+                      <TableHeaderCell className="w-[145px]">{t.readAt}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.link ? (
+                      <TableHeaderCell className="w-[130px]">{t.link}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.actions ? (
+                      <TableHeaderCell className="w-[72px] text-center">
+                        {t.actions}
+                      </TableHeaderCell>
+                    ) : null}
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {filteredNotifications.length ? (
+                    filteredNotifications.map((notification) => (
+                      <TableRow key={notification.id} className="h-[62px]">
+                        {visibleColumns.select ? (
+                          <TableBodyCell className="w-[46px] px-3">
+                            <Checkbox
+                              checked={selectedIds.includes(notification.id)}
+                              onCheckedChange={(checked) =>
+                                toggleSelectNotification(notification.id, Boolean(checked))
+                              }
+                              aria-label={notification.title}
+                            />
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.notification ? (
+                          <TableBodyCell className="w-[360px]">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div
+                                className={cn(
+                                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border",
+                                  notification.is_read ? "bg-muted/40" : "bg-emerald-50",
+                                )}
+                              >
+                                <Bell
+                                  className={cn(
+                                    "h-4 w-4",
+                                    notification.is_read
+                                      ? "text-muted-foreground"
+                                      : "text-emerald-700",
+                                  )}
+                                />
+                              </div>
+
+                              <div className="min-w-0 flex-1">
+                                <Link
+                                  href={`/system/notifications/${notification.id}`}
+                                  className="block truncate text-sm font-semibold text-foreground hover:underline"
+                                >
+                                  {notification.title || t.unknown}
+                                </Link>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {notification.message || "—"}
+                                </p>
+                              </div>
+                            </div>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.type ? (
+                          <TableBodyCell className="w-[125px]">
+                            <Badge
+                              variant="outline"
+                              className="max-w-full rounded-full bg-muted/40 px-2.5 py-1 text-xs font-medium"
+                            >
+                              <span className="truncate">
+                                {getTypeLabel(notification.notification_type, locale)}
+                              </span>
+                            </Badge>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.severity ? (
+                          <TableBodyCell className="w-[125px]">
+                            <SeverityBadge severity={notification.severity} locale={locale} />
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.status ? (
+                          <TableBodyCell className="w-[120px]">
+                            <ReadBadge isRead={notification.is_read} locale={locale} />
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.createdAt ? (
+                          <TableBodyCell className="w-[145px]">
+                            <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                              {formatDateTime(notification.created_at)}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.readAt ? (
+                          <TableBodyCell className="w-[145px]">
+                            <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                              {formatDateTime(notification.read_at)}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.link ? (
+                          <TableBodyCell className="w-[130px]">
+                            {notification.link ? (
+                              <button
+                                type="button"
+                                onClick={() => openNotificationLink(notification.link)}
+                                className="truncate text-sm font-medium text-foreground hover:underline"
+                              >
+                                {t.openLink}
+                              </button>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">{t.noLink}</span>
+                            )}
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.actions ? (
+                          <TableBodyCell className="w-[72px] text-center">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 rounded-lg"
+                                  disabled={Boolean(actionLoading)}
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+
+                              <DropdownMenuContent
+                                align={locale === "ar" ? "start" : "end"}
+                                className="w-52"
+                              >
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/system/notifications/${notification.id}`}>
+                                    <Eye className="h-4 w-4" />
+                                    {t.details}
+                                  </Link>
+                                </DropdownMenuItem>
+
+                                {notification.link ? (
+                                  <DropdownMenuItem
+                                    onClick={() => openNotificationLink(notification.link)}
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                    {t.openLink}
+                                  </DropdownMenuItem>
+                                ) : null}
+
+                                <DropdownMenuSeparator />
+
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    void runInboxAction("mark_read", {
+                                      id: notification.id,
+                                    })
+                                  }
+                                  disabled={notification.is_read}
+                                >
+                                  <MailCheck className="h-4 w-4" />
+                                  {t.markRead}
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    void runInboxAction("mark_unread", {
+                                      id: notification.id,
+                                    })
+                                  }
+                                  disabled={!notification.is_read}
+                                >
+                                  <Bell className="h-4 w-4" />
+                                  {t.markUnread}
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableBodyCell>
+                        ) : null}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={visibleColumnCount} className="h-72">
+                        <div className="flex flex-col items-center justify-center gap-3 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                            <Bell className="h-6 w-6 text-muted-foreground" />
+                          </div>
+
+                          <div className="space-y-1">
+                            <p className="font-semibold text-foreground">
+                              {hasActiveFilters ? t.noResultsTitle : t.noDataTitle}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {hasActiveFilters ? t.noResultsDesc : t.noDataDesc}
+                            </p>
+                          </div>
+
+                          {hasActiveFilters ? (
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-lg"
+                              onClick={resetFilters}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              {t.reset}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-muted-foreground">
+              {t.showing}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(filteredNotifications.length)}
+              </span>{" "}
+              {t.of}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(pagination.total_items || counts.total)}
+              </span>{" "}
+              {t.rows}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                disabled={!pagination.has_previous || refreshing}
+                onClick={() => setPage((current) => Math.max(current - 1, 1))}
+              >
+                {t.previous}
+              </Button>
+
+              <div className="rounded-lg border bg-background px-3 py-2 text-sm tabular-nums">
+                {t.page} {formatInteger(page)} {t.of}{" "}
+                {formatInteger(pagination.total_pages)}
+              </div>
+
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                disabled={!pagination.has_next || refreshing}
+                onClick={() =>
+                  setPage((current) =>
+                    Math.min(current + 1, pagination.total_pages),
+                  )
+                }
+              >
+                {t.next}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

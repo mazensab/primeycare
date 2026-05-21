@@ -3,576 +3,358 @@
 /* ============================================================
    📂 app/system/treasury/transactions/[id]/page.tsx
    🧠 Primey Care | Treasury Transaction Details Page
-
-   ✅ المسار:
-      app/system/treasury/transactions/[id]/page.tsx
-
-   ✅ العمل:
-      صفحة تفاصيل حركة خزينة داخل النظام.
-      تعرض بيانات سند القبض أو الصرف أو التحويل أو التسوية، الحسابات، المبلغ، الحالة، والترحيل.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Treasury Transaction Details Build
-
-   ✅ يعتمد على:
-      - /api/treasury/transactions/{id}/
-      - /api/treasury/transactions/{id}/confirm/
-      - /api/treasury/transactions/{id}/cancel/
-      - /api/treasury/accounts/
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Treasury overview page
-      - Treasury transactions page
-      - Treasury transaction create page
-      - Treasury accounts page
-      - Treasury account statement page
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - عرض تفاصيل الحركة المالية.
-      - عرض نوع الحركة والحالة والمبلغ والتاريخ والمرجع.
-      - عرض حساب الخزينة وحساب المستلم للتحويل الداخلي.
-      - عرض حالة ترحيل الخزينة والترحيل المحاسبي.
-      - تأكيد الحركة إذا كانت مسودة.
-      - إلغاء الحركة إذا لم تكن ملغاة.
-      - Web PDF Print.
-      - Error State مستقل.
-      - Not Found State مستقل.
-      - Skeleton Loading.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - أرقام إنجليزية دائمًا.
-      - رمز SAR من /currency/sar.svg بعد الرقم.
-      - استخدام sonner للتنبيهات.
-
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - بناء صفحة التفاصيل كاملة بنفس النمط التشغيلي المعتمد.
-      - الالتزام بالقاعدة: w-full space-y-4 بدون main/min-h-screen/max-w.
-      - عدم عرض أي مسارات أو عبارات تقنية داخل واجهة المستخدم.
-      - إخفاء الأزرار غير المصرح بها بدل تعطيلها.
-      - عدم تنفيذ حذف فعلي، فقط إلغاء آمن عند توفر endpoint.
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Real API:
+      GET  /api/treasury/transactions/{id}/
+      POST /api/treasury/transactions/{id}/confirm/
+      POST /api/treasury/transactions/{id}/cancel/
+   ✅ Primary confirm/save/create buttons are always black
+   ✅ Secondary actions are outline
+   ✅ Transaction details / account / destination / amount / status
+   ✅ Web Print
+   ✅ Skeleton Loading
+   ✅ Error / Not Found states
+   ✅ sonner
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  ArrowLeftRight,
+  ArrowRight,
   Banknote,
   CalendarDays,
   CheckCircle2,
-  Copy,
+  CircleDollarSign,
   CreditCard,
   FileText,
+  Landmark,
   Loader2,
   Printer,
-  Receipt,
-  RefreshCcw,
+  RefreshCw,
+  RotateCcw,
   ShieldCheck,
-  Wallet,
+  TriangleAlert,
+  WalletCards,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type TransactionType =
-  | "RECEIPT"
-  | "PAYMENT"
-  | "TRANSFER"
-  | "ADJUSTMENT"
-  | "UNKNOWN";
-
-type TransactionStatus = "DRAFT" | "CONFIRMED" | "CANCELLED" | "UNKNOWN";
-
-type TransactionDetails = {
-  id: string;
-  transaction_number: string;
-  transaction_type: TransactionType;
-  status: TransactionStatus;
-  amount: number;
-  currency: string;
-  transaction_date: string;
-  account_id: string;
-  account_name: string;
-  account_code: string;
-  to_account_id: string;
-  to_account_name: string;
-  to_account_code: string;
-  source_reference: string;
-  description: string;
-  notes: string;
-  is_treasury_posted: boolean;
-  is_accounting_posted: boolean;
-  treasury_reference: string;
-  accounting_reference: string;
-  created_at: string;
-  updated_at: string;
-};
-
-type ApiEnvelope<T> = {
+type ApiResponse = {
   ok?: boolean;
   success?: boolean;
+  data?: unknown;
+  result?: unknown;
+  item?: unknown;
+  transaction?: unknown;
   message?: string;
   detail?: string;
   error?: string;
-  data?: T;
-  transaction?: unknown;
-  treasury_transaction?: unknown;
+  errors?: unknown;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
+type TreasuryTransaction = {
+  id: string;
+  transaction_number: string;
+  transaction_type: string;
+  transaction_type_label: string;
+  source: string;
+  source_label: string;
+  status: string;
+  status_label: string;
+  transaction_date: string | null;
+  treasury_account_id: string;
+  treasury_account_name: string;
+  treasury_account_code: string;
+  destination_account_id: string;
+  destination_account_name: string;
+  destination_account_code: string;
+  amount: number;
+  fees_amount: number;
+  net_amount: number;
+  currency: string;
+  reference: string;
+  external_reference: string;
+  source_number: string;
+  party_name: string;
+  description: string;
+  notes: string;
+  balance_applied: boolean;
+  accounting_posted: boolean;
+  treasury_posted: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  created_by_name: string;
+  confirmed_at: string | null;
+  cancelled_at: string | null;
+  cancellation_reason: string;
+};
 
-/* ============================================================
-   Locale / API
-============================================================ */
+const translations = {
+  ar: {
+    title: "تفاصيل حركة الخزينة",
+    subtitle: "عرض بيانات حركة الخزينة وحالتها وأثرها المالي.",
+    back: "حركات الخزينة",
+    treasury: "الخزينة",
+    refresh: "تحديث",
+    print: "طباعة",
+    confirm: "تأكيد الحركة",
+    cancel: "إلغاء الحركة",
+    confirming: "جاري التأكيد...",
+    cancelling: "جاري الإلغاء...",
+    openStatement: "كشف الحساب",
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+    transactionSummary: "ملخص الحركة",
+    transactionSummaryDesc: "بيانات الحركة الأساسية وحالتها.",
+    financialSummary: "الملخص المالي",
+    financialSummaryDesc: "المبلغ والرسوم والصافي.",
+    accountInfo: "الحسابات",
+    accountInfoDesc: "حساب الخزينة وحساب الوجهة إن وجد.",
+    referenceInfo: "المرجع والوصف",
+    referenceInfoDesc: "بيانات الطرف والمرجع والوصف.",
+    postingInfo: "حالة الترحيل",
+    postingInfoDesc: "حالة أثر الرصيد والترحيل المالي.",
 
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+    number: "رقم الحركة",
+    type: "نوع الحركة",
+    status: "الحالة",
+    date: "التاريخ",
+    source: "المصدر",
+    sourceAccount: "حساب الخزينة",
+    destinationAccount: "حساب الوجهة",
+    amount: "المبلغ",
+    fees: "الرسوم",
+    net: "الصافي",
+    party: "الطرف",
+    reference: "المرجع",
+    externalReference: "مرجع خارجي",
+    sourceNumber: "رقم المصدر",
+    description: "الوصف",
+    notes: "ملاحظات",
+    createdBy: "أنشئت بواسطة",
+    createdAt: "تاريخ الإنشاء",
+    updatedAt: "آخر تحديث",
+    confirmedAt: "تاريخ التأكيد",
+    cancelledAt: "تاريخ الإلغاء",
+    cancellationReason: "سبب الإلغاء",
 
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
+    balanceApplied: "أثر الرصيد",
+    accountingPosted: "الترحيل المحاسبي",
+    treasuryPosted: "ترحيل الخزينة",
+    applied: "مطبق",
+    notApplied: "غير مطبق",
+    posted: "مرحل",
+    notPosted: "غير مرحل",
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
+    draft: "مسودة",
+    confirmed: "مؤكدة",
+    cancelled: "ملغاة",
+    income: "قبض",
+    expense: "صرف",
+    transfer: "تحويل",
+    deposit: "إيداع",
+    withdraw: "سحب",
+    openingBalance: "رصيد افتتاحي",
+    refund: "استرداد",
+    fee: "رسوم",
+    adjustment: "تسوية",
+
+    confirmQuestion: "هل تريد تأكيد حركة الخزينة؟",
+    cancelQuestion: "هل تريد إلغاء حركة الخزينة؟",
+    confirmedToast: "تم تأكيد حركة الخزينة بنجاح.",
+    cancelledToast: "تم إلغاء حركة الخزينة بنجاح.",
+    refreshed: "تم تحديث تفاصيل الحركة.",
+
+    errorTitle: "تعذر تحميل تفاصيل الحركة",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    notFoundTitle: "لم يتم العثور على الحركة",
+    notFoundDesc: "قد تكون الحركة غير موجودة أو لا تملك صلاحية عرضها.",
+    tryAgain: "إعادة المحاولة",
+
+    actionError: "تعذر تنفيذ الإجراء.",
+    printTitle: "تفاصيل حركة الخزينة",
+    generatedAt: "تاريخ الطباعة",
+    notAvailable: "—",
+    sar: "ر.س",
+  },
+  en: {
+    title: "Treasury Transaction Details",
+    subtitle: "View treasury transaction information, status, and financial impact.",
+    back: "Treasury transactions",
+    treasury: "Treasury",
+    refresh: "Refresh",
+    print: "Print",
+    confirm: "Confirm transaction",
+    cancel: "Cancel transaction",
+    confirming: "Confirming...",
+    cancelling: "Cancelling...",
+    openStatement: "Statement",
+
+    transactionSummary: "Transaction summary",
+    transactionSummaryDesc: "Main transaction data and status.",
+    financialSummary: "Financial summary",
+    financialSummaryDesc: "Amount, fees, and net amount.",
+    accountInfo: "Accounts",
+    accountInfoDesc: "Treasury account and destination account if available.",
+    referenceInfo: "Reference and description",
+    referenceInfoDesc: "Party, reference, and description data.",
+    postingInfo: "Posting status",
+    postingInfoDesc: "Balance impact and financial posting status.",
+
+    number: "Transaction number",
+    type: "Type",
+    status: "Status",
+    date: "Date",
+    source: "Source",
+    sourceAccount: "Treasury account",
+    destinationAccount: "Destination account",
+    amount: "Amount",
+    fees: "Fees",
+    net: "Net",
+    party: "Party",
+    reference: "Reference",
+    externalReference: "External reference",
+    sourceNumber: "Source number",
+    description: "Description",
+    notes: "Notes",
+    createdBy: "Created by",
+    createdAt: "Created at",
+    updatedAt: "Updated at",
+    confirmedAt: "Confirmed at",
+    cancelledAt: "Cancelled at",
+    cancellationReason: "Cancellation reason",
+
+    balanceApplied: "Balance impact",
+    accountingPosted: "Accounting posting",
+    treasuryPosted: "Treasury posting",
+    applied: "Applied",
+    notApplied: "Not applied",
+    posted: "Posted",
+    notPosted: "Not posted",
+
+    draft: "Draft",
+    confirmed: "Confirmed",
+    cancelled: "Cancelled",
+    income: "Income",
+    expense: "Expense",
+    transfer: "Transfer",
+    deposit: "Deposit",
+    withdraw: "Withdraw",
+    openingBalance: "Opening balance",
+    refund: "Refund",
+    fee: "Fee",
+    adjustment: "Adjustment",
+
+    confirmQuestion: "Confirm this treasury transaction?",
+    cancelQuestion: "Cancel this treasury transaction?",
+    confirmedToast: "Treasury transaction confirmed successfully.",
+    cancelledToast: "Treasury transaction cancelled successfully.",
+    refreshed: "Transaction details refreshed.",
+
+    errorTitle: "Unable to load transaction details",
+    errorDesc: "Make sure the backend is running, then try again.",
+    notFoundTitle: "Transaction not found",
+    notFoundDesc: "The transaction may not exist or you may not have permission to view it.",
+    tryAgain: "Try again",
+
+    actionError: "Unable to complete the action.",
+    printTitle: "Treasury transaction details",
+    generatedAt: "Generated at",
+    notAvailable: "—",
+    sar: "SAR",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
+}
+
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
+
+  return fallback;
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-function getCookie(name: string) {
-  try {
-    if (typeof document === "undefined") return "";
-
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-
-    if (parts.length === 2) {
-      return parts.pop()?.split(";").shift() || "";
+    if (
+      ["1", "true", "yes", "on", "applied", "posted", "confirmed", "success"].includes(
+        normalized,
+      )
+    ) {
+      return true;
     }
 
-    return "";
-  } catch {
-    return "";
-  }
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
+    if (["0", "false", "no", "off", "draft", "cancelled"].includes(normalized)) {
+      return false;
     }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
   }
 
-  return true;
+  return fallback;
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "تفاصيل الحركة المالية" : "Treasury Transaction Details",
-    subtitle: isArabic
-      ? "مراجعة تفاصيل سند القبض أو الصرف أو التحويل أو التسوية."
-      : "Review receipt, payment, transfer, or adjustment details.",
-
-    back: isArabic ? "الحركات المالية" : "Transactions",
-    treasury: isArabic ? "الخزينة" : "Treasury",
-    accounts: isArabic ? "حسابات الخزينة" : "Treasury Accounts",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-    confirm: isArabic ? "تأكيد الحركة" : "Confirm Transaction",
-    cancel: isArabic ? "إلغاء الحركة" : "Cancel Transaction",
-    confirming: isArabic ? "جاري التأكيد..." : "Confirming...",
-    cancelling: isArabic ? "جاري الإلغاء..." : "Cancelling...",
-    copy: isArabic ? "نسخ" : "Copy",
-
-    infoTitle: isArabic ? "بيانات الحركة" : "Transaction Information",
-    infoDesc: isArabic
-      ? "المعلومات الأساسية والتشغيلية للحركة المالية."
-      : "Basic and operational information for the transaction.",
-
-    accountTitle: isArabic ? "الحسابات المرتبطة" : "Linked Accounts",
-    accountDesc: isArabic
-      ? "حساب الخزينة وحساب المستلم عند وجود تحويل داخلي."
-      : "Treasury account and destination account when this is an internal transfer.",
-
-    postingTitle: isArabic ? "حالة الترحيل" : "Posting Status",
-    postingDesc: isArabic
-      ? "حالة ترحيل الحركة في الخزينة والمحاسبة."
-      : "Treasury and accounting posting status.",
-
-    notesTitle: isArabic ? "الوصف والملاحظات" : "Description and Notes",
-    notesDesc: isArabic
-      ? "المرجع والوصف والملاحظات المسجلة على الحركة."
-      : "Reference, description, and notes recorded on this transaction.",
-
-    transactionNumber: isArabic ? "رقم الحركة" : "Transaction No.",
-    transactionType: isArabic ? "نوع الحركة" : "Transaction Type",
-    status: isArabic ? "الحالة" : "Status",
-    amount: isArabic ? "المبلغ" : "Amount",
-    date: isArabic ? "تاريخ الحركة" : "Transaction Date",
-    sourceReference: isArabic ? "المرجع" : "Reference",
-    account: isArabic ? "حساب الخزينة" : "Treasury Account",
-    fromAccount: isArabic ? "حساب المصدر" : "Source Account",
-    toAccount: isArabic ? "حساب المستلم" : "Destination Account",
-    description: isArabic ? "الوصف" : "Description",
-    notes: isArabic ? "ملاحظات" : "Notes",
-    createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-    updatedAt: isArabic ? "آخر تحديث" : "Updated At",
-
-    receipt: isArabic ? "سند قبض" : "Receipt Voucher",
-    payment: isArabic ? "سند صرف" : "Payment Voucher",
-    transfer: isArabic ? "تحويل داخلي" : "Internal Transfer",
-    adjustment: isArabic ? "تسوية مالية" : "Adjustment",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    draft: isArabic ? "مسودة" : "Draft",
-    confirmed: isArabic ? "مؤكدة" : "Confirmed",
-    cancelled: isArabic ? "ملغاة" : "Cancelled",
-
-    treasuryPosted: isArabic ? "ترحيل الخزينة" : "Treasury Posting",
-    accountingPosted: isArabic ? "الترحيل المحاسبي" : "Accounting Posting",
-    posted: isArabic ? "مرحّل" : "Posted",
-    notPosted: isArabic ? "غير مرحّل" : "Not Posted",
-    treasuryReference: isArabic ? "مرجع الخزينة" : "Treasury Reference",
-    accountingReference: isArabic ? "مرجع المحاسبة" : "Accounting Reference",
-
-    notSet: isArabic ? "غير محدد" : "Not set",
-
-    accessDeniedTitle: isArabic
-      ? "غير مصرح بعرض الحركة المالية"
-      : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض تفاصيل حركات الخزينة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view treasury transaction details. Contact your system administrator if you need access.",
-
-    notFoundTitle: isArabic ? "الحركة المالية غير موجودة" : "Transaction not found",
-    notFoundText: isArabic
-      ? "لم يتم العثور على الحركة المالية المطلوبة."
-      : "The requested treasury transaction could not be found.",
-
-    loadError: isArabic
-      ? "تعذر تحميل تفاصيل الحركة المالية."
-      : "Unable to load treasury transaction details.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث تفاصيل الحركة بنجاح."
-      : "Transaction details refreshed successfully.",
-
-    confirmSuccess: isArabic
-      ? "تم تأكيد الحركة المالية بنجاح."
-      : "Transaction confirmed successfully.",
-    confirmError: isArabic
-      ? "تعذر تأكيد الحركة المالية."
-      : "Unable to confirm transaction.",
-    cancelSuccess: isArabic
-      ? "تم إلغاء الحركة المالية بنجاح."
-      : "Transaction cancelled successfully.",
-    cancelError: isArabic
-      ? "تعذر إلغاء الحركة المالية."
-      : "Unable to cancel transaction.",
-
-    confirmPrompt: isArabic
-      ? "هل تريد تأكيد هذه الحركة المالية؟"
-      : "Confirm this treasury transaction?",
-    cancelPrompt: isArabic
-      ? "هل تريد إلغاء هذه الحركة المالية؟"
-      : "Cancel this treasury transaction?",
-
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-    copied: isArabic ? "تم النسخ." : "Copied.",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function formatDate(value: string, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).replace("T", " ").slice(0, 16);
 
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
 }
 
-function escapeHtml(value: string | number) {
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -581,623 +363,404 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
 
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
 
-  for (const container of [
-    "account",
-    "treasury_account",
-    "from_account",
-    "to_account",
-    "destination_account",
-    "cashbox",
-    "bank",
-    "transaction",
-    "treasury_transaction",
-    "item",
-    "data",
-  ]) {
-    const nested = obj[container];
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
+}
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+function makeApiUrl(path: string) {
+  return `${getApiBaseUrl()}${path}`;
+}
 
-      if (value !== undefined && value !== null && value !== "") return value;
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const match = document.cookie.split("; ").find((row) => row.startsWith(`${name}=`));
+
+  return match ? decodeURIComponent(match.split("=")[1] || "") : "";
+}
+
+async function fetchJson<T>(
+  url: string,
+  options: RequestInit & { signal?: AbortSignal } = {},
+): Promise<T> {
+  const response = await fetch(url, {
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    ...options,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options.method && options.method !== "GET"
+        ? {
+            "Content-Type": "application/json",
+            "X-CSRFToken": getCookie("csrftoken"),
+          }
+        : {}),
+      ...(options.headers || {}),
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      payload?.errors ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+
+  return (payload || {}) as T;
 }
 
-function extractTransactionData(payload: ApiEnvelope<unknown> | null): Dict {
-  if (!payload) return {};
+function extractPayload(payload: ApiResponse): ApiRecord {
+  const data = asRecord(payload.data);
+  const result = asRecord(payload.result);
+  const item = asRecord(payload.item);
+  const transaction = asRecord(payload.transaction);
 
-  const data = asDict(payload.data);
+  if (Object.keys(transaction).length) return transaction;
+  if (Object.keys(item).length) return item;
+  if (Object.keys(data).length) return data;
+  if (Object.keys(result).length) return result;
 
-  if (payload.transaction && typeof payload.transaction === "object") {
-    return payload.transaction as Dict;
-  }
-
-  if (
-    payload.treasury_transaction &&
-    typeof payload.treasury_transaction === "object"
-  ) {
-    return payload.treasury_transaction as Dict;
-  }
-
-  if (data.transaction && typeof data.transaction === "object") {
-    return data.transaction as Dict;
-  }
-
-  if (data.treasury_transaction && typeof data.treasury_transaction === "object") {
-    return data.treasury_transaction as Dict;
-  }
-
-  return Object.keys(data).length > 0 ? data : asDict(payload);
+  return asRecord(payload);
 }
 
-function normalizeTransactionType(value: unknown): TransactionType {
-  const clean = String(value || "").toUpperCase();
-
-  if (["RECEIPT", "INCOME", "RECEIVE", "CASH_IN"].includes(clean)) {
-    return "RECEIPT";
-  }
-
-  if (["PAYMENT", "EXPENSE", "PAY", "CASH_OUT"].includes(clean)) {
-    return "PAYMENT";
-  }
-
-  if (["TRANSFER", "INTERNAL_TRANSFER"].includes(clean)) return "TRANSFER";
-  if (["ADJUSTMENT", "OPENING_BALANCE"].includes(clean)) return "ADJUSTMENT";
-
-  return "UNKNOWN";
-}
-
-function normalizeStatus(value: unknown): TransactionStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["DRAFT", "PENDING"].includes(clean)) return "DRAFT";
-  if (["CONFIRMED", "POSTED", "APPROVED", "TRUE"].includes(clean)) {
-    return "CONFIRMED";
-  }
-  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
-
-  if (typeof value === "boolean") return value ? "CONFIRMED" : "DRAFT";
-
-  return "UNKNOWN";
-}
-
-function normalizeTransaction(item: unknown): TransactionDetails {
-  const obj = asDict(item);
-
-  const accountObj = asDict(obj.account || obj.treasury_account || obj.from_account);
-  const toAccountObj = asDict(obj.to_account || obj.destination_account);
+function normalizeTransaction(value: unknown): TreasuryTransaction {
+  const item = asRecord(value);
+  const account = asRecord(item.treasury_account || item.account);
+  const destination = asRecord(item.destination_account || item.to_account);
+  const createdBy = asRecord(item.created_by || item.user);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || ""),
-    transaction_number: String(
-      getNestedValue(obj, [
-        "transaction_number",
-        "voucher_number",
-        "number",
-        "code",
-        "reference",
-      ]) || "-",
+    id: normalizeText(item.id || item.pk || item.uuid),
+    transaction_number: normalizeText(item.transaction_number || item.number || item.reference),
+    transaction_type: normalizeText(item.transaction_type || item.type || "adjustment"),
+    transaction_type_label: normalizeText(item.transaction_type_label || item.type_label),
+    source: normalizeText(item.source),
+    source_label: normalizeText(item.source_label),
+    status: normalizeText(item.status || "draft").toLowerCase(),
+    status_label: normalizeText(item.status_label),
+    transaction_date:
+      normalizeText(item.transaction_date || item.date || item.created_at) || null,
+    treasury_account_id: normalizeText(item.treasury_account_id || item.account_id || account.id || account.pk),
+    treasury_account_name: normalizeText(account.name || item.treasury_account_name || item.account_name),
+    treasury_account_code: normalizeText(account.code || item.treasury_account_code || item.account_code),
+    destination_account_id: normalizeText(item.destination_account_id || item.to_account_id || destination.id || destination.pk),
+    destination_account_name: normalizeText(destination.name || item.destination_account_name || item.to_account_name),
+    destination_account_code: normalizeText(destination.code || item.destination_account_code || item.to_account_code),
+    amount: toNumber(item.amount),
+    fees_amount: toNumber(item.fees_amount || item.fee_amount),
+    net_amount: toNumber(item.net_amount ?? item.amount),
+    currency: normalizeText(item.currency || "SAR"),
+    reference: normalizeText(item.reference),
+    external_reference: normalizeText(item.external_reference),
+    source_number: normalizeText(item.source_number || item.source_reference),
+    party_name: normalizeText(item.party_name),
+    description: normalizeText(item.description),
+    notes: normalizeText(item.notes),
+    balance_applied: toBoolean(item.balance_applied || item.is_balance_applied),
+    accounting_posted: toBoolean(item.accounting_posted || item.is_accounting_posted),
+    treasury_posted: toBoolean(item.treasury_posted || item.is_treasury_posted || item.balance_applied),
+    created_at: normalizeText(item.created_at) || null,
+    updated_at: normalizeText(item.updated_at) || null,
+    created_by_name: normalizeText(
+      item.created_by_name ||
+        createdBy.name ||
+        createdBy.full_name ||
+        createdBy.email ||
+        createdBy.username,
     ),
-    transaction_type: normalizeTransactionType(
-      getNestedValue(obj, ["transaction_type", "type", "kind", "voucher_type"]),
-    ),
-    status: normalizeStatus(getNestedValue(obj, ["status", "state", "is_confirmed"])),
-    amount: toNumber(getNestedValue(obj, ["amount", "total_amount", "value"])),
-    currency: String(getNestedValue(obj, ["currency"]) || "SAR"),
-    transaction_date: String(
-      getNestedValue(obj, ["transaction_date", "date", "created_at"]) || "",
-    ),
-
-    account_id: String(
-      getNestedValue(obj, [
-        "account_id",
-        "treasury_account_id",
-        "from_account_id",
-        "cashbox_id",
-        "bank_id",
-      ]) ||
-        accountObj.id ||
-        accountObj.uuid ||
-        "",
-    ),
-    account_name: String(
-      accountObj.name ||
-        accountObj.title ||
-        getNestedValue(obj, [
-          "account_name",
-          "treasury_account_name",
-          "from_account_name",
-          "cashbox_name",
-          "bank_name",
-        ]) ||
-        "",
-    ),
-    account_code: String(
-      accountObj.code ||
-        accountObj.account_code ||
-        getNestedValue(obj, [
-          "account_code",
-          "treasury_account_code",
-          "from_account_code",
-        ]) ||
-        "",
-    ),
-
-    to_account_id: String(
-      getNestedValue(obj, ["to_account_id", "destination_account_id"]) ||
-        toAccountObj.id ||
-        toAccountObj.uuid ||
-        "",
-    ),
-    to_account_name: String(
-      toAccountObj.name ||
-        toAccountObj.title ||
-        getNestedValue(obj, ["to_account_name", "destination_account_name"]) ||
-        "",
-    ),
-    to_account_code: String(
-      toAccountObj.code ||
-        toAccountObj.account_code ||
-        getNestedValue(obj, ["to_account_code", "destination_account_code"]) ||
-        "",
-    ),
-
-    source_reference: String(
-      getNestedValue(obj, [
-        "source_reference",
-        "external_reference",
-        "payment_reference",
-        "ref",
-      ]) || "",
-    ),
-    description: String(getNestedValue(obj, ["description", "notes", "memo"]) || ""),
-    notes: String(getNestedValue(obj, ["internal_notes", "extra_notes"]) || ""),
-
-    is_treasury_posted: Boolean(
-      getNestedValue(obj, ["is_treasury_posted", "treasury_posted"]),
-    ),
-    is_accounting_posted: Boolean(
-      getNestedValue(obj, ["is_accounting_posted", "accounting_posted"]),
-    ),
-    treasury_reference: String(
-      getNestedValue(obj, ["treasury_reference", "treasury_posting_reference"]) ||
-        "",
-    ),
-    accounting_reference: String(
-      getNestedValue(obj, [
-        "accounting_reference",
-        "journal_entry_reference",
-        "accounting_posting_reference",
-      ]) || "",
-    ),
-    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
-    updated_at: String(getNestedValue(obj, ["updated_at", "modified"]) || ""),
+    confirmed_at: normalizeText(item.confirmed_at) || null,
+    cancelled_at: normalizeText(item.cancelled_at) || null,
+    cancellation_reason: normalizeText(item.cancellation_reason || item.cancel_reason),
   };
 }
 
-function transactionTypeLabel(type: TransactionType, locale: AppLocale) {
-  const t = dictionary(locale);
+function typeLabel(type: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = type.toLowerCase();
 
-  const labels: Record<TransactionType, string> = {
-    RECEIPT: t.receipt,
-    PAYMENT: t.payment,
-    TRANSFER: t.transfer,
-    ADJUSTMENT: t.adjustment,
-    UNKNOWN: t.unknown,
-  };
+  if (normalized === "income") return t.income;
+  if (normalized === "expense") return t.expense;
+  if (normalized === "transfer") return t.transfer;
+  if (normalized === "deposit") return t.deposit;
+  if (normalized === "withdraw") return t.withdraw;
+  if (normalized === "opening_balance") return t.openingBalance;
+  if (normalized === "refund") return t.refund;
+  if (normalized === "fee") return t.fee;
+  if (normalized === "adjustment") return t.adjustment;
 
-  return labels[type];
+  return type || t.notAvailable;
 }
 
-function statusLabel(status: TransactionStatus, locale: AppLocale) {
-  const t = dictionary(locale);
+function statusLabel(status: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = status.toLowerCase();
 
-  const labels: Record<TransactionStatus, string> = {
-    DRAFT: t.draft,
-    CONFIRMED: t.confirmed,
-    CANCELLED: t.cancelled,
-    UNKNOWN: t.unknown,
-  };
+  if (normalized === "confirmed") return t.confirmed;
+  if (normalized === "cancelled") return t.cancelled;
 
-  return labels[status];
+  return t.draft;
 }
 
-function transactionTypeBadge(type: TransactionType, locale: AppLocale) {
-  const label = transactionTypeLabel(type, locale);
+function statusClass(status: string) {
+  const normalized = status.toLowerCase();
 
-  if (type === "RECEIPT") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+  if (normalized === "confirmed") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
-  if (type === "PAYMENT") {
-    return (
-      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
-        {label}
-      </Badge>
-    );
+  if (normalized === "cancelled") {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
   }
 
-  if (type === "TRANSFER") {
-    return (
-      <Badge className="rounded-full border-sky-200 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50 dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-300">
-        {label}
-      </Badge>
-    );
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function typeClass(type: string) {
+  const normalized = type.toLowerCase();
+
+  if (["income", "deposit", "opening_balance"].includes(normalized)) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
-  if (type === "ADJUSTMENT") {
-    return (
-      <Badge className="rounded-full border-violet-200 bg-violet-50 px-3 py-1 text-violet-700 hover:bg-violet-50 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-300">
-        {label}
-      </Badge>
-    );
+  if (["expense", "withdraw", "refund", "fee"].includes(normalized)) {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
   }
 
+  if (normalized === "transfer") {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  return "border-violet-500/30 bg-violet-50 text-violet-700 hover:bg-violet-50";
+}
+
+function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", statusClass(status))}
+    >
+      {statusLabel(status, locale)}
     </Badge>
   );
 }
 
-function statusBadge(status: TransactionStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "CONFIRMED") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "DRAFT") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "CANCELLED") {
-    return (
-      <Badge variant="secondary" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
+function TypeBadge({ type, locale }: { type: string; locale: Locale }) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", typeClass(type))}
+    >
+      {typeLabel(type, locale)}
     </Badge>
   );
 }
 
-function isValidId(value: unknown) {
-  const id = String(value || "").trim();
-
-  return id && id !== "-" && id !== "undefined" && id !== "null";
-}
-
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+function BooleanBadge({
+  value,
+  trueLabel,
+  falseLabel,
+}: {
+  value: boolean;
+  trueLabel: string;
+  falseLabel: string;
+}) {
   return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full px-2.5 py-1 text-xs font-medium",
+        value
+          ? "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50"
+          : "border-slate-500/30 bg-slate-50 text-slate-700 hover:bg-slate-50",
+      )}
+    >
+      {value ? trueLabel : falseLabel}
+    </Badge>
   );
 }
 
-function MoneyText({ value }: { value: unknown }) {
+function MoneyValue({ value, label }: { value: number; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <div className="flex items-center gap-1 text-sm font-semibold tabular-nums">
       <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function DetailsSkeleton() {
-  return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="space-y-4">
-        {Array.from({ length: 3 }).map((_, index) => (
-          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="grid gap-4 p-5 md:grid-cols-3">
-              {Array.from({ length: 6 }).map((__, itemIndex) => (
-                <div key={itemIndex} className="rounded-2xl border bg-background p-4">
-                  <SkeletonLine className="h-3 w-20" />
-                  <SkeletonLine className="mt-3 h-5 w-32" />
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="space-y-4 p-5">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-10 w-full rounded-xl" />
-          ))}
-        </CardContent>
-      </Card>
+      <img src="/currency/sar.svg" alt={label} className="h-3.5 w-3.5" />
     </div>
   );
 }
 
-function InfoBox({
+function DetailItem({
   label,
   value,
-  dir,
+  mono = false,
 }: {
   label: string;
   value: React.ReactNode;
-  dir?: "ltr" | "rtl";
+  mono?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border bg-background p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <div className="mt-2 font-semibold" dir={dir}>
-        {value || "-"}
+    <div className="rounded-lg border bg-background p-4">
+      <div className="mb-1 text-xs text-muted-foreground">{label}</div>
+      <div className={cn("text-sm font-medium text-foreground", mono && "tabular-nums")}>
+        {value}
       </div>
     </div>
   );
 }
 
-function buildPrintHtml({
-  locale,
-  title,
-  transaction,
-}: {
-  locale: AppLocale;
-  title: string;
-  transaction: TransactionDetails;
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-  const now = new Date().toLocaleString("en-US");
-
-  const rows = [
-    [t.transactionNumber, transaction.transaction_number],
-    [t.transactionType, transactionTypeLabel(transaction.transaction_type, locale)],
-    [t.status, statusLabel(transaction.status, locale)],
-    [t.date, formatDate(transaction.transaction_date, locale)],
-    [t.amount, formatMoney(transaction.amount)],
-    [t.account, `${transaction.account_name || "-"} ${transaction.account_code ? `(${transaction.account_code})` : ""}`],
-    [t.toAccount, `${transaction.to_account_name || "-"} ${transaction.to_account_code ? `(${transaction.to_account_code})` : ""}`],
-    [t.sourceReference, transaction.source_reference || "-"],
-    [t.treasuryPosted, transaction.is_treasury_posted ? t.posted : t.notPosted],
-    [t.accountingPosted, transaction.is_accounting_posted ? t.posted : t.notPosted],
-    [t.description, transaction.description || "-"],
-    [t.notes, transaction.notes || "-"],
-  ]
-    .map(
-      ([label, value]) => `
-        <tr>
-          <th>${escapeHtml(label)}</th>
-          <td>${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .print-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 18px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          table { width: 100%; border-collapse: collapse; font-size: 13px; }
-          th {
-            width: 240px;
-            background: #f3f4f6;
-            color: #111827;
-            font-weight: 700;
-          }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 10px 9px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          @page { size: A4; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-
-      <body>
-        <div class="print-header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(transaction.transaction_number)}</div>
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-            </div>
-          </div>
-          <div class="badge">Primey Care</div>
+function PageSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-72" />
+          <Skeleton className="h-4 w-96" />
         </div>
 
-        <table>
-          <tbody>${rows}</tbody>
-        </table>
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
 
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+      <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="space-y-4">
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="space-y-3 p-4">
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-4">
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="space-y-3 p-4">
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-48 w-full" />
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="space-y-3 p-4">
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-40 w-full" />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
 }
-
-/* ============================================================
-   Page
-============================================================ */
 
 export default function TreasuryTransactionDetailsPage() {
   const params = useParams<{ id?: string }>();
-  const auth = useAuth() as unknown;
+  const router = useRouter();
 
-  const transactionId = String(params?.id || "");
+  const id = React.useMemo(() => {
+    const rawId = params?.id;
+    return Array.isArray(rawId) ? rawId[0] : rawId || "";
+  }, [params]);
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [transaction, setTransaction] = useState<TransactionDetails | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [isCancelling, setIsCancelling] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [notFound, setNotFound] = useState(false);
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [transaction, setTransaction] = React.useState<TreasuryTransaction | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [notFound, setNotFound] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [actionLoading, setActionLoading] = React.useState<"confirm" | "cancel" | null>(null);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const canView = hasSafePermission(
-    auth,
-    ["treasury.view", "treasury.transactions.view"],
-    "view",
-  );
+  const canConfirm = transaction?.status === "draft";
+  const canCancel = Boolean(transaction && transaction.status !== "cancelled");
 
-  const canConfirm = hasSafePermission(
-    auth,
-    ["treasury.confirm", "treasury.transactions.confirm", "treasury.manage"],
-    "action",
-  );
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const canCancel = hasSafePermission(
-    auth,
-    ["treasury.cancel", "treasury.transactions.cancel", "treasury.manage"],
-    "action",
-  );
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-  const canPrint = hasSafePermission(
-    auth,
-    ["treasury.print", "treasury.reports.print", "reports.print"],
-    "action",
-  );
+    applyLocale();
 
-  const currentTransactionId = transaction?.id ?? "";
-  const currentTransactionStatus: TransactionStatus =
-    transaction?.status ?? "UNKNOWN";
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-  const canShowConfirm =
-    transaction !== null &&
-    Boolean(currentTransactionId) &&
-    canConfirm &&
-    currentTransactionStatus === "DRAFT" &&
-    !isConfirming &&
-    !isCancelling;
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
 
-  const canShowCancel =
-    transaction !== null &&
-    Boolean(currentTransactionId) &&
-    canCancel &&
-    currentTransactionStatus !== "CANCELLED" &&
-    !isConfirming &&
-    !isCancelling;
-
-  const loadTransaction = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setIsLoading(false);
-        return;
-      }
-
-      if (!transactionId) {
-        setIsLoading(false);
+  const loadTransaction = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!id) {
         setNotFound(true);
+        setLoading(false);
         return;
       }
+
+      const controller = new AbortController();
 
       try {
-        setIsLoading(true);
-        setErrorMessage("");
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setError("");
         setNotFound(false);
 
-        const response = await fetch(
-          apiUrl(`/api/treasury/transactions/${transactionId}/`),
+        const payload = await fetchJson<ApiResponse>(
+          makeApiUrl(`/api/treasury/transactions/${encodeURIComponent(id)}/`),
           {
             method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
+            signal: controller.signal,
           },
         );
 
-        const payload = (await response.json().catch(() => null)) as
-          | ApiEnvelope<unknown>
-          | null;
+        const normalized = normalizeTransaction(extractPayload(payload));
 
-        if (response.status === 404) {
-          setTransaction(null);
-          setNotFound(true);
-          return;
-        }
-
-        if (!response.ok || payload?.ok === false || payload?.success === false) {
-          throw new Error(
-            payload?.message ||
-              payload?.detail ||
-              payload?.error ||
-              `HTTP ${response.status}`,
-          );
-        }
-
-        const normalized = normalizeTransaction(extractTransactionData(payload));
-
-        if (!isValidId(normalized.id) && !normalized.transaction_number) {
+        if (!normalized.id && !normalized.transaction_number) {
           setTransaction(null);
           setNotFound(true);
           return;
@@ -1205,717 +768,497 @@ export default function TreasuryTransactionDetailsPage() {
 
         setTransaction(normalized);
 
-        if (showToast) {
-          toast.success(t.loadSuccess);
+        if (silent) toast.success(t.refreshed);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        if (message.includes("404")) {
+          setNotFound(true);
+          setTransaction(null);
+        } else {
+          setError(message);
         }
-      } catch (error) {
-        console.error("Treasury transaction details load error:", error);
-        setTransaction(null);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
       } finally {
-        setIsLoading(false);
+        setLoading(false);
+        setRefreshing(false);
       }
+
+      return () => controller.abort();
     },
-    [canView, t.loadError, t.loadSuccess, transactionId],
+    [id, t.errorDesc, t.refreshed],
   );
 
-  async function runTransactionAction(
-    action: "confirm" | "cancel",
-    endpoint: string,
-  ) {
+  React.useEffect(() => {
+    void loadTransaction();
+  }, [loadTransaction]);
+
+  async function runAction(action: "confirm" | "cancel") {
     if (!transaction) return;
 
-    const confirmed = window.confirm(
-      action === "confirm" ? t.confirmPrompt : t.cancelPrompt,
-    );
+    const question = action === "confirm" ? t.confirmQuestion : t.cancelQuestion;
 
-    if (!confirmed) return;
+    if (!window.confirm(question)) return;
+
+    setActionLoading(action);
+    setError("");
 
     try {
-      if (action === "confirm") {
-        setIsConfirming(true);
-      } else {
-        setIsCancelling(true);
-      }
+      const endpoint =
+        action === "confirm"
+          ? `/api/treasury/transactions/${encodeURIComponent(transaction.id)}/confirm/`
+          : `/api/treasury/transactions/${encodeURIComponent(transaction.id)}/cancel/`;
 
-      const csrfToken = getCookie("csrftoken");
-
-      const response = await fetch(apiUrl(endpoint), {
+      await fetchJson<ApiResponse>(makeApiUrl(endpoint), {
         method: "POST",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-        },
-        body: JSON.stringify({ id: currentTransactionId }),
+        body: JSON.stringify({}),
       });
 
-      const payload = (await response.json().catch(() => null)) as
-        | ApiEnvelope<unknown>
-        | null;
+      toast.success(action === "confirm" ? t.confirmedToast : t.cancelledToast);
 
-      if (!response.ok || payload?.ok === false || payload?.success === false) {
-        throw new Error(
-          payload?.message ||
-            payload?.detail ||
-            payload?.error ||
-            `HTTP ${response.status}`,
-        );
-      }
+      await loadTransaction({ silent: false });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.actionError;
 
-      toast.success(action === "confirm" ? t.confirmSuccess : t.cancelSuccess);
-      await loadTransaction(false);
-    } catch (error) {
-      console.error(`Treasury transaction ${action} error:`, error);
-      toast.error(action === "confirm" ? t.confirmError : t.cancelError);
+      setError(message);
+      toast.error(t.actionError);
     } finally {
-      setIsConfirming(false);
-      setIsCancelling(false);
+      setActionLoading(null);
     }
   }
 
   function printPage() {
-    if (!canPrint || !transaction) return;
+    if (!transaction) return;
 
-    const printWindow = window.open("", "_blank", "width=1000,height=800");
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
 
-    if (!printWindow) {
-      toast.error(t.printError);
-      return;
-    }
+    if (!printWindow) return;
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        transaction,
-      }),
-    );
-    printWindow.document.close();
-
-    toast.success(t.printSuccess);
-  }
-
-  async function copyText(value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      toast.success(t.copied);
-    } catch {
-      toast.success(t.copied);
-    }
-  }
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadTransaction(false);
-  }, [authResolving, loadTransaction]);
-
-  if (!authResolving && !canView) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .grid {
+              display: grid;
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 15px; }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
             <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
             </div>
+          </div>
+
+          <div class="grid">
+            <div class="box"><span>${escapeHtml(t.number)}</span><strong>${escapeHtml(transaction.transaction_number || t.notAvailable)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.status)}</span><strong>${escapeHtml(statusLabel(transaction.status, locale))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.type)}</span><strong>${escapeHtml(typeLabel(transaction.transaction_type, locale))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.date)}</span><strong>${escapeHtml(formatDate(transaction.transaction_date))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.sourceAccount)}</span><strong>${escapeHtml(transaction.treasury_account_name || t.notAvailable)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.destinationAccount)}</span><strong>${escapeHtml(transaction.destination_account_name || t.notAvailable)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.amount)}</span><strong>${escapeHtml(formatMoney(transaction.amount))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.fees)}</span><strong>${escapeHtml(formatMoney(transaction.fees_amount))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.net)}</span><strong>${escapeHtml(formatMoney(transaction.net_amount))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.party)}</span><strong>${escapeHtml(transaction.party_name || t.notAvailable)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.reference)}</span><strong>${escapeHtml(transaction.reference || t.notAvailable)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.description)}</span><strong>${escapeHtml(transaction.description || t.notAvailable)}</strong></div>
+          </div>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+  }
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <PageSkeleton />
+      </div>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1 text-right">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+              {t.title}
+            </h1>
+            <p className="text-sm text-muted-foreground">{t.subtitle}</p>
+          </div>
+
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury/transactions">
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
+        </div>
+
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="flex min-h-[320px] flex-col items-center justify-center gap-3 p-6 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+              <TriangleAlert className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <div className="space-y-1">
+              <p className="font-semibold text-foreground">{t.notFoundTitle}</p>
+              <p className="text-sm text-muted-foreground">{t.notFoundDesc}</p>
+            </div>
+            <Button asChild variant="outline" className="h-9 rounded-lg">
+              <Link href="/system/treasury/transactions">
+                <BackIcon className="h-4 w-4" />
+                {t.back}
+              </Link>
+            </Button>
           </CardContent>
         </Card>
       </div>
     );
   }
 
+  if (!transaction) return null;
+
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {transaction
-              ? `${transaction.transaction_number} - ${transactionTypeLabel(
-                  transaction.transaction_type,
-                  locale,
-                )}`
-              : t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/treasury/transactions">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury/transactions">
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
 
-          <Link href="/system/treasury">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <Wallet className="h-4 w-4" />
-              <span>{t.treasury}</span>
-            </Button>
-          </Link>
-
-          <Link href="/system/treasury/accounts">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <CreditCard className="h-4 w-4" />
-              <span>{t.accounts}</span>
-            </Button>
-          </Link>
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury">
+              <WalletCards className="h-4 w-4" />
+              {t.treasury}
+            </Link>
+          </Button>
 
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadTransaction(true)}
-            disabled={isLoading || isConfirming || isCancelling}
+            className="h-9 rounded-lg"
+            onClick={() => void loadTransaction({ silent: true })}
+            disabled={refreshing || Boolean(actionLoading)}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canPrint ? (
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
+
+          {canCancel ? (
             <Button
               variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={isLoading || !transaction}
+              className="h-9 rounded-lg"
+              onClick={() => void runAction("cancel")}
+              disabled={Boolean(actionLoading)}
             >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
-
-          {canShowConfirm ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={() =>
-                runTransactionAction(
-                  "confirm",
-                  `/api/treasury/transactions/${currentTransactionId}/confirm/`,
-                )
-              }
-            >
-              {isConfirming ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <CheckCircle2 className="h-4 w-4" />
-              )}
-              <span>{isConfirming ? t.confirming : t.confirm}</span>
-            </Button>
-          ) : null}
-
-          {canShowCancel ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() =>
-                runTransactionAction(
-                  "cancel",
-                  `/api/treasury/transactions/${currentTransactionId}/cancel/`,
-                )
-              }
-            >
-              {isCancelling ? (
+              {actionLoading === "cancel" ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <XCircle className="h-4 w-4" />
               )}
-              <span>{isCancelling ? t.cancelling : t.cancel}</span>
+              {actionLoading === "cancel" ? t.cancelling : t.cancel}
+            </Button>
+          ) : null}
+
+          {canConfirm ? (
+            <Button
+              className="h-9 rounded-lg bg-black text-white hover:bg-black/90"
+              onClick={() => void runAction("confirm")}
+              disabled={Boolean(actionLoading)}
+            >
+              {actionLoading === "confirm" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              {actionLoading === "confirm" ? t.confirming : t.confirm}
             </Button>
           ) : null}
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
-
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadTransaction(true)}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadTransaction()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {!isLoading && notFound ? (
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-              <CreditCard className="h-5 w-5" />
-            </div>
+      <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="space-y-4">
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="relative px-6 py-5">
+              <CardDescription>{t.transactionSummaryDesc}</CardDescription>
+              <CardTitle>{transaction.transaction_number || t.notAvailable}</CardTitle>
+              <CardAction>
+                <StatusBadge status={transaction.status} locale={locale} />
+              </CardAction>
+            </CardHeader>
 
-            <div>
-              <p className="font-semibold">{t.notFoundTitle}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.notFoundText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+            <CardContent className="space-y-3 px-6 pb-6">
+              <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                <span className="text-sm text-muted-foreground">{t.type}</span>
+                <TypeBadge type={transaction.transaction_type} locale={locale} />
+              </div>
 
-      {isLoading ? <DetailsSkeleton /> : null}
+              <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                <span className="text-sm text-muted-foreground">{t.date}</span>
+                <span className="text-sm font-medium text-foreground tabular-nums">
+                  {formatDate(transaction.transaction_date)}
+                </span>
+              </div>
 
-      {!isLoading && transaction && !errorMessage && !notFound ? (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-2xl font-bold">
-                        <MoneyText value={transaction.amount} />
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {t.amount}
-                      </p>
-                    </div>
+              <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                <span className="text-sm text-muted-foreground">{t.source}</span>
+                <span className="max-w-[180px] truncate text-sm font-medium text-foreground">
+                  {transaction.source_label || transaction.source || t.notAvailable}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
 
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300">
-                      <Banknote className="h-5 w-5" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle>{t.financialSummary}</CardTitle>
+              <CardDescription>{t.financialSummaryDesc}</CardDescription>
+            </CardHeader>
 
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="mt-1">{transactionTypeBadge(transaction.transaction_type, locale)}</div>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {t.transactionType}
-                      </p>
-                    </div>
+            <CardContent className="space-y-3 px-6 pb-6">
+              <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                <span className="text-sm text-muted-foreground">{t.amount}</span>
+                <MoneyValue value={transaction.amount} label={t.sar} />
+              </div>
 
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-300">
-                      {transaction.transaction_type === "RECEIPT" ? (
-                        <Receipt className="h-5 w-5" />
-                      ) : transaction.transaction_type === "PAYMENT" ? (
-                        <Banknote className="h-5 w-5" />
-                      ) : transaction.transaction_type === "TRANSFER" ? (
-                        <ArrowLeftRight className="h-5 w-5" />
-                      ) : (
-                        <CreditCard className="h-5 w-5" />
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                <span className="text-sm text-muted-foreground">{t.fees}</span>
+                <MoneyValue value={transaction.fees_amount} label={t.sar} />
+              </div>
 
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="mt-1">{statusBadge(transaction.status, locale)}</div>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {t.status}
-                      </p>
-                    </div>
+              <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                <span className="text-sm font-medium text-foreground">{t.net}</span>
+                <MoneyValue value={transaction.net_amount} label={t.sar} />
+              </div>
+            </CardContent>
+          </Card>
 
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                      <ShieldCheck className="h-5 w-5" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle>{t.postingInfo}</CardTitle>
+              <CardDescription>{t.postingInfoDesc}</CardDescription>
+            </CardHeader>
 
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-2xl font-bold">
-                        {formatDate(transaction.transaction_date, locale)}
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {t.date}
-                      </p>
-                    </div>
-
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-50 text-teal-700 dark:bg-teal-950/30 dark:text-teal-300">
-                      <CalendarDays className="h-5 w-5" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <FileText className="h-4 w-4" />
-                  {t.infoTitle}
-                </CardTitle>
-                <CardDescription>{t.infoDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                <InfoBox
-                  label={t.transactionNumber}
-                  value={
-                    <span className="inline-flex items-center gap-2">
-                      <span>{transaction.transaction_number || "-"}</span>
-                      {transaction.transaction_number ? (
-                        <button
-                          type="button"
-                          onClick={() => copyText(transaction.transaction_number)}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                          <span className="sr-only">{t.copy}</span>
-                        </button>
-                      ) : null}
-                    </span>
-                  }
-                  dir="ltr"
+            <CardContent className="space-y-3 px-6 pb-6">
+              <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                <span className="text-sm text-muted-foreground">{t.balanceApplied}</span>
+                <BooleanBadge
+                  value={transaction.balance_applied}
+                  trueLabel={t.applied}
+                  falseLabel={t.notApplied}
                 />
+              </div>
 
-                <InfoBox
-                  label={t.transactionType}
-                  value={transactionTypeBadge(transaction.transaction_type, locale)}
+              <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                <span className="text-sm text-muted-foreground">{t.treasuryPosted}</span>
+                <BooleanBadge
+                  value={transaction.treasury_posted}
+                  trueLabel={t.posted}
+                  falseLabel={t.notPosted}
                 />
+              </div>
 
-                <InfoBox
-                  label={t.status}
-                  value={statusBadge(transaction.status, locale)}
+              <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                <span className="text-sm text-muted-foreground">{t.accountingPosted}</span>
+                <BooleanBadge
+                  value={transaction.accounting_posted}
+                  trueLabel={t.posted}
+                  falseLabel={t.notPosted}
                 />
-
-                <InfoBox
-                  label={t.amount}
-                  value={<MoneyText value={transaction.amount} />}
-                />
-
-                <InfoBox
-                  label={t.date}
-                  value={formatDate(transaction.transaction_date, locale)}
-                />
-
-                <InfoBox
-                  label={t.sourceReference}
-                  value={transaction.source_reference || "-"}
-                  dir="ltr"
-                />
-
-                <InfoBox
-                  label={t.createdAt}
-                  value={formatDate(transaction.created_at, locale)}
-                />
-
-                <InfoBox
-                  label={t.updatedAt}
-                  value={formatDate(transaction.updated_at, locale)}
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <Wallet className="h-4 w-4" />
-                  {t.accountTitle}
-                </CardTitle>
-                <CardDescription>{t.accountDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <InfoBox
-                  label={
-                    transaction.transaction_type === "TRANSFER"
-                      ? t.fromAccount
-                      : t.account
-                  }
-                  value={
-                    <div>
-                      <p>{transaction.account_name || t.notSet}</p>
-                      <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                        {transaction.account_code || "-"}
-                      </p>
-                    </div>
-                  }
-                />
-
-                {transaction.transaction_type === "TRANSFER" ? (
-                  <InfoBox
-                    label={t.toAccount}
-                    value={
-                      <div>
-                        <p>{transaction.to_account_name || t.notSet}</p>
-                        <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                          {transaction.to_account_code || "-"}
-                        </p>
-                      </div>
-                    }
-                  />
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <ShieldCheck className="h-4 w-4" />
-                  {t.postingTitle}
-                </CardTitle>
-                <CardDescription>{t.postingDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <InfoBox
-                  label={t.treasuryPosted}
-                  value={
-                    transaction.is_treasury_posted ? (
-                      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-                        {t.posted}
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="rounded-full px-3 py-1">
-                        {t.notPosted}
-                      </Badge>
-                    )
-                  }
-                />
-
-                <InfoBox
-                  label={t.accountingPosted}
-                  value={
-                    transaction.is_accounting_posted ? (
-                      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-                        {t.posted}
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="rounded-full px-3 py-1">
-                        {t.notPosted}
-                      </Badge>
-                    )
-                  }
-                />
-
-                <InfoBox
-                  label={t.treasuryReference}
-                  value={transaction.treasury_reference || "-"}
-                  dir="ltr"
-                />
-
-                <InfoBox
-                  label={t.accountingReference}
-                  value={transaction.accounting_reference || "-"}
-                  dir="ltr"
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <FileText className="h-4 w-4" />
-                  {t.notesTitle}
-                </CardTitle>
-                <CardDescription>{t.notesDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">{t.description}</p>
-                  <p className="mt-2 whitespace-pre-line text-sm leading-6">
-                    {transaction.description || "-"}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">{t.notes}</p>
-                  <p className="mt-2 whitespace-pre-line text-sm leading-6">
-                    {transaction.notes || "-"}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <aside className="space-y-4">
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <CheckCircle2 className="h-4 w-4" />
-                  {t.infoTitle}
-                </CardTitle>
-                <CardDescription>{t.infoDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                  <span>{t.transactionNumber}</span>
-                  <span className="font-semibold" dir="ltr">
-                    {transaction.transaction_number}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                  <span>{t.amount}</span>
-                  <MoneyText value={transaction.amount} />
-                </div>
-
-                <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                  <span>{t.status}</span>
-                  {statusBadge(transaction.status, locale)}
-                </div>
-
-                <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                  <span>{t.transactionType}</span>
-                  {transactionTypeBadge(transaction.transaction_type, locale)}
-                </div>
-
-                <div className="grid gap-2 pt-2">
-                  {canShowConfirm ? (
-                    <Button
-                      type="button"
-                      className="h-11 rounded-2xl"
-                      onClick={() =>
-                        runTransactionAction(
-                          "confirm",
-                          `/api/treasury/transactions/${currentTransactionId}/confirm/`,
-                        )
-                      }
-                    >
-                      {isConfirming ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="h-4 w-4" />
-                      )}
-                      {isConfirming ? t.confirming : t.confirm}
-                    </Button>
-                  ) : null}
-
-                  {canShowCancel ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-11 rounded-2xl border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() =>
-                        runTransactionAction(
-                          "cancel",
-                          `/api/treasury/transactions/${currentTransactionId}/cancel/`,
-                        )
-                      }
-                    >
-                      {isCancelling ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <XCircle className="h-4 w-4" />
-                      )}
-                      {isCancelling ? t.cancelling : t.cancel}
-                    </Button>
-                  ) : null}
-
-                  {canPrint ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-11 rounded-2xl"
-                      onClick={printPage}
-                    >
-                      <Printer className="h-4 w-4" />
-                      {t.print}
-                    </Button>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="space-y-3 p-5">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  {transaction.transaction_type === "RECEIPT" ? (
-                    <Receipt className="h-4 w-4" />
-                  ) : transaction.transaction_type === "PAYMENT" ? (
-                    <Banknote className="h-4 w-4" />
-                  ) : transaction.transaction_type === "TRANSFER" ? (
-                    <ArrowLeftRight className="h-4 w-4" />
-                  ) : (
-                    <CreditCard className="h-4 w-4" />
-                  )}
-                  {transactionTypeLabel(transaction.transaction_type, locale)}
-                </div>
-
-                <p className="text-sm leading-6 text-muted-foreground">
-                  {transaction.description || t.subtitle}
-                </p>
-
-                <div className="text-2xl font-bold">
-                  <MoneyText value={transaction.amount} />
-                </div>
-              </CardContent>
-            </Card>
-          </aside>
+              </div>
+            </CardContent>
+          </Card>
         </div>
-      ) : null}
+
+        <div className="space-y-4">
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle>{t.accountInfo}</CardTitle>
+              <CardDescription>{t.accountInfoDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-3 px-6 pb-6 md:grid-cols-2">
+              <DetailItem
+                label={t.sourceAccount}
+                value={
+                  <div className="space-y-1">
+                    <div>{transaction.treasury_account_name || t.notAvailable}</div>
+                    <div className="text-xs text-muted-foreground tabular-nums">
+                      {transaction.treasury_account_code || t.notAvailable}
+                    </div>
+                  </div>
+                }
+              />
+
+              <DetailItem
+                label={t.destinationAccount}
+                value={
+                  <div className="space-y-1">
+                    <div>{transaction.destination_account_name || t.notAvailable}</div>
+                    <div className="text-xs text-muted-foreground tabular-nums">
+                      {transaction.destination_account_code || t.notAvailable}
+                    </div>
+                  </div>
+                }
+              />
+
+              {transaction.treasury_account_id ? (
+                <div className="md:col-span-2">
+                  <Button asChild variant="outline" className="h-9 rounded-lg">
+                    <Link
+                      href={`/system/treasury/statement?account_id=${encodeURIComponent(
+                        transaction.treasury_account_id,
+                      )}`}
+                    >
+                      <FileText className="h-4 w-4" />
+                      {t.openStatement}
+                    </Link>
+                  </Button>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle>{t.referenceInfo}</CardTitle>
+              <CardDescription>{t.referenceInfoDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-3 px-6 pb-6 md:grid-cols-2">
+              <DetailItem label={t.party} value={transaction.party_name || t.notAvailable} />
+              <DetailItem label={t.reference} value={transaction.reference || t.notAvailable} mono />
+              <DetailItem
+                label={t.externalReference}
+                value={transaction.external_reference || t.notAvailable}
+                mono
+              />
+              <DetailItem label={t.sourceNumber} value={transaction.source_number || t.notAvailable} mono />
+              <div className="md:col-span-2">
+                <DetailItem label={t.description} value={transaction.description || t.notAvailable} />
+              </div>
+              <div className="md:col-span-2">
+                <DetailItem label={t.notes} value={transaction.notes || t.notAvailable} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle>{t.createdAt}</CardTitle>
+              <CardDescription>{transaction.created_by_name || t.notAvailable}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-3 px-6 pb-6 md:grid-cols-2">
+              <DetailItem label={t.createdAt} value={formatDate(transaction.created_at)} mono />
+              <DetailItem label={t.updatedAt} value={formatDate(transaction.updated_at)} mono />
+              <DetailItem label={t.confirmedAt} value={formatDate(transaction.confirmed_at)} mono />
+              <DetailItem label={t.cancelledAt} value={formatDate(transaction.cancelled_at)} mono />
+
+              {transaction.cancellation_reason ? (
+                <div className="md:col-span-2">
+                  <DetailItem label={t.cancellationReason} value={transaction.cancellation_reason} />
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }

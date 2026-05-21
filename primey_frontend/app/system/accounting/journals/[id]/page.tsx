@@ -2,99 +2,67 @@
 
 /* ============================================================
    📂 app/system/accounting/journals/[id]/page.tsx
-   🧠 Primey Care | Journal Entry Detail
-
-   ✅ المسار:
-      app/system/accounting/journals/[id]/page.tsx
-
-   ✅ العمل:
-      صفحة تفاصيل قيد اليومية داخل مديول المحاسبة.
-      تعرض بيانات القيد، حالة الترحيل، مصدر القيد، المدين والدائن، وسطور القيد.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Accounting Journal Detail Fix
-
-   ✅ يعتمد على:
-      - /api/accounting/journals/{id}/
-      - /api/accounting/journal-entries/{id}/ كـ fallback آمن
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Accounting module approved pattern
-      - Accounting journals list page
-      - Centers approved UX pattern
-      - Customers approved UX pattern
-
-   ✅ الوظائف:
-      - عرض تفاصيل قيد اليومية.
-      - عرض ملخص المدين والدائن وفرق التوازن.
-      - عرض بيانات القيد الأساسية.
-      - عرض سطور القيد.
-      - دعم مراكز التكلفة في السطور.
-      - البحث داخل سطور القيد.
-      - التحكم بالأعمدة المرئية.
-      - Excel export بصيغة .xls HTML Workbook.
-      - Web PDF Print.
-      - Skeleton Loading.
-      - Error State مستقل.
-      - Not Found State مستقل.
-      - إخفاء الإجراءات حسب الصلاحيات قدر الإمكان.
-
+   🧾 Primey Care — Journal Entry Details
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - إصلاح تكرار مفتاح notBalanced داخل القاموس.
-      - الحفاظ على نمط النظام: w-full space-y-4 بدون main/min-h-screen.
-      - تحسين fallback للتحميل عند 400 / 404 / 405.
-      - دعم مصادر الترحيل الجديدة: خزينة، عمولة، رصيد افتتاحي، نظام.
-      - دعم مراكز التكلفة داخل جدول السطور.
-      - استخدام الرقم ثم رمز SAR عند عرض القيم المالية.
-      - منع عرض أي عبارات تقنية أو مسارات داخل واجهة المستخدم.
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Real API only: /api/accounting/journals/{id}/
+   ✅ Header / profile card / KPI cards / journal lines table
+   ✅ Search / movement filter / columns
+   ✅ Excel .xls + Web print
+   ✅ Skeleton loading
+   ✅ Error / Not Found / Empty states
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowDownUp,
   ArrowLeft,
-  Calculator,
+  ArrowRight,
+  ArrowUpDown,
+  BookOpen,
   CheckCircle2,
-  ColumnsIcon,
-  Download,
-  FileText,
-  Layers3,
+  Eye,
+  FileSpreadsheet,
+  Landmark,
   Loader2,
   Printer,
-  RefreshCcw,
+  ReceiptText,
+  RefreshCw,
+  RotateCcw,
   Search,
+  Settings2,
   ShieldCheck,
+  TriangleAlert,
+  WalletCards,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -104,555 +72,314 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
+type ApiResponse = {
+  ok?: boolean;
+  success?: boolean;
+  data?: unknown;
+  item?: unknown;
+  journal?: unknown;
+  entry?: unknown;
+  results?: unknown[];
+  items?: unknown[];
+  lines?: unknown[];
+  message?: string;
+  detail?: string;
+  error?: string;
+};
 
-type JournalStatus =
-  | "DRAFT"
-  | "POSTED"
-  | "CANCELLED"
-  | "REVERSED"
-  | "UNKNOWN";
+type JournalRecord = {
+  id: string;
+  entry_number: string;
+  entry_date: string | null;
+  period_id: string;
+  period_name: string;
+  status: string;
+  status_label: string;
+  posting_source: string;
+  posting_source_label: string;
+  source_number: string;
+  reference: string;
+  description: string;
+  notes: string;
+  total_debit: number;
+  total_credit: number;
+  difference: number;
+  is_balanced: boolean;
+  lines_count: number;
+  created_by_name: string;
+  created_at: string | null;
+  updated_at: string | null;
+};
 
-type PostingSource =
-  | "MANUAL"
-  | "ORDER"
-  | "PAYMENT"
-  | "INVOICE"
-  | "REFUND"
-  | "ADJUSTMENT"
-  | "TREASURY"
-  | "COMMISSION"
-  | "OPENING"
-  | "SYSTEM"
-  | "OTHER"
-  | "UNKNOWN";
-
-type SortKey =
-  | "sort_order"
-  | "account_code"
-  | "account_name"
-  | "account_type"
-  | "description"
-  | "debit_amount"
-  | "credit_amount";
-
-type SortDirection = "asc" | "desc";
-
-type JournalLine = {
+type JournalLineRecord = {
   id: string;
   account_id: string;
   account_code: string;
   account_name: string;
-  account_type: string;
-  normal_balance: string;
   cost_center_id: string;
   cost_center_code: string;
   cost_center_name: string;
   description: string;
-  debit_amount: number;
-  credit_amount: number;
-  sort_order: number;
-};
-
-type JournalDetail = {
-  id: string;
-  entry_number: string;
-  entry_date: string;
-  status: JournalStatus;
-  posting_source: PostingSource;
+  debit: number;
+  credit: number;
+  movement_type: "debit" | "credit" | "empty";
   reference: string;
-  external_reference: string;
-  description: string;
-  notes: string;
-  currency: string;
-  total_debit: number;
-  total_credit: number;
-  is_balanced: boolean;
-  posted_at: string;
-  created_at: string;
-  updated_at: string;
-  lines: JournalLine[];
 };
 
-type ApiEnvelope<T> = {
-  ok?: boolean;
-  success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
-};
+type MovementFilter = "all" | "debit" | "credit" | "empty";
 
-type VisibleColumns = {
-  sortOrder: boolean;
-  accountCode: boolean;
-  accountName: boolean;
-  accountType: boolean;
-  normalBalance: boolean;
-  costCenter: boolean;
-  description: boolean;
-  debitAmount: boolean;
-  creditAmount: boolean;
-};
+type ColumnKey =
+  | "account"
+  | "costCenter"
+  | "description"
+  | "reference"
+  | "debit"
+  | "credit"
+  | "movement"
+  | "actions";
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-
-const DEFAULT_COLUMNS: VisibleColumns = {
-  sortOrder: true,
-  accountCode: true,
-  accountName: true,
-  accountType: true,
-  normalBalance: false,
+const DEFAULT_COLUMNS: Record<ColumnKey, boolean> = {
+  account: true,
   costCenter: true,
   description: true,
-  debitAmount: true,
-  creditAmount: true,
+  reference: true,
+  debit: true,
+  credit: true,
+  movement: true,
+  actions: true,
 };
 
-/* ============================================================
-   Locale / API
-============================================================ */
+const translations = {
+  ar: {
+    title: "تفاصيل قيد اليومية",
+    subtitle: "عرض بيانات القيد المحاسبي وسطور المدين والدائن وحالة التوازن.",
+    back: "قيود اليومية",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    openAccount: "فتح الحساب",
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+    profile: "ملف القيد",
+    profileDesc: "البيانات الأساسية للقيد وحالة الترحيل والتوازن.",
+    linesTitle: "سطور القيد",
+    linesDesc: "الحسابات، مراكز التكلفة، المدين والدائن لكل سطر.",
 
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+    entryNumber: "رقم القيد",
+    entryDate: "تاريخ القيد",
+    period: "الفترة",
+    status: "الحالة",
+    postingSource: "مصدر القيد",
+    sourceNumber: "رقم المصدر",
+    reference: "المرجع",
+    description: "الوصف",
+    notes: "ملاحظات",
+    createdBy: "أنشئ بواسطة",
+    createdAt: "تاريخ الإنشاء",
+    updatedAt: "آخر تحديث",
 
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
+    totalDebit: "إجمالي المدين",
+    totalCredit: "إجمالي الدائن",
+    difference: "فرق التوازن",
+    linesCount: "عدد السطور",
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+    account: "الحساب",
+    costCenter: "مركز التكلفة",
+    debit: "مدين",
+    credit: "دائن",
+    movement: "الحركة",
+    actions: "الإجراءات",
+
+    draft: "مسودة",
+    posted: "مرحل",
+    cancelled: "ملغي",
+    reversed: "معكوس",
+    balanced: "متوازن",
+    unbalanced: "غير متوازن",
+    empty: "فارغ",
+    all: "الكل",
+    columns: "الأعمدة",
+    movementType: "نوع الحركة",
+    searchPlaceholder: "ابحث بالحساب أو مركز التكلفة أو البيان أو المرجع...",
+
+    showing: "عرض",
+    of: "من",
+    rows: "صفوف",
+    noDataTitle: "لا توجد سطور",
+    noDataDesc: "لا توجد سطور مرتبطة بهذا القيد.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+    notFoundTitle: "القيد غير موجود",
+    notFoundDesc: "تعذر العثور على قيد اليومية المطلوب.",
+    errorTitle: "تعذر تحميل تفاصيل القيد",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    refreshed: "تم تحديث تفاصيل القيد.",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير تفاصيل قيد اليومية",
+    generatedAt: "تاريخ الطباعة",
+    sar: "ر.س",
+    unknown: "غير محدد",
+  },
+  en: {
+    title: "Journal Entry Details",
+    subtitle: "View journal entry data, debit and credit lines, and balance status.",
+    back: "Journal entries",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    openAccount: "Open account",
+
+    profile: "Journal profile",
+    profileDesc: "Basic journal entry data, posting status, and balance status.",
+    linesTitle: "Journal lines",
+    linesDesc: "Accounts, cost centers, debit, and credit for each line.",
+
+    entryNumber: "Entry number",
+    entryDate: "Entry date",
+    period: "Period",
+    status: "Status",
+    postingSource: "Posting source",
+    sourceNumber: "Source number",
+    reference: "Reference",
+    description: "Description",
+    notes: "Notes",
+    createdBy: "Created by",
+    createdAt: "Created at",
+    updatedAt: "Updated at",
+
+    totalDebit: "Total debit",
+    totalCredit: "Total credit",
+    difference: "Difference",
+    linesCount: "Lines count",
+
+    account: "Account",
+    costCenter: "Cost center",
+    debit: "Debit",
+    credit: "Credit",
+    movement: "Movement",
+    actions: "Actions",
+
+    draft: "Draft",
+    posted: "Posted",
+    cancelled: "Cancelled",
+    reversed: "Reversed",
+    balanced: "Balanced",
+    unbalanced: "Unbalanced",
+    empty: "Empty",
+    all: "All",
+    columns: "Columns",
+    movementType: "Movement type",
+    searchPlaceholder: "Search by account, cost center, description, or reference...",
+
+    showing: "Showing",
+    of: "of",
+    rows: "rows",
+    noDataTitle: "No lines",
+    noDataDesc: "No lines are linked to this journal entry.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other results.",
+    notFoundTitle: "Journal entry not found",
+    notFoundDesc: "The requested journal entry could not be found.",
+    errorTitle: "Unable to load journal details",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    refreshed: "Journal details refreshed.",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "Journal entry details report",
+    generatedAt: "Generated at",
+    sar: "SAR",
+    unknown: "Unknown",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
 }
 
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
 
-    if (value && typeof value === "object") {
-      return value as Dict;
-    }
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  const roles = getAuthRoles(authValue);
+  return fallback;
+}
 
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+
+    if (["1", "true", "yes", "on", "balanced", "posted"].includes(normalized)) return true;
+    if (["0", "false", "no", "off", "draft", "unbalanced"].includes(normalized)) return false;
   }
 
-  return true;
+  return fallback;
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "تفاصيل قيد اليومية" : "Journal Entry Details",
-    subtitle: isArabic
-      ? "مراجعة بيانات القيد وسطور الحسابات ومراكز التكلفة والتوازن بين المدين والدائن."
-      : "Review entry details, account lines, cost centers, and debit-credit balance.",
-
-    back: isArabic ? "القيود اليومية" : "Journal Entries",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-    columns: isArabic ? "الأعمدة" : "Columns",
-    clearSearch: isArabic ? "مسح البحث" : "Clear Search",
-
-    entryInfo: isArabic ? "بيانات القيد" : "Entry Information",
-    entryInfoDesc: isArabic
-      ? "المعلومات الأساسية للقيد ومصدر الترحيل."
-      : "Basic information and posting source.",
-    financialSummary: isArabic ? "ملخص مالي" : "Financial Summary",
-    financialSummaryDesc: isArabic
-      ? "إجمالي المدين والدائن وفرق التوازن."
-      : "Total debit, total credit, and balance difference.",
-    linesTitle: isArabic ? "سطور القيد" : "Journal Lines",
-    linesDesc: isArabic
-      ? "تفاصيل الحسابات ومراكز التكلفة والمبالغ."
-      : "Account, cost center, and amount details.",
-
-    entryNumber: isArabic ? "رقم القيد" : "Entry Number",
-    entryDate: isArabic ? "تاريخ القيد" : "Entry Date",
-    status: isArabic ? "الحالة" : "Status",
-    postingSource: isArabic ? "مصدر الترحيل" : "Posting Source",
-    reference: isArabic ? "المرجع" : "Reference",
-    externalReference: isArabic ? "مرجع خارجي" : "External Reference",
-    description: isArabic ? "الوصف" : "Description",
-    notes: isArabic ? "ملاحظات" : "Notes",
-    postedAt: isArabic ? "تاريخ الترحيل" : "Posted At",
-    createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-    updatedAt: isArabic ? "آخر تحديث" : "Updated At",
-
-    totalDebit: isArabic ? "إجمالي المدين" : "Total Debit",
-    totalCredit: isArabic ? "إجمالي الدائن" : "Total Credit",
-    difference: isArabic ? "فرق التوازن" : "Difference",
-    linesCount: isArabic ? "عدد السطور" : "Lines Count",
-    balanced: isArabic ? "متوازن" : "Balanced",
-    notBalanced: isArabic ? "غير متوازن" : "Not Balanced",
-
-    draft: isArabic ? "مسودة" : "Draft",
-    posted: isArabic ? "مرحّل" : "Posted",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
-    reversed: isArabic ? "معكوس" : "Reversed",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    manual: isArabic ? "يدوي" : "Manual",
-    order: isArabic ? "طلب" : "Order",
-    payment: isArabic ? "دفعة" : "Payment",
-    invoice: isArabic ? "فاتورة" : "Invoice",
-    refund: isArabic ? "استرداد" : "Refund",
-    adjustment: isArabic ? "تسوية" : "Adjustment",
-    treasury: isArabic ? "خزينة" : "Treasury",
-    commission: isArabic ? "عمولة" : "Commission",
-    opening: isArabic ? "رصيد افتتاحي" : "Opening Balance",
-    system: isArabic ? "النظام" : "System",
-    other: isArabic ? "أخرى" : "Other",
-
-    searchPlaceholder: isArabic
-      ? "ابحث في الحساب أو الوصف أو مركز التكلفة..."
-      : "Search account, description, or cost center...",
-
-    table: {
-      sortOrder: isArabic ? "الترتيب" : "Order",
-      accountCode: isArabic ? "رمز الحساب" : "Account Code",
-      accountName: isArabic ? "اسم الحساب" : "Account Name",
-      accountType: isArabic ? "نوع الحساب" : "Account Type",
-      normalBalance: isArabic ? "الطبيعة" : "Normal Balance",
-      costCenter: isArabic ? "مركز التكلفة" : "Cost Center",
-      description: isArabic ? "الوصف" : "Description",
-      debit: isArabic ? "مدين" : "Debit",
-      credit: isArabic ? "دائن" : "Credit",
-    },
-
-    emptyTitle: isArabic ? "لا توجد سطور للقيد" : "No journal lines",
-    emptyText: isArabic
-      ? "لا توجد سطور محاسبية مرتبطة بهذا القيد."
-      : "There are no accounting lines linked to this entry.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث داخل سطور القيد."
-      : "Try changing the search keywords inside entry lines.",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض القيد" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض تفاصيل القيود اليومية. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view journal entry details. Contact your system administrator if you need access.",
-
-    notFoundTitle: isArabic ? "القيد غير موجود" : "Entry not found",
-    notFoundText: isArabic
-      ? "لم يتم العثور على قيد اليومية المطلوب."
-      : "The requested journal entry could not be found.",
-
-    apiError: isArabic
-      ? "تعذر تحميل تفاصيل القيد."
-      : "Unable to load journal entry details.",
-    apiErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    refreshSuccess: isArabic
-      ? "تم تحديث تفاصيل القيد بنجاح."
-      : "Journal entry details refreshed successfully.",
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
-    exportEmpty: isArabic
-      ? "لا توجد سطور قابلة للتصدير."
-      : "No lines available to export.",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: unknown): string {
+function formatInteger(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(toNumber(value));
 }
 
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function formatDate(value: string, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const parsed = new Date(value);
 
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).slice(0, 10);
+  }
+
+  return parsed.toISOString().slice(0, 10);
 }
 
-function formatDateTime(value: string, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const parsed = new Date(value);
 
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).replace("T", " ").slice(0, 16);
+  }
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
 }
 
-function escapeHtml(value: string | number) {
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -661,1023 +388,769 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function getValue(obj: Dict, key: string): unknown {
-  const direct = obj[key];
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
 
-  if (direct !== undefined && direct !== null && direct !== "") {
-    return direct;
-  }
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
 
-  for (const container of [
-    "entry",
-    "journal",
-    "journal_entry",
-    "account",
-    "chart_account",
-    "cost_center",
-    "costCenter",
-    "data",
-    "item",
-  ]) {
-    const nested = obj[container];
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
+}
 
-    if (nested && typeof nested === "object") {
-      const value = (nested as Dict)[key];
+function makeApiUrl(path: string) {
+  return `${getApiBaseUrl()}${path}`;
+}
 
-      if (value !== undefined && value !== null && value !== "") {
-        return value;
-      }
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
-}
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
 
-function normalizeStatus(value: unknown): JournalStatus {
-  const status = String(value || "").toUpperCase();
-
-  if (status === "DRAFT") return "DRAFT";
-  if (status === "POSTED" || status === "CONFIRMED") return "POSTED";
-  if (status === "CANCELLED" || status === "CANCELED") return "CANCELLED";
-  if (status === "REVERSED") return "REVERSED";
-
-  return "UNKNOWN";
-}
-
-function normalizePostingSource(value: unknown): PostingSource {
-  const source = String(value || "").toUpperCase();
-
-  if (source.includes("COMMISSION")) return "COMMISSION";
-  if (source.includes("PAYMENT")) return "PAYMENT";
-  if (source.includes("INVOICE")) return "INVOICE";
-  if (source.includes("ORDER")) return "ORDER";
-  if (source.includes("TREASURY")) return "TREASURY";
-  if (source.includes("OPENING")) return "OPENING";
-  if (source.includes("ADJUSTMENT") || source.includes("SETTLEMENT")) {
-    return "ADJUSTMENT";
+    throw new Error(message);
   }
-  if (source.includes("REFUND")) return "REFUND";
-  if (source.includes("SYSTEM") || source.includes("AUTO")) return "SYSTEM";
-  if (source.includes("MANUAL") || source.includes("USER")) return "MANUAL";
-  if (source.includes("OTHER")) return "OTHER";
 
-  return "UNKNOWN";
+  return (payload || {}) as T;
 }
 
-function toBoolean(value: unknown, fallback: boolean) {
-  if (typeof value === "boolean") return value;
+function extractDetail(payload: ApiResponse) {
+  const data = asRecord(payload.data);
 
-  if (value === undefined || value === null || value === "") return fallback;
+  if (payload.journal) return payload.journal;
+  if (payload.entry) return payload.entry;
+  if (payload.item) return payload.item;
+  if (data.journal) return data.journal;
+  if (data.entry) return data.entry;
+  if (data.item) return data.item;
+  if (data.detail) return data.detail;
 
-  const clean = String(value).toLowerCase();
-
-  if (["true", "1", "yes", "balanced"].includes(clean)) return true;
-  if (["false", "0", "no", "unbalanced"].includes(clean)) return false;
-
-  return fallback;
+  return payload.data || payload;
 }
 
-function normalizeLine(item: unknown, index: number): JournalLine {
-  const obj = asDict(item);
-  const account = asDict(obj.account || obj.chart_account);
-  const costCenter = asDict(obj.cost_center || obj.costCenter);
+function extractLines(payload: unknown) {
+  const record = asRecord(payload);
+  const data = asRecord(record.data);
+
+  const possible =
+    record.lines ||
+    record.items ||
+    record.details ||
+    record.journal_lines ||
+    record.entry_lines ||
+    data.lines ||
+    data.items ||
+    data.details ||
+    data.journal_lines ||
+    data.entry_lines;
+
+  return Array.isArray(possible) ? possible : [];
+}
+
+function normalizeJournal(value: unknown): JournalRecord {
+  const item = asRecord(value);
+  const period = asRecord(item.period);
+  const createdBy = asRecord(item.created_by || item.user || item.owner);
+
+  const id = normalizeText(item.id || item.pk || item.uuid);
+  const totalDebit = toNumber(item.total_debit ?? item.debit_total ?? item.debit);
+  const totalCredit = toNumber(item.total_credit ?? item.credit_total ?? item.credit);
+  const difference = Math.abs(totalDebit - totalCredit);
 
   return {
-    id: String(getValue(obj, "id") || `${index}`),
-    account_id: String(account.id || getValue(obj, "account_id") || ""),
-    account_code: String(account.code || getValue(obj, "account_code") || ""),
-    account_name: String(account.name || getValue(obj, "account_name") || ""),
-    account_type: String(
-      account.type || account.account_type || getValue(obj, "account_type") || "",
+    id,
+    entry_number: normalizeText(
+      item.entry_number || item.number || item.journal_number || item.code || `#${id}`,
     ),
-    normal_balance: String(
-      account.normal_balance || getValue(obj, "normal_balance") || "",
+    entry_date: normalizeText(item.entry_date || item.date || item.posting_date) || null,
+    period_id: normalizeText(item.period_id || period.id),
+    period_name: normalizeText(item.period_name || period.name || period.title),
+    status: normalizeText(item.status || item.entry_status || "draft"),
+    status_label: normalizeText(item.status_label || item.status),
+    posting_source: normalizeText(item.posting_source || item.source || item.source_type),
+    posting_source_label: normalizeText(
+      item.posting_source_label || item.source_label || item.posting_source || item.source,
     ),
-    cost_center_id: String(costCenter.id || getValue(obj, "cost_center_id") || ""),
-    cost_center_code: String(
-      costCenter.code || getValue(obj, "cost_center_code") || "",
+    source_number: normalizeText(
+      item.source_number || item.reference_number || item.external_reference,
     ),
-    cost_center_name: String(
-      costCenter.name || getValue(obj, "cost_center_name") || "",
+    reference: normalizeText(item.reference || item.ref || item.reference_number),
+    description: normalizeText(item.description || item.notes || item.memo),
+    notes: normalizeText(item.notes),
+    total_debit: totalDebit,
+    total_credit: totalCredit,
+    difference: toNumber(item.difference, difference),
+    is_balanced: toBoolean(item.is_balanced, difference < 0.01),
+    lines_count: toNumber(item.lines_count || item.items_count || item.details_count),
+    created_by_name: normalizeText(
+      item.created_by_name ||
+        item.user_name ||
+        createdBy.name ||
+        createdBy.full_name ||
+        createdBy.username,
     ),
-    description: String(
-      getValue(obj, "description") ||
-        getValue(obj, "memo") ||
-        getValue(obj, "notes") ||
-        "",
-    ),
-    debit_amount: toNumber(
-      getValue(obj, "debit_amount") || getValue(obj, "debit") || 0,
-    ),
-    credit_amount: toNumber(
-      getValue(obj, "credit_amount") || getValue(obj, "credit") || 0,
-    ),
-    sort_order: toNumber(getValue(obj, "sort_order") ?? index + 1),
+    created_at: normalizeText(item.created_at) || null,
+    updated_at: normalizeText(item.updated_at) || null,
   };
 }
 
-function normalizeJournalDetail(payload: unknown): JournalDetail | null {
-  const envelope = asDict(payload);
-  const source =
-    envelope.data && typeof envelope.data === "object"
-      ? asDict(envelope.data)
-      : envelope;
+function normalizeLine(value: unknown): JournalLineRecord {
+  const item = asRecord(value);
+  const account = asRecord(item.account);
+  const costCenter = asRecord(item.cost_center || item.costCenter);
 
-  if (!source || Object.keys(source).length === 0) return null;
+  const id = normalizeText(item.id || item.pk || item.uuid);
+  const debit = toNumber(item.debit ?? item.debit_amount ?? item.total_debit);
+  const credit = toNumber(item.credit ?? item.credit_amount ?? item.total_credit);
 
-  const linesSource =
-    source.lines ||
-    source.items ||
-    source.entries ||
-    source.details ||
-    asDict(source.data).lines ||
-    [];
-
-  const lines = Array.isArray(linesSource)
-    ? linesSource.map((line, index) => normalizeLine(line, index))
-    : [];
-
-  const totalDebit =
-    getValue(source, "total_debit") ||
-    lines.reduce((sum, line) => sum + line.debit_amount, 0);
-
-  const totalCredit =
-    getValue(source, "total_credit") ||
-    lines.reduce((sum, line) => sum + line.credit_amount, 0);
-
-  const debitNumber = toNumber(totalDebit);
-  const creditNumber = toNumber(totalCredit);
+  let movementType: JournalLineRecord["movement_type"] = "empty";
+  if (debit > 0) movementType = "debit";
+  if (credit > 0) movementType = "credit";
 
   return {
-    id: String(getValue(source, "id") || ""),
-    entry_number: String(
-      getValue(source, "entry_number") ||
-        getValue(source, "journal_number") ||
-        getValue(source, "number") ||
-        "-",
+    id,
+    account_id: normalizeText(item.account_id || account.id),
+    account_code: normalizeText(item.account_code || account.code),
+    account_name: normalizeText(
+      item.account_name || account.name || account.name_ar || account.name_en,
     ),
-    entry_date: String(
-      getValue(source, "entry_date") ||
-        getValue(source, "journal_date") ||
-        getValue(source, "date") ||
-        "",
+    cost_center_id: normalizeText(item.cost_center_id || costCenter.id),
+    cost_center_code: normalizeText(item.cost_center_code || costCenter.code),
+    cost_center_name: normalizeText(
+      item.cost_center_name || costCenter.name || costCenter.name_ar || costCenter.name_en,
     ),
-    status: normalizeStatus(getValue(source, "status")),
-    posting_source: normalizePostingSource(
-      getValue(source, "posting_source") ||
-        getValue(source, "source") ||
-        getValue(source, "source_type"),
-    ),
-    reference: String(getValue(source, "reference") || ""),
-    external_reference: String(
-      getValue(source, "external_reference") ||
-        getValue(source, "source_reference") ||
-        "",
-    ),
-    description: String(
-      getValue(source, "description") ||
-        getValue(source, "memo") ||
-        getValue(source, "notes") ||
-        "",
-    ),
-    notes: String(getValue(source, "notes") || ""),
-    currency: String(getValue(source, "currency") || "SAR"),
-    total_debit: debitNumber,
-    total_credit: creditNumber,
-    is_balanced: toBoolean(
-      getValue(source, "is_balanced"),
-      Math.abs(debitNumber - creditNumber) < 0.005,
-    ),
-    posted_at: String(getValue(source, "posted_at") || ""),
-    created_at: String(getValue(source, "created_at") || ""),
-    updated_at: String(getValue(source, "updated_at") || ""),
-    lines,
+    description: normalizeText(item.description || item.notes || item.memo),
+    debit,
+    credit,
+    movement_type: movementType,
+    reference: normalizeText(item.reference || item.ref || item.source_number),
   };
 }
 
-function statusLabel(status: JournalStatus, locale: AppLocale) {
-  const t = dictionary(locale);
+function statusLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const status = value.toLowerCase();
 
-  const labels: Record<JournalStatus, string> = {
-    DRAFT: t.draft,
-    POSTED: t.posted,
-    CANCELLED: t.cancelled,
-    REVERSED: t.reversed,
-    UNKNOWN: t.unknown,
-  };
+  if (status === "posted") return t.posted;
+  if (status === "cancelled" || status === "canceled") return t.cancelled;
+  if (status === "reversed") return t.reversed;
 
-  return labels[status];
+  return t.draft;
 }
 
-function sourceLabel(source: PostingSource, locale: AppLocale) {
-  const t = dictionary(locale);
+function movementLabel(value: JournalLineRecord["movement_type"], locale: Locale) {
+  const t = translations[locale];
 
-  const labels: Record<PostingSource, string> = {
-    MANUAL: t.manual,
-    ORDER: t.order,
-    PAYMENT: t.payment,
-    INVOICE: t.invoice,
-    REFUND: t.refund,
-    ADJUSTMENT: t.adjustment,
-    TREASURY: t.treasury,
-    COMMISSION: t.commission,
-    OPENING: t.opening,
-    SYSTEM: t.system,
-    OTHER: t.other,
-    UNKNOWN: t.unknown,
-  };
+  if (value === "debit") return t.debit;
+  if (value === "credit") return t.credit;
 
-  return labels[source];
+  return t.empty;
 }
 
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+function getBadgeClass(value: string) {
+  const normalized = value.toLowerCase();
+
+  if (["posted", "balanced", "debit"].includes(normalized)) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  if (["cancelled", "canceled", "unbalanced"].includes(normalized)) {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+  }
+
+  if (["reversed", "credit"].includes(normalized)) {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function StatusBadge({ value, label }: { value: string; label: string }) {
   return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", getBadgeClass(value))}
+    >
+      {label || value || "—"}
+    </Badge>
   );
 }
 
-function MoneyText({ value }: { value: unknown }) {
+function MoneyValue({ value, label }: { value: number; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <div className="flex items-center justify-start gap-1 text-sm font-semibold tabular-nums">
       <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-function statusBadge(status: JournalStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "POSTED") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "DRAFT") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "CANCELLED" || status === "REVERSED") {
-    return (
-      <Badge variant="destructive" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
-  );
-}
-
-function sourceBadge(source: PostingSource, locale: AppLocale) {
-  const label = sourceLabel(source, locale);
-
-  if (source === "PAYMENT" || source === "TREASURY") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (source === "INVOICE" || source === "ORDER") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (source === "COMMISSION" || source === "OPENING") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
-  );
-}
-
-function balanceBadge(isBalanced: boolean, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  if (isBalanced) {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {t.balanced}
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="destructive" className="rounded-full px-3 py-1">
-      {t.notBalanced}
-    </Badge>
-  );
-}
-
-function sortValue(row: JournalLine, key: SortKey): string | number {
-  if (key === "debit_amount") return row.debit_amount;
-  if (key === "credit_amount") return row.credit_amount;
-  if (key === "sort_order") return row.sort_order;
-
-  return String(row[key] || "");
-}
-
-/* ============================================================
-   Skeleton
-============================================================ */
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function SummaryCardsSkeleton() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-2">
-                <SkeletonLine className="h-7 w-20" />
-                <SkeletonLine className="h-4 w-32" />
-              </div>
-              <SkeletonLine className="h-10 w-10 rounded-xl" />
-            </div>
-
-            <div className="mt-4 flex items-center gap-2">
-              <SkeletonLine className="h-3 w-8" />
-              <SkeletonLine className="h-2 flex-1" />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+      <img src="/currency/sar.svg" alt={label} className="h-3.5 w-3.5" />
     </div>
   );
 }
 
-function TableRowsSkeleton({ columnsCount }: { columnsCount: number }) {
+function InfoRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
   return (
-    <>
-      {Array.from({ length: 6 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 2
-                    ? "h-8 w-44 rounded-lg"
-                    : "h-4 w-24 rounded-lg"
-                }
-              />
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </>
+    <div className="flex items-center justify-between gap-3 border-b py-3 last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="min-w-0 text-left text-sm font-medium text-foreground">{value}</div>
+    </div>
   );
 }
 
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  worksheetName,
+function KpiCard({
   title,
-  locale,
-  summaryRows,
-  headers,
-  rows,
+  value,
+  trend,
+  icon: Icon,
 }: {
-  filename: string;
-  worksheetName: string;
   title: string;
-  locale: AppLocale;
-  summaryRows: Array<[string, string | number]>;
-  headers: string[];
-  rows: Array<Array<string | number>>;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
-  const dir = locale === "ar" ? "rtl" : "ltr";
-  const align = locale === "ar" ? "right" : "left";
-  const colspan = Math.max(headers.length, 2);
+  return (
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-  const summaryHtml = summaryRows
-    .map(
-      ([label, value]) => `
-        <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
 
-  const headerHtml = headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
-    .join("");
-
-  const rowsHtml = rows
-    .map(
-      (row) => `
-        <tr>
-          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; color: #000; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-          .summary-value { font-weight: 700; }
-        </style>
-      </head>
-
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="${colspan}">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${locale === "ar" ? "ملخص القيد" : "Entry Summary"}
-          </td></tr>
-          ${summaryHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr>${headerHtml}</tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  entry,
-  rows,
-  t,
-}: {
-  locale: AppLocale;
-  title: string;
-  entry: JournalDetail;
-  rows: JournalLine[];
-  t: ReturnType<typeof dictionary>;
-}) {
-  const isArabic = locale === "ar";
-  const now = new Date().toLocaleString("en-US");
-  const difference = entry.total_debit - entry.total_credit;
-
-  const tableRows = rows
-    .map(
-      (item, index) => `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(item.account_code || "-")}</td>
-          <td>${escapeHtml(item.account_name || "-")}</td>
-          <td>${escapeHtml(item.cost_center_name || "-")}</td>
-          <td>${escapeHtml(item.description || "-")}</td>
-          <td>${escapeHtml(formatMoney(item.debit_amount))}</td>
-          <td>${escapeHtml(formatMoney(item.credit_amount))}</td>
-        </tr>
-      `,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #ffffff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .print-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 16px;
-            margin-bottom: 18px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
-          .badge {
-            display: inline-block;
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            color: #374151;
-          }
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .summary-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .summary-card span {
-            display: block;
-            color: #6b7280;
-            font-size: 11px;
-            margin-bottom: 5px;
-          }
-          .summary-card strong { font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; }
-          th { background: #f3f4f6; color: #111827; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 9px 8px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          tr:nth-child(even) td { background: #fafafa; }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-
-      <body>
-        <div class="print-header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.entryNumber)}: ${escapeHtml(entry.entry_number)}</div>
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
           </div>
-          <div class="badge">Primey Care</div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
         </div>
-
-        <div class="summary-grid">
-          <div class="summary-card"><span>${escapeHtml(t.totalDebit)}</span><strong>${formatMoney(entry.total_debit)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.totalCredit)}</span><strong>${formatMoney(entry.total_credit)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.difference)}</span><strong>${formatMoney(difference)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.linesCount)}</span><strong>${formatNumber(entry.lines.length)}</strong></div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>${escapeHtml(t.table.accountCode)}</th>
-              <th>${escapeHtml(t.table.accountName)}</th>
-              <th>${escapeHtml(t.table.costCenter)}</th>
-              <th>${escapeHtml(t.table.description)}</th>
-              <th>${escapeHtml(t.table.debit)}</th>
-              <th>${escapeHtml(t.table.credit)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="7" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+      </CardHeader>
+    </Card>
+  );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function DetailsSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-60" />
+          <Skeleton className="h-4 w-96" />
+        </div>
 
-export default function JournalEntryDetailPage() {
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-6">
+            {Array.from({ length: 10 }).map((_, index) => (
+              <Skeleton key={index} className="h-10 w-full" />
+            ))}
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Card key={index} className="rounded-lg border bg-card shadow-none">
+                <CardHeader className="min-h-[112px] px-6 py-5">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-8 w-32" />
+                  <Skeleton className="h-5 w-20" />
+                </CardHeader>
+              </Card>
+            ))}
+          </div>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="space-y-3 p-4">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-80 w-full" />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function AccountingJournalDetailsPage() {
   const params = useParams<{ id?: string }>();
-  const auth = useAuth() as unknown;
+  const journalId = Array.isArray(params?.id) ? params.id[0] : params?.id || "";
 
-  const journalId = String(params?.id || "");
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [journal, setJournal] = React.useState<JournalRecord | null>(null);
+  const [lines, setLines] = React.useState<JournalLineRecord[]>([]);
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [entry, setEntry] = useState<JournalDetail | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [notFound, setNotFound] = useState(false);
-  const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("sort_order");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-  const [visibleColumns, setVisibleColumns] =
-    useState<VisibleColumns>(DEFAULT_COLUMNS);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [notFound, setNotFound] = React.useState(false);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const [searchInput, setSearchInput] = React.useState("");
+  const [movementFilter, setMovementFilter] = React.useState<MovementFilter>("all");
+  const [columns, setColumns] = React.useState<Record<ColumnKey, boolean>>(DEFAULT_COLUMNS);
 
-  const canView = hasSafePermission(
-    auth,
-    ["accounting.view", "accounting.journals.view", "accounting.detail"],
-    "view",
-  );
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const canExport = hasSafePermission(
-    auth,
-    ["accounting.export", "reports.accounting.export"],
-    "action",
-  );
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const canPrint = hasSafePermission(
-    auth,
-    ["accounting.print", "reports.accounting.print"],
-    "action",
-  );
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-  const filteredLines = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
+    applyLocale();
 
-    const lines = (entry?.lines || []).filter((line) => {
-      if (!cleanQuery) return true;
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-      return [
-        line.account_code,
-        line.account_name,
-        line.account_type,
-        line.normal_balance,
-        line.cost_center_code,
-        line.cost_center_name,
-        line.description,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(cleanQuery);
-    });
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
 
-    return [...lines].sort((a, b) => {
-      const first = sortValue(a, sortKey);
-      const second = sortValue(b, sortKey);
+  const loadDetails = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!journalId) return;
 
-      if (typeof first === "number" && typeof second === "number") {
-        return sortDirection === "asc" ? first - second : second - first;
-      }
-
-      return sortDirection === "asc"
-        ? String(first).localeCompare(String(second))
-        : String(second).localeCompare(String(first));
-    });
-  }, [entry?.lines, query, sortDirection, sortKey]);
-
-  const visibleColumnCount = Object.values(visibleColumns).filter(Boolean).length;
-  const difference = entry ? entry.total_debit - entry.total_credit : 0;
-
-  const summaryCards = useMemo(
-    () => [
-      {
-        title: t.totalDebit,
-        value: entry?.total_debit || 0,
-        icon: Calculator,
-        helper: t.financialSummary,
-        isMoney: true,
-      },
-      {
-        title: t.totalCredit,
-        value: entry?.total_credit || 0,
-        icon: CheckCircle2,
-        helper: t.financialSummary,
-        isMoney: true,
-      },
-      {
-        title: t.difference,
-        value: difference,
-        icon: ShieldCheck,
-        helper: entry?.is_balanced ? t.balanced : t.notBalanced,
-        isMoney: true,
-      },
-      {
-        title: t.linesCount,
-        value: entry?.lines.length || 0,
-        icon: Layers3,
-        helper: t.linesTitle,
-        isMoney: false,
-      },
-    ],
-    [difference, entry, t],
-  );
-
-  const loadEntry = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setIsLoading(false);
-        return;
-      }
-
-      if (!journalId) {
-        setIsLoading(false);
-        setNotFound(true);
-        return;
-      }
+      const controller = new AbortController();
 
       try {
-        setIsLoading(true);
-        setErrorMessage("");
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setError("");
         setNotFound(false);
 
-        const endpoints = [
-          `/api/accounting/journals/${journalId}/`,
-          `/api/accounting/journal-entries/${journalId}/`,
-        ];
+        const payload = await fetchJson<ApiResponse>(
+          makeApiUrl(`/api/accounting/journals/${journalId}/`),
+          controller.signal,
+        );
 
-        let loadedPayload: unknown = null;
-        let loaded = false;
+        const detail = extractDetail(payload);
+        const normalizedJournal = normalizeJournal(detail);
 
-        for (const endpoint of endpoints) {
-          const response = await fetch(apiUrl(endpoint), {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-          });
-
-          const payload = (await response.json().catch(() => null)) as
-            | ApiEnvelope<unknown>
-            | unknown
-            | null;
-
-          if ([400, 404, 405].includes(response.status)) {
-            loadedPayload = payload;
-            continue;
-          }
-
-          const envelope = payload as ApiEnvelope<unknown> | null;
-
-          if (
-            !response.ok ||
-            envelope?.ok === false ||
-            envelope?.success === false
-          ) {
-            throw new Error(
-              envelope?.message ||
-                envelope?.detail ||
-                envelope?.error ||
-                `HTTP ${response.status}`,
-            );
-          }
-
-          loadedPayload = payload;
-          loaded = true;
-          break;
-        }
-
-        if (!loaded) {
-          setEntry(null);
+        if (!normalizedJournal.id && !normalizedJournal.entry_number) {
           setNotFound(true);
+          setJournal(null);
+          setLines([]);
           return;
         }
 
-        const normalized = normalizeJournalDetail(loadedPayload);
+        const normalizedLines = extractLines(detail).map(normalizeLine);
+        const totalDebit =
+          normalizedLines.length > 0
+            ? normalizedLines.reduce((sum, line) => sum + line.debit, 0)
+            : normalizedJournal.total_debit;
+        const totalCredit =
+          normalizedLines.length > 0
+            ? normalizedLines.reduce((sum, line) => sum + line.credit, 0)
+            : normalizedJournal.total_credit;
+        const difference = Math.abs(totalDebit - totalCredit);
 
-        if (!normalized || !normalized.id) {
-          setEntry(null);
+        setJournal({
+          ...normalizedJournal,
+          total_debit: totalDebit,
+          total_credit: totalCredit,
+          difference,
+          is_balanced: difference < 0.01,
+          lines_count: normalizedLines.length || normalizedJournal.lines_count,
+        });
+        setLines(normalizedLines);
+
+        if (silent) toast.success(t.refreshed);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        if (message.includes("404")) {
           setNotFound(true);
-          return;
+        } else {
+          setError(message);
         }
-
-        setEntry(normalized);
-
-        if (showToast) {
-          toast.success(t.refreshSuccess);
-        }
-      } catch (error) {
-        console.error("Journal detail load error:", error);
-        setEntry(null);
-        setErrorMessage(t.apiError);
-        toast.error(t.apiError);
       } finally {
-        setIsLoading(false);
+        setLoading(false);
+        setRefreshing(false);
       }
+
+      return () => controller.abort();
     },
-    [canView, journalId, t.apiError, t.refreshSuccess],
+    [journalId, t.errorDesc, t.refreshed],
   );
 
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
+  React.useEffect(() => {
+    void loadDetails();
+  }, [loadDetails]);
 
-    setSortKey(key);
-    setSortDirection("asc");
+  const filteredLines = React.useMemo(() => {
+    const query = searchInput.trim().toLowerCase();
+
+    return lines.filter((line) => {
+      const matchesSearch =
+        !query ||
+        line.account_code.toLowerCase().includes(query) ||
+        line.account_name.toLowerCase().includes(query) ||
+        line.cost_center_code.toLowerCase().includes(query) ||
+        line.cost_center_name.toLowerCase().includes(query) ||
+        line.description.toLowerCase().includes(query) ||
+        line.reference.toLowerCase().includes(query);
+
+      const matchesMovement =
+        movementFilter === "all" || line.movement_type === movementFilter;
+
+      return matchesSearch && matchesMovement;
+    });
+  }, [lines, movementFilter, searchInput]);
+
+  const hasActiveFilters = Boolean(searchInput.trim()) || movementFilter !== "all";
+  const visibleColumnCount = Object.values(columns).filter(Boolean).length;
+
+  function resetFilters() {
+    setSearchInput("");
+    setMovementFilter("all");
+  }
+
+  function columnLabel(key: ColumnKey) {
+    if (key === "account") return t.account;
+    if (key === "costCenter") return t.costCenter;
+    if (key === "description") return t.description;
+    if (key === "reference") return t.reference;
+    if (key === "debit") return t.debit;
+    if (key === "credit") return t.credit;
+    if (key === "movement") return t.movement;
+    return t.actions;
+  }
+
+  function buildExportRows() {
+    return filteredLines.map((line) => ({
+      account: `${line.account_code ? `${line.account_code} — ` : ""}${line.account_name || "—"}`,
+      costCenter: `${line.cost_center_code ? `${line.cost_center_code} — ` : ""}${line.cost_center_name || "—"}`,
+      description: line.description,
+      reference: line.reference,
+      debit: formatMoney(line.debit),
+      credit: formatMoney(line.credit),
+      movement: movementLabel(line.movement_type, locale),
+    }));
   }
 
   function exportExcel() {
-    if (!canExport || !entry) return;
+    if (!journal) return;
 
-    if (filteredLines.length === 0) {
+    const rows = buildExportRows();
+
+    if (!rows.length) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    const generatedAt = new Date();
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(t.printTitle)}</h1>
+          <p>${escapeHtml(t.entryNumber)}: ${escapeHtml(journal.entry_number)}</p>
+          <p>${escapeHtml(t.entryDate)}: ${escapeHtml(formatDate(journal.entry_date))}</p>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
 
-    downloadExcel({
-      filename: `primey-care-journal-entry-${entry.entry_number || journalId}-${generatedAt
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "تفاصيل القيد" : "Journal Entry",
-      title: t.title,
-      locale,
-      summaryRows: [
-        [t.generatedAt, generatedAt.toLocaleString("en-US")],
-        [t.entryNumber, entry.entry_number],
-        [t.entryDate, formatDate(entry.entry_date, locale)],
-        [t.status, statusLabel(entry.status, locale)],
-        [t.postingSource, sourceLabel(entry.posting_source, locale)],
-        [t.reference, entry.reference || "-"],
-        [t.totalDebit, formatMoney(entry.total_debit)],
-        [t.totalCredit, formatMoney(entry.total_credit)],
-        [t.difference, formatMoney(difference)],
-        [t.linesCount, entry.lines.length],
-      ],
-      headers: [
-        t.table.sortOrder,
-        t.table.accountCode,
-        t.table.accountName,
-        t.table.accountType,
-        t.table.normalBalance,
-        t.table.costCenter,
-        t.table.description,
-        t.table.debit,
-        t.table.credit,
-      ],
-      rows: filteredLines.map((line) => [
-        line.sort_order || "-",
-        line.account_code || "-",
-        line.account_name || "-",
-        line.account_type || "-",
-        line.normal_balance || "-",
-        [line.cost_center_code, line.cost_center_name].filter(Boolean).join(" - ") ||
-          "-",
-        line.description || "-",
-        formatMoney(line.debit_amount),
-        formatMoney(line.credit_amount),
-      ]),
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.account)}</th>
+                <th>${escapeHtml(t.costCenter)}</th>
+                <th>${escapeHtml(t.description)}</th>
+                <th>${escapeHtml(t.reference)}</th>
+                <th>${escapeHtml(t.debit)}</th>
+                <th>${escapeHtml(t.credit)}</th>
+                <th>${escapeHtml(t.movement)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.account)}</td>
+                      <td>${escapeHtml(row.costCenter)}</td>
+                      <td>${escapeHtml(row.description)}</td>
+                      <td>${escapeHtml(row.reference)}</td>
+                      <td>${escapeHtml(row.debit)}</td>
+                      <td>${escapeHtml(row.credit)}</td>
+                      <td>${escapeHtml(row.movement)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
     });
 
-    toast.success(t.exportSuccess);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-journal-${journal.entry_number || journal.id}-${new Date()
+      .toISOString()
+      .slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
   function printPage() {
-    if (!canPrint || !entry) return;
+    if (!journal) return;
 
-    if (filteredLines.length === 0) {
-      toast.error(t.exportEmpty);
+    const rows = buildExportRows();
+
+    if (!rows.length) {
+      toast.error(t.printEmpty);
       return;
     }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.printError);
+      toast.error(t.printEmpty);
       return;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        entry,
-        rows: filteredLines,
-        t,
-      }),
-    );
-    printWindow.document.close();
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+              margin-bottom: 18px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.entryNumber)}: ${escapeHtml(journal.entry_number)}</p>
+              <p>${escapeHtml(t.entryDate)}: ${escapeHtml(formatDate(journal.entry_date))}</p>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.showing)}: ${escapeHtml(rows.length)}</p>
+            </div>
+          </div>
 
-    toast.success(t.printSuccess);
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.totalDebit)}</span><strong>${escapeHtml(formatMoney(journal.total_debit))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.totalCredit)}</span><strong>${escapeHtml(formatMoney(journal.total_credit))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.difference)}</span><strong>${escapeHtml(formatMoney(journal.difference))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.linesCount)}</span><strong>${escapeHtml(journal.lines_count)}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.account)}</th>
+                <th>${escapeHtml(t.costCenter)}</th>
+                <th>${escapeHtml(t.description)}</th>
+                <th>${escapeHtml(t.reference)}</th>
+                <th>${escapeHtml(t.debit)}</th>
+                <th>${escapeHtml(t.credit)}</th>
+                <th>${escapeHtml(t.movement)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.account)}</td>
+                      <td>${escapeHtml(row.costCenter)}</td>
+                      <td>${escapeHtml(row.description)}</td>
+                      <td>${escapeHtml(row.reference)}</td>
+                      <td>${escapeHtml(row.debit)}</td>
+                      <td>${escapeHtml(row.credit)}</td>
+                      <td>${escapeHtml(row.movement)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadEntry(false);
-  }, [authResolving, loadEntry]);
-
-  if (!authResolving && !canView) {
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
+      <div className="w-full space-y-4" dir={dir}>
+        <DetailsSkeleton />
+      </div>
+    );
+  }
 
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
+  if (notFound || !journal) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1 text-right">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+              {t.title}
+            </h1>
+            <p className="text-sm text-muted-foreground">{t.subtitle}</p>
+          </div>
+
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/accounting/journals">
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
+        </div>
+
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="flex min-h-[360px] flex-col items-center justify-center gap-3 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-lg border bg-muted/40">
+              <XCircle className="h-7 w-7 text-muted-foreground" />
+            </div>
+            <div className="space-y-1">
+              <p className="font-semibold text-foreground">{t.notFoundTitle}</p>
+              <p className="text-sm text-muted-foreground">{t.notFoundDesc}</p>
             </div>
           </CardContent>
         </Card>
@@ -1686,623 +1159,416 @@ export default function JournalEntryDetailPage() {
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.title}
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+            {journal.entry_number || t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{journal.description || t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/accounting/journals">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/accounting/journals">
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
 
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadEntry(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadDetails({ silent: true })}
+            disabled={refreshing}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canExport ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={isLoading || !entry || filteredLines.length === 0}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
 
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={isLoading || !entry || filteredLines.length === 0}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
-
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-destructive">
-                  {errorMessage}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.apiErrorHint}
-                </p>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadEntry(true)}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadDetails()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {!isLoading && notFound ? (
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-              <FileText className="h-5 w-5" />
-            </div>
+      <div className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
+        <div className="space-y-4">
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle>{t.profile}</CardTitle>
+                  <CardDescription>{t.profileDesc}</CardDescription>
+                </div>
 
-            <div>
-              <p className="font-semibold">{t.notFoundTitle}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.notFoundText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background">
+                  <ReceiptText className="h-5 w-5 text-muted-foreground" />
+                </div>
+              </div>
+            </CardHeader>
 
-      {!errorMessage && !notFound ? (
-        <>
-          {isLoading ? (
-            <SummaryCardsSkeleton />
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {summaryCards.map((item) => {
-                const Icon = item.icon;
+            <CardContent className="space-y-1 px-6 pb-6">
+              <InfoRow label={t.entryNumber} value={<span className="tabular-nums">{journal.entry_number}</span>} />
+              <InfoRow label={t.entryDate} value={<span className="tabular-nums">{formatDate(journal.entry_date)}</span>} />
+              <InfoRow label={t.period} value={<span>{journal.period_name || "—"}</span>} />
+              <InfoRow
+                label={t.status}
+                value={
+                  <StatusBadge
+                    value={journal.status}
+                    label={journal.status_label || statusLabel(journal.status, locale)}
+                  />
+                }
+              />
+              <InfoRow
+                label={t.postingSource}
+                value={<span>{journal.posting_source_label || journal.posting_source || "—"}</span>}
+              />
+              <InfoRow label={t.sourceNumber} value={<span>{journal.source_number || "—"}</span>} />
+              <InfoRow label={t.reference} value={<span>{journal.reference || "—"}</span>} />
+              <InfoRow
+                label={t.status}
+                value={
+                  <StatusBadge
+                    value={journal.is_balanced ? "balanced" : "unbalanced"}
+                    label={journal.is_balanced ? t.balanced : t.unbalanced}
+                  />
+                }
+              />
+              <InfoRow label={t.createdBy} value={<span>{journal.created_by_name || "—"}</span>} />
+              <InfoRow label={t.createdAt} value={<span className="tabular-nums">{formatDateTime(journal.created_at)}</span>} />
+              <InfoRow label={t.updatedAt} value={<span className="tabular-nums">{formatDateTime(journal.updated_at)}</span>} />
+            </CardContent>
+          </Card>
+        </div>
 
-                return (
-                  <Card
-                    key={item.title}
-                    className="rounded-2xl border bg-card shadow-sm"
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-2xl font-bold">
-                            {item.isMoney ? (
-                              <MoneyText value={item.value} />
-                            ) : (
-                              formatNumber(item.value)
-                            )}
-                          </div>
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              title={t.totalDebit}
+              value={<MoneyValue value={journal.total_debit} label={t.sar} />}
+              trend={t.debit}
+              icon={WalletCards}
+            />
 
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {item.title}
-                          </p>
-                        </div>
+            <KpiCard
+              title={t.totalCredit}
+              value={<MoneyValue value={journal.total_credit} label={t.sar} />}
+              trend={t.credit}
+              icon={Landmark}
+            />
 
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                          <Icon className="h-5 w-5" />
-                        </div>
-                      </div>
+            <KpiCard
+              title={t.difference}
+              value={<MoneyValue value={journal.difference} label={t.sar} />}
+              trend={journal.is_balanced ? t.balanced : t.unbalanced}
+              icon={ShieldCheck}
+            />
 
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        {item.helper}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
+            <KpiCard
+              title={t.linesCount}
+              value={formatInteger(journal.lines_count || lines.length)}
+              trend={t.linesTitle}
+              icon={BookOpen}
+            />
+          </div>
 
-          {entry ? (
-            <>
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-                <Card className="rounded-2xl border bg-card shadow-sm">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 text-base font-bold">
-                      <FileText className="h-4 w-4" />
-                      {t.entryInfo}
-                    </CardTitle>
-                    <CardDescription>{t.entryInfoDesc}</CardDescription>
-                  </CardHeader>
+          <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle>{t.linesTitle}</CardTitle>
+              <CardDescription>{t.linesDesc}</CardDescription>
+            </CardHeader>
 
-                  <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    <div className="rounded-2xl border bg-background p-4">
-                      <p className="text-xs text-muted-foreground">
-                        {t.entryNumber}
-                      </p>
-                      <p className="mt-2 font-semibold">
-                        {entry.entry_number || "-"}
-                      </p>
-                    </div>
+            <CardContent className="space-y-3 p-4">
+              <div className="flex flex-col gap-3">
+                <div className="relative w-full">
+                  <Search
+                    className={cn(
+                      "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                      locale === "ar" ? "right-3" : "left-3",
+                    )}
+                  />
+                  <Input
+                    value={searchInput}
+                    onChange={(event) => setSearchInput(event.target.value)}
+                    placeholder={t.searchPlaceholder}
+                    className={cn(
+                      "h-10 rounded-lg bg-background",
+                      locale === "ar" ? "pr-9" : "pl-9",
+                    )}
+                  />
+                </div>
 
-                    <div className="rounded-2xl border bg-background p-4">
-                      <p className="text-xs text-muted-foreground">
-                        {t.entryDate}
-                      </p>
-                      <p className="mt-2 font-semibold">
-                        {formatDate(entry.entry_date, locale)}
-                      </p>
-                    </div>
+                <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={movementFilter}
+                      onValueChange={(value) => setMovementFilter(value as MovementFilter)}
+                    >
+                      <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[165px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t.movementType}: {t.all}</SelectItem>
+                        <SelectItem value="debit">{t.debit}</SelectItem>
+                        <SelectItem value="credit">{t.credit}</SelectItem>
+                        <SelectItem value="empty">{t.empty}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                    <div className="rounded-2xl border bg-background p-4">
-                      <p className="text-xs text-muted-foreground">
-                        {t.status}
-                      </p>
-                      <div className="mt-2">
-                        {statusBadge(entry.status, locale)}
-                      </div>
-                    </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value="columns"
+                      onValueChange={(value) => {
+                        if (value in columns) {
+                          setColumns((current) => ({
+                            ...current,
+                            [value]: !current[value as ColumnKey],
+                          }));
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[150px]">
+                        <Settings2 className="h-4 w-4" />
+                        <SelectValue placeholder={t.columns} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(columns) as ColumnKey[]).map((key) => (
+                          <SelectItem key={key} value={key}>
+                            {columns[key] ? "✓ " : ""}
+                            {columnLabel(key)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
 
-                    <div className="rounded-2xl border bg-background p-4">
-                      <p className="text-xs text-muted-foreground">
-                        {t.postingSource}
-                      </p>
-                      <div className="mt-2">
-                        {sourceBadge(entry.posting_source, locale)}
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border bg-background p-4">
-                      <p className="text-xs text-muted-foreground">
-                        {t.reference}
-                      </p>
-                      <p className="mt-2 font-semibold">
-                        {entry.reference || "-"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border bg-background p-4">
-                      <p className="text-xs text-muted-foreground">
-                        {t.externalReference}
-                      </p>
-                      <p className="mt-2 font-semibold">
-                        {entry.external_reference || "-"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border bg-background p-4 md:col-span-2 xl:col-span-3">
-                      <p className="text-xs text-muted-foreground">
-                        {t.description}
-                      </p>
-                      <p className="mt-2 text-sm leading-6">
-                        {entry.description || "-"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border bg-background p-4 md:col-span-2 xl:col-span-3">
-                      <p className="text-xs text-muted-foreground">
-                        {t.notes}
-                      </p>
-                      <p className="mt-2 text-sm leading-6">
-                        {entry.notes || "-"}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <aside className="space-y-4">
-                  <Card className="rounded-2xl border bg-card shadow-sm">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="flex items-center gap-2 text-base font-bold">
-                        <Calculator className="h-4 w-4" />
-                        {t.financialSummary}
-                      </CardTitle>
-                      <CardDescription>{t.financialSummaryDesc}</CardDescription>
-                    </CardHeader>
-
-                    <CardContent className="space-y-4">
-                      <div className="rounded-2xl border bg-background p-4">
-                        <p className="text-xs text-muted-foreground">
-                          {t.totalDebit}
-                        </p>
-                        <div className="mt-2 text-xl font-bold">
-                          <MoneyText value={entry.total_debit} />
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border bg-background p-4">
-                        <p className="text-xs text-muted-foreground">
-                          {t.totalCredit}
-                        </p>
-                        <div className="mt-2 text-xl font-bold">
-                          <MoneyText value={entry.total_credit} />
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border bg-background p-4">
-                        <p className="text-xs text-muted-foreground">
-                          {t.difference}
-                        </p>
-                        <div className="mt-2 text-xl font-bold">
-                          <MoneyText value={difference} />
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border bg-background p-4">
-                        <p className="text-xs text-muted-foreground">
-                          {t.linesCount}
-                        </p>
-                        <div className="mt-2 text-2xl font-bold">
-                          {formatNumber(entry.lines.length)}
-                        </div>
-                      </div>
-
-                      {balanceBadge(entry.is_balanced, locale)}
-                    </CardContent>
-                  </Card>
-
-                  <Card className="rounded-2xl border bg-card shadow-sm">
-                    <CardContent className="space-y-3 p-5">
-                      <div className="grid gap-3 text-sm">
-                        <div>
-                          <p className="text-xs text-muted-foreground">
-                            {t.postedAt}
-                          </p>
-                          <p className="mt-1">
-                            {formatDateTime(entry.posted_at, locale)}
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-xs text-muted-foreground">
-                            {t.createdAt}
-                          </p>
-                          <p className="mt-1">
-                            {formatDateTime(entry.created_at, locale)}
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-xs text-muted-foreground">
-                            {t.updatedAt}
-                          </p>
-                          <p className="mt-1">
-                            {formatDateTime(entry.updated_at, locale)}
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </aside>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background" onClick={resetFilters}>
+                      <RotateCcw className="h-4 w-4" />
+                      {t.reset}
+                    </Button>
+                  </div>
+                </div>
               </div>
 
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base font-bold">
-                    <Layers3 className="h-4 w-4" />
-                    {t.linesTitle}
-                  </CardTitle>
-                  <CardDescription>{t.linesDesc}</CardDescription>
-                </CardHeader>
+              <div className="overflow-hidden rounded-lg border bg-background">
+                <div className="overflow-x-auto">
+                  <Table className="min-w-[1180px] table-fixed">
+                    <TableHeader>
+                      <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                        {columns.account ? (
+                          <TableHead className="h-11 w-[250px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                            {t.account}
+                          </TableHead>
+                        ) : null}
 
-                <CardContent className="space-y-4">
-                  <div className="relative w-full">
-                    <Search
-                      className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                        isArabic ? "right-3" : "left-3"
-                      }`}
-                    />
-                    <Input
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      placeholder={t.searchPlaceholder}
-                      className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                    />
-                  </div>
+                        {columns.costCenter ? (
+                          <TableHead className="h-11 w-[190px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                            {t.costCenter}
+                          </TableHead>
+                        ) : null}
 
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    {query.trim() ? (
-                      <Button
-                        variant="outline"
-                        className="h-10 rounded-xl"
-                        onClick={() => setQuery("")}
-                      >
-                        {t.clearSearch}
-                      </Button>
-                    ) : (
-                      <div />
-                    )}
+                        {columns.description ? (
+                          <TableHead className="h-11 w-[280px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                            {t.description}
+                          </TableHead>
+                        ) : null}
 
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" className="h-10 rounded-xl">
-                          <ColumnsIcon className="h-4 w-4" />
-                          {t.columns}
-                        </Button>
-                      </DropdownMenuTrigger>
+                        {columns.reference ? (
+                          <TableHead className="h-11 w-[145px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                            {t.reference}
+                          </TableHead>
+                        ) : null}
 
-                      <DropdownMenuContent align={isArabic ? "start" : "end"}>
-                        <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
-                        <DropdownMenuSeparator />
+                        {columns.debit ? (
+                          <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                            {t.debit}
+                          </TableHead>
+                        ) : null}
 
-                        {Object.entries(visibleColumns).map(([key, value]) => (
-                          <DropdownMenuCheckboxItem
-                            key={key}
-                            checked={value}
-                            onCheckedChange={(checked) =>
-                              setVisibleColumns((current) => ({
-                                ...current,
-                                [key]: Boolean(checked),
-                              }))
-                            }
-                          >
-                            {key === "sortOrder"
-                              ? t.table.sortOrder
-                              : key === "accountCode"
-                                ? t.table.accountCode
-                                : key === "accountName"
-                                  ? t.table.accountName
-                                  : key === "accountType"
-                                    ? t.table.accountType
-                                    : key === "normalBalance"
-                                      ? t.table.normalBalance
-                                      : key === "costCenter"
-                                        ? t.table.costCenter
-                                        : key === "description"
-                                          ? t.table.description
-                                          : key === "debitAmount"
-                                            ? t.table.debit
-                                            : t.table.credit}
-                          </DropdownMenuCheckboxItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                        {columns.credit ? (
+                          <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                            {t.credit}
+                          </TableHead>
+                        ) : null}
 
-                  <div className="overflow-hidden rounded-xl border">
-                    <div className="overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            {visibleColumns.sortOrder ? (
-                              <TableHead>
-                                <button
-                                  type="button"
-                                  onClick={() => toggleSort("sort_order")}
-                                  className="inline-flex items-center gap-1 font-medium"
-                                >
-                                  {t.table.sortOrder}
-                                  <ArrowDownUp className="h-3.5 w-3.5" />
-                                </button>
-                              </TableHead>
-                            ) : null}
+                        {columns.movement ? (
+                          <TableHead className="h-11 w-[120px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                            {t.movement}
+                          </TableHead>
+                        ) : null}
 
-                            {visibleColumns.accountCode ? (
-                              <TableHead>
-                                <button
-                                  type="button"
-                                  onClick={() => toggleSort("account_code")}
-                                  className="inline-flex items-center gap-1 font-medium"
-                                >
-                                  {t.table.accountCode}
-                                  <ArrowDownUp className="h-3.5 w-3.5" />
-                                </button>
-                              </TableHead>
-                            ) : null}
+                        {columns.actions ? (
+                          <TableHead className="h-11 w-[90px] whitespace-nowrap px-4 text-center text-xs font-semibold text-muted-foreground">
+                            {t.actions}
+                          </TableHead>
+                        ) : null}
+                      </TableRow>
+                    </TableHeader>
 
-                            {visibleColumns.accountName ? (
-                              <TableHead>
-                                <button
-                                  type="button"
-                                  onClick={() => toggleSort("account_name")}
-                                  className="inline-flex items-center gap-1 font-medium"
-                                >
-                                  {t.table.accountName}
-                                  <ArrowDownUp className="h-3.5 w-3.5" />
-                                </button>
-                              </TableHead>
-                            ) : null}
-
-                            {visibleColumns.accountType ? (
-                              <TableHead>{t.table.accountType}</TableHead>
-                            ) : null}
-
-                            {visibleColumns.normalBalance ? (
-                              <TableHead>{t.table.normalBalance}</TableHead>
-                            ) : null}
-
-                            {visibleColumns.costCenter ? (
-                              <TableHead>{t.table.costCenter}</TableHead>
-                            ) : null}
-
-                            {visibleColumns.description ? (
-                              <TableHead>{t.table.description}</TableHead>
-                            ) : null}
-
-                            {visibleColumns.debitAmount ? (
-                              <TableHead>
-                                <button
-                                  type="button"
-                                  onClick={() => toggleSort("debit_amount")}
-                                  className="inline-flex items-center gap-1 font-medium"
-                                >
-                                  {t.table.debit}
-                                  <ArrowDownUp className="h-3.5 w-3.5" />
-                                </button>
-                              </TableHead>
-                            ) : null}
-
-                            {visibleColumns.creditAmount ? (
-                              <TableHead>
-                                <button
-                                  type="button"
-                                  onClick={() => toggleSort("credit_amount")}
-                                  className="inline-flex items-center gap-1 font-medium"
-                                >
-                                  {t.table.credit}
-                                  <ArrowDownUp className="h-3.5 w-3.5" />
-                                </button>
-                              </TableHead>
-                            ) : null}
-                          </TableRow>
-                        </TableHeader>
-
-                        <TableBody>
-                          {isLoading ? (
-                            <TableRowsSkeleton columnsCount={visibleColumnCount} />
-                          ) : filteredLines.length > 0 ? (
-                            filteredLines.map((line) => (
-                              <TableRow key={`${line.id}-${line.sort_order}`}>
-                                {visibleColumns.sortOrder ? (
-                                  <TableCell>
-                                    {formatNumber(line.sort_order)}
-                                  </TableCell>
-                                ) : null}
-
-                                {visibleColumns.accountCode ? (
-                                  <TableCell>{line.account_code || "-"}</TableCell>
-                                ) : null}
-
-                                {visibleColumns.accountName ? (
-                                  <TableCell>
-                                    <div className="min-w-[180px]">
-                                      <p className="font-medium">
-                                        {line.account_name || "-"}
-                                      </p>
-                                      <p className="text-xs text-muted-foreground">
-                                        {line.account_id || "-"}
-                                      </p>
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {visibleColumns.accountType ? (
-                                  <TableCell>{line.account_type || "-"}</TableCell>
-                                ) : null}
-
-                                {visibleColumns.normalBalance ? (
-                                  <TableCell>
-                                    {line.normal_balance || "-"}
-                                  </TableCell>
-                                ) : null}
-
-                                {visibleColumns.costCenter ? (
-                                  <TableCell>
-                                    <div className="min-w-[160px]">
-                                      <p>{line.cost_center_name || "-"}</p>
-                                      <p className="text-xs text-muted-foreground">
-                                        {line.cost_center_code || "-"}
-                                      </p>
-                                    </div>
-                                  </TableCell>
-                                ) : null}
-
-                                {visibleColumns.description ? (
-                                  <TableCell>
-                                    <span className="line-clamp-2 min-w-[180px] text-sm">
-                                      {line.description || "-"}
-                                    </span>
-                                  </TableCell>
-                                ) : null}
-
-                                {visibleColumns.debitAmount ? (
-                                  <TableCell>
-                                    <MoneyText value={line.debit_amount} />
-                                  </TableCell>
-                                ) : null}
-
-                                {visibleColumns.creditAmount ? (
-                                  <TableCell>
-                                    <MoneyText value={line.credit_amount} />
-                                  </TableCell>
-                                ) : null}
-                              </TableRow>
-                            ))
-                          ) : (
-                            <TableRow>
-                              <TableCell
-                                colSpan={visibleColumnCount || 1}
-                                className="h-36 text-center"
-                              >
-                                <div className="mx-auto max-w-md space-y-2">
-                                  <p className="font-semibold">
-                                    {query.trim()
-                                      ? t.noResultsTitle
-                                      : t.emptyTitle}
-                                  </p>
-                                  <p className="text-sm text-muted-foreground">
-                                    {query.trim()
-                                      ? t.noResultsText
-                                      : t.emptyText}
-                                  </p>
-
-                                  {query.trim() ? (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="mt-2 rounded-xl"
-                                      onClick={() => setQuery("")}
-                                    >
-                                      {t.clearSearch}
-                                    </Button>
-                                  ) : null}
+                    <TableBody>
+                      {filteredLines.length ? (
+                        filteredLines.map((line, index) => (
+                          <TableRow key={line.id || `${line.account_id}-${index}`} className="h-[62px]">
+                            {columns.account ? (
+                              <TableCell className="h-[62px] w-[250px] overflow-hidden px-4 text-right align-middle">
+                                <div className="min-w-0">
+                                  <span className="block truncate text-sm font-semibold text-foreground">
+                                    {line.account_name || t.unknown}
+                                  </span>
+                                  <span className="block truncate text-xs text-muted-foreground tabular-nums">
+                                    {line.account_code || "—"}
+                                  </span>
                                 </div>
                               </TableCell>
-                            </TableRow>
-                          )}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
+                            ) : null}
 
-                  <p className="text-sm text-muted-foreground">
-                    {t.showing} {formatNumber(filteredLines.length)} {t.from}{" "}
-                    {formatNumber(entry.lines.length)}
-                  </p>
-                </CardContent>
-              </Card>
-            </>
-          ) : null}
-        </>
-      ) : null}
+                            {columns.costCenter ? (
+                              <TableCell className="h-[62px] w-[190px] overflow-hidden px-4 text-right align-middle">
+                                <div className="min-w-0">
+                                  <span className="block truncate text-sm text-foreground">
+                                    {line.cost_center_name || "—"}
+                                  </span>
+                                  <span className="block truncate text-xs text-muted-foreground tabular-nums">
+                                    {line.cost_center_code || "—"}
+                                  </span>
+                                </div>
+                              </TableCell>
+                            ) : null}
+
+                            {columns.description ? (
+                              <TableCell className="h-[62px] w-[280px] overflow-hidden px-4 text-right align-middle">
+                                <span className="block truncate text-sm text-muted-foreground">
+                                  {line.description || "—"}
+                                </span>
+                              </TableCell>
+                            ) : null}
+
+                            {columns.reference ? (
+                              <TableCell className="h-[62px] w-[145px] overflow-hidden px-4 text-right align-middle">
+                                <span className="block truncate text-sm text-muted-foreground">
+                                  {line.reference || "—"}
+                                </span>
+                              </TableCell>
+                            ) : null}
+
+                            {columns.debit ? (
+                              <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                                <MoneyValue value={line.debit} label={t.sar} />
+                              </TableCell>
+                            ) : null}
+
+                            {columns.credit ? (
+                              <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                                <MoneyValue value={line.credit} label={t.sar} />
+                              </TableCell>
+                            ) : null}
+
+                            {columns.movement ? (
+                              <TableCell className="h-[62px] w-[120px] overflow-hidden px-4 text-right align-middle">
+                                <StatusBadge
+                                  value={line.movement_type}
+                                  label={movementLabel(line.movement_type, locale)}
+                                />
+                              </TableCell>
+                            ) : null}
+
+                            {columns.actions ? (
+                              <TableCell className="h-[62px] w-[90px] overflow-hidden px-4 text-center align-middle">
+                                {line.account_id ? (
+                                  <Button asChild variant="ghost" size="sm" className="h-8 rounded-lg">
+                                    <Link href={`/system/accounting/accounts/${line.account_id}`}>
+                                      <Eye className="h-4 w-4" />
+                                    </Link>
+                                  </Button>
+                                ) : (
+                                  <span className="text-sm text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
+                            ) : null}
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={Math.max(1, visibleColumnCount)} className="h-72">
+                            <div className="flex flex-col items-center justify-center gap-3 text-center">
+                              <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                                <Search className="h-6 w-6 text-muted-foreground" />
+                              </div>
+
+                              <div className="space-y-1">
+                                <p className="font-semibold text-foreground">
+                                  {hasActiveFilters ? t.noResultsTitle : t.noDataTitle}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  {hasActiveFilters ? t.noResultsDesc : t.noDataDesc}
+                                </p>
+                              </div>
+
+                              {hasActiveFilters ? (
+                                <Button variant="outline" className="h-9 rounded-lg" onClick={resetFilters}>
+                                  <RotateCcw className="h-4 w-4" />
+                                  {t.reset}
+                                </Button>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              <div className="text-sm text-muted-foreground">
+                {t.showing}{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  {formatInteger(filteredLines.length)}
+                </span>{" "}
+                {t.of}{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  {formatInteger(lines.length)}
+                </span>{" "}
+                {t.rows}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }

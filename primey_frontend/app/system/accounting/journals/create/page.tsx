@@ -2,1168 +2,1142 @@
 
 /* ============================================================
    📂 app/system/accounting/journals/create/page.tsx
-   🧠 Primey Care | Create Journal Entry Page
-
-   ✅ المسار:
-      app/system/accounting/journals/create/page.tsx
-
-   ✅ العمل:
-      صفحة إنشاء قيد يومية داخل مديول المحاسبة.
-      تتيح إدخال بيانات القيد وسطور المدين والدائن ومركز التكلفة والمرجع.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Accounting Journal Create Review
-
-   ✅ يعتمد على:
-      - /api/accounting/accounts/
-      - /api/accounting/cost-centers/
-      - /api/accounting/journals/create/
-      - /api/accounting/journal-entries/create/ كـ fallback آمن
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Accounting module approved pattern
-      - Accounting journals list page
-      - Centers approved UX pattern
-      - Customers approved UX pattern
-
-   ✅ الوظائف:
-      - إنشاء قيد يومية يدوي.
-      - إضافة أكثر من سطر قيد.
-      - دعم الحسابات ومراكز التكلفة.
-      - احتساب إجمالي المدين والدائن وفرق التوازن.
-      - منع الحفظ إذا كان القيد غير متوازن.
-      - حماية مغادرة الصفحة عند وجود تغييرات غير محفوظة.
-      - مسح النموذج بتأكيد.
-      - Skeleton Loading للقوائم.
-      - Error State مستقل.
-      - إخفاء الحفظ حسب الصلاحيات.
-      - sonner للتنبيهات.
-      - استخدام رمز SAR بعد الرقم.
-
+   🧾 Primey Care — Create Journal Entry
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - إصلاح الخطأ السابق بعدم جعل الصفحة full-page خارج نمط النظام.
-      - استخدام نفس نمط صفحات النظام: w-full space-y-4.
-      - الحفاظ على تصميم Create Page المعتمد: Header actions + Main form + Sidebar summary.
-      - إزالة الخلط الموجود داخل الملف مع وحدة المراكز.
-      - إزالة أي عبارات تقنية أو مؤقتة من الواجهة.
-      - عدم استخدام localhost أو API_BASE_URL ثابت.
-      - دعم مراكز التكلفة ومصادر الترحيل اليدوية.
-      - دعم fallback آمن للإنشاء بدون كسر البناء.
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Real API only:
+      GET  /api/accounting/accounts/
+      GET  /api/accounting/cost-centers/
+      GET  /api/accounting/periods/
+      POST /api/accounting/journals/create/
+      POST /api/accounting/journals/ fallback
+   ✅ Manual journal entry
+   ✅ Balanced debit / credit validation
+   ✅ Account + cost center selectors
+   ✅ Unsaved changes protection
+   ✅ Skeleton loading
+   ✅ Error state
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  Calculator,
+  ArrowRight,
+  BookOpen,
+  CalendarDays,
   CheckCircle2,
+  CircleDollarSign,
   FileText,
-  Layers3,
   Loader2,
   Plus,
-  RefreshCcw,
+  RefreshCw,
   RotateCcw,
   Save,
+  Search,
+  ShieldAlert,
   Trash2,
   WalletCards,
-  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type OptionItem = {
+type Account = {
   id: string;
   code: string;
   name: string;
-  type?: string;
-  isActive: boolean;
+  name_ar: string;
+  name_en: string;
+  account_type: string;
+  is_group: boolean;
+  is_active: boolean;
+};
+
+type CostCenter = {
+  id: string;
+  code: string;
+  name: string;
+  name_ar: string;
+  name_en: string;
+  is_active: boolean;
+};
+
+type AccountingPeriod = {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  status: string;
 };
 
 type JournalLine = {
-  localId: string;
-  accountId: string;
-  accountCode: string;
-  accountName: string;
-  costCenterId: string;
-  costCenterCode: string;
-  costCenterName: string;
+  id: string;
+  account_id: string;
+  cost_center_id: string;
+  description: string;
   debit: string;
   credit: string;
-  description: string;
 };
 
-type FormState = {
-  entryDate: string;
+type JournalForm = {
+  entry_date: string;
+  period_id: string;
   reference: string;
-  externalReference: string;
+  source_number: string;
+  posting_source: string;
   description: string;
   notes: string;
-  postingSource: "MANUAL" | "OPENING" | "ADJUSTMENT";
   lines: JournalLine[];
 };
 
-type ApiEnvelope<T> = {
-  ok?: boolean;
-  success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
-  results?: unknown[];
-  items?: unknown[];
-  rows?: unknown[];
-  accounts?: unknown[];
-  cost_centers?: unknown[];
+type FieldErrors = Partial<Record<keyof JournalForm | "lines" | "general", string>>;
+
+const translations = {
+  ar: {
+    title: "إنشاء قيد يومية",
+    subtitle: "إضافة قيد محاسبي يدوي مع سطور مدين ودائن ومركز تكلفة ومرجع تشغيلي.",
+    back: "قيود اليومية",
+    save: "حفظ القيد",
+    saving: "جاري الحفظ...",
+    refresh: "تحديث البيانات",
+    reset: "مسح النموذج",
+    addLine: "إضافة سطر",
+    removeLine: "حذف",
+
+    basicInfo: "بيانات القيد",
+    basicInfoDesc: "حدد تاريخ القيد والفترة والمرجع والوصف.",
+    linesInfo: "سطور القيد",
+    linesInfoDesc: "أضف الحسابات وقيم المدين والدائن. يجب أن يكون القيد متوازنًا.",
+    summary: "ملخص القيد",
+    summaryDesc: "مراجعة جاهزية القيد قبل الحفظ.",
+
+    entryDate: "تاريخ القيد",
+    period: "الفترة المحاسبية",
+    noPeriod: "بدون فترة",
+    reference: "المرجع",
+    sourceNumber: "رقم المصدر",
+    postingSource: "مصدر القيد",
+    description: "الوصف",
+    notes: "ملاحظات",
+    descriptionPlaceholder: "مثال: قيد تسوية يدوي...",
+    notesPlaceholder: "ملاحظات داخلية اختيارية...",
+
+    account: "الحساب",
+    costCenter: "مركز التكلفة",
+    lineDescription: "بيان السطر",
+    debit: "مدين",
+    credit: "دائن",
+    actions: "الإجراءات",
+    searchAccount: "ابحث عن الحساب...",
+    searchCostCenter: "ابحث عن مركز التكلفة...",
+
+    totalDebit: "إجمالي المدين",
+    totalCredit: "إجمالي الدائن",
+    difference: "فرق التوازن",
+    balanceStatus: "حالة التوازن",
+    linesCount: "عدد السطور",
+    ready: "جاهز للحفظ",
+    notReady: "غير مكتمل",
+    balanced: "متوازن",
+    unbalanced: "غير متوازن",
+
+    accountsLoaded: "الحسابات",
+    costCentersLoaded: "مراكز التكلفة",
+    periodsLoaded: "الفترات",
+    today: "تاريخ اليوم",
+
+    validDate: "تاريخ القيد محدد",
+    validDescription: "وصف القيد مكتمل",
+    validLines: "يوجد سطران صحيحان على الأقل",
+    validBalance: "القيد متوازن",
+    invalidDate: "تاريخ القيد مطلوب",
+    invalidDescription: "وصف القيد مطلوب",
+    invalidLines: "أضف سطرين صحيحين على الأقل",
+    invalidBalance: "القيد غير متوازن",
+
+    manual: "يدوي",
+    required: "هذا الحقل مطلوب.",
+    accountRequired: "اختر الحساب.",
+    lineAmountRequired: "أدخل قيمة مدين أو دائن.",
+    debitCreditConflict: "لا يمكن إدخال مدين ودائن في نفس السطر.",
+    loadError: "تعذر تحميل البيانات المحاسبية.",
+    saveError: "تعذر حفظ قيد اليومية.",
+    saveSuccess: "تم إنشاء قيد اليومية بنجاح.",
+    resetDone: "تم مسح النموذج.",
+    confirmReset: "لديك تغييرات غير محفوظة. هل تريد مسح النموذج؟",
+    leaveWarning: "لديك تغييرات غير محفوظة.",
+    noAccounts: "لا توجد حسابات مطابقة.",
+    noCostCenters: "لا توجد مراكز تكلفة مطابقة.",
+    select: "اختيار",
+    selected: "محدد",
+    sar: "ر.س",
+    unknown: "غير محدد",
+  },
+  en: {
+    title: "Create Journal Entry",
+    subtitle: "Add a manual accounting journal with debit, credit, cost center, and operational reference lines.",
+    back: "Journal entries",
+    save: "Save journal",
+    saving: "Saving...",
+    refresh: "Refresh data",
+    reset: "Reset form",
+    addLine: "Add line",
+    removeLine: "Remove",
+
+    basicInfo: "Journal information",
+    basicInfoDesc: "Set the entry date, period, reference, and description.",
+    linesInfo: "Journal lines",
+    linesInfoDesc: "Add accounts and debit/credit values. The entry must be balanced.",
+    summary: "Journal summary",
+    summaryDesc: "Review readiness before saving.",
+
+    entryDate: "Entry date",
+    period: "Period",
+    noPeriod: "No period",
+    reference: "Reference",
+    sourceNumber: "Source number",
+    postingSource: "Posting source",
+    description: "Description",
+    notes: "Notes",
+    descriptionPlaceholder: "Example: Manual adjustment journal...",
+    notesPlaceholder: "Optional internal notes...",
+
+    account: "Account",
+    costCenter: "Cost center",
+    lineDescription: "Line description",
+    debit: "Debit",
+    credit: "Credit",
+    actions: "Actions",
+    searchAccount: "Search account...",
+    searchCostCenter: "Search cost center...",
+
+    totalDebit: "Total debit",
+    totalCredit: "Total credit",
+    difference: "Balance difference",
+    balanceStatus: "Balance status",
+    linesCount: "Lines count",
+    ready: "Ready to save",
+    notReady: "Incomplete",
+    balanced: "Balanced",
+    unbalanced: "Unbalanced",
+
+    accountsLoaded: "Accounts",
+    costCentersLoaded: "Cost centers",
+    periodsLoaded: "Periods",
+    today: "Today",
+
+    validDate: "Entry date selected",
+    validDescription: "Description completed",
+    validLines: "At least two valid lines",
+    validBalance: "Journal is balanced",
+    invalidDate: "Entry date is required",
+    invalidDescription: "Description is required",
+    invalidLines: "Add at least two valid lines",
+    invalidBalance: "Journal is not balanced",
+
+    manual: "Manual",
+    required: "This field is required.",
+    accountRequired: "Choose an account.",
+    lineAmountRequired: "Enter debit or credit amount.",
+    debitCreditConflict: "Debit and credit cannot be entered on the same line.",
+    loadError: "Could not load accounting data.",
+    saveError: "Could not save journal entry.",
+    saveSuccess: "Journal entry created successfully.",
+    resetDone: "Form has been reset.",
+    confirmReset: "You have unsaved changes. Do you want to reset the form?",
+    leaveWarning: "You have unsaved changes.",
+    noAccounts: "No matching accounts.",
+    noCostCenters: "No matching cost centers.",
+    select: "Select",
+    selected: "Selected",
+    sar: "SAR",
+    unknown: "Unknown",
+  },
+} as const;
+
+const EMPTY_LINE = (): JournalLine => ({
+  id: crypto.randomUUID(),
+  account_id: "",
+  cost_center_id: "",
+  description: "",
+  debit: "",
+  credit: "",
+});
+
+const today = new Date().toISOString().slice(0, 10);
+
+const EMPTY_FORM: JournalForm = {
+  entry_date: today,
+  period_id: "",
+  reference: "",
+  source_number: "",
+  posting_source: "manual",
+  description: "",
+  notes: "",
+  lines: [EMPTY_LINE(), EMPTY_LINE()],
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-
-function makeLocalId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-function defaultLine(): JournalLine {
-  return {
-    localId: makeLocalId(),
-    accountId: "",
-    accountCode: "",
-    accountName: "",
-    costCenterId: "",
-    costCenterCode: "",
-    costCenterName: "",
-    debit: "",
-    credit: "",
-    description: "",
-  };
+function getCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+
+  if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
+
+  return "";
 }
 
-function defaultForm(): FormState {
-  return {
-    entryDate: new Date().toISOString().slice(0, 10),
-    reference: "",
-    externalReference: "",
-    description: "",
-    notes: "",
-    postingSource: "MANUAL",
-    lines: [defaultLine(), defaultLine()],
-  };
-}
-
-/* ============================================================
-   Locale / API
-============================================================ */
-
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
-
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
-}
-
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
-
-function apiUrl(path: string) {
-  const base =
+function getApiBaseUrl(): string {
+  const configured =
     process.env.NEXT_PUBLIC_API_URL ||
     process.env.NEXT_PUBLIC_API_BASE_URL ||
     "";
 
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+  return configured.replace(/\/+$/, "");
 }
 
-function getCookie(name: string) {
-  try {
-    if (typeof document === "undefined") return "";
+function apiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const baseUrl = getApiBaseUrl();
 
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
+  if (!baseUrl) return normalizedPath;
 
-    if (parts.length === 2) {
-      return parts.pop()?.split(";").shift() || "";
-    }
+  return `${baseUrl}${normalizedPath}`;
+}
 
-    return "";
-  } catch {
-    return "";
+function isRecord(value: unknown): value is ApiRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function asString(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+
+  return fallback;
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "active"].includes(normalized)) return true;
+    if (["false", "0", "no", "inactive"].includes(normalized)) return false;
   }
+
+  return fallback;
 }
 
-/* ============================================================
-   Auth / Permissions
-============================================================ */
+function asNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
 
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  return fallback;
 }
 
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as Dict;
-    }
+function pickRecord(...values: unknown[]): ApiRecord {
+  for (const value of values) {
+    if (isRecord(value)) return value;
   }
 
   return {};
 }
 
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
+function normalizeAccount(raw: unknown): Account | null {
+  if (!isRecord(raw)) return null;
 
-          if (typeof value === "string") return [value];
+  const id = asString(raw.id || raw.pk || raw.account_id);
 
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
-  }
-
-  return true;
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
+  if (!id) return null;
 
   return {
-    title: isArabic ? "إنشاء قيد يومية" : "Create Journal Entry",
-    subtitle: isArabic
-      ? "أدخل بيانات القيد وسطور المدين والدائن مع اختيار الحساب ومركز التكلفة عند الحاجة."
-      : "Enter journal details and debit-credit lines with account and cost center when needed.",
-
-    back: isArabic ? "القيود اليومية" : "Journal Entries",
-    refresh: isArabic ? "تحديث القوائم" : "Refresh Lists",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    save: isArabic ? "حفظ القيد" : "Save Entry",
-    saving: isArabic ? "جاري الحفظ..." : "Saving...",
-    clear: isArabic ? "مسح النموذج" : "Clear Form",
-    addLine: isArabic ? "إضافة سطر" : "Add Line",
-    removeLine: isArabic ? "حذف السطر" : "Remove Line",
-
-    mainInfo: isArabic ? "بيانات القيد" : "Entry Details",
-    mainInfoDesc: isArabic
-      ? "المعلومات الأساسية للقيد اليومي."
-      : "Basic information for the journal entry.",
-    linesTitle: isArabic ? "سطور القيد" : "Journal Lines",
-    linesDesc: isArabic
-      ? "يجب أن يكون إجمالي المدين مساويًا لإجمالي الدائن قبل الحفظ."
-      : "Total debit must equal total credit before saving.",
-    summaryTitle: isArabic ? "ملخص القيد" : "Entry Summary",
-    summaryDesc: isArabic
-      ? "مراجعة التوازن قبل حفظ القيد."
-      : "Review balance before saving the entry.",
-
-    entryDate: isArabic ? "تاريخ القيد" : "Entry Date",
-    reference: isArabic ? "المرجع" : "Reference",
-    externalReference: isArabic ? "مرجع خارجي" : "External Reference",
-    postingSource: isArabic ? "مصدر الترحيل" : "Posting Source",
-    description: isArabic ? "الوصف" : "Description",
-    notes: isArabic ? "ملاحظات" : "Notes",
-
-    account: isArabic ? "الحساب" : "Account",
-    costCenter: isArabic ? "مركز التكلفة" : "Cost Center",
-    debit: isArabic ? "مدين" : "Debit",
-    credit: isArabic ? "دائن" : "Credit",
-    lineDescription: isArabic ? "وصف السطر" : "Line Description",
-    action: isArabic ? "الإجراء" : "Action",
-
-    chooseAccount: isArabic ? "اختر الحساب" : "Choose account",
-    chooseCostCenter: isArabic ? "بدون مركز تكلفة" : "No cost center",
-    manual: isArabic ? "يدوي" : "Manual",
-    opening: isArabic ? "رصيد افتتاحي" : "Opening Balance",
-    adjustment: isArabic ? "تسوية" : "Adjustment",
-
-    totalDebit: isArabic ? "إجمالي المدين" : "Total Debit",
-    totalCredit: isArabic ? "إجمالي الدائن" : "Total Credit",
-    difference: isArabic ? "فرق التوازن" : "Difference",
-    balanced: isArabic ? "القيد متوازن" : "Entry is balanced",
-    notBalanced: isArabic ? "القيد غير متوازن" : "Entry is not balanced",
-    linesCount: isArabic ? "عدد السطور" : "Lines Count",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بإنشاء القيود" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية إنشاء قيد يومية. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to create journal entries. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل قوائم الحسابات ومراكز التكلفة."
-      : "Unable to load accounts and cost centers.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    saveSuccess: isArabic
-      ? "تم إنشاء القيد بنجاح."
-      : "Journal entry created successfully.",
-    saveError: isArabic
-      ? "تعذر حفظ القيد."
-      : "Unable to save journal entry.",
-    validationTitle: isArabic ? "راجع بيانات القيد" : "Review entry data",
-    requiredDate: isArabic ? "تاريخ القيد مطلوب." : "Entry date is required.",
-    requiredDescription: isArabic
-      ? "وصف القيد مطلوب."
-      : "Entry description is required.",
-    requiredLines: isArabic
-      ? "أضف سطرين على الأقل للقيد."
-      : "Add at least two journal lines.",
-    requiredAccount: isArabic
-      ? "كل سطر بقيمة مالية يحتاج اختيار حساب."
-      : "Every line with an amount requires an account.",
-    lineAmountRequired: isArabic
-      ? "كل سطر يحتاج مبلغ مدين أو دائن."
-      : "Every line requires either debit or credit amount.",
-    oneSideOnly: isArabic
-      ? "لا يمكن إدخال مدين ودائن في نفس السطر."
-      : "A line cannot have both debit and credit.",
-    balanceRequired: isArabic
-      ? "لا يمكن حفظ قيد غير متوازن."
-      : "Unbalanced entry cannot be saved.",
-    confirmClear: isArabic
-      ? "هل تريد مسح النموذج الحالي؟"
-      : "Clear the current form?",
-    unsavedChanges: isArabic
-      ? "لديك تغييرات غير محفوظة. هل تريد المغادرة؟"
-      : "You have unsaved changes. Do you want to leave?",
-
-    yes: isArabic ? "نعم" : "Yes",
-    no: isArabic ? "لا" : "No",
+    id,
+    code: asString(raw.code || raw.account_code || raw.number),
+    name: asString(raw.name || raw.title || raw.name_ar || raw.name_en),
+    name_ar: asString(raw.name_ar || raw.arabic_name || raw.name),
+    name_en: asString(raw.name_en || raw.english_name || raw.name),
+    account_type: asString(raw.account_type || raw.type || raw.category),
+    is_group: asBoolean(raw.is_group ?? raw.group ?? raw.is_parent, false),
+    is_active: asBoolean(raw.is_active ?? raw.active, true),
   };
 }
 
-/* ============================================================
-   Helpers
-============================================================ */
+function normalizeCostCenter(raw: unknown): CostCenter | null {
+  if (!isRecord(raw)) return null;
 
-function toNumber(value: unknown): number {
-  const parsed = Number(value);
+  const id = asString(raw.id || raw.pk || raw.cost_center_id);
 
-  return Number.isFinite(parsed) ? parsed : 0;
+  if (!id) return null;
+
+  return {
+    id,
+    code: asString(raw.code || raw.cost_center_code || raw.number),
+    name: asString(raw.name || raw.title || raw.name_ar || raw.name_en),
+    name_ar: asString(raw.name_ar || raw.arabic_name || raw.name),
+    name_en: asString(raw.name_en || raw.english_name || raw.name),
+    is_active: asBoolean(raw.is_active ?? raw.active, true),
+  };
 }
 
-function formatMoney(value: number | string): string {
-  const numericValue = Number(value);
+function normalizePeriod(raw: unknown): AccountingPeriod | null {
+  if (!isRecord(raw)) return null;
 
-  if (!Number.isFinite(numericValue)) return "0.00";
+  const id = asString(raw.id || raw.pk || raw.period_id);
 
-  return numericValue.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  if (!id) return null;
+
+  return {
+    id,
+    name: asString(raw.name || raw.title || raw.period_name || raw.code),
+    start_date: asString(raw.start_date || raw.starts_at),
+    end_date: asString(raw.end_date || raw.ends_at),
+    status: asString(raw.status || raw.state),
+  };
 }
 
-function escapeNumberInput(value: string) {
-  return value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1");
-}
-
-function extractArray(payload: unknown): unknown[] {
-  const obj = asDict(payload);
-  const data = asDict(obj.data);
-
-  if (Array.isArray(obj.results)) return obj.results;
-  if (Array.isArray(obj.items)) return obj.items;
-  if (Array.isArray(obj.rows)) return obj.rows;
-  if (Array.isArray(obj.accounts)) return obj.accounts;
-  if (Array.isArray(obj.cost_centers)) return obj.cost_centers;
-
-  if (Array.isArray(data.results)) return data.results;
-  if (Array.isArray(data.items)) return data.items;
-  if (Array.isArray(data.rows)) return data.rows;
-  if (Array.isArray(data.accounts)) return data.accounts;
-  if (Array.isArray(data.cost_centers)) return data.cost_centers;
-
+function extractArray(payload: unknown, key: string): unknown[] {
   if (Array.isArray(payload)) return payload;
+
+  const root = pickRecord(payload);
+  const data = root.data;
+
+  if (Array.isArray(root.results)) return root.results;
+  if (Array.isArray(root[key])) return root[key];
+  if (Array.isArray(data)) return data;
+
+  if (isRecord(data)) {
+    if (Array.isArray(data.results)) return data.results;
+    if (Array.isArray(data[key])) return data[key];
+  }
 
   return [];
 }
 
-function normalizeOption(item: unknown): OptionItem {
-  const obj = asDict(item);
+function normalizeAccounts(payload: unknown): Account[] {
+  return extractArray(payload, "accounts")
+    .map(normalizeAccount)
+    .filter((account): account is Account => Boolean(account))
+    .filter((account) => account.is_active && !account.is_group)
+    .sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true }));
+}
+
+function normalizeCostCenters(payload: unknown): CostCenter[] {
+  return extractArray(payload, "cost_centers")
+    .map(normalizeCostCenter)
+    .filter((center): center is CostCenter => Boolean(center))
+    .filter((center) => center.is_active)
+    .sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true }));
+}
+
+function normalizePeriods(payload: unknown): AccountingPeriod[] {
+  return extractArray(payload, "periods")
+    .map(normalizePeriod)
+    .filter((period): period is AccountingPeriod => Boolean(period));
+}
+
+function extractApiError(payload: unknown, fallback: string): string {
+  if (!isRecord(payload)) return fallback;
+
+  const direct =
+    asString(payload.message) ||
+    asString(payload.detail) ||
+    asString(payload.error);
+
+  if (direct) return direct;
+
+  const errors = payload.errors;
+
+  if (typeof errors === "string") return errors;
+
+  if (Array.isArray(errors)) {
+    return errors.map((item) => asString(item)).filter(Boolean).join(" ") || fallback;
+  }
+
+  if (isRecord(errors)) {
+    const first = Object.values(errors)[0];
+
+    if (Array.isArray(first)) return first.map((item) => asString(item)).filter(Boolean).join(" ");
+    if (typeof first === "string") return first;
+  }
+
+  return fallback;
+}
+
+function parseFieldErrors(payload: unknown): FieldErrors {
+  if (!isRecord(payload)) return {};
+
+  const errors = isRecord(payload.errors) ? payload.errors : payload;
+  const fieldErrors: FieldErrors = {};
+
+  for (const [key, value] of Object.entries(errors)) {
+    if (Array.isArray(value)) {
+      fieldErrors[key as keyof FieldErrors] = value.map((item) => asString(item)).filter(Boolean).join(" ");
+    } else if (typeof value === "string") {
+      fieldErrors[key as keyof FieldErrors] = value;
+    }
+  }
+
+  return fieldErrors;
+}
+
+function displayAccountName(account: Account, locale: Locale): string {
+  if (locale === "ar") return account.name_ar || account.name || account.name_en || account.code;
+  return account.name_en || account.name || account.name_ar || account.code;
+}
+
+function displayCostCenterName(center: CostCenter, locale: Locale): string {
+  if (locale === "ar") return center.name_ar || center.name || center.name_en || center.code;
+  return center.name_en || center.name || center.name_ar || center.code;
+}
+
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function formatMoney(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function normalizeDecimalInput(value: string): string {
+  return value.replace(/[^\d.-]/g, "");
+}
+
+function parseAmount(value: string): number {
+  const parsed = Number(normalizeDecimalInput(value || "0"));
+
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function calculateTotals(lines: JournalLine[]) {
+  const totalDebit = lines.reduce((sum, line) => sum + parseAmount(line.debit), 0);
+  const totalCredit = lines.reduce((sum, line) => sum + parseAmount(line.credit), 0);
+  const difference = Math.abs(totalDebit - totalCredit);
+  const validLines = lines.filter((line) => line.account_id && (parseAmount(line.debit) > 0 || parseAmount(line.credit) > 0));
 
   return {
-    id: String(obj.id || obj.uuid || obj.pk || ""),
-    code: String(obj.code || obj.account_code || obj.number || ""),
-    name: String(obj.name || obj.account_name || obj.title || ""),
-    type: String(obj.type || obj.account_type || ""),
-    isActive:
-      obj.is_active === undefined && obj.active === undefined
-        ? true
-        : Boolean(obj.is_active ?? obj.active),
+    totalDebit,
+    totalCredit,
+    difference,
+    validLinesCount: validLines.length,
+    isBalanced: difference < 0.01 && totalDebit > 0 && totalCredit > 0,
   };
 }
 
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
-  );
+function validateForm(form: JournalForm, locale: Locale): FieldErrors {
+  const t = translations[locale];
+  const errors: FieldErrors = {};
+
+  if (!form.entry_date) errors.entry_date = t.required;
+  if (!form.description.trim()) errors.description = t.required;
+
+  const totals = calculateTotals(form.lines);
+
+  if (totals.validLinesCount < 2) {
+    errors.lines = t.invalidLines;
+  }
+
+  if (!totals.isBalanced) {
+    errors.general = t.invalidBalance;
+  }
+
+  form.lines.forEach((line, index) => {
+    const debit = parseAmount(line.debit);
+    const credit = parseAmount(line.credit);
+
+    if ((debit > 0 || credit > 0) && !line.account_id) {
+      errors.lines = `${t.accountRequired} (${index + 1})`;
+    }
+
+    if (debit > 0 && credit > 0) {
+      errors.lines = `${t.debitCreditConflict} (${index + 1})`;
+    }
+  });
+
+  return errors;
 }
 
-function MoneyText({ value }: { value: number | string }) {
+function buildPayload(form: JournalForm) {
+  return {
+    entry_date: form.entry_date,
+    period: form.period_id || null,
+    period_id: form.period_id || null,
+    reference: form.reference.trim(),
+    source_number: form.source_number.trim(),
+    posting_source: form.posting_source || "manual",
+    description: form.description.trim(),
+    notes: form.notes.trim(),
+    lines: form.lines
+      .map((line) => ({
+        account: line.account_id || null,
+        account_id: line.account_id || null,
+        cost_center: line.cost_center_id || null,
+        cost_center_id: line.cost_center_id || null,
+        description: line.description.trim(),
+        debit: parseAmount(line.debit),
+        credit: parseAmount(line.credit),
+      }))
+      .filter((line) => line.account_id && (line.debit > 0 || line.credit > 0)),
+  };
+}
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+
+  return <p className="mt-1 text-xs text-red-600">{message}</p>;
+}
+
+function MoneyValue({
+  value,
+  label,
+}: {
+  value: number;
+  label: string;
+}) {
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-1 tabular-nums">
       <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
+      <span className="text-xs text-muted-foreground">{label}</span>
     </span>
   );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <Badge
+      variant="outline"
+      className={
+        ok
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-red-200 bg-red-50 text-red-700"
+      }
+    >
+      {label}
+    </Badge>
+  );
+}
+
+function SummaryRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2.5">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="text-sm font-medium">{value}</span>
+    </div>
+  );
+}
+
+function PageSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-72" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Skeleton className="h-[760px] rounded-lg" />
+        <Skeleton className="h-[520px] rounded-lg" />
+      </div>
+    </div>
+  );
+}
+
+function SelectorPopover({
+  title,
+  searchPlaceholder,
+  selectedLabel,
+  children,
+}: {
+  title: string;
+  searchPlaceholder: string;
+  selectedLabel: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border bg-background">
+      <div className="border-b p-3">
+        <div className="text-sm font-medium">{title}</div>
+        <div className="mt-1 text-xs text-muted-foreground">{selectedLabel}</div>
+      </div>
+      <div className="p-3">{children}</div>
+    </div>
+  );
+}
 
 export default function CreateJournalEntryPage() {
-  const auth = useAuth() as unknown;
+  const router = useRouter();
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [form, setForm] = useState<FormState>(() => defaultForm());
-  const [accounts, setAccounts] = useState<OptionItem[]>([]);
-  const [costCenters, setCostCenters] = useState<OptionItem[]>([]);
-  const [isLoadingOptions, setIsLoadingOptions] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const [submitError, setSubmitError] = useState("");
-  const [isDirty, setIsDirty] = useState(false);
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [accounts, setAccounts] = React.useState<Account[]>([]);
+  const [costCenters, setCostCenters] = React.useState<CostCenter[]>([]);
+  const [periods, setPeriods] = React.useState<AccountingPeriod[]>([]);
+  const [form, setForm] = React.useState<JournalForm>(EMPTY_FORM);
+  const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({});
+  const [accountSearch, setAccountSearch] = React.useState<Record<string, string>>({});
+  const [costCenterSearch, setCostCenterSearch] = React.useState<Record<string, string>>({});
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [pageError, setPageError] = React.useState("");
+  const [isDirty, setIsDirty] = React.useState(false);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
+  const totals = React.useMemo(() => calculateTotals(form.lines), [form.lines]);
 
-  const canCreate = hasSafePermission(
-    auth,
-    ["accounting.create", "accounting.journals.create", "accounting.post"],
-    "action",
-  );
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const totals = useMemo(() => {
-    const totalDebit = form.lines.reduce(
-      (sum, line) => sum + toNumber(line.debit),
-      0,
-    );
-    const totalCredit = form.lines.reduce(
-      (sum, line) => sum + toNumber(line.credit),
-      0,
-    );
-    const difference = totalDebit - totalCredit;
-
-    return {
-      totalDebit,
-      totalCredit,
-      difference,
-      isBalanced:
-        totalDebit > 0 &&
-        totalCredit > 0 &&
-        Math.abs(difference) < 0.005,
-    };
-  }, [form.lines]);
-
-  const activeAccounts = useMemo(
-    () =>
-      accounts
-        .filter((item) => item.id && item.name && item.isActive)
-        .sort((a, b) => `${a.code} ${a.name}`.localeCompare(`${b.code} ${b.name}`)),
-    [accounts],
-  );
-
-  const activeCostCenters = useMemo(
-    () =>
-      costCenters
-        .filter((item) => item.id && item.name && item.isActive)
-        .sort((a, b) => `${a.code} ${a.name}`.localeCompare(`${b.code} ${b.name}`)),
-    [costCenters],
-  );
-
-  const canSubmit = canCreate && !isSaving && totals.isBalanced;
-
-  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({
-      ...current,
-      [key]: value,
-    }));
-    setIsDirty(true);
-  }
-
-  function updateLine(localId: string, updates: Partial<JournalLine>) {
-    setForm((current) => ({
-      ...current,
-      lines: current.lines.map((line) =>
-        line.localId === localId ? { ...line, ...updates } : line,
-      ),
-    }));
-    setIsDirty(true);
-  }
-
-  function handleAccountChange(localId: string, accountId: string) {
-    const account = activeAccounts.find((item) => item.id === accountId);
-
-    updateLine(localId, {
-      accountId,
-      accountCode: account?.code || "",
-      accountName: account?.name || "",
-    });
-  }
-
-  function handleCostCenterChange(localId: string, costCenterId: string) {
-    const costCenter = activeCostCenters.find((item) => item.id === costCenterId);
-
-    updateLine(localId, {
-      costCenterId,
-      costCenterCode: costCenter?.code || "",
-      costCenterName: costCenter?.name || "",
-    });
-  }
-
-  function addLine() {
-    setForm((current) => ({
-      ...current,
-      lines: [...current.lines, defaultLine()],
-    }));
-    setIsDirty(true);
-  }
-
-  function removeLine(localId: string) {
-    setForm((current) => ({
-      ...current,
-      lines:
-        current.lines.length <= 2
-          ? current.lines
-          : current.lines.filter((line) => line.localId !== localId),
-    }));
-    setIsDirty(true);
-  }
-
-  function clearForm() {
-    if (isDirty && !window.confirm(t.confirmClear)) return;
-
-    setForm(defaultForm());
-    setSubmitError("");
-    setIsDirty(false);
-  }
-
-  function validateForm() {
-    const errors: string[] = [];
-
-    if (!form.entryDate) errors.push(t.requiredDate);
-    if (!form.description.trim()) errors.push(t.requiredDescription);
-
-    const usedLines = form.lines.filter(
-      (line) => toNumber(line.debit) > 0 || toNumber(line.credit) > 0,
-    );
-
-    if (usedLines.length < 2) errors.push(t.requiredLines);
-
-    usedLines.forEach((line) => {
-      const debit = toNumber(line.debit);
-      const credit = toNumber(line.credit);
-
-      if (!line.accountId) errors.push(t.requiredAccount);
-      if (debit <= 0 && credit <= 0) errors.push(t.lineAmountRequired);
-      if (debit > 0 && credit > 0) errors.push(t.oneSideOnly);
-    });
-
-    if (!totals.isBalanced) errors.push(t.balanceRequired);
-
-    return Array.from(new Set(errors));
-  }
-
-  function buildPayload() {
-    const lines = form.lines
-      .filter((line) => toNumber(line.debit) > 0 || toNumber(line.credit) > 0)
-      .map((line) => ({
-        account_id: line.accountId,
-        account: line.accountId,
-        cost_center_id: line.costCenterId || null,
-        cost_center: line.costCenterId || null,
-        debit: toNumber(line.debit),
-        debit_amount: toNumber(line.debit),
-        credit: toNumber(line.credit),
-        credit_amount: toNumber(line.credit),
-        description: line.description.trim() || form.description.trim(),
-      }));
-
-    return {
-      entry_date: form.entryDate,
-      date: form.entryDate,
-      reference: form.reference.trim(),
-      external_reference: form.externalReference.trim(),
-      description: form.description.trim(),
-      notes: form.notes.trim(),
-      posting_source: form.postingSource,
-      source: form.postingSource,
-      lines,
-      entries: lines,
-      items: lines,
-    };
-  }
-
-  const loadOptions = useCallback(
-    async (showToast = false) => {
-      try {
-        setIsLoadingOptions(true);
-        setLoadError("");
-
-        const [accountsResult, costCentersResult] = await Promise.allSettled([
-          fetch(apiUrl("/api/accounting/accounts/?page_size=500"), {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-          }),
-          fetch(apiUrl("/api/accounting/cost-centers/?page_size=500"), {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-          }),
-        ]);
-
-        async function readList(result: PromiseSettledResult<Response>) {
-          if (result.status !== "fulfilled") return [];
-
-          if (!result.value.ok) {
-            if (result.value.status === 404 || result.value.status === 405) {
-              return [];
-            }
-
-            throw new Error(`HTTP ${result.value.status}`);
-          }
-
-          const payload = await result.value.json().catch(() => null);
-
-          return extractArray(payload).map(normalizeOption);
-        }
-
-        const [accountRows, costCenterRows] = await Promise.all([
-          readList(accountsResult),
-          readList(costCentersResult),
-        ]);
-
-        setAccounts(accountRows);
-        setCostCenters(costCenterRows);
-
-        if (showToast) {
-          toast.success(locale === "ar" ? "تم تحديث القوائم." : "Lists refreshed.");
-        }
-      } catch (error) {
-        console.error("Create journal options load error:", error);
-        setLoadError(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoadingOptions(false);
-      }
-    },
-    [locale, t.loadError],
-  );
-
-  async function submitForm() {
-    if (!canCreate) return;
-
-    const errors = validateForm();
-
-    if (errors.length > 0) {
-      setSubmitError(errors.join("\n"));
-      toast.error(t.validationTitle);
-      return;
-    }
-
-    try {
-      setIsSaving(true);
-      setSubmitError("");
-
-      const payload = buildPayload();
-      const csrfToken = getCookie("csrftoken");
-
-      const endpoints = [
-        "/api/accounting/journals/create/",
-        "/api/accounting/journal-entries/create/",
-        "/api/accounting/journals/",
-        "/api/accounting/journal-entries/",
-      ];
-
-      let saved = false;
-      let lastMessage = "";
-
-      for (const endpoint of endpoints) {
-        const response = await fetch(apiUrl(endpoint), {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-          },
-          body: JSON.stringify(payload),
-        });
-
-        const responsePayload = (await response.json().catch(() => null)) as
-          | ApiEnvelope<unknown>
-          | null;
-
-        if (response.status === 404 || response.status === 405) {
-          lastMessage = responsePayload?.message || responsePayload?.detail || "";
-          continue;
-        }
-
-        if (
-          !response.ok ||
-          responsePayload?.ok === false ||
-          responsePayload?.success === false
-        ) {
-          throw new Error(
-            responsePayload?.message ||
-              responsePayload?.detail ||
-              responsePayload?.error ||
-              `HTTP ${response.status}`,
-          );
-        }
-
-        saved = true;
-        break;
-      }
-
-      if (!saved) {
-        throw new Error(lastMessage || t.saveError);
-      }
-
-      toast.success(t.saveSuccess);
-      setIsDirty(false);
-      setForm(defaultForm());
-    } catch (error) {
-      console.error("Create journal submit error:", error);
-      const message = error instanceof Error ? error.message : t.saveError;
-
-      setSubmitError(message || t.saveError);
-      toast.error(t.saveError);
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
       setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
     };
 
-    const syncAfterPaint = () => {
-      syncLocale();
+    applyLocale();
 
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
     };
   }, []);
 
-  useEffect(() => {
-    if (authResolving) return;
-    loadOptions(false);
-  }, [authResolving, loadOptions]);
-
-  useEffect(() => {
-    const handler = (event: BeforeUnloadEvent) => {
-      if (!isDirty || isSaving) return;
+  React.useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirty || saving) return;
 
       event.preventDefault();
       event.returnValue = "";
     };
 
-    window.addEventListener("beforeunload", handler);
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
-    return () => {
-      window.removeEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty, saving]);
+
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    setPageError("");
+
+    try {
+      const [accountsResponse, costCentersResponse, periodsResponse] = await Promise.all([
+        fetch(apiUrl("/api/accounting/accounts/"), {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        }),
+        fetch(apiUrl("/api/accounting/cost-centers/"), {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        }),
+        fetch(apiUrl("/api/accounting/periods/"), {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        }),
+      ]);
+
+      const accountsPayload = await accountsResponse.json().catch(() => null);
+      const costCentersPayload = await costCentersResponse.json().catch(() => null);
+      const periodsPayload = await periodsResponse.json().catch(() => null);
+
+      if (!accountsResponse.ok) throw new Error(extractApiError(accountsPayload, t.loadError));
+
+      setAccounts(normalizeAccounts(accountsPayload));
+
+      if (costCentersResponse.ok) {
+        setCostCenters(normalizeCostCenters(costCentersPayload));
+      } else {
+        setCostCenters([]);
+      }
+
+      if (periodsResponse.ok) {
+        setPeriods(normalizePeriods(periodsPayload));
+      } else {
+        setPeriods([]);
+      }
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : t.loadError;
+
+      setPageError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [t.loadError]);
+
+  React.useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const updateForm = React.useCallback(
+    <K extends keyof JournalForm>(key: K, value: JournalForm[K]) => {
+      setForm((current) => ({
+        ...current,
+        [key]: value,
+      }));
+
+      setFieldErrors((current) => ({
+        ...current,
+        [key]: undefined,
+        general: undefined,
+      }));
+
+      setIsDirty(true);
+    },
+    [],
+  );
+
+  const updateLine = React.useCallback(
+    <K extends keyof JournalLine>(lineId: string, key: K, value: JournalLine[K]) => {
+      setForm((current) => ({
+        ...current,
+        lines: current.lines.map((line) => {
+          if (line.id !== lineId) return line;
+
+          const next = {
+            ...line,
+            [key]: value,
+          };
+
+          if (key === "debit" && parseAmount(String(value)) > 0) {
+            next.credit = "";
+          }
+
+          if (key === "credit" && parseAmount(String(value)) > 0) {
+            next.debit = "";
+          }
+
+          return next;
+        }),
+      }));
+
+      setFieldErrors((current) => ({
+        ...current,
+        lines: undefined,
+        general: undefined,
+      }));
+
+      setIsDirty(true);
+    },
+    [],
+  );
+
+  const addLine = React.useCallback(() => {
+    setForm((current) => ({
+      ...current,
+      lines: [...current.lines, EMPTY_LINE()],
+    }));
+
+    setIsDirty(true);
+  }, []);
+
+  const removeLine = React.useCallback(
+    (lineId: string) => {
+      setForm((current) => {
+        if (current.lines.length <= 2) return current;
+
+        return {
+          ...current,
+          lines: current.lines.filter((line) => line.id !== lineId),
+        };
+      });
+
+      setIsDirty(true);
+    },
+    [],
+  );
+
+  const handleReset = React.useCallback(() => {
+    if (isDirty && !window.confirm(t.confirmReset)) return;
+
+    setForm({
+      ...EMPTY_FORM,
+      entry_date: new Date().toISOString().slice(0, 10),
+      lines: [EMPTY_LINE(), EMPTY_LINE()],
+    });
+    setFieldErrors({});
+    setAccountSearch({});
+    setCostCenterSearch({});
+    setPageError("");
+    setIsDirty(false);
+    toast.success(t.resetDone);
+  }, [isDirty, t.confirmReset, t.resetDone]);
+
+  const submitToEndpoint = React.useCallback(async (endpoint: string, payload: ApiRecord) => {
+    const response = await fetch(apiUrl(endpoint), {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRFToken": getCookie("csrftoken"),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const responsePayload = await response.json().catch(() => null);
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      payload: responsePayload,
     };
-  }, [isDirty, isSaving]);
+  }, []);
 
-  if (!authResolving && !canCreate) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
+  const handleSubmit = React.useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
 
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+      const errors = validateForm(form, locale);
+
+      if (Object.keys(errors).length) {
+        setFieldErrors(errors);
+        toast.error(errors.general || errors.lines || t.saveError);
+        return;
+      }
+
+      setSaving(true);
+      setPageError("");
+      setFieldErrors({});
+
+      const payload = buildPayload(form);
+
+      try {
+        let result = await submitToEndpoint("/api/accounting/journals/create/", payload);
+
+        if (!result.ok && [404, 405].includes(result.status)) {
+          result = await submitToEndpoint("/api/accounting/journals/", payload);
+        }
+
+        if (!result.ok) {
+          setFieldErrors(parseFieldErrors(result.payload));
+          throw new Error(extractApiError(result.payload, t.saveError));
+        }
+
+        const responseRecord = pickRecord(result.payload);
+        const data = pickRecord(responseRecord.data, responseRecord.journal, responseRecord.result, result.payload);
+        const id = asString(data.id || data.pk || responseRecord.id);
+
+        setIsDirty(false);
+        toast.success(t.saveSuccess);
+
+        if (id) {
+          router.push(`/system/accounting/journals/${encodeURIComponent(id)}`);
+        } else {
+          router.push("/system/accounting/journals");
+        }
+      } catch (error) {
+        const message = error instanceof Error && error.message ? error.message : t.saveError;
+
+        setPageError(message);
+        toast.error(message);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [form, locale, router, submitToEndpoint, t.saveError, t.saveSuccess],
+  );
+
+  const handleBack = React.useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (!isDirty || saving) return;
+
+      const accepted = window.confirm(t.leaveWarning);
+
+      if (!accepted) event.preventDefault();
+    },
+    [isDirty, saving, t.leaveWarning],
+  );
+
+  const findAccount = React.useCallback(
+    (id: string) => accounts.find((account) => account.id === id) || null,
+    [accounts],
+  );
+
+  const findCostCenter = React.useCallback(
+    (id: string) => costCenters.find((center) => center.id === id) || null,
+    [costCenters],
+  );
+
+  const filteredAccounts = React.useCallback(
+    (lineId: string) => {
+      const query = (accountSearch[lineId] || "").trim().toLowerCase();
+
+      return accounts.filter((account) => {
+        if (!query) return true;
+
+        return [
+          account.code,
+          account.name,
+          account.name_ar,
+          account.name_en,
+          account.account_type,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      });
+    },
+    [accountSearch, accounts],
+  );
+
+  const filteredCostCenters = React.useCallback(
+    (lineId: string) => {
+      const query = (costCenterSearch[lineId] || "").trim().toLowerCase();
+
+      return costCenters.filter((center) => {
+        if (!query) return true;
+
+        return [center.code, center.name, center.name_ar, center.name_en]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      });
+    },
+    [costCenterSearch, costCenters],
+  );
+
+  if (loading) return <PageSkeleton />;
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+    <form onSubmit={handleSubmit} className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.title}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <Link href="/system/accounting" className="hover:text-foreground">
+              {locale === "ar" ? "المحاسبة" : "Accounting"}
+            </Link>
+            <span>/</span>
+            <Link href="/system/accounting/journals" className="hover:text-foreground">
+              {t.back}
+            </Link>
+            <span>/</span>
+            <span className="text-foreground">{t.title}</span>
+          </div>
 
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight">{t.title}</h1>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link
-            href="/system/accounting/journals"
-            onClick={(event) => {
-              if (isDirty && !window.confirm(t.unsavedChanges)) {
-                event.preventDefault();
-              }
-            }}
-          >
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadOptions(true)}
-            disabled={isLoadingOptions || isSaving}
-          >
-            {isLoadingOptions ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            <span>{t.refresh}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/system/accounting/journals" onClick={handleBack}>
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
           </Button>
 
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={clearForm}
-            disabled={isSaving}
-          >
+          <Button type="button" variant="outline" onClick={() => void loadData()} disabled={saving}>
+            <RefreshCw className="h-4 w-4" />
+            {t.refresh}
+          </Button>
+
+          <Button type="button" variant="outline" onClick={handleReset} disabled={saving}>
             <RotateCcw className="h-4 w-4" />
-            <span>{t.clear}</span>
+            {t.reset}
           </Button>
 
-          <Button
-            type="button"
-            className="h-10 rounded-xl"
-            onClick={submitForm}
-            disabled={!canSubmit}
-          >
-            {isSaving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
-            <span>{isSaving ? t.saving : t.save}</span>
+          <Button type="submit" disabled={saving} className="bg-foreground text-background hover:bg-foreground/90">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? t.saving : t.save}
           </Button>
         </div>
       </div>
 
-      {loadError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p className="font-semibold text-destructive">{loadError}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
-              </div>
+      {pageError ? (
+        <Card className="border-red-200 bg-red-50/60 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4">
+            <div className="rounded-lg bg-red-100 p-2 text-red-700">
+              <ShieldAlert className="h-5 w-5" />
             </div>
-
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadOptions(true)}
-              disabled={isLoadingOptions}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
-            </Button>
+            <div>
+              <div className="font-semibold text-red-900">{t.saveError}</div>
+              <p className="mt-1 text-sm text-red-700">{pageError}</p>
+            </div>
           </CardContent>
         </Card>
       ) : null}
 
-      {submitError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
+      {fieldErrors.general || fieldErrors.lines ? (
+        <Card className="border-red-200 bg-red-50/60 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4">
+            <div className="rounded-lg bg-red-100 p-2 text-red-700">
+              <ShieldAlert className="h-5 w-5" />
             </div>
-
             <div>
-              <p className="font-semibold text-destructive">
-                {t.validationTitle}
-              </p>
-              <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">
-                {submitError}
-              </p>
+              <div className="font-semibold text-red-900">{t.notReady}</div>
+              <p className="mt-1 text-sm text-red-700">{fieldErrors.general || fieldErrors.lines}</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {isDirty ? (
+        <Card className="border-amber-200 bg-amber-50/50 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4">
+            <div className="rounded-lg bg-amber-100 p-2 text-amber-700">
+              <ShieldAlert className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="font-semibold text-amber-900">{t.leaveWarning}</div>
+              <p className="mt-1 text-sm text-amber-700">{t.leaveWarning}</p>
             </div>
           </CardContent>
         </Card>
@@ -1171,45 +1145,39 @@ export default function CreateJournalEntryPage() {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <FileText className="h-4 w-4" />
-                {t.mainInfo}
-              </CardTitle>
-              <CardDescription>{t.mainInfoDesc}</CardDescription>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="border-b">
+              <CardTitle>{t.basicInfo}</CardTitle>
+              <CardDescription>{t.basicInfoDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
+            <CardContent className="grid gap-4 p-4 lg:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium">{t.entryDate}</label>
                 <Input
                   type="date"
-                  value={form.entryDate}
-                  onChange={(event) =>
-                    updateForm("entryDate", event.target.value)
-                  }
-                  disabled={isSaving}
-                  className="h-11 rounded-xl"
+                  value={form.entry_date}
+                  onChange={(event) => updateForm("entry_date", event.target.value)}
+                  disabled={saving}
+                  dir="ltr"
                 />
+                <FieldError message={fieldErrors.entry_date} />
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t.postingSource}</label>
+                <label className="text-sm font-medium">{t.period}</label>
                 <select
-                  value={form.postingSource}
-                  onChange={(event) =>
-                    updateForm(
-                      "postingSource",
-                      event.target.value as FormState["postingSource"],
-                    )
-                  }
-                  disabled={isSaving}
-                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  value={form.period_id}
+                  onChange={(event) => updateForm("period_id", event.target.value)}
+                  disabled={saving}
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                 >
-                  <option value="MANUAL">{t.manual}</option>
-                  <option value="OPENING">{t.opening}</option>
-                  <option value="ADJUSTMENT">{t.adjustment}</option>
+                  <option value="">{t.noPeriod}</option>
+                  {periods.map((period) => (
+                    <option key={period.id} value={period.id}>
+                      {period.name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1217,327 +1185,388 @@ export default function CreateJournalEntryPage() {
                 <label className="text-sm font-medium">{t.reference}</label>
                 <Input
                   value={form.reference}
-                  onChange={(event) =>
-                    updateForm("reference", event.target.value)
-                  }
-                  disabled={isSaving}
-                  className="h-11 rounded-xl"
+                  onChange={(event) => updateForm("reference", event.target.value)}
+                  disabled={saving}
+                  dir="ltr"
                 />
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  {t.externalReference}
-                </label>
+                <label className="text-sm font-medium">{t.sourceNumber}</label>
                 <Input
-                  value={form.externalReference}
-                  onChange={(event) =>
-                    updateForm("externalReference", event.target.value)
-                  }
-                  disabled={isSaving}
-                  className="h-11 rounded-xl"
+                  value={form.source_number}
+                  onChange={(event) => updateForm("source_number", event.target.value)}
+                  disabled={saving}
+                  dir="ltr"
                 />
               </div>
 
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.postingSource}</label>
+                <Input
+                  value={form.posting_source}
+                  onChange={(event) => updateForm("posting_source", event.target.value)}
+                  disabled={saving}
+                  dir="ltr"
+                />
+              </div>
+
+              <div className="space-y-2 lg:col-span-2">
                 <label className="text-sm font-medium">{t.description}</label>
-                <Input
+                <Textarea
                   value={form.description}
-                  onChange={(event) =>
-                    updateForm("description", event.target.value)
-                  }
-                  disabled={isSaving}
-                  className="h-11 rounded-xl"
+                  onChange={(event) => updateForm("description", event.target.value)}
+                  placeholder={t.descriptionPlaceholder}
+                  disabled={saving}
+                  rows={3}
                 />
+                <FieldError message={fieldErrors.description} />
               </div>
 
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2 lg:col-span-2">
                 <label className="text-sm font-medium">{t.notes}</label>
-                <textarea
+                <Textarea
                   value={form.notes}
                   onChange={(event) => updateForm("notes", event.target.value)}
-                  disabled={isSaving}
+                  placeholder={t.notesPlaceholder}
+                  disabled={saving}
                   rows={3}
-                  className="w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="flex flex-col gap-3 pb-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <WalletCards className="h-4 w-4" />
-                  {t.linesTitle}
-                </CardTitle>
-                <CardDescription>{t.linesDesc}</CardDescription>
-              </div>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="border-b">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <CardTitle>{t.linesInfo}</CardTitle>
+                  <CardDescription>{t.linesInfoDesc}</CardDescription>
+                </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10 rounded-xl"
-                onClick={addLine}
-                disabled={isSaving}
-              >
-                <Plus className="h-4 w-4" />
-                {t.addLine}
-              </Button>
+                <CardAction>
+                  <Button type="button" variant="outline" onClick={addLine} disabled={saving}>
+                    <Plus className="h-4 w-4" />
+                    {t.addLine}
+                  </Button>
+                </CardAction>
+              </div>
             </CardHeader>
 
-            <CardContent>
-              <div className="overflow-hidden rounded-xl border">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t.account}</TableHead>
-                        <TableHead>{t.costCenter}</TableHead>
-                        <TableHead>{t.debit}</TableHead>
-                        <TableHead>{t.credit}</TableHead>
-                        <TableHead>{t.lineDescription}</TableHead>
-                        <TableHead>{t.action}</TableHead>
-                      </TableRow>
-                    </TableHeader>
+            <CardContent className="space-y-4 p-4">
+              {form.lines.map((line, index) => {
+                const selectedAccount = findAccount(line.account_id);
+                const selectedCostCenter = findCostCenter(line.cost_center_id);
+                const accountResults = filteredAccounts(line.id);
+                const costCenterResults = filteredCostCenters(line.id);
 
-                    <TableBody>
-                      {isLoadingOptions ? (
-                        Array.from({ length: 2 }).map((_, index) => (
-                          <TableRow key={index}>
-                            {Array.from({ length: 6 }).map((__, cellIndex) => (
-                              <TableCell key={cellIndex}>
-                                <div className="h-9 animate-pulse rounded-lg bg-muted" />
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        ))
-                      ) : (
-                        form.lines.map((line) => (
-                          <TableRow key={line.localId}>
-                            <TableCell>
-                              <select
-                                value={line.accountId}
-                                onChange={(event) =>
-                                  handleAccountChange(
-                                    line.localId,
-                                    event.target.value,
-                                  )
-                                }
-                                disabled={isSaving}
-                                className="h-10 min-w-[220px] rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                              >
-                                <option value="">{t.chooseAccount}</option>
-                                {activeAccounts.map((account) => (
-                                  <option key={account.id} value={account.id}>
-                                    {[account.code, account.name]
-                                      .filter(Boolean)
-                                      .join(" - ")}
-                                  </option>
-                                ))}
-                              </select>
-                            </TableCell>
+                return (
+                  <div key={line.id} className="rounded-lg border bg-background p-4">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">#{index + 1}</Badge>
+                        <span className="text-sm font-medium">{t.lineDescription}</span>
+                      </div>
 
-                            <TableCell>
-                              <select
-                                value={line.costCenterId}
-                                onChange={(event) =>
-                                  handleCostCenterChange(
-                                    line.localId,
-                                    event.target.value,
-                                  )
-                                }
-                                disabled={isSaving}
-                                className="h-10 min-w-[190px] rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                              >
-                                <option value="">{t.chooseCostCenter}</option>
-                                {activeCostCenters.map((costCenter) => (
-                                  <option
-                                    key={costCenter.id}
-                                    value={costCenter.id}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => removeLine(line.id)}
+                        disabled={saving || form.lines.length <= 2}
+                        className="border-red-200 text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {t.removeLine}
+                      </Button>
+                    </div>
+
+                    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_130px_130px]">
+                      <SelectorPopover
+                        title={t.account}
+                        searchPlaceholder={t.searchAccount}
+                        selectedLabel={
+                          selectedAccount
+                            ? `${selectedAccount.code} · ${displayAccountName(selectedAccount, locale)}`
+                            : t.accountRequired
+                        }
+                      >
+                        <div className="relative mb-2">
+                          <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            value={accountSearch[line.id] || ""}
+                            onChange={(event) =>
+                              setAccountSearch((current) => ({
+                                ...current,
+                                [line.id]: event.target.value,
+                              }))
+                            }
+                            placeholder={t.searchAccount}
+                            className="ps-9"
+                            disabled={saving}
+                          />
+                        </div>
+
+                        <ScrollArea className="h-[170px]">
+                          <div className="space-y-1">
+                            {accountResults.length ? (
+                              accountResults.map((account) => {
+                                const selected = account.id === line.account_id;
+
+                                return (
+                                  <button
+                                    key={account.id}
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={() => updateLine(line.id, "account_id", account.id)}
+                                    className={`w-full rounded-md border px-3 py-2 text-start text-sm transition hover:bg-muted/40 ${
+                                      selected ? "border-foreground bg-muted" : "bg-background"
+                                    }`}
                                   >
-                                    {[costCenter.code, costCenter.name]
-                                      .filter(Boolean)
-                                      .join(" - ")}
-                                  </option>
-                                ))}
-                              </select>
-                            </TableCell>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-mono font-semibold">{account.code}</span>
+                                      {selected ? <Badge variant="outline">{t.selected}</Badge> : null}
+                                    </div>
+                                    <div className="mt-1 truncate text-muted-foreground">
+                                      {displayAccountName(account, locale)}
+                                    </div>
+                                  </button>
+                                );
+                              })
+                            ) : (
+                              <div className="flex h-[130px] items-center justify-center text-center text-sm text-muted-foreground">
+                                {t.noAccounts}
+                              </div>
+                            )}
+                          </div>
+                        </ScrollArea>
+                      </SelectorPopover>
 
-                            <TableCell>
-                              <Input
-                                inputMode="decimal"
-                                value={line.debit}
-                                onChange={(event) => {
-                                  const value = escapeNumberInput(
-                                    event.target.value,
-                                  );
+                      <SelectorPopover
+                        title={t.costCenter}
+                        searchPlaceholder={t.searchCostCenter}
+                        selectedLabel={
+                          selectedCostCenter
+                            ? `${selectedCostCenter.code} · ${displayCostCenterName(selectedCostCenter, locale)}`
+                            : t.unknown
+                        }
+                      >
+                        <div className="relative mb-2">
+                          <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            value={costCenterSearch[line.id] || ""}
+                            onChange={(event) =>
+                              setCostCenterSearch((current) => ({
+                                ...current,
+                                [line.id]: event.target.value,
+                              }))
+                            }
+                            placeholder={t.searchCostCenter}
+                            className="ps-9"
+                            disabled={saving}
+                          />
+                        </div>
 
-                                  updateLine(line.localId, {
-                                    debit: value,
-                                    credit: value ? "" : line.credit,
-                                  });
-                                }}
-                                disabled={isSaving}
-                                className="h-10 min-w-[120px] rounded-xl"
-                              />
-                            </TableCell>
+                        <ScrollArea className="h-[170px]">
+                          <div className="space-y-1">
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => updateLine(line.id, "cost_center_id", "")}
+                              className={`w-full rounded-md border px-3 py-2 text-start text-sm transition hover:bg-muted/40 ${
+                                !line.cost_center_id ? "border-foreground bg-muted" : "bg-background"
+                              }`}
+                            >
+                              {t.unknown}
+                            </button>
 
-                            <TableCell>
-                              <Input
-                                inputMode="decimal"
-                                value={line.credit}
-                                onChange={(event) => {
-                                  const value = escapeNumberInput(
-                                    event.target.value,
-                                  );
+                            {costCenterResults.length ? (
+                              costCenterResults.map((center) => {
+                                const selected = center.id === line.cost_center_id;
 
-                                  updateLine(line.localId, {
-                                    credit: value,
-                                    debit: value ? "" : line.debit,
-                                  });
-                                }}
-                                disabled={isSaving}
-                                className="h-10 min-w-[120px] rounded-xl"
-                              />
-                            </TableCell>
+                                return (
+                                  <button
+                                    key={center.id}
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={() => updateLine(line.id, "cost_center_id", center.id)}
+                                    className={`w-full rounded-md border px-3 py-2 text-start text-sm transition hover:bg-muted/40 ${
+                                      selected ? "border-foreground bg-muted" : "bg-background"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-mono font-semibold">{center.code}</span>
+                                      {selected ? <Badge variant="outline">{t.selected}</Badge> : null}
+                                    </div>
+                                    <div className="mt-1 truncate text-muted-foreground">
+                                      {displayCostCenterName(center, locale)}
+                                    </div>
+                                  </button>
+                                );
+                              })
+                            ) : (
+                              <div className="flex h-[100px] items-center justify-center text-center text-sm text-muted-foreground">
+                                {t.noCostCenters}
+                              </div>
+                            )}
+                          </div>
+                        </ScrollArea>
+                      </SelectorPopover>
 
-                            <TableCell>
-                              <Input
-                                value={line.description}
-                                onChange={(event) =>
-                                  updateLine(line.localId, {
-                                    description: event.target.value,
-                                  })
-                                }
-                                disabled={isSaving}
-                                className="h-10 min-w-[180px] rounded-xl"
-                              />
-                            </TableCell>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">{t.debit}</label>
+                        <Input
+                          value={line.debit}
+                          onChange={(event) => updateLine(line.id, "debit", normalizeDecimalInput(event.target.value))}
+                          disabled={saving}
+                          inputMode="decimal"
+                          dir="ltr"
+                        />
+                      </div>
 
-                            <TableCell>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-9 rounded-xl"
-                                onClick={() => removeLine(line.localId)}
-                                disabled={isSaving || form.lines.length <= 2}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                                <span className="sr-only">{t.removeLine}</span>
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">{t.credit}</label>
+                        <Input
+                          value={line.credit}
+                          onChange={(event) => updateLine(line.id, "credit", normalizeDecimalInput(event.target.value))}
+                          disabled={saving}
+                          inputMode="decimal"
+                          dir="ltr"
+                        />
+                      </div>
+
+                      <div className="xl:col-span-4">
+                        <label className="text-sm font-medium">{t.lineDescription}</label>
+                        <Input
+                          value={line.description}
+                          onChange={(event) => updateLine(line.id, "description", event.target.value)}
+                          disabled={saving}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-4">
+          <Card className="sticky top-4 rounded-lg border bg-card shadow-none">
+            <CardHeader className="border-b">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle>{t.summary}</CardTitle>
+                  <CardDescription>{t.summaryDesc}</CardDescription>
+                </div>
+                <CardAction>
+                  <div className="rounded-lg bg-muted p-2 text-muted-foreground">
+                    <WalletCards className="h-5 w-5" />
+                  </div>
+                </CardAction>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4 p-4">
+              <SummaryRow label={t.totalDebit} value={<MoneyValue value={totals.totalDebit} label={t.sar} />} />
+              <SummaryRow label={t.totalCredit} value={<MoneyValue value={totals.totalCredit} label={t.sar} />} />
+              <SummaryRow label={t.difference} value={<MoneyValue value={totals.difference} label={t.sar} />} />
+              <SummaryRow
+                label={t.balanceStatus}
+                value={<StatusBadge ok={totals.isBalanced} label={totals.isBalanced ? t.balanced : t.unbalanced} />}
+              />
+              <SummaryRow label={t.linesCount} value={formatInteger(form.lines.length)} />
+
+              <div className="rounded-lg border bg-background p-3">
+                <div className="mb-3 text-sm font-semibold">{t.ready}</div>
+
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">{form.entry_date ? t.validDate : t.invalidDate}</span>
+                    <StatusBadge ok={Boolean(form.entry_date)} label={form.entry_date ? t.ready : t.notReady} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">{form.description.trim() ? t.validDescription : t.invalidDescription}</span>
+                    <StatusBadge ok={Boolean(form.description.trim())} label={form.description.trim() ? t.ready : t.notReady} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      {totals.validLinesCount >= 2 ? t.validLines : t.invalidLines}
+                    </span>
+                    <StatusBadge ok={totals.validLinesCount >= 2} label={totals.validLinesCount >= 2 ? t.ready : t.notReady} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">
+                      {totals.isBalanced ? t.validBalance : t.invalidBalance}
+                    </span>
+                    <StatusBadge ok={totals.isBalanced} label={totals.isBalanced ? t.ready : t.notReady} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Button type="submit" disabled={saving} className="bg-foreground text-background hover:bg-foreground/90">
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {saving ? t.saving : t.save}
+                </Button>
+
+                <Button type="button" variant="outline" onClick={addLine} disabled={saving}>
+                  <Plus className="h-4 w-4" />
+                  {t.addLine}
+                </Button>
+
+                <Button type="button" variant="outline" onClick={handleReset} disabled={saving}>
+                  <RotateCcw className="h-4 w-4" />
+                  {t.reset}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="grid gap-3 p-4">
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <div className="rounded-lg bg-muted p-2">
+                  <BookOpen className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t.accountsLoaded}</p>
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    {formatInteger(accounts.length)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <div className="rounded-lg bg-muted p-2">
+                  <CircleDollarSign className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t.costCentersLoaded}</p>
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    {formatInteger(costCenters.length)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 rounded-lg border bg-background p-3">
+                <div className="rounded-lg bg-muted p-2">
+                  <CalendarDays className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t.periodsLoaded}</p>
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    {formatInteger(periods.length)}
+                  </p>
                 </div>
               </div>
             </CardContent>
           </Card>
         </div>
-
-        <aside className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <CheckCircle2 className="h-4 w-4" />
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.totalDebit}</p>
-                <div className="mt-2 text-xl font-bold">
-                  <MoneyText value={totals.totalDebit} />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.totalCredit}</p>
-                <div className="mt-2 text-xl font-bold">
-                  <MoneyText value={totals.totalCredit} />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.difference}</p>
-                <div className="mt-2 text-xl font-bold">
-                  <MoneyText value={totals.difference} />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.linesCount}</p>
-                <div className="mt-2 text-2xl font-bold">
-                  {form.lines.length.toLocaleString("en-US")}
-                </div>
-              </div>
-
-              {totals.isBalanced ? (
-                <Badge className="w-full justify-center rounded-2xl border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-                  <CheckCircle2 className="h-4 w-4" />
-                  {t.balanced}
-                </Badge>
-              ) : (
-                <Badge
-                  variant="destructive"
-                  className="w-full justify-center rounded-2xl px-3 py-2"
-                >
-                  <XCircle className="h-4 w-4" />
-                  {t.notBalanced}
-                </Badge>
-              )}
-
-              <div className="grid gap-2 pt-2">
-                <Button
-                  type="button"
-                  className="h-11 rounded-2xl"
-                  onClick={submitForm}
-                  disabled={!canSubmit}
-                >
-                  {isSaving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  {isSaving ? t.saving : t.save}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 rounded-2xl"
-                  onClick={clearForm}
-                  disabled={isSaving}
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  {t.clear}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Layers3 className="h-4 w-4" />
-                {t.costCenter}
-              </div>
-
-              <p className="text-sm leading-6 text-muted-foreground">
-                {activeCostCenters.length > 0
-                  ? `${activeCostCenters.length.toLocaleString("en-US")} ${t.costCenter}`
-                  : t.chooseCostCenter}
-              </p>
-            </CardContent>
-          </Card>
-        </aside>
       </div>
-    </div>
+    </form>
   );
 }

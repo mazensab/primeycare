@@ -1,759 +1,697 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/agents/[id]/page.tsx
-   🧠 Primey Care | Agent Details
+   📂 primey_frontend/app/system/agents/[id]/page.tsx
+   👤 Primey Care — Agent Details V4 Financial Statement + Login User
    ------------------------------------------------------------
-   ✅ المسار: /system/agents/[id]
-   ✅ الإصدار: v2.0.0 - Centers Pattern + Safe Permissions
-
-   ✅ العمل:
-      عرض تفاصيل المندوب، بيانات التواصل، العمولات،
-      الحساب البنكي، الأداء، والربط التشغيلي.
-
-   ✅ Backend:
-      GET /api/agents/{id}/
-
-   ✅ المعيار:
-      - مبني بصريًا على نمط تفاصيل المراكز والعملاء المعتمد.
-      - دمج UX Refinement مع حماية المرحلة 2.
-      - لا يتم إظهار مسارات تقنية أو API داخل الواجهة.
-      - الصفحة ممتدة على عرض المساحة وليست متمركزة.
-      - Side Profile Card + Main Content.
-      - لا يتم عرض زر حذف نهائي.
-      - لا يتم عرض أزرار وهمية أو معطلة.
-      - إخفاء الأزرار غير المصرح بها بدل تعطيلها.
-      - عدم كسر system_admin / superadmin.
-      - Error State مستقل عن Not Found.
-      - Skeleton Loading.
-      - نسخ سريع للكود / الإحالة / المعرف / الآيبان.
-      - Web PDF Print.
-      - استخدام /currency/sar.svg.
-      - الأرقام بالإنجليزية.
-      - دعم عربي / إنجليزي عبر primey-locale.
-      - استخدام sonner للتنبيهات.
-      - بدون localhost hardcoded.
+   ✅ Approved Products/Customers premium pattern
+   ✅ Real API only: GET /api/agents/{id}/?include_statement=1
+   ✅ Shows Agent.user / login_user / profile after backend linking
+   ✅ Shows AgentFinancialEntry statement:
+      COD_CUSTODY / SALES_COMMISSION / DELIVERY_FEE / BROKER_SHARE
+   ✅ Shows amount due from agent / due to agent / net balance
+   ✅ Shows journal_entry_reference per movement
+   ✅ Recent financial entries
+   ✅ Legacy orders and commissions kept
+   ✅ Web print
+   ✅ SAR icon from /currency/sar.svg
+   ✅ sonner toast
+   ✅ RTL/LTR via primey-locale
+   ✅ No localhost / no fake data
 ============================================================ */
 
+import * as React from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import type { ComponentType, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  BadgeCheck,
+  ArrowRight,
+  BadgePercent,
   Banknote,
   CalendarDays,
   CheckCircle2,
-  ClipboardList,
   Copy,
   Eye,
   FileText,
-  HandCoins,
-  IdCard,
+  Home,
   Landmark,
+  Layers3,
   Loader2,
   Mail,
-  MapPin,
+  MoreHorizontal,
   Phone,
   Printer,
-  RefreshCcw,
+  ReceiptText,
+  RefreshCw,
   ShieldCheck,
-  Star,
+  ShoppingCart,
+  TriangleAlert,
+  UserCircle2,
   UserRound,
-  Users,
-  Wallet,
-  XCircle,
+  UsersRound,
+  WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
   Table,
   TableBody,
   TableCell,
+  TableHead,
+  TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type AuthRecord = Record<string, unknown>;
+type LoginUserProfile = {
+  id?: number | string | null;
+  display_name?: string;
+  user_type?: string;
+  role?: string;
+  phone_number?: string;
+  whatsapp_number?: string;
+  alternate_email?: string;
+  preferred_language?: string;
+  timezone?: string;
+  extra_data?: Record<string, unknown>;
+  tags?: unknown[];
+};
 
-type AgentStatus =
-  | "ACTIVE"
-  | "INACTIVE"
-  | "SUSPENDED"
-  | "DRAFT"
-  | "UNKNOWN";
+type LoginUserRecord = {
+  id?: number | string | null;
+  username?: string;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  full_name?: string;
+  is_active?: boolean;
+  is_staff?: boolean;
+  is_superuser?: boolean;
+  last_login?: string | null;
+  date_joined?: string | null;
+  profile?: LoginUserProfile | null;
+};
 
-type CommissionType = "PERCENTAGE" | "FIXED" | "UNKNOWN";
+type FinancialSummary = {
+  financial_entries_count: number;
+  accounting_posted_count: number;
 
-type AgentDetail = {
-  id: number | string;
-  fullName: string;
-  agentCode: string;
-  referralCode: string;
-  status: AgentStatus;
+  total_debit_amount: number;
+  total_credit_amount: number;
+  total_debit_paid_amount: number;
+  total_credit_paid_amount: number;
+  total_debit_remaining_amount: number;
+  total_credit_remaining_amount: number;
+  net_balance_amount: number;
+
+  cod_custody_amount: number;
+  cod_custody_paid_amount: number;
+  cod_custody_remaining_amount: number;
+
+  sales_commission_amount: number;
+  sales_commission_paid_amount: number;
+  sales_commission_remaining_amount: number;
+
+  delivery_fee_amount: number;
+  delivery_fee_paid_amount: number;
+  delivery_fee_remaining_amount: number;
+
+  broker_share_amount: number;
+  broker_share_paid_amount: number;
+  broker_share_remaining_amount: number;
+
+  settlements_amount: number;
+  amount_due_from_agent: number;
+  amount_due_to_agent: number;
+  currency: string;
+};
+
+type AgentRecord = {
+  id: number;
+  full_name: string;
+  name: string;
+  agent_code: string;
+  code: string;
+  referral_code: string;
+  status: string;
   phone: string;
   email: string;
   city: string;
   address: string;
-  defaultCommissionType: CommissionType;
-  defaultCommissionValue: number;
-  totalCustomers: number;
-  totalOrders: number;
-  totalSales: number;
-  pendingCommission: number;
-  approvedCommission: number;
-  paidCommission: number;
-  accountingPostedCommission: number;
-  bankName: string;
-  bankAccountName: string;
+
+  user_id: number | string | null;
+  has_login_user: boolean;
+  login_user: LoginUserRecord | null;
+
+  broker_id: number | null;
+  broker_name: string;
+  broker_code: string;
+
+  default_commission_type: string;
+  default_commission_value: number;
+  default_delivery_fee: number;
+
+  bank_name: string;
+  bank_account_name: string;
   iban: string;
   notes: string;
-  isFeatured: boolean;
-  createdAt: string;
-  updatedAt: string;
-  raw: Record<string, unknown>;
+
+  total_customers: number;
+  customers_count: number;
+  total_orders: number;
+  orders_count: number;
+  total_sales: number;
+
+  pending_commission: number;
+  approved_commission: number;
+  paid_commission: number;
+  total_commission: number;
+  due_commission: number;
+
+  financial: FinancialSummary;
+
+  created_at: string | null;
+  updated_at: string | null;
 };
 
-type AgentDetailResponse = {
+type AgentOrderRecord = {
+  id: number;
+  order_id: number | null;
+  order_number: string;
+  agent_id: number | null;
+  customer_id: number | null;
+  customer_name: string;
+  commission_type: string;
+  commission_value: number;
+  sales_amount: number;
+  commission_amount: number;
+  referral_code_used: string;
+  notes: string;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type AgentCommissionRecord = {
+  id: number;
+  reference: string;
+  status: string;
+  commission_status: string;
+  agent_id: number | null;
+  agent_name: string;
+  agent_code: string;
+  referral_code: string;
+  order_id: number | null;
+  order_number: string;
+  payment_id: number | null;
+  payment_number: string;
+  customer_id: number | null;
+  customer_name: string;
+  base_amount: number;
+  amount: number;
+  commission_amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  journal_entry_id: number | null;
+  journal_entry_reference: string;
+  is_accounting_posted: boolean;
+  earned_at: string | null;
+  approved_at: string | null;
+  paid_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  notes: string;
+};
+
+type FinancialEntryRecord = {
+  id: number;
+  entry_number: string;
+  entry_type: string;
+  entry_type_label: string;
+  direction: string;
+  direction_label: string;
+  status: string;
+  status_label: string;
+  amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  currency: string;
+  debit_amount: number;
+  credit_amount: number;
+
+  order_id: number | null;
+  order_number: string;
+  payment_id: number | null;
+  payment_number: string;
+  commission_id: number | null;
+  rule_id: number | null;
+
+  description: string;
+  reference: string;
+  source_type: string;
+  source_id: string;
+  source_number: string;
+
+  journal_entry_id: number | null;
+  journal_entry_reference: string;
+  journal_entry_number: string;
+  is_accounting_posted: boolean;
+
+  earned_at: string | null;
+  approved_at: string | null;
+  settled_at: string | null;
+  paid_at: string | null;
+  posted_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type StatementLineRecord = {
+  line_type: string;
+  line_date: string | null;
+  reference: string;
+  related_order_id: number | null;
+  related_agent_order_id: number | null;
+  related_commission_id: number | null;
+  related_financial_entry_id: number | null;
+  description: string;
+  debit_amount: number;
+  credit_amount: number;
+  balance_after: number;
+  currency: string;
+  status: string;
+  metadata: ApiRecord;
+};
+
+type AgentApiResponse = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
   data?: unknown;
   agent?: unknown;
-  item?: unknown;
+  stats?: unknown;
+  financial_summary?: unknown;
+  recent_orders?: unknown[];
+  recent_commissions?: unknown[];
+  recent_financial_entries?: unknown[];
+  statement?: unknown;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
+const SAR_ICON = "/currency/sar.svg";
 
-/* ============================================================
-   Locale Helpers
-============================================================ */
+const EMPTY_FINANCIAL: FinancialSummary = {
+  financial_entries_count: 0,
+  accounting_posted_count: 0,
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+  total_debit_amount: 0,
+  total_credit_amount: 0,
+  total_debit_paid_amount: 0,
+  total_credit_paid_amount: 0,
+  total_debit_remaining_amount: 0,
+  total_credit_remaining_amount: 0,
+  net_balance_amount: 0,
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+  cod_custody_amount: 0,
+  cod_custody_paid_amount: 0,
+  cod_custody_remaining_amount: 0,
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+  sales_commission_amount: 0,
+  sales_commission_paid_amount: 0,
+  sales_commission_remaining_amount: 0,
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
-    return "ar";
-  }
+  delivery_fee_amount: 0,
+  delivery_fee_paid_amount: 0,
+  delivery_fee_remaining_amount: 0,
+
+  broker_share_amount: 0,
+  broker_share_paid_amount: 0,
+  broker_share_remaining_amount: 0,
+
+  settlements_amount: 0,
+  amount_due_from_agent: 0,
+  amount_due_to_agent: 0,
+  currency: "SAR",
+};
+
+const translations = {
+  ar: {
+    title: "تفاصيل المندوب",
+    subtitle: "ملف المندوب، كشف الحساب، العهدة، المستحقات، العمولات، وحركاته المالية.",
+    back: "رجوع",
+    refresh: "تحديث",
+    print: "طباعة",
+    actions: "الإجراءات",
+    copyCode: "نسخ كود المندوب",
+    copyReferral: "نسخ كود الإحالة",
+    copyIban: "نسخ الآيبان",
+    copied: "تم النسخ",
+    overview: "نظرة عامة",
+    orders: "الطلبات",
+    commissions: "العمولات",
+    statement: "كشف الحساب",
+    entries: "الحركات المالية",
+    bank: "الحساب البنكي",
+    activity: "السجل",
+    agentInfo: "بيانات المندوب",
+    contactInfo: "بيانات التواصل",
+    accountInfo: "حساب الدخول",
+    accountStatus: "حالة حساب الدخول",
+    linked: "مرتبط",
+    missing: "بدون حساب",
+    loginUsername: "اسم المستخدم",
+    loginEmail: "بريد الحساب",
+    loginDisplayName: "اسم العرض",
+    loginUserId: "معرّف الحساب",
+    loginRole: "الدور",
+    loginUserType: "نوع المستخدم",
+    loginWorkspace: "المساحة",
+    loginPhone: "جوال الحساب",
+    loginWhatsapp: "واتساب الحساب",
+    accountActive: "الحساب نشط",
+    agentWorkspace: "مساحة المندوب",
+    bankInfo: "البيانات البنكية",
+    performance: "الأداء",
+    financialPosition: "المركز المالي للمندوب",
+    notes: "الملاحظات",
+    noNotes: "لا توجد ملاحظات.",
+    fullName: "اسم المندوب",
+    agentCode: "كود المندوب",
+    referralCode: "كود الإحالة",
+    broker: "الوسيط",
+    status: "الحالة",
+    phone: "الجوال",
+    email: "البريد",
+    city: "المدينة",
+    address: "العنوان",
+    commissionType: "نوع العمولة",
+    commissionValue: "قيمة العمولة",
+    deliveryFee: "عمولة التوصيل",
+    percentage: "نسبة",
+    fixed: "مبلغ ثابت",
+    bankName: "اسم البنك",
+    bankAccountName: "اسم صاحب الحساب",
+    iban: "الآيبان",
+
+    totalSales: "إجمالي المبيعات",
+    totalOrders: "إجمالي الطلبات",
+    totalCustomers: "إجمالي العملاء",
+    dueCommission: "المستحقات القديمة",
+    pendingCommission: "عمولة معلقة",
+    approvedCommission: "عمولة معتمدة",
+    paidCommission: "عمولة مدفوعة",
+    totalCommission: "إجمالي العمولات القديمة",
+
+    codCustody: "عهدة COD",
+    salesCommission: "عمولة البيع",
+    deliveryFeeAmount: "مستحق التوصيل",
+    brokerShare: "حصة الوسيط",
+    dueFromAgent: "المستحق على المندوب",
+    dueToAgent: "المستحق للمندوب",
+    netBalance: "الصافي",
+    accountingPosted: "مرحّل محاسبيًا",
+    financialEntriesCount: "عدد الحركات المالية",
+    debitTotal: "إجمالي مدين",
+    creditTotal: "إجمالي دائن",
+
+    orderNumber: "رقم الطلب",
+    customer: "العميل",
+    salesAmount: "مبلغ البيع",
+    commissionAmount: "العمولة",
+    paidAmount: "المسدد",
+    remainingAmount: "المتبقي",
+    commissionStatus: "حالة العمولة",
+    payment: "الدفعة",
+    earnedAt: "تاريخ الاستحقاق",
+    approvedAt: "تاريخ الاعتماد",
+    paidAt: "تاريخ الدفع",
+    createdAt: "تاريخ الإنشاء",
+    updatedAt: "آخر تحديث",
+    postedAt: "تاريخ الترحيل",
+    reference: "المرجع",
+    description: "الوصف",
+    debit: "مدين",
+    credit: "دائن",
+    balance: "الرصيد",
+    date: "التاريخ",
+    type: "النوع",
+    journal: "القيد",
+    source: "المصدر",
+
+    approveCommission: "اعتماد العمولة",
+    confirmApprove: "هل تريد اعتماد هذه العمولة؟",
+    approveSuccess: "تم اعتماد العمولة بنجاح.",
+    operationFailed: "تعذر تنفيذ العملية.",
+    openOrder: "فتح الطلب",
+    openCustomer: "فتح العميل",
+    openPayment: "فتح الدفعة",
+
+    active: "نشط",
+    inactive: "غير نشط",
+    suspended: "موقوف",
+    draft: "مسودة",
+    pending: "معلق",
+    approved: "معتمد",
+    paid: "مدفوع",
+    settled: "مسوى",
+    earned: "مستحق",
+    cancelled: "ملغي",
+    reversed: "معكوس",
+    unknown: "غير معروف",
+
+    noOrdersTitle: "لا توجد طلبات",
+    noOrdersDesc: "لم يتم ربط طلبات بهذا المندوب بعد.",
+    noCommissionsTitle: "لا توجد عمولات",
+    noCommissionsDesc: "لم يتم تسجيل عمولات لهذا المندوب بعد.",
+    noStatementTitle: "لا توجد حركات",
+    noStatementDesc: "لم يرجع كشف الحساب أي حركات لهذا المندوب.",
+    noEntriesTitle: "لا توجد حركات مالية",
+    noEntriesDesc: "لا توجد حركات مالية تفصيلية لهذا المندوب.",
+    errorTitle: "تعذر تحميل تفاصيل المندوب",
+    errorDesc: "تأكد من تشغيل الخادم ثم أعد المحاولة.",
+    notFoundTitle: "المندوب غير موجود",
+    notFoundDesc: "لم يتم العثور على المندوب المطلوب.",
+    tryAgain: "إعادة المحاولة",
+    printTitle: "تقرير المندوب",
+    generatedAt: "تاريخ الإنشاء",
+  },
+  en: {
+    title: "Agent details",
+    subtitle: "Agent profile, statement, custody, dues, commissions, and financial movements.",
+    back: "Back",
+    refresh: "Refresh",
+    print: "Print",
+    actions: "Actions",
+    copyCode: "Copy agent code",
+    copyReferral: "Copy referral code",
+    copyIban: "Copy IBAN",
+    copied: "Copied",
+    overview: "Overview",
+    orders: "Orders",
+    commissions: "Commissions",
+    statement: "Statement",
+    entries: "Financial entries",
+    bank: "Bank account",
+    activity: "Activity",
+    agentInfo: "Agent info",
+    contactInfo: "Contact info",
+    accountInfo: "Login account",
+    accountStatus: "Login account status",
+    linked: "Linked",
+    missing: "No account",
+    loginUsername: "Username",
+    loginEmail: "Account email",
+    loginDisplayName: "Display name",
+    loginUserId: "User ID",
+    loginRole: "Role",
+    loginUserType: "User type",
+    loginWorkspace: "Workspace",
+    loginPhone: "Account phone",
+    loginWhatsapp: "Account WhatsApp",
+    accountActive: "Account active",
+    agentWorkspace: "Agent workspace",
+    bankInfo: "Bank info",
+    performance: "Performance",
+    financialPosition: "Agent financial position",
+    notes: "Notes",
+    noNotes: "No notes.",
+    fullName: "Agent name",
+    agentCode: "Agent code",
+    referralCode: "Referral code",
+    broker: "Broker",
+    status: "Status",
+    phone: "Phone",
+    email: "Email",
+    city: "City",
+    address: "Address",
+    commissionType: "Commission type",
+    commissionValue: "Commission value",
+    deliveryFee: "Delivery fee",
+    percentage: "Percentage",
+    fixed: "Fixed",
+    bankName: "Bank name",
+    bankAccountName: "Account holder",
+    iban: "IBAN",
+
+    totalSales: "Total sales",
+    totalOrders: "Total orders",
+    totalCustomers: "Total customers",
+    dueCommission: "Legacy dues",
+    pendingCommission: "Pending commission",
+    approvedCommission: "Approved commission",
+    paidCommission: "Paid commission",
+    totalCommission: "Legacy commissions",
+
+    codCustody: "COD custody",
+    salesCommission: "Sales commission",
+    deliveryFeeAmount: "Delivery due",
+    brokerShare: "Broker share",
+    dueFromAgent: "Due from agent",
+    dueToAgent: "Due to agent",
+    netBalance: "Net balance",
+    accountingPosted: "Accounting posted",
+    financialEntriesCount: "Financial entries",
+    debitTotal: "Total debit",
+    creditTotal: "Total credit",
+
+    orderNumber: "Order number",
+    customer: "Customer",
+    salesAmount: "Sales amount",
+    commissionAmount: "Commission",
+    paidAmount: "Paid",
+    remainingAmount: "Remaining",
+    commissionStatus: "Commission status",
+    payment: "Payment",
+    earnedAt: "Earned at",
+    approvedAt: "Approved at",
+    paidAt: "Paid at",
+    createdAt: "Created at",
+    updatedAt: "Updated at",
+    postedAt: "Posted at",
+    reference: "Reference",
+    description: "Description",
+    debit: "Debit",
+    credit: "Credit",
+    balance: "Balance",
+    date: "Date",
+    type: "Type",
+    journal: "Journal",
+    source: "Source",
+
+    approveCommission: "Approve commission",
+    confirmApprove: "Do you want to approve this commission?",
+    approveSuccess: "Commission approved successfully.",
+    operationFailed: "Unable to complete operation.",
+    openOrder: "Open order",
+    openCustomer: "Open customer",
+    openPayment: "Open payment",
+
+    active: "Active",
+    inactive: "Inactive",
+    suspended: "Suspended",
+    draft: "Draft",
+    pending: "Pending",
+    approved: "Approved",
+    paid: "Paid",
+    settled: "Settled",
+    earned: "Earned",
+    cancelled: "Cancelled",
+    reversed: "Reversed",
+    unknown: "Unknown",
+
+    noOrdersTitle: "No orders",
+    noOrdersDesc: "No orders have been linked to this agent yet.",
+    noCommissionsTitle: "No commissions",
+    noCommissionsDesc: "No commissions were recorded for this agent yet.",
+    noStatementTitle: "No statement",
+    noStatementDesc: "No statement data was returned for this agent.",
+    noEntriesTitle: "No financial entries",
+    noEntriesDesc: "No detailed financial entries were returned for this agent.",
+    errorTitle: "Unable to load agent details",
+    errorDesc: "Make sure the backend is running, then try again.",
+    notFoundTitle: "Agent not found",
+    notFoundDesc: "The requested agent could not be found.",
+    tryAgain: "Try again",
+    printTitle: "Agent report",
+    generatedAt: "Generated at",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/* ============================================================
-   API Helper
-============================================================ */
-
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-/* ============================================================
-   Permission Helpers
-============================================================ */
-
-function asRecord(value: unknown): AuthRecord {
-  return value && typeof value === "object" ? (value as AuthRecord) : {};
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
 }
 
-function getNestedRecord(source: AuthRecord, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as AuthRecord;
-    }
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as AuthRecord;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as AuthRecord;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown): AuthRecord {
-  const auth = asRecord(authValue);
-
-  return getNestedRecord(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asRecord(auth.permissions);
-  const userPermissions = asRecord(user.permissions);
-  const authProfilePermissions = asRecord(auth.profile_permissions);
-  const userProfilePermissions = asRecord(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asRecord(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasKnownPermissionSignal(authValue: unknown) {
-  return (
-    getAuthRoles(authValue).length > 0 ||
-    getAuthPermissionCodes(authValue).length > 0
-  );
-}
-
-function hasPermissionCode(authValue: unknown, codes: string[]) {
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length === 0) return undefined;
-
-  return codes.some((code) => permissions.includes(code));
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const explicitPermission = hasPermissionCode(authValue, codes);
-
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "support",
-          "accountant",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin"].includes(role),
-    );
-  }
-
-  if (!hasKnownPermissionSignal(authValue)) {
-    return true;
-  }
-
-  return mode === "view";
-}
-
-/* ============================================================
-   Normalizers
-============================================================ */
-
-function toNumber(value: unknown): number {
+function toNumber(value: unknown, fallback = 0) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
 
-  const clean = String(value ?? "")
-    .replace(/,/g, "")
-    .replace(/[^\d.-]/g, "");
-
-  const parsed = Number(clean);
-
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function getObjectValue(obj: Record<string, unknown>, key: string): unknown {
-  const direct = obj[key];
-
-  if (direct !== undefined && direct !== null && direct !== "") {
-    return direct;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  const containers = ["agent", "stats", "summary", "commissions"];
-
-  for (const container of containers) {
-    const nested = obj[container];
-
-    if (nested && typeof nested === "object") {
-      const nestedObj = nested as Record<string, unknown>;
-      const value = nestedObj[key];
-
-      if (value !== undefined && value !== null && value !== "") {
-        return value;
-      }
-    }
-  }
-
-  return undefined;
+  return fallback;
 }
 
-function unwrapAgent(payload: unknown): unknown {
-  const wrapper = (payload || {}) as AgentDetailResponse;
-
-  return wrapper.data || wrapper.agent || wrapper.item || payload || {};
-}
-
-function normalizeStatus(value: unknown): AgentStatus {
-  const status = String(value || "").toUpperCase();
-
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "INACTIVE") return "INACTIVE";
-  if (status === "SUSPENDED") return "SUSPENDED";
-  if (status === "DRAFT") return "DRAFT";
-
-  if (value === true) return "ACTIVE";
-  if (value === false) return "INACTIVE";
-
-  return "UNKNOWN";
-}
-
-function normalizeCommissionType(value: unknown): CommissionType {
-  const commissionType = String(value || "").toUpperCase();
-
-  if (commissionType === "PERCENTAGE") return "PERCENTAGE";
-  if (commissionType === "FIXED") return "FIXED";
-
-  return "UNKNOWN";
-}
-
-function normalizeAgentDetail(payload: unknown): AgentDetail {
-  const obj = unwrapAgent(payload) as Record<string, unknown>;
-
-  const id = getObjectValue(obj, "id") ?? getObjectValue(obj, "agent_id") ?? "";
-
-  const fullName =
-    getObjectValue(obj, "full_name") ??
-    getObjectValue(obj, "name") ??
-    getObjectValue(obj, "agent_name") ??
-    "-";
-
-  const agentCode =
-    getObjectValue(obj, "agent_code") ??
-    getObjectValue(obj, "code") ??
-    (id ? `AGT-${id}` : "-");
-
-  const referralCode =
-    getObjectValue(obj, "referral_code") ??
-    getObjectValue(obj, "reference") ??
-    getObjectValue(obj, "ref_code") ??
-    "-";
-
-  return {
-    id: id as number | string,
-    fullName: String(fullName || "-"),
-    agentCode: String(agentCode || "-"),
-    referralCode: String(referralCode || "-"),
-    status: normalizeStatus(getObjectValue(obj, "status")),
-    phone: String(getObjectValue(obj, "phone") ?? ""),
-    email: String(getObjectValue(obj, "email") ?? ""),
-    city: String(getObjectValue(obj, "city") ?? ""),
-    address: String(getObjectValue(obj, "address") ?? ""),
-    defaultCommissionType: normalizeCommissionType(
-      getObjectValue(obj, "default_commission_type") ??
-        getObjectValue(obj, "commission_type"),
-    ),
-    defaultCommissionValue: toNumber(
-      getObjectValue(obj, "default_commission_value") ??
-        getObjectValue(obj, "commission_value") ??
-        0,
-    ),
-    totalCustomers: toNumber(
-      getObjectValue(obj, "total_customers") ??
-        getObjectValue(obj, "customers_count") ??
-        getObjectValue(obj, "customer_count") ??
-        0,
-    ),
-    totalOrders: toNumber(
-      getObjectValue(obj, "total_orders") ??
-        getObjectValue(obj, "orders_count") ??
-        getObjectValue(obj, "order_count") ??
-        0,
-    ),
-    totalSales: toNumber(
-      getObjectValue(obj, "total_sales") ??
-        getObjectValue(obj, "sales_total") ??
-        getObjectValue(obj, "orders_total") ??
-        0,
-    ),
-    pendingCommission: toNumber(
-      getObjectValue(obj, "pending_commission") ??
-        getObjectValue(obj, "pending_commissions") ??
-        0,
-    ),
-    approvedCommission: toNumber(
-      getObjectValue(obj, "approved_commission") ??
-        getObjectValue(obj, "approved_commissions") ??
-        getObjectValue(obj, "total_commission") ??
-        0,
-    ),
-    paidCommission: toNumber(
-      getObjectValue(obj, "paid_commission") ??
-        getObjectValue(obj, "paid_commissions") ??
-        0,
-    ),
-    accountingPostedCommission: toNumber(
-      getObjectValue(obj, "accounting_posted_commission") ??
-        getObjectValue(obj, "posted_commission") ??
-        0,
-    ),
-    bankName: String(getObjectValue(obj, "bank_name") ?? ""),
-    bankAccountName: String(getObjectValue(obj, "bank_account_name") ?? ""),
-    iban: String(getObjectValue(obj, "iban") ?? ""),
-    notes: String(getObjectValue(obj, "notes") ?? ""),
-    isFeatured: Boolean(
-      getObjectValue(obj, "is_featured") ??
-        getObjectValue(obj, "featured") ??
-        false,
-    ),
-    createdAt: String(getObjectValue(obj, "created_at") ?? ""),
-    updatedAt: String(getObjectValue(obj, "updated_at") ?? ""),
-    raw: obj,
-  };
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "تفاصيل المندوب" : "Agent Details",
-    subtitle: isArabic
-      ? "عرض بيانات المندوب، التواصل، العمولة، الحساب البنكي، والأداء التشغيلي."
-      : "View agent profile, contact, commission, bank details, and operational performance.",
-
-    back: isArabic ? "العودة للمندوبين" : "Back to Agents",
-    agentsList: isArabic ? "قائمة المندوبين" : "Agents List",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-
-    overview: isArabic ? "نظرة عامة" : "Overview",
-    overviewDesc: isArabic
-      ? "بيانات المندوب الأساسية والحالة التشغيلية."
-      : "Basic agent information and operational status.",
-
-    contact: isArabic ? "بيانات التواصل" : "Contact Information",
-    contactDesc: isArabic
-      ? "رقم الجوال، البريد الإلكتروني، المدينة، والعنوان."
-      : "Phone, email, city, and address.",
-
-    performance: isArabic ? "الأداء التشغيلي" : "Operational Performance",
-    performanceDesc: isArabic
-      ? "ملخص العملاء والطلبات والمبيعات المرتبطة بالمندوب."
-      : "Summary of customers, orders, and sales linked to this agent.",
-
-    commissions: isArabic ? "العمولات" : "Commissions",
-    commissionsDesc: isArabic
-      ? "إعدادات العمولة ورصيد العمولات حسب الحالة."
-      : "Commission settings and balances by status.",
-
-    bank: isArabic ? "البيانات البنكية" : "Bank Information",
-    bankDesc: isArabic
-      ? "بيانات الحساب البنكي المرتبط بالمندوب."
-      : "Bank account information linked to this agent.",
-
-    notes: isArabic ? "الملاحظات" : "Notes",
-    notesDesc: isArabic
-      ? "ملاحظات تشغيلية داخلية مرتبطة بالمندوب."
-      : "Internal operational notes related to this agent.",
-
-    quickInfo: isArabic ? "معلومات سريعة" : "Quick Info",
-    copy: isArabic ? "نسخ" : "Copy",
-    copied: isArabic ? "تم النسخ بنجاح" : "Copied successfully",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض تفاصيل المندوبين. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view agent details. Contact your system administrator if you need access.",
-
-    notFoundTitle: isArabic ? "المندوب غير موجود" : "Agent not found",
-    notFoundText: isArabic
-      ? "لم يتم العثور على المندوب المطلوب أو قد يكون غير متاح."
-      : "The requested agent could not be found or may not be available.",
-
-    loadError: isArabic
-      ? "تعذر تحميل تفاصيل المندوب."
-      : "Unable to load agent details.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    refreshSuccess: isArabic
-      ? "تم تحديث تفاصيل المندوب بنجاح."
-      : "Agent details refreshed successfully.",
-    printReady: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    fields: {
-      id: isArabic ? "المعرف" : "ID",
-      fullName: isArabic ? "اسم المندوب" : "Agent Name",
-      agentCode: isArabic ? "كود المندوب" : "Agent Code",
-      referralCode: isArabic ? "كود الإحالة" : "Referral Code",
-      status: isArabic ? "الحالة" : "Status",
-      phone: isArabic ? "رقم الجوال" : "Phone",
-      email: isArabic ? "البريد الإلكتروني" : "Email",
-      city: isArabic ? "المدينة" : "City",
-      address: isArabic ? "العنوان" : "Address",
-      commissionType: isArabic ? "نوع العمولة" : "Commission Type",
-      commissionValue: isArabic ? "قيمة العمولة" : "Commission Value",
-      totalCustomers: isArabic ? "إجمالي العملاء" : "Total Customers",
-      totalOrders: isArabic ? "إجمالي الطلبات" : "Total Orders",
-      totalSales: isArabic ? "إجمالي المبيعات" : "Total Sales",
-      pendingCommission: isArabic ? "عمولة معلقة" : "Pending Commission",
-      approvedCommission: isArabic ? "عمولة معتمدة" : "Approved Commission",
-      paidCommission: isArabic ? "عمولة مدفوعة" : "Paid Commission",
-      accountingPostedCommission: isArabic
-        ? "عمولة مرحلة محاسبيًا"
-        : "Accounting Posted Commission",
-      bankName: isArabic ? "اسم البنك" : "Bank Name",
-      bankAccountName: isArabic ? "اسم صاحب الحساب" : "Account Holder",
-      iban: isArabic ? "IBAN" : "IBAN",
-      notes: isArabic ? "الملاحظات" : "Notes",
-      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-      updatedAt: isArabic ? "آخر تحديث" : "Updated At",
-    },
-
-    statuses: {
-      ACTIVE: isArabic ? "نشط" : "Active",
-      INACTIVE: isArabic ? "غير نشط" : "Inactive",
-      SUSPENDED: isArabic ? "موقوف" : "Suspended",
-      DRAFT: isArabic ? "مسودة" : "Draft",
-      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
-    } satisfies Record<AgentStatus, string>,
-
-    commissionTypes: {
-      PERCENTAGE: isArabic ? "نسبة" : "Percentage",
-      FIXED: isArabic ? "مبلغ ثابت" : "Fixed Amount",
-      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
-    } satisfies Record<CommissionType, string>,
-
-    badges: {
-      featured: isArabic ? "مميز" : "Featured",
-      active: isArabic ? "نشط" : "Active",
-      hasBank: isArabic ? "بيانات بنكية متوفرة" : "Bank Details Available",
-      noBank: isArabic ? "لا توجد بيانات بنكية" : "No Bank Details",
-      hasContact: isArabic ? "بيانات تواصل متوفرة" : "Contact Available",
-      noContact: isArabic ? "لا توجد بيانات تواصل" : "No Contact",
-    },
-
-    empty: isArabic ? "لا توجد بيانات" : "No data",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-  };
-}
-
-/* ============================================================
-   UI Helpers
-============================================================ */
-
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0";
-
+function formatInteger(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(numericValue);
+  }).format(toNumber(value));
 }
 
-function formatMoney(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0.00";
-
-  return numericValue.toLocaleString("en-US", {
+function formatMoney(value: unknown) {
+  return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  });
+  }).format(toNumber(value));
 }
 
-function formatDate(value: string): string {
-  if (!value) return "-";
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const date = new Date(value);
+  const parsed = new Date(value);
 
-  if (Number.isNaN(date.getTime())) return "-";
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).slice(0, 10);
+  }
 
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
+  return parsed.toISOString().slice(0, 10);
 }
 
-function escapeHtml(value: string | number) {
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -762,1116 +700,2008 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function isValidId(id: unknown) {
-  const value = String(id || "").trim();
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
 
-  return value.length > 0 && value !== "-" && value !== "undefined";
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
+  }
+
+  return envBase;
 }
 
-function statusLabel(status: AgentStatus, locale: AppLocale) {
-  return dictionary(locale).statuses[status];
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const base = getApiBaseUrl();
+  const query = params?.toString();
+
+  return `${base}${path}${query ? `?${query}` : ""}`;
 }
 
-function commissionLabel(type: CommissionType, locale: AppLocale) {
-  return dictionary(locale).commissionTypes[type];
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const found = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${name}=`));
+
+  return found ? decodeURIComponent(found.split("=").slice(1).join("=")) : "";
 }
 
-function statusBadge(status: AgentStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
 
-  if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+async function fetchJson<T>(
+  url: string,
+  options?: {
+    signal?: AbortSignal;
+    method?: "GET" | "POST";
+    body?: unknown;
+  },
+): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
+
+  const response = await fetch(url, {
+    method: options?.method || "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal: options?.signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options?.method === "POST" ? { "Content-Type": "application/json" } : {}),
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body:
+      options?.method === "POST"
+        ? JSON.stringify(options.body || {})
+        : undefined,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
   }
 
-  if (status === "DRAFT") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
   }
 
-  if (status === "SUSPENDED") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
   }
 
-  if (status === "INACTIVE") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
+  return payload as T;
+}
 
-  return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
+function normalizeFinancialSummary(value: unknown): FinancialSummary {
+  const item = asRecord(value);
+
+  return {
+    financial_entries_count: toNumber(item.financial_entries_count),
+    accounting_posted_count: toNumber(item.accounting_posted_count),
+
+    total_debit_amount: toNumber(item.total_debit_amount),
+    total_credit_amount: toNumber(item.total_credit_amount),
+    total_debit_paid_amount: toNumber(item.total_debit_paid_amount),
+    total_credit_paid_amount: toNumber(item.total_credit_paid_amount),
+    total_debit_remaining_amount: toNumber(item.total_debit_remaining_amount),
+    total_credit_remaining_amount: toNumber(item.total_credit_remaining_amount),
+    net_balance_amount: toNumber(item.net_balance_amount),
+
+    cod_custody_amount: toNumber(item.cod_custody_amount),
+    cod_custody_paid_amount: toNumber(item.cod_custody_paid_amount),
+    cod_custody_remaining_amount: toNumber(item.cod_custody_remaining_amount),
+
+    sales_commission_amount: toNumber(item.sales_commission_amount),
+    sales_commission_paid_amount: toNumber(item.sales_commission_paid_amount),
+    sales_commission_remaining_amount: toNumber(item.sales_commission_remaining_amount),
+
+    delivery_fee_amount: toNumber(item.delivery_fee_amount),
+    delivery_fee_paid_amount: toNumber(item.delivery_fee_paid_amount),
+    delivery_fee_remaining_amount: toNumber(item.delivery_fee_remaining_amount),
+
+    broker_share_amount: toNumber(item.broker_share_amount),
+    broker_share_paid_amount: toNumber(item.broker_share_paid_amount),
+    broker_share_remaining_amount: toNumber(item.broker_share_remaining_amount),
+
+    settlements_amount: toNumber(item.settlements_amount),
+    amount_due_from_agent: toNumber(item.amount_due_from_agent),
+    amount_due_to_agent: toNumber(item.amount_due_to_agent),
+    currency: normalizeText(item.currency, "SAR"),
+  };
+}
+
+function extractAgentPayload(payload: AgentApiResponse): ApiRecord {
+  const data = asRecord(payload.data);
+
+  if (data.agent) return asRecord(data.agent);
+  if (payload.agent) return asRecord(payload.agent);
+
+  return data.id || data.full_name ? data : asRecord(payload);
+}
+
+function extractStatsPayload(payload: AgentApiResponse): ApiRecord {
+  const data = asRecord(payload.data);
+  return asRecord(data.stats || payload.stats);
+}
+
+function extractFinancialSummaryPayload(payload: AgentApiResponse): ApiRecord {
+  const data = asRecord(payload.data);
+  const agent = asRecord(data.agent || payload.agent);
+  const stats = extractStatsPayload(payload);
+
+  return asRecord(
+    data.financial_summary ||
+      payload.financial_summary ||
+      agent.financial_summary ||
+      stats,
   );
 }
 
-function SarAmount({ value }: { value: number | string }) {
+function normalizeAgent(value: unknown, summaryValue?: unknown): AgentRecord {
+  const item = asRecord(value);
+  const stats = asRecord(summaryValue);
+  const fullName = normalizeText(
+    item.full_name || item.name || item.agent_name,
+    `#${normalizeText(item.id)}`,
+  );
+  const agentCode = normalizeText(item.agent_code || item.code);
+  const financial = normalizeFinancialSummary(item.financial_summary || stats);
+  const loginUser = isRecord(item.login_user) ? (item.login_user as LoginUserRecord) : null;
+
+  const legacyTotalCommission = toNumber(
+    item.total_commission || stats.total_commission,
+    toNumber(item.pending_commission || stats.pending_commission) +
+      toNumber(item.approved_commission || stats.approved_commission) +
+      toNumber(item.paid_commission || stats.paid_commission),
+  );
+
+  return {
+    id: toNumber(item.id),
+    full_name: fullName,
+    name: fullName,
+    agent_code: agentCode,
+    code: agentCode,
+    referral_code: normalizeText(item.referral_code || item.ref_code),
+    status: normalizeText(item.status).toUpperCase(),
+    phone: normalizeText(item.phone || item.mobile || item.phone_number),
+    email: normalizeText(item.email),
+    city: normalizeText(item.city),
+    address: normalizeText(item.address),
+
+    user_id:
+      item.user_id === null || item.user_id === undefined
+        ? loginUser?.id || null
+        : (item.user_id as number | string),
+    has_login_user: Boolean(item.has_login_user || item.user_id || loginUser?.id),
+    login_user: loginUser,
+
+    broker_id:
+      item.broker_id === null || item.broker_id === undefined
+        ? null
+        : toNumber(item.broker_id),
+    broker_name: normalizeText(item.broker_name || asRecord(item.broker).name),
+    broker_code: normalizeText(item.broker_code || asRecord(item.broker).broker_code),
+
+    default_commission_type: normalizeText(
+      item.default_commission_type || item.commission_type,
+    ).toUpperCase(),
+    default_commission_value: toNumber(
+      item.default_commission_value || item.commission_value,
+    ),
+    default_delivery_fee: toNumber(item.default_delivery_fee),
+
+    bank_name: normalizeText(item.bank_name),
+    bank_account_name: normalizeText(item.bank_account_name),
+    iban: normalizeText(item.iban),
+    notes: normalizeText(item.notes),
+
+    total_customers: toNumber(item.total_customers || item.customers_count),
+    customers_count: toNumber(item.customers_count || item.total_customers),
+    total_orders: toNumber(item.total_orders || item.orders_count),
+    orders_count: toNumber(item.orders_count || item.total_orders),
+    total_sales: toNumber(item.total_sales || item.sales_total),
+
+    pending_commission: toNumber(item.pending_commission || stats.pending_commission),
+    approved_commission: toNumber(item.approved_commission || stats.approved_commission),
+    paid_commission: toNumber(item.paid_commission || stats.paid_commission),
+    total_commission: legacyTotalCommission,
+    due_commission: toNumber(
+      item.due_commission || stats.due_commission,
+      Math.max(legacyTotalCommission - toNumber(item.paid_commission), 0),
+    ),
+
+    financial,
+
+    created_at: normalizeText(item.created_at) || null,
+    updated_at: normalizeText(item.updated_at) || null,
+  };
+}
+
+function normalizeAgentOrder(value: unknown): AgentOrderRecord {
+  const item = asRecord(value);
+
+  return {
+    id: toNumber(item.id),
+    order_id:
+      item.order_id === null || item.order_id === undefined
+        ? null
+        : toNumber(item.order_id),
+    order_number: normalizeText(item.order_number || asRecord(item.order).order_number),
+    agent_id:
+      item.agent_id === null || item.agent_id === undefined
+        ? null
+        : toNumber(item.agent_id),
+    customer_id:
+      item.customer_id === null || item.customer_id === undefined
+        ? null
+        : toNumber(item.customer_id),
+    customer_name: normalizeText(item.customer_name || asRecord(item.customer).name),
+    commission_type: normalizeText(item.commission_type).toUpperCase(),
+    commission_value: toNumber(item.commission_value),
+    sales_amount: toNumber(item.sales_amount),
+    commission_amount: toNumber(item.commission_amount),
+    referral_code_used: normalizeText(item.referral_code_used),
+    notes: normalizeText(item.notes),
+    created_at: normalizeText(item.created_at) || null,
+    updated_at: normalizeText(item.updated_at) || null,
+  };
+}
+
+function normalizeCommission(value: unknown): AgentCommissionRecord {
+  const item = asRecord(value);
+
+  return {
+    id: toNumber(item.id),
+    reference: normalizeText(item.reference || `COM-${normalizeText(item.id)}`),
+    status: normalizeText(item.status || item.commission_status).toUpperCase(),
+    commission_status: normalizeText(item.commission_status || item.status).toUpperCase(),
+    agent_id:
+      item.agent_id === null || item.agent_id === undefined
+        ? null
+        : toNumber(item.agent_id),
+    agent_name: normalizeText(item.agent_name),
+    agent_code: normalizeText(item.agent_code),
+    referral_code: normalizeText(item.referral_code),
+    order_id:
+      item.order_id === null || item.order_id === undefined
+        ? null
+        : toNumber(item.order_id),
+    order_number: normalizeText(item.order_number),
+    payment_id:
+      item.payment_id === null || item.payment_id === undefined
+        ? null
+        : toNumber(item.payment_id),
+    payment_number: normalizeText(item.payment_number),
+    customer_id:
+      item.customer_id === null || item.customer_id === undefined
+        ? null
+        : toNumber(item.customer_id),
+    customer_name: normalizeText(item.customer_name),
+    base_amount: toNumber(item.base_amount),
+    amount: toNumber(item.amount || item.commission_amount),
+    commission_amount: toNumber(item.commission_amount || item.amount),
+    paid_amount: toNumber(item.paid_amount),
+    remaining_amount: toNumber(item.remaining_amount),
+    journal_entry_id:
+      item.journal_entry_id === null || item.journal_entry_id === undefined
+        ? null
+        : toNumber(item.journal_entry_id),
+    journal_entry_reference: normalizeText(item.journal_entry_reference),
+    is_accounting_posted: Boolean(item.is_accounting_posted),
+    earned_at: normalizeText(item.earned_at) || null,
+    approved_at: normalizeText(item.approved_at) || null,
+    paid_at: normalizeText(item.paid_at) || null,
+    created_at: normalizeText(item.created_at) || null,
+    updated_at: normalizeText(item.updated_at) || null,
+    notes: normalizeText(item.notes),
+  };
+}
+
+function normalizeFinancialEntry(value: unknown): FinancialEntryRecord {
+  const item = asRecord(value);
+
+  return {
+    id: toNumber(item.id),
+    entry_number: normalizeText(item.entry_number),
+    entry_type: normalizeText(item.entry_type).toUpperCase(),
+    entry_type_label: normalizeText(item.entry_type_label || item.entry_type),
+    direction: normalizeText(item.direction).toUpperCase(),
+    direction_label: normalizeText(item.direction_label || item.direction),
+    status: normalizeText(item.status).toUpperCase(),
+    status_label: normalizeText(item.status_label || item.status),
+    amount: toNumber(item.amount),
+    paid_amount: toNumber(item.paid_amount),
+    remaining_amount: toNumber(item.remaining_amount),
+    currency: normalizeText(item.currency, "SAR"),
+    debit_amount: toNumber(item.debit_amount),
+    credit_amount: toNumber(item.credit_amount),
+
+    order_id:
+      item.order_id === null || item.order_id === undefined
+        ? null
+        : toNumber(item.order_id),
+    order_number: normalizeText(item.order_number),
+    payment_id:
+      item.payment_id === null || item.payment_id === undefined
+        ? null
+        : toNumber(item.payment_id),
+    payment_number: normalizeText(item.payment_number),
+    commission_id:
+      item.commission_id === null || item.commission_id === undefined
+        ? null
+        : toNumber(item.commission_id),
+    rule_id:
+      item.rule_id === null || item.rule_id === undefined ? null : toNumber(item.rule_id),
+
+    description: normalizeText(item.description),
+    reference: normalizeText(item.reference),
+    source_type: normalizeText(item.source_type),
+    source_id: normalizeText(item.source_id),
+    source_number: normalizeText(item.source_number),
+
+    journal_entry_id:
+      item.journal_entry_id === null || item.journal_entry_id === undefined
+        ? null
+        : toNumber(item.journal_entry_id),
+    journal_entry_reference: normalizeText(
+      item.journal_entry_reference || item.journal_entry_number,
+    ),
+    journal_entry_number: normalizeText(item.journal_entry_number),
+    is_accounting_posted: Boolean(item.is_accounting_posted),
+    earned_at: normalizeText(item.earned_at) || null,
+    approved_at: normalizeText(item.approved_at) || null,
+    settled_at: normalizeText(item.settled_at) || null,
+    paid_at: normalizeText(item.paid_at) || null,
+    posted_at: normalizeText(item.posted_at) || null,
+    created_at: normalizeText(item.created_at) || null,
+    updated_at: normalizeText(item.updated_at) || null,
+  };
+}
+
+function normalizeStatementLine(value: unknown, index: number): StatementLineRecord {
+  const item = asRecord(value);
+  const metadata = asRecord(item.metadata);
+
+  return {
+    line_type: normalizeText(item.line_type || item.type || metadata.entry_type).toUpperCase(),
+    line_date: normalizeText(item.line_date || item.date || item.created_at) || null,
+    reference: normalizeText(item.reference || metadata.entry_number),
+    related_order_id:
+      item.related_order_id === null || item.related_order_id === undefined
+        ? metadata.order_id === null || metadata.order_id === undefined
+          ? null
+          : toNumber(metadata.order_id)
+        : toNumber(item.related_order_id),
+    related_agent_order_id:
+      item.related_agent_order_id === null || item.related_agent_order_id === undefined
+        ? null
+        : toNumber(item.related_agent_order_id),
+    related_commission_id:
+      item.related_commission_id === null || item.related_commission_id === undefined
+        ? metadata.commission_id === null || metadata.commission_id === undefined
+          ? null
+          : toNumber(metadata.commission_id)
+        : toNumber(item.related_commission_id),
+    related_financial_entry_id:
+      item.related_financial_entry_id === null || item.related_financial_entry_id === undefined
+        ? metadata.entry_id === null || metadata.entry_id === undefined
+          ? index
+          : toNumber(metadata.entry_id)
+        : toNumber(item.related_financial_entry_id),
+    description: normalizeText(item.description || metadata.description || metadata.entry_type_label),
+    debit_amount: toNumber(item.debit_amount || item.debit),
+    credit_amount: toNumber(item.credit_amount || item.credit),
+    balance_after: toNumber(item.balance_after || item.balance),
+    currency: normalizeText(item.currency || metadata.currency, "SAR"),
+    status: normalizeText(item.status || metadata.status).toUpperCase(),
+    metadata,
+  };
+}
+
+function extractRecentOrders(payload: AgentApiResponse): AgentOrderRecord[] {
+  const data = asRecord(payload.data);
+
+  const candidates = [
+    data.recent_orders,
+    payload.recent_orders,
+    data.orders,
+    asRecord(data.statement).orders,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate.map(normalizeAgentOrder);
+  }
+
+  return [];
+}
+
+function extractRecentCommissions(payload: AgentApiResponse): AgentCommissionRecord[] {
+  const data = asRecord(payload.data);
+
+  const candidates = [
+    data.recent_commissions,
+    payload.recent_commissions,
+    data.commissions,
+    asRecord(data.statement).commissions,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate.map(normalizeCommission);
+  }
+
+  return [];
+}
+
+function extractRecentFinancialEntries(payload: AgentApiResponse): FinancialEntryRecord[] {
+  const data = asRecord(payload.data);
+
+  const candidates = [
+    data.recent_financial_entries,
+    payload.recent_financial_entries,
+    data.financial_entries,
+    data.entries,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate.map(normalizeFinancialEntry);
+  }
+
+  return [];
+}
+
+function extractStatementRows(payload: AgentApiResponse): StatementLineRecord[] {
+  const data = asRecord(payload.data);
+  const statement = asRecord(data.statement || payload.statement);
+
+  const candidates = [
+    statement.lines,
+    statement.rows,
+    statement.items,
+    statement.results,
+    statement.entries,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate.map(normalizeStatementLine);
+  }
+
+  return [];
+}
+
+function getStatusLabel(status: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(status).toUpperCase();
+
+  if (normalized === "ACTIVE") return t.active;
+  if (normalized === "INACTIVE") return t.inactive;
+  if (normalized === "SUSPENDED") return t.suspended;
+  if (normalized === "DRAFT") return t.draft;
+  if (normalized === "PENDING") return t.pending;
+  if (normalized === "APPROVED") return t.approved;
+  if (normalized === "PAID") return t.paid;
+  if (normalized === "SETTLED") return t.settled;
+  if (normalized === "EARNED") return t.earned;
+  if (normalized === "CANCELLED") return t.cancelled;
+  if (normalized === "REVERSED") return t.reversed;
+
+  return normalized || t.unknown;
+}
+
+function getStatusClass(status: string) {
+  const normalized = normalizeText(status).toUpperCase();
+
+  if (["ACTIVE", "PAID", "SETTLED"].includes(normalized)) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  if (["APPROVED", "EARNED"].includes(normalized)) {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  if (["PENDING", "DRAFT"].includes(normalized)) {
+    return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+  }
+
+  if (["SUSPENDED", "CANCELLED", "REVERSED"].includes(normalized)) {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+  }
+
+  return "border-muted bg-muted/40 text-muted-foreground hover:bg-muted/40";
+}
+
+function getCommissionTypeLabel(type: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(type).toUpperCase();
+
+  if (normalized === "PERCENTAGE") return t.percentage;
+  if (normalized === "FIXED") return t.fixed;
+
+  return normalized || t.unknown;
+}
+
+function getEntryTypeLabel(type: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(type).toUpperCase();
+
+  if (normalized === "COD_CUSTODY") return t.codCustody;
+  if (normalized === "SALES_COMMISSION") return t.salesCommission;
+  if (normalized === "DELIVERY_FEE") return t.deliveryFeeAmount;
+  if (normalized === "BROKER_SHARE") return t.brokerShare;
+
+  return normalized || t.unknown;
+}
+
+function hasAgentAccount(agent: AgentRecord | null) {
+  return Boolean(agent?.has_login_user || agent?.user_id || agent?.login_user?.id);
+}
+
+function getAgentLoginUser(agent: AgentRecord | null): LoginUserRecord | null {
+  if (!agent?.login_user) return null;
+  return agent.login_user;
+}
+
+function getAgentLoginProfile(agent: AgentRecord | null): LoginUserProfile | null {
+  return getAgentLoginUser(agent)?.profile || null;
+}
+
+function getAgentLoginUsername(agent: AgentRecord | null) {
+  return getAgentLoginUser(agent)?.username || "";
+}
+
+function getAgentLoginEmail(agent: AgentRecord | null) {
+  return getAgentLoginUser(agent)?.email || agent?.email || "";
+}
+
+function getAgentProfileWorkspace(profile: LoginUserProfile | null) {
+  const extraData = profile?.extra_data || {};
+  const workspaceValue = extraData.workspace;
+
+  return typeof workspaceValue === "string" ? workspaceValue : "";
+}
+
+function canApproveCommission(commission: AgentCommissionRecord) {
+  return commission.id > 0 && commission.commission_status === "PENDING";
+}
+
+function SarIcon({ className }: { className?: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <Image
+      src={SAR_ICON}
+      alt="SAR"
+      width={14}
+      height={14}
+      className={cn("inline-block h-3.5 w-3.5 object-contain", className)}
+      unoptimized
+    />
+  );
+}
+
+function MoneyValue({ value }: { value: unknown }) {
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap font-medium tabular-nums text-foreground">
       <span>{formatMoney(value)}</span>
-      <Image
-        src={SAR_ICON_PATH}
-        alt=""
-        width={14}
-        height={14}
-        className="h-3.5 w-3.5"
-      />
+      <SarIcon />
     </span>
   );
 }
 
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function copyToClipboard(value: string, successMessage: string) {
-  if (!value || value === "-") return;
-
-  navigator.clipboard.writeText(value);
-  toast.success(successMessage);
-}
-
-function DetailSkeleton() {
+function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
   return (
-    <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="space-y-4 p-5">
-          <SkeletonLine className="h-16 w-16 rounded-2xl" />
-          <SkeletonLine className="h-6 w-48" />
-          <SkeletonLine className="h-4 w-32" />
-          <div className="grid gap-3">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <SkeletonLine key={index} className="h-10 w-full rounded-xl" />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+    <Badge
+      variant="outline"
+      className={cn(
+        "max-w-full rounded-full px-2.5 py-1 text-xs font-medium",
+        getStatusClass(status),
+      )}
+    >
+      <span className="truncate">{getStatusLabel(status, locale)}</span>
+    </Badge>
+  );
+}
 
-      <div className="space-y-4">
-        {Array.from({ length: 5 }).map((_, index) => (
-          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <SkeletonLine className="h-5 w-40" />
-              <SkeletonLine className="h-4 w-full" />
-              <SkeletonLine className="h-4 w-3/4" />
-              <SkeletonLine className="h-4 w-1/2" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </div>
+function DirectionBadge({ direction }: { direction: string }) {
+  const normalized = normalizeText(direction).toUpperCase();
+  const isDebit = normalized === "DEBIT";
+
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full px-2.5 py-1 text-xs font-medium",
+        isDebit
+          ? "border-red-500/30 bg-red-50 text-red-700"
+          : "border-emerald-500/30 bg-emerald-50 text-emerald-700",
+      )}
+    >
+      {isDebit ? "DR" : "CR"}
+    </Badge>
   );
 }
 
 function InfoRow({
   label,
   value,
-  copyable,
-  copiedMessage,
+  children,
 }: {
   label: string;
-  value: string;
-  copyable?: boolean;
-  copiedMessage: string;
+  value?: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   return (
-    <TableRow>
-      <TableCell className="w-[220px] text-muted-foreground">{label}</TableCell>
-      <TableCell>
-        <div className="flex items-center justify-between gap-3">
-          <span className="break-words font-medium">{value || "-"}</span>
-
-          {copyable && value && value !== "-" ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 shrink-0 rounded-lg"
-              onClick={() => copyToClipboard(value, copiedMessage)}
-            >
-              <Copy className="h-4 w-4" />
-            </Button>
-          ) : null}
-        </div>
-      </TableCell>
-    </TableRow>
-  );
-}
-
-function QuickInfoItem({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-start gap-3 rounded-xl border bg-background p-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <Icon className="h-4 w-4" />
-      </div>
-
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="mt-1 truncate text-sm font-semibold">{value || "-"}</p>
+    <div className="flex items-start justify-between gap-3 border-b py-3 last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="min-w-0 text-start text-sm font-medium text-foreground">
+        {children || value || "—"}
       </div>
     </div>
   );
 }
 
 function MetricCard({
-  icon: Icon,
-  label,
+  title,
   value,
+  icon: Icon,
+  tone = "default",
 }: {
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  value: ReactNode;
+  title: string;
+  value: React.ReactNode;
+  icon: React.ComponentType<{ className?: string }>;
+  tone?: "default" | "debit" | "credit" | "net";
+}) {
+  const toneClass =
+    tone === "debit"
+      ? "bg-red-50 text-red-700"
+      : tone === "credit"
+        ? "bg-emerald-50 text-emerald-700"
+        : tone === "net"
+          ? "bg-purple-50 text-purple-700"
+          : "bg-background text-muted-foreground";
+
+  return (
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[104px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
+
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg border", toneClass)}>
+            <Icon className="h-4 w-4" />
+          </div>
+        </CardAction>
+      </CardHeader>
+    </Card>
+  );
+}
+
+function EmptyBlock({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
 }) {
   return (
-    <div className="rounded-2xl border bg-background p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <div className="mt-2 text-lg font-bold">{value}</div>
-        </div>
+    <div className="flex min-h-[240px] flex-col items-center justify-center gap-3 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+        <Icon className="h-6 w-6 text-muted-foreground" />
+      </div>
+      <div className="space-y-1">
+        <p className="font-semibold text-foreground">{title}</p>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+    </div>
+  );
+}
 
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-          <Icon className="h-4 w-4" />
+function DetailSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardHeader className="space-y-3">
+            <Skeleton className="h-12 w-12 rounded-lg" />
+            <Skeleton className="h-6 w-48" />
+            <Skeleton className="h-4 w-32" />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {Array.from({ length: 7 }).map((_, index) => (
+              <Skeleton key={index} className="h-10 w-full" />
+            ))}
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Card key={index} className="rounded-lg border bg-card shadow-none">
+                <CardHeader className="min-h-[104px] px-6 py-5">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-8 w-28" />
+                </CardHeader>
+              </Card>
+            ))}
+          </div>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="space-y-3 p-4">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-80 w-full" />
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
   );
 }
 
-function TextSection({
-  label,
-  value,
-  empty,
-}: {
-  label: string;
-  value: string;
-  empty: string;
-}) {
-  return (
-    <div className="rounded-2xl border bg-background p-4">
-      <p className="text-sm font-semibold">{label}</p>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-muted-foreground">
-        {value || empty}
-      </p>
-    </div>
-  );
-}
-
-/* ============================================================
-   Print
-============================================================ */
-
-function buildPrintHtml({
-  locale,
-  agent,
-  t,
-}: {
-  locale: AppLocale;
-  agent: AgentDetail;
-  t: ReturnType<typeof dictionary>;
-}) {
-  const isArabic = locale === "ar";
-  const now = new Date().toLocaleString("en-US");
-
-  const rows: Array<[string, string]> = [
-    [t.fields.fullName, agent.fullName],
-    [t.fields.agentCode, agent.agentCode],
-    [t.fields.referralCode, agent.referralCode],
-    [t.fields.status, statusLabel(agent.status, locale)],
-    [t.fields.phone, agent.phone || "-"],
-    [t.fields.email, agent.email || "-"],
-    [t.fields.city, agent.city || "-"],
-    [t.fields.address, agent.address || "-"],
-    [t.fields.commissionType, commissionLabel(agent.defaultCommissionType, locale)],
-    [
-      t.fields.commissionValue,
-      agent.defaultCommissionType === "FIXED"
-        ? formatMoney(agent.defaultCommissionValue)
-        : `${formatNumber(agent.defaultCommissionValue)}%`,
-    ],
-    [t.fields.totalCustomers, formatNumber(agent.totalCustomers)],
-    [t.fields.totalOrders, formatNumber(agent.totalOrders)],
-    [t.fields.totalSales, formatMoney(agent.totalSales)],
-    [t.fields.pendingCommission, formatMoney(agent.pendingCommission)],
-    [t.fields.approvedCommission, formatMoney(agent.approvedCommission)],
-    [t.fields.paidCommission, formatMoney(agent.paidCommission)],
-    [t.fields.bankName, agent.bankName || "-"],
-    [t.fields.bankAccountName, agent.bankAccountName || "-"],
-    [t.fields.iban, agent.iban || "-"],
-    [t.fields.createdAt, formatDate(agent.createdAt)],
-    [t.fields.updatedAt, formatDate(agent.updatedAt || agent.createdAt)],
-  ];
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(t.title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #ffffff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .print-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            align-items: flex-start;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-          }
-          h1 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: 800;
-          }
-          .meta {
-            margin-top: 8px;
-            font-size: 12px;
-            line-height: 1.8;
-            color: #6b7280;
-          }
-          .badge {
-            display: inline-block;
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            color: #374151;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-            margin-bottom: 18px;
-          }
-          th,
-          td {
-            border: 1px solid #e5e7eb;
-            padding: 10px 9px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          th {
-            width: 240px;
-            background: #f3f4f6;
-            color: #111827;
-          }
-          .section-title {
-            margin: 18px 0 8px;
-            font-size: 16px;
-            font-weight: 800;
-          }
-          .text-block {
-            border: 1px solid #e5e7eb;
-            padding: 12px;
-            border-radius: 12px;
-            line-height: 1.8;
-            white-space: pre-wrap;
-          }
-          @page {
-            size: A4;
-            margin: 12mm;
-          }
-          @media print {
-            body { padding: 0; }
-          }
-        </style>
-      </head>
-
-      <body>
-        <div class="print-header">
-          <div>
-            <h1>${escapeHtml(agent.fullName)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.fields.agentCode)}: ${escapeHtml(agent.agentCode)}</div>
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-            </div>
-          </div>
-          <div class="badge">Primey Care</div>
-        </div>
-
-        <table>
-          <tbody>
-            ${rows
-              .map(
-                ([label, value]) => `
-                  <tr>
-                    <th>${escapeHtml(label)}</th>
-                    <td>${escapeHtml(value || "-")}</td>
-                  </tr>
-                `,
-              )
-              .join("")}
-          </tbody>
-        </table>
-
-        <div class="section-title">${escapeHtml(t.fields.notes)}</div>
-        <div class="text-block">${escapeHtml(agent.notes || "-")}</div>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
-}
-
-/* ============================================================
-   Page
-============================================================ */
-
 export default function SystemAgentDetailsPage() {
-  const params = useParams();
-  const auth = useAuth() as unknown;
+  const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const agentId = normalizeText(params?.id);
 
-  const agentId = String(params?.id || "");
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [agent, setAgent] = React.useState<AgentRecord | null>(null);
+  const [orders, setOrders] = React.useState<AgentOrderRecord[]>([]);
+  const [commissions, setCommissions] = React.useState<AgentCommissionRecord[]>([]);
+  const [financialEntries, setFinancialEntries] = React.useState<FinancialEntryRecord[]>([]);
+  const [statementRows, setStatementRows] = React.useState<StatementLineRecord[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [actionLoadingId, setActionLoadingId] = React.useState<number | null>(null);
+  const [error, setError] = React.useState("");
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [agent, setAgent] = useState<AgentDetail | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [notFound, setNotFound] = useState(false);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
+  React.useEffect(() => {
+    const applyLocale = () => setLocale(getInitialLocale());
 
-  const authResolving = isAuthResolving(auth);
+    applyLocale();
 
-  const canViewAgents = hasSafePermission(
-    auth,
-    ["agents.view", "agents.detail", "agents.list"],
-    "view",
-  );
-
-  const canViewAgentsList = hasSafePermission(
-    auth,
-    ["agents.view", "agents.list"],
-    "view",
-  );
-
-  const canPrintAgents = hasSafePermission(
-    auth,
-    ["agents.print", "reports.print"],
-    "action",
-  );
-
-  const canViewCommissions = hasSafePermission(
-    auth,
-    ["agents.commissions.view"],
-    "view",
-  );
-
-  const loadAgent = useCallback(
-    async (showToast = false) => {
-      if (!canViewAgents) {
-        setIsLoading(false);
-        setAgent(null);
-        return;
-      }
-
-      if (!isValidId(agentId)) {
-        setIsLoading(false);
-        setAgent(null);
-        setNotFound(true);
-        return;
-      }
-
-      try {
-        setIsLoading(true);
-        setErrorMessage("");
-        setNotFound(false);
-
-        const response = await fetch(
-          apiUrl(`/api/agents/${encodeURIComponent(agentId)}/`),
-          {
-            method: "GET",
-            credentials: "include",
-            headers: {
-              Accept: "application/json",
-            },
-          },
-        );
-
-        const payload = (await response.json().catch(() => null)) as
-          | AgentDetailResponse
-          | null;
-
-        if (response.status === 404) {
-          setAgent(null);
-          setNotFound(true);
-          return;
-        }
-
-        if (!response.ok || payload?.ok === false) {
-          throw new Error(payload?.message || `HTTP ${response.status}`);
-        }
-
-        const normalized = normalizeAgentDetail(payload);
-
-        if (!isValidId(normalized.id)) {
-          setAgent(null);
-          setNotFound(true);
-          return;
-        }
-
-        setAgent(normalized);
-
-        if (showToast) {
-          toast.success(t.refreshSuccess);
-        }
-      } catch (error) {
-        console.error("Failed to load agent details:", error);
-        setAgent(null);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [agentId, canViewAgents, t.loadError, t.refreshSuccess],
-  );
-
-  function printAgent() {
-    if (!canPrintAgents || !agent) return;
-
-    const printWindow = window.open("", "_blank", "width=1000,height=800");
-
-    if (!printWindow) {
-      toast.error(t.printError);
-      return;
-    }
-
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        agent,
-        t,
-      }),
-    );
-    printWindow.document.close();
-
-    toast.success(t.printReady);
-  }
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
     };
   }, []);
 
-  useEffect(() => {
-    if (authResolving) return;
-    loadAgent(false);
-  }, [authResolving, loadAgent]);
+  const loadAgent = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!agentId) {
+        setLoading(false);
+        setError(t.notFoundDesc);
+        return;
+      }
 
-  if (!authResolving && !canViewAgents) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
+      const controller = new AbortController();
 
+      try {
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setError("");
+
+        const params = new URLSearchParams({
+          include_statement: "1",
+          include_financial_entries: "1",
+          include_agent_orders: "1",
+          include_commissions: "1",
+        });
+
+        const payload = await fetchJson<AgentApiResponse>(
+          makeApiUrl(`/api/agents/${agentId}/`, params),
+          { signal: controller.signal },
+        );
+
+        const nextAgent = normalizeAgent(
+          extractAgentPayload(payload),
+          extractFinancialSummaryPayload(payload),
+        );
+
+        setAgent(nextAgent.id ? nextAgent : null);
+        setOrders(extractRecentOrders(payload));
+        setCommissions(extractRecentCommissions(payload));
+        setFinancialEntries(extractRecentFinancialEntries(payload));
+        setStatementRows(extractStatementRows(payload));
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setAgent(null);
+        setOrders([]);
+        setCommissions([]);
+        setFinancialEntries([]);
+        setStatementRows([]);
+        setError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+
+      return () => controller.abort();
+    },
+    [agentId, t.errorDesc, t.notFoundDesc],
+  );
+
+  React.useEffect(() => {
+    void loadAgent();
+  }, [loadAgent]);
+
+  async function copyValue(value: string) {
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t.copied);
+    } catch {
+      toast.error(t.operationFailed);
+    }
+  }
+
+  async function approveCommission(commission: AgentCommissionRecord) {
+    if (!window.confirm(t.confirmApprove)) return;
+
+    setActionLoadingId(commission.id);
+
+    try {
+      await fetchJson<unknown>(
+        makeApiUrl(`/api/agents/commissions/${commission.id}/approve/`),
+        {
+          method: "POST",
+          body: {
+            auto_post_accounting: true,
+          },
+        },
+      );
+
+      toast.success(t.approveSuccess);
+      await loadAgent({ silent: true });
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.operationFailed;
+
+      toast.error(message);
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
+
+  function printPage() {
+    if (!agent) return;
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(t.operationFailed);
+      return;
+    }
+
+    const loginUser = getAgentLoginUser(agent);
+    const loginProfile = getAgentLoginProfile(agent);
+
+    const statementHtml = statementRows.length
+      ? statementRows
+          .map(
+            (row) => `
+              <tr>
+                <td>${escapeHtml(formatDate(row.line_date))}</td>
+                <td>${escapeHtml(getEntryTypeLabel(row.line_type, locale))}</td>
+                <td>${escapeHtml(row.reference || "—")}</td>
+                <td>${escapeHtml(row.description || "—")}</td>
+                <td class="num">${escapeHtml(formatMoney(row.debit_amount))}</td>
+                <td class="num">${escapeHtml(formatMoney(row.credit_amount))}</td>
+                <td class="num">${escapeHtml(formatMoney(row.balance_after))}</td>
+                <td>${escapeHtml(normalizeText(row.metadata?.journal_entry_reference || row.metadata?.journal_entry_number, "—"))}</td>
+              </tr>
+            `,
+          )
+          .join("")
+      : `<tr><td colspan="8">${escapeHtml(t.noStatementDesc)}</td></tr>`;
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)} - ${escapeHtml(agent.full_name)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            h2 { margin: 18px 0 8px; font-size: 16px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong {
+              font-size: 16px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+              margin-bottom: 16px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            .num { direction: ltr; unicode-bidi: embed; white-space: nowrap; }
+            @media print {
+              body { padding: 16px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
             <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.fullName)}: <strong>${escapeHtml(agent.full_name)}</strong></p>
+              <p>${escapeHtml(t.agentCode)}: ${escapeHtml(agent.agent_code || "—")}</p>
+              <p>${escapeHtml(t.referralCode)}: ${escapeHtml(agent.referral_code || "—")}</p>
+              <p>${escapeHtml(t.broker)}: ${escapeHtml(agent.broker_name || "—")}</p>
+              <p>${escapeHtml(t.accountStatus)}: ${escapeHtml(hasAgentAccount(agent) ? t.linked : t.missing)}</p>
+              <p>${escapeHtml(t.loginUsername)}: ${escapeHtml(loginUser?.username || "—")}</p>
+              <p>${escapeHtml(t.loginRole)}: ${escapeHtml(loginProfile?.role || "—")}</p>
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.codCustody)}</span><strong class="num">${escapeHtml(formatMoney(agent.financial.cod_custody_remaining_amount))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.dueToAgent)}</span><strong class="num">${escapeHtml(formatMoney(agent.financial.amount_due_to_agent))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.netBalance)}</span><strong class="num">${escapeHtml(formatMoney(agent.financial.net_balance_amount))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.accountingPosted)}</span><strong class="num">${escapeHtml(agent.financial.accounting_posted_count)}</strong></div>
+          </div>
+
+          <h2>${escapeHtml(t.agentInfo)}</h2>
+          <table>
+            <tbody>
+              <tr><th>${escapeHtml(t.status)}</th><td>${escapeHtml(getStatusLabel(agent.status, locale))}</td></tr>
+              <tr><th>${escapeHtml(t.phone)}</th><td>${escapeHtml(agent.phone || "—")}</td></tr>
+              <tr><th>${escapeHtml(t.email)}</th><td>${escapeHtml(agent.email || "—")}</td></tr>
+              <tr><th>${escapeHtml(t.city)}</th><td>${escapeHtml(agent.city || "—")}</td></tr>
+              <tr><th>${escapeHtml(t.commissionType)}</th><td>${escapeHtml(getCommissionTypeLabel(agent.default_commission_type, locale))}</td></tr>
+              <tr><th>${escapeHtml(t.commissionValue)}</th><td>${escapeHtml(agent.default_commission_type === "PERCENTAGE" ? `${formatMoney(agent.default_commission_value)}%` : formatMoney(agent.default_commission_value))}</td></tr>
+            </tbody>
+          </table>
+
+          <h2>${escapeHtml(t.statement)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.date)}</th>
+                <th>${escapeHtml(t.type)}</th>
+                <th>${escapeHtml(t.reference)}</th>
+                <th>${escapeHtml(t.description)}</th>
+                <th>${escapeHtml(t.debit)}</th>
+                <th>${escapeHtml(t.credit)}</th>
+                <th>${escapeHtml(t.balance)}</th>
+                <th>${escapeHtml(t.journal)}</th>
+              </tr>
+            </thead>
+            <tbody>${statementHtml}</tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+  }
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <DetailSkeleton />
+      </div>
+    );
+  }
+
+  if (error || !agent) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1 text-start">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+              {t.title}
+            </h1>
+            <p className="text-sm text-muted-foreground">{t.subtitle}</p>
+          </div>
+
+          <Button variant="outline" className="h-9 rounded-lg" onClick={() => router.back()}>
+            <BackIcon className="h-4 w-4" />
+            {t.back}
+          </Button>
+        </div>
+
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col items-center justify-center gap-4 p-10 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-red-200 bg-white">
+              <TriangleAlert className="h-6 w-6 text-red-600" />
+            </div>
+
+            <div className="space-y-1">
+              <p className="font-semibold text-red-900">
+                {error ? t.errorTitle : t.notFoundTitle}
               </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
+              <p className="text-sm text-red-700">
+                {error || t.notFoundDesc}
               </p>
             </div>
+
+            <Button
+              variant="outline"
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadAgent()}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
+            </Button>
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {agent?.fullName || t.title}
-          </h1>
+  const agentAccountLinked = hasAgentAccount(agent);
+  const loginUser = getAgentLoginUser(agent);
+  const loginProfile = getAgentLoginProfile(agent);
 
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+  return (
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-start">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+            {t.title}
+          </h1>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/agents">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
-
-          {canViewAgentsList ? (
-            <Link href="/system/agents/list">
-              <Button
-                variant="outline"
-                className="h-10 w-full rounded-xl sm:w-auto"
-              >
-                <ClipboardList className="h-4 w-4" />
-                <span>{t.agentsList}</span>
-              </Button>
-            </Link>
-          ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" className="h-9 rounded-lg" onClick={() => router.back()}>
+            <BackIcon className="h-4 w-4" />
+            {t.back}
+          </Button>
 
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadAgent(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadAgent({ silent: true })}
+            disabled={refreshing}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canPrintAgents && agent ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printAgent}
-              disabled={isLoading || Boolean(errorMessage) || notFound}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="h-9 rounded-lg bg-black px-4 text-white hover:bg-black/90">
+                <MoreHorizontal className="h-4 w-4" />
+                {t.actions}
+              </Button>
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+              <DropdownMenuItem onClick={() => void copyValue(agent.agent_code)}>
+                <Copy className="h-4 w-4" />
+                {t.copyCode}
+              </DropdownMenuItem>
+
+              <DropdownMenuItem onClick={() => void copyValue(agent.referral_code)}>
+                <ShieldCheck className="h-4 w-4" />
+                {t.copyReferral}
+              </DropdownMenuItem>
+
+              {agent.iban ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => void copyValue(agent.iban)}>
+                    <Landmark className="h-4 w-4" />
+                    {t.copyIban}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      {/* Error State */}
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
-              </div>
+      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardHeader className="space-y-4 px-6 py-5">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+              <UserRound className="h-6 w-6 text-muted-foreground" />
             </div>
 
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadAgent(true)}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
-            </Button>
+            <div className="min-w-0 space-y-1">
+              <CardTitle className="truncate text-xl font-bold">
+                {agent.full_name}
+              </CardTitle>
+              <CardDescription className="truncate">
+                {agent.agent_code || "—"} · {agent.referral_code || "—"}
+              </CardDescription>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <StatusBadge status={agent.status} locale={locale} />
+              <Badge
+                variant="outline"
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-xs font-medium",
+                  agentAccountLinked
+                    ? "border-violet-500/30 bg-violet-50 text-violet-700"
+                    : "border-muted bg-muted/40 text-muted-foreground",
+                )}
+              >
+                <UserCircle2 className="me-1 h-3.5 w-3.5" />
+                {agentAccountLinked ? t.linked : t.missing}
+              </Badge>
+              <Badge
+                variant="outline"
+                className="rounded-full bg-muted/40 px-2.5 py-1 text-xs font-medium"
+              >
+                {getCommissionTypeLabel(agent.default_commission_type, locale)}
+              </Badge>
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-2 px-6 pb-6">
+            <InfoRow label={t.broker} value={agent.broker_name || "—"} />
+            <InfoRow label={t.accountStatus}>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "rounded-full",
+                  agentAccountLinked
+                    ? "border-violet-500/30 bg-violet-50 text-violet-700"
+                    : "border-muted bg-muted/40 text-muted-foreground",
+                )}
+              >
+                {agentAccountLinked ? t.linked : t.missing}
+              </Badge>
+            </InfoRow>
+            <InfoRow label={t.codCustody}>
+              <MoneyValue value={agent.financial.cod_custody_remaining_amount} />
+            </InfoRow>
+            <InfoRow label={t.dueToAgent}>
+              <MoneyValue value={agent.financial.amount_due_to_agent} />
+            </InfoRow>
+            <InfoRow label={t.netBalance}>
+              <MoneyValue value={agent.financial.net_balance_amount} />
+            </InfoRow>
+            <InfoRow label={t.totalOrders} value={formatInteger(agent.total_orders)} />
+            <InfoRow label={t.totalCustomers} value={formatInteger(agent.total_customers)} />
+            <InfoRow label={t.accountingPosted} value={formatInteger(agent.financial.accounting_posted_count)} />
           </CardContent>
         </Card>
-      ) : null}
 
-      {/* Not Found */}
-      {!isLoading && !errorMessage && notFound ? (
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted">
-              <UserRound className="h-7 w-7 text-muted-foreground" />
-            </div>
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard
+              title={t.dueFromAgent}
+              value={<MoneyValue value={agent.financial.amount_due_from_agent} />}
+              icon={WalletCards}
+              tone="debit"
+            />
+            <MetricCard
+              title={t.dueToAgent}
+              value={<MoneyValue value={agent.financial.amount_due_to_agent} />}
+              icon={BadgePercent}
+              tone="credit"
+            />
+            <MetricCard
+              title={t.netBalance}
+              value={<MoneyValue value={agent.financial.net_balance_amount} />}
+              icon={Banknote}
+              tone="net"
+            />
+            <MetricCard
+              title={t.accountingPosted}
+              value={formatInteger(agent.financial.accounting_posted_count)}
+              icon={ReceiptText}
+            />
+          </div>
 
-            <div>
-              <p className="text-lg font-semibold">{t.notFoundTitle}</p>
-              <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                {t.notFoundText}
-              </p>
-            </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard
+              title={t.codCustody}
+              value={<MoneyValue value={agent.financial.cod_custody_remaining_amount} />}
+              icon={WalletCards}
+              tone="debit"
+            />
+            <MetricCard
+              title={t.salesCommission}
+              value={<MoneyValue value={agent.financial.sales_commission_remaining_amount} />}
+              icon={BadgePercent}
+              tone="credit"
+            />
+            <MetricCard
+              title={t.deliveryFeeAmount}
+              value={<MoneyValue value={agent.financial.delivery_fee_remaining_amount} />}
+              icon={ShoppingCart}
+              tone="credit"
+            />
+            <MetricCard
+              title={t.financialEntriesCount}
+              value={formatInteger(agent.financial.financial_entries_count)}
+              icon={Layers3}
+            />
+          </div>
 
-            {canViewAgentsList ? (
-              <Link href="/system/agents/list">
-                <Button className="mt-2 rounded-xl">
-                  <ClipboardList className="h-4 w-4" />
-                  {t.agentsList}
-                </Button>
-              </Link>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Loading */}
-      {isLoading ? <DetailSkeleton /> : null}
-
-      {/* Details */}
-      {!isLoading && !errorMessage && agent && !notFound ? (
-        <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
-          {/* Profile Card */}
-          <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="space-y-5 p-5">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border bg-muted">
-                    <UserRound className="h-8 w-8" />
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="truncate text-lg font-bold">
-                        {agent.fullName}
-                      </p>
-
-                      {agent.isFeatured ? (
-                        <Star className="h-4 w-4 shrink-0 fill-orange-400 text-orange-400" />
-                      ) : null}
-                    </div>
-
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {agent.agentCode}
-                    </p>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {statusBadge(agent.status, locale)}
-                      <Badge variant="secondary" className="rounded-full">
-                        {agent.referralCode}
-                      </Badge>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.fields.approvedCommission}
-                  </p>
-                  <p className="mt-1 text-2xl font-bold">
-                    <SarAmount value={agent.approvedCommission} />
-                  </p>
-
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <Badge variant="outline" className="rounded-full">
-                      {commissionLabel(agent.defaultCommissionType, locale)}
-                    </Badge>
-
-                    <Badge variant="outline" className="rounded-full">
-                      {agent.defaultCommissionType === "FIXED" ? (
-                        <SarAmount value={agent.defaultCommissionValue} />
-                      ) : (
-                        `${formatNumber(agent.defaultCommissionValue)}%`
-                      )}
-                    </Badge>
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Button
-                    variant="outline"
-                    className="justify-start rounded-xl"
-                    onClick={() => copyToClipboard(agent.agentCode, t.copied)}
-                  >
-                    <Copy className="h-4 w-4" />
-                    {t.copy} {t.fields.agentCode}
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    className="justify-start rounded-xl"
-                    onClick={() => copyToClipboard(agent.referralCode, t.copied)}
-                  >
-                    <Copy className="h-4 w-4" />
-                    {t.copy} {t.fields.referralCode}
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    className="justify-start rounded-xl"
-                    onClick={() => copyToClipboard(String(agent.id), t.copied)}
-                  >
-                    <Copy className="h-4 w-4" />
-                    {t.copy} {t.fields.id}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base font-bold">
-                  {t.quickInfo}
-                </CardTitle>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <QuickInfoItem
-                  icon={Phone}
-                  label={t.fields.phone}
-                  value={agent.phone || "-"}
-                />
-
-                <QuickInfoItem
-                  icon={Mail}
-                  label={t.fields.email}
-                  value={agent.email || "-"}
-                />
-
-                <QuickInfoItem
-                  icon={MapPin}
-                  label={t.fields.city}
-                  value={agent.city || "-"}
-                />
-
-                <QuickInfoItem
-                  icon={CalendarDays}
-                  label={t.fields.updatedAt}
-                  value={formatDate(agent.updatedAt || agent.createdAt)}
-                />
-              </CardContent>
-            </Card>
-          </aside>
-
-          {/* Main Content */}
-          <main className="space-y-4">
-            {/* Overview */}
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <Eye className="h-4 w-4" />
-                  {t.overview}
-                </CardTitle>
-                <CardDescription>{t.overviewDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                <div className="overflow-hidden rounded-xl border">
-                  <Table>
-                    <TableBody>
-                      <InfoRow
-                        label={t.fields.id}
-                        value={String(agent.id || "-")}
-                        copyable
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.fullName}
-                        value={agent.fullName}
-                        copyable
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.agentCode}
-                        value={agent.agentCode}
-                        copyable
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.referralCode}
-                        value={agent.referralCode}
-                        copyable
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.status}
-                        value={statusLabel(agent.status, locale)}
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.createdAt}
-                        value={formatDate(agent.createdAt)}
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.updatedAt}
-                        value={formatDate(agent.updatedAt || agent.createdAt)}
-                        copiedMessage={t.copied}
-                      />
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Contact */}
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <Phone className="h-4 w-4" />
-                  {t.contact}
-                </CardTitle>
-                <CardDescription>{t.contactDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                <div className="overflow-hidden rounded-xl border">
-                  <Table>
-                    <TableBody>
-                      <InfoRow
-                        label={t.fields.phone}
-                        value={agent.phone || "-"}
-                        copyable={Boolean(agent.phone)}
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.email}
-                        value={agent.email || "-"}
-                        copyable={Boolean(agent.email)}
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.city}
-                        value={agent.city || "-"}
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.address}
-                        value={agent.address || "-"}
-                        copiedMessage={t.copied}
-                      />
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Performance */}
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <ShieldCheck className="h-4 w-4" />
-                  {t.performance}
-                </CardTitle>
-                <CardDescription>{t.performanceDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <MetricCard
-                    icon={Users}
-                    label={t.fields.totalCustomers}
-                    value={formatNumber(agent.totalCustomers)}
-                  />
-                  <MetricCard
-                    icon={ClipboardList}
-                    label={t.fields.totalOrders}
-                    value={formatNumber(agent.totalOrders)}
-                  />
-                  <MetricCard
-                    icon={Wallet}
-                    label={t.fields.totalSales}
-                    value={<SarAmount value={agent.totalSales} />}
-                  />
-                  <MetricCard
-                    icon={HandCoins}
-                    label={t.fields.approvedCommission}
-                    value={<SarAmount value={agent.approvedCommission} />}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Commissions */}
-            {canViewCommissions ? (
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base font-bold">
-                    <HandCoins className="h-4 w-4" />
+          <Tabs defaultValue="overview" className="space-y-4">
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardContent className="p-4">
+                <TabsList className="h-auto flex-wrap justify-start rounded-lg bg-muted/40 p-1">
+                  <TabsTrigger value="overview" className="rounded-md">
+                    <Eye className="h-4 w-4" />
+                    {t.overview}
+                  </TabsTrigger>
+                  <TabsTrigger value="statement" className="rounded-md">
+                    <ReceiptText className="h-4 w-4" />
+                    {t.statement}
+                  </TabsTrigger>
+                  <TabsTrigger value="entries" className="rounded-md">
+                    <Layers3 className="h-4 w-4" />
+                    {t.entries}
+                  </TabsTrigger>
+                  <TabsTrigger value="orders" className="rounded-md">
+                    <ShoppingCart className="h-4 w-4" />
+                    {t.orders}
+                  </TabsTrigger>
+                  <TabsTrigger value="commissions" className="rounded-md">
+                    <BadgePercent className="h-4 w-4" />
                     {t.commissions}
-                  </CardTitle>
-                  <CardDescription>{t.commissionsDesc}</CardDescription>
-                </CardHeader>
+                  </TabsTrigger>
+                  <TabsTrigger value="bank" className="rounded-md">
+                    <Landmark className="h-4 w-4" />
+                    {t.bank}
+                  </TabsTrigger>
+                  <TabsTrigger value="activity" className="rounded-md">
+                    <CalendarDays className="h-4 w-4" />
+                    {t.activity}
+                  </TabsTrigger>
+                </TabsList>
+              </CardContent>
+            </Card>
 
-                <CardContent>
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    <MetricCard
-                      icon={IdCard}
-                      label={t.fields.commissionType}
-                      value={commissionLabel(agent.defaultCommissionType, locale)}
+            <TabsContent value="overview" className="space-y-4">
+              <div className="grid gap-4 xl:grid-cols-2">
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.agentInfo}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.fullName} value={agent.full_name} />
+                    <InfoRow label={t.agentCode} value={agent.agent_code || "—"} />
+                    <InfoRow label={t.referralCode} value={agent.referral_code || "—"} />
+                    <InfoRow label={t.broker} value={agent.broker_name || "—"} />
+                    <InfoRow label={t.status}>
+                      <StatusBadge status={agent.status} locale={locale} />
+                    </InfoRow>
+                    <InfoRow
+                      label={t.commissionType}
+                      value={getCommissionTypeLabel(agent.default_commission_type, locale)}
                     />
-                    <MetricCard
-                      icon={BadgeCheck}
-                      label={t.fields.commissionValue}
+                    <InfoRow
+                      label={t.commissionValue}
                       value={
-                        agent.defaultCommissionType === "FIXED" ? (
-                          <SarAmount value={agent.defaultCommissionValue} />
-                        ) : (
-                          `${formatNumber(agent.defaultCommissionValue)}%`
-                        )
+                        agent.default_commission_type === "PERCENTAGE"
+                          ? `${formatMoney(agent.default_commission_value)}%`
+                          : <MoneyValue value={agent.default_commission_value} />
                       }
                     />
-                    <MetricCard
-                      icon={Wallet}
-                      label={t.fields.pendingCommission}
-                      value={<SarAmount value={agent.pendingCommission} />}
-                    />
-                    <MetricCard
-                      icon={CheckCircle2}
-                      label={t.fields.paidCommission}
-                      value={<SarAmount value={agent.paidCommission} />}
-                    />
-                  </div>
+                    <InfoRow label={t.deliveryFee}>
+                      <MoneyValue value={agent.default_delivery_fee} />
+                    </InfoRow>
+                  </CardContent>
+                </Card>
 
-                  <div className="mt-4 overflow-hidden rounded-xl border">
-                    <Table>
-                      <TableBody>
-                        <InfoRow
-                          label={t.fields.pendingCommission}
-                          value={formatMoney(agent.pendingCommission)}
-                          copiedMessage={t.copied}
-                        />
-                        <InfoRow
-                          label={t.fields.approvedCommission}
-                          value={formatMoney(agent.approvedCommission)}
-                          copiedMessage={t.copied}
-                        />
-                        <InfoRow
-                          label={t.fields.paidCommission}
-                          value={formatMoney(agent.paidCommission)}
-                          copiedMessage={t.copied}
-                        />
-                        <InfoRow
-                          label={t.fields.accountingPostedCommission}
-                          value={formatMoney(agent.accountingPostedCommission)}
-                          copiedMessage={t.copied}
-                        />
-                      </TableBody>
-                    </Table>
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.accountInfo}</CardTitle>
+                    <CardDescription>
+                      {getAgentLoginUsername(agent) || agent.user_id || "—"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.accountStatus}>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          agentAccountLinked
+                            ? "border-violet-500/30 bg-violet-50 text-violet-700"
+                            : "border-muted bg-muted/40 text-muted-foreground",
+                        )}
+                      >
+                        <UserCircle2 className="me-1 h-3.5 w-3.5" />
+                        {agentAccountLinked ? t.linked : t.missing}
+                      </Badge>
+                    </InfoRow>
+
+                    <InfoRow label={t.loginUsername} value={getAgentLoginUsername(agent) || "—"} />
+                    <InfoRow label={t.loginEmail} value={getAgentLoginEmail(agent) || "—"} />
+                    <InfoRow
+                      label={t.loginDisplayName}
+                      value={loginUser?.full_name || loginProfile?.display_name || "—"}
+                    />
+                    <InfoRow label={t.loginUserId} value={String(loginUser?.id || agent.user_id || "—")} />
+                    <InfoRow label={t.accountActive}>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          loginUser?.is_active
+                            ? "border-emerald-500/30 bg-emerald-50 text-emerald-700"
+                            : "border-muted bg-muted/40 text-muted-foreground",
+                        )}
+                      >
+                        {loginUser?.is_active ? t.active : t.inactive}
+                      </Badge>
+                    </InfoRow>
+                    <InfoRow label={t.loginUserType} value={loginProfile?.user_type || "—"} />
+                    <InfoRow label={t.loginRole} value={loginProfile?.role || "—"} />
+                    <InfoRow
+                      label={t.loginWorkspace}
+                      value={getAgentProfileWorkspace(loginProfile) || t.agentWorkspace}
+                    />
+                    <InfoRow label={t.loginPhone} value={loginProfile?.phone_number || "—"} />
+                    <InfoRow label={t.loginWhatsapp} value={loginProfile?.whatsapp_number || "—"} />
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.financialPosition}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.debitTotal}>
+                      <MoneyValue value={agent.financial.total_debit_amount} />
+                    </InfoRow>
+                    <InfoRow label={t.creditTotal}>
+                      <MoneyValue value={agent.financial.total_credit_amount} />
+                    </InfoRow>
+                    <InfoRow label={t.codCustody}>
+                      <MoneyValue value={agent.financial.cod_custody_remaining_amount} />
+                    </InfoRow>
+                    <InfoRow label={t.salesCommission}>
+                      <MoneyValue value={agent.financial.sales_commission_remaining_amount} />
+                    </InfoRow>
+                    <InfoRow label={t.deliveryFeeAmount}>
+                      <MoneyValue value={agent.financial.delivery_fee_remaining_amount} />
+                    </InfoRow>
+                    <InfoRow label={t.netBalance}>
+                      <MoneyValue value={agent.financial.net_balance_amount} />
+                    </InfoRow>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.contactInfo}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.phone} value={agent.phone || "—"} />
+                    <InfoRow label={t.email} value={agent.email || "—"} />
+                    <InfoRow label={t.city} value={agent.city || "—"} />
+                    <InfoRow label={t.address} value={agent.address || "—"} />
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none xl:col-span-2">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.notes}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <div className="min-h-[140px] rounded-lg border bg-background p-4">
+                      <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                        {agent.notes || t.noNotes}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="statement" className="space-y-4">
+              <Card className="rounded-lg border bg-card shadow-none">
+                <CardContent className="p-4">
+                  <div className="overflow-hidden rounded-lg border bg-background">
+                    <div className="overflow-x-auto">
+                      <Table className="min-w-[1160px] table-fixed">
+                        <TableHeader>
+                          <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                            <TableHead className="w-[120px] px-4 text-start">{t.date}</TableHead>
+                            <TableHead className="w-[150px] px-4 text-start">{t.type}</TableHead>
+                            <TableHead className="w-[150px] px-4 text-start">{t.reference}</TableHead>
+                            <TableHead className="w-[260px] px-4 text-start">{t.description}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.debit}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.credit}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.balance}</TableHead>
+                            <TableHead className="w-[150px] px-4 text-start">{t.journal}</TableHead>
+                            <TableHead className="w-[110px] px-4 text-start">{t.status}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {statementRows.length ? (
+                            statementRows.map((row, index) => (
+                              <TableRow key={`${row.related_financial_entry_id}-${row.reference}-${index}`} className="h-[62px]">
+                                <TableCell className="px-4 text-start tabular-nums text-muted-foreground">
+                                  {formatDate(row.line_date)}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <Badge variant="outline" className="rounded-full bg-muted/40">
+                                    {getEntryTypeLabel(row.line_type, locale)}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="px-4 text-start font-medium">
+                                  {row.reference || "—"}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <p className="line-clamp-2">{row.description || "—"}</p>
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={row.debit_amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={row.credit_amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={row.balance_after} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  {normalizeText(row.metadata?.journal_entry_reference || row.metadata?.journal_entry_number) || "—"}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <StatusBadge status={row.status} locale={locale} />
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={9}>
+                                <EmptyBlock
+                                  icon={ReceiptText}
+                                  title={t.noStatementTitle}
+                                  description={t.noStatementDesc}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
-            ) : null}
+            </TabsContent>
 
-            {/* Bank */}
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <Landmark className="h-4 w-4" />
-                  {t.bank}
-                </CardTitle>
-                <CardDescription>{t.bankDesc}</CardDescription>
-              </CardHeader>
+            <TabsContent value="entries" className="space-y-4">
+              <Card className="rounded-lg border bg-card shadow-none">
+                <CardContent className="p-4">
+                  <div className="overflow-hidden rounded-lg border bg-background">
+                    <div className="overflow-x-auto">
+                      <Table className="min-w-[1180px] table-fixed">
+                        <TableHeader>
+                          <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                            <TableHead className="w-[140px] px-4 text-start">{t.reference}</TableHead>
+                            <TableHead className="w-[150px] px-4 text-start">{t.type}</TableHead>
+                            <TableHead className="w-[90px] px-4 text-start">{t.debit}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.credit}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.paidAmount}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.remainingAmount}</TableHead>
+                            <TableHead className="w-[150px] px-4 text-start">{t.orderNumber}</TableHead>
+                            <TableHead className="w-[150px] px-4 text-start">{t.journal}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.status}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {financialEntries.length ? (
+                            financialEntries.map((entry) => (
+                              <TableRow key={entry.id || entry.entry_number} className="h-[62px]">
+                                <TableCell className="px-4 text-start font-medium">
+                                  {entry.entry_number || "—"}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <Badge variant="outline" className="rounded-full bg-muted/40">
+                                    {getEntryTypeLabel(entry.entry_type, locale)}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <DirectionBadge direction={entry.direction} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={entry.amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={entry.paid_amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={entry.remaining_amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  {entry.order_id ? (
+                                    <Link
+                                      href={`/system/orders/${entry.order_id}`}
+                                      className="hover:underline"
+                                    >
+                                      {entry.order_number || `#${entry.order_id}`}
+                                    </Link>
+                                  ) : (
+                                    entry.order_number || "—"
+                                  )}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  {entry.journal_entry_reference || "—"}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <StatusBadge status={entry.status} locale={locale} />
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={9}>
+                                <EmptyBlock
+                                  icon={Layers3}
+                                  title={t.noEntriesTitle}
+                                  description={t.noEntriesDesc}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-              <CardContent>
-                <div className="overflow-hidden rounded-xl border">
-                  <Table>
-                    <TableBody>
-                      <InfoRow
-                        label={t.fields.bankName}
-                        value={agent.bankName || "-"}
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.bankAccountName}
-                        value={agent.bankAccountName || "-"}
-                        copiedMessage={t.copied}
-                      />
-                      <InfoRow
-                        label={t.fields.iban}
-                        value={agent.iban || "-"}
-                        copyable={Boolean(agent.iban)}
-                        copiedMessage={t.copied}
-                      />
-                    </TableBody>
-                  </Table>
-                </div>
+            <TabsContent value="orders" className="space-y-4">
+              <Card className="rounded-lg border bg-card shadow-none">
+                <CardContent className="p-4">
+                  <div className="overflow-hidden rounded-lg border bg-background">
+                    <div className="overflow-x-auto">
+                      <Table className="min-w-[920px] table-fixed">
+                        <TableHeader>
+                          <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                            <TableHead className="w-[150px] px-4 text-start">{t.orderNumber}</TableHead>
+                            <TableHead className="w-[180px] px-4 text-start">{t.customer}</TableHead>
+                            <TableHead className="w-[130px] px-4 text-start">{t.salesAmount}</TableHead>
+                            <TableHead className="w-[130px] px-4 text-start">{t.commissionType}</TableHead>
+                            <TableHead className="w-[130px] px-4 text-start">{t.commissionValue}</TableHead>
+                            <TableHead className="w-[130px] px-4 text-start">{t.commissionAmount}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.createdAt}</TableHead>
+                            <TableHead className="w-[72px] px-4 text-center">{t.actions}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {orders.length ? (
+                            orders.map((order) => (
+                              <TableRow key={order.id || order.order_number} className="h-[62px]">
+                                <TableCell className="px-4 text-start font-medium">
+                                  {order.order_id ? (
+                                    <Link href={`/system/orders/${order.order_id}`} className="hover:underline">
+                                      {order.order_number || `#${order.order_id}`}
+                                    </Link>
+                                  ) : (
+                                    order.order_number || "—"
+                                  )}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  {order.customer_id ? (
+                                    <Link
+                                      href={`/system/customers/${order.customer_id}`}
+                                      className="block truncate hover:underline"
+                                    >
+                                      {order.customer_name || "—"}
+                                    </Link>
+                                  ) : (
+                                    <span className="block truncate">{order.customer_name || "—"}</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={order.sales_amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  {getCommissionTypeLabel(order.commission_type, locale)}
+                                </TableCell>
+                                <TableCell className="px-4 text-start tabular-nums">
+                                  {order.commission_type === "PERCENTAGE"
+                                    ? `${formatMoney(order.commission_value)}%`
+                                    : formatMoney(order.commission_value)}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={order.commission_amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start tabular-nums text-muted-foreground">
+                                  {formatDate(order.created_at)}
+                                </TableCell>
+                                <TableCell className="px-4 text-center">
+                                  {order.order_id ? (
+                                    <Button asChild variant="ghost" size="icon" className="h-8 w-8 rounded-lg">
+                                      <Link href={`/system/orders/${order.order_id}`}>
+                                        <Eye className="h-4 w-4" />
+                                      </Link>
+                                    </Button>
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={8}>
+                                <EmptyBlock
+                                  icon={ShoppingCart}
+                                  title={t.noOrdersTitle}
+                                  description={t.noOrdersDesc}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Badge variant="outline" className="rounded-full">
-                    <Banknote className="h-3.5 w-3.5" />
-                    {agent.bankName || agent.iban ? t.badges.hasBank : t.badges.noBank}
-                  </Badge>
+            <TabsContent value="commissions" className="space-y-4">
+              <Card className="rounded-lg border bg-card shadow-none">
+                <CardContent className="p-4">
+                  <div className="overflow-hidden rounded-lg border bg-background">
+                    <div className="overflow-x-auto">
+                      <Table className="min-w-[1220px] table-fixed">
+                        <TableHeader>
+                          <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                            <TableHead className="w-[130px] px-4 text-start">{t.reference}</TableHead>
+                            <TableHead className="w-[140px] px-4 text-start">{t.orderNumber}</TableHead>
+                            <TableHead className="w-[160px] px-4 text-start">{t.customer}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.salesAmount}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.commissionAmount}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.paidAmount}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.remainingAmount}</TableHead>
+                            <TableHead className="w-[150px] px-4 text-start">{t.journal}</TableHead>
+                            <TableHead className="w-[120px] px-4 text-start">{t.commissionStatus}</TableHead>
+                            <TableHead className="w-[82px] px-4 text-center">{t.actions}</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {commissions.length ? (
+                            commissions.map((commission) => (
+                              <TableRow key={commission.id || commission.reference} className="h-[62px]">
+                                <TableCell className="px-4 text-start font-medium">
+                                  {commission.reference}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  {commission.order_id ? (
+                                    <Link href={`/system/orders/${commission.order_id}`} className="block truncate hover:underline">
+                                      {commission.order_number || `#${commission.order_id}`}
+                                    </Link>
+                                  ) : (
+                                    <span className="block truncate">{commission.order_number || "—"}</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  {commission.customer_id ? (
+                                    <Link
+                                      href={`/system/customers/${commission.customer_id}`}
+                                      className="block truncate hover:underline"
+                                    >
+                                      {commission.customer_name || "—"}
+                                    </Link>
+                                  ) : (
+                                    <span className="block truncate">{commission.customer_name || "—"}</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={commission.base_amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={commission.commission_amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={commission.paid_amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <MoneyValue value={commission.remaining_amount} />
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  {commission.journal_entry_reference || "—"}
+                                </TableCell>
+                                <TableCell className="px-4 text-start">
+                                  <StatusBadge status={commission.commission_status} locale={locale} />
+                                </TableCell>
+                                <TableCell className="px-4 text-center">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 rounded-lg"
+                                        disabled={actionLoadingId === commission.id}
+                                      >
+                                        {actionLoadingId === commission.id ? (
+                                          <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                          <MoreHorizontal className="h-4 w-4" />
+                                        )}
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent
+                                      align={locale === "ar" ? "start" : "end"}
+                                      className="w-52"
+                                    >
+                                      {commission.order_id ? (
+                                        <DropdownMenuItem asChild>
+                                          <Link href={`/system/orders/${commission.order_id}`}>
+                                            <ShoppingCart className="h-4 w-4" />
+                                            {t.openOrder}
+                                          </Link>
+                                        </DropdownMenuItem>
+                                      ) : null}
 
-                  <Badge variant="outline" className="rounded-full">
-                    <Phone className="h-3.5 w-3.5" />
-                    {agent.phone || agent.email
-                      ? t.badges.hasContact
-                      : t.badges.noContact}
-                  </Badge>
-                </div>
-              </CardContent>
-            </Card>
+                                      {commission.payment_id ? (
+                                        <DropdownMenuItem asChild>
+                                          <Link href={`/system/payments/${commission.payment_id}`}>
+                                            <WalletCards className="h-4 w-4" />
+                                            {t.openPayment}
+                                          </Link>
+                                        </DropdownMenuItem>
+                                      ) : null}
 
-            {/* Notes */}
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <FileText className="h-4 w-4" />
-                  {t.notes}
-                </CardTitle>
-                <CardDescription>{t.notesDesc}</CardDescription>
-              </CardHeader>
+                                      {canApproveCommission(commission) ? (
+                                        <>
+                                          <DropdownMenuSeparator />
+                                          <DropdownMenuItem onClick={() => void approveCommission(commission)}>
+                                            <CheckCircle2 className="h-4 w-4" />
+                                            {t.approveCommission}
+                                          </DropdownMenuItem>
+                                        </>
+                                      ) : null}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={10}>
+                                <EmptyBlock
+                                  icon={BadgePercent}
+                                  title={t.noCommissionsTitle}
+                                  description={t.noCommissionsDesc}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-              <CardContent>
-                <TextSection
-                  label={t.fields.notes}
-                  value={agent.notes}
-                  empty={t.empty}
-                />
-              </CardContent>
-            </Card>
-          </main>
+            <TabsContent value="bank" className="space-y-4">
+              <div className="grid gap-4 xl:grid-cols-2">
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.bankInfo}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.bankName} value={agent.bank_name || "—"} />
+                    <InfoRow label={t.bankAccountName} value={agent.bank_account_name || "—"} />
+                    <InfoRow label={t.iban}>
+                      <span className="inline-flex items-center gap-2">
+                        <span className="max-w-[220px] truncate">{agent.iban || "—"}</span>
+                        {agent.iban ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 rounded-lg"
+                            onClick={() => void copyValue(agent.iban)}
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </Button>
+                        ) : null}
+                      </span>
+                    </InfoRow>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.financialPosition}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.dueFromAgent}>
+                      <MoneyValue value={agent.financial.amount_due_from_agent} />
+                    </InfoRow>
+                    <InfoRow label={t.dueToAgent}>
+                      <MoneyValue value={agent.financial.amount_due_to_agent} />
+                    </InfoRow>
+                    <InfoRow label={t.netBalance}>
+                      <MoneyValue value={agent.financial.net_balance_amount} />
+                    </InfoRow>
+                    <InfoRow label={t.accountingPosted} value={formatInteger(agent.financial.accounting_posted_count)} />
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="activity" className="space-y-4">
+              <Card className="rounded-lg border bg-card shadow-none">
+                <CardHeader className="px-5 py-4">
+                  <CardTitle className="text-base">{t.activity}</CardTitle>
+                  <CardDescription>{agent.full_name}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 px-5 pb-5">
+                  {[
+                    {
+                      label: t.createdAt,
+                      value: formatDate(agent.created_at),
+                      icon: UserRound,
+                    },
+                    {
+                      label: t.updatedAt,
+                      value: formatDate(agent.updated_at),
+                      icon: RefreshCw,
+                    },
+                    {
+                      label: t.accountStatus,
+                      value: agentAccountLinked ? t.linked : t.missing,
+                      icon: UserCircle2,
+                    },
+                    {
+                      label: t.loginUsername,
+                      value: getAgentLoginUsername(agent) || "—",
+                      icon: Mail,
+                    },
+                    {
+                      label: t.financialEntriesCount,
+                      value: formatInteger(agent.financial.financial_entries_count),
+                      icon: Layers3,
+                    },
+                    {
+                      label: t.accountingPosted,
+                      value: formatInteger(agent.financial.accounting_posted_count),
+                      icon: FileText,
+                    },
+                  ].map((item) => {
+                    const Icon = item.icon;
+
+                    return (
+                      <div
+                        key={item.label}
+                        className="flex items-center justify-between gap-3 rounded-lg border bg-background p-4"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
+                            <Icon className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                          <p className="truncate font-medium">{item.label}</p>
+                        </div>
+                        <p className="text-sm tabular-nums text-muted-foreground">
+                          {item.value}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

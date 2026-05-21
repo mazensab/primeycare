@@ -2,93 +2,67 @@
 
 /* ============================================================
    📂 app/system/treasury/statement/page.tsx
-   🧠 Primey Care | Treasury General Statement Page
-
-   ✅ المسار:
-      app/system/treasury/statement/page.tsx
-
-   ✅ العمل:
-      صفحة كشف حساب الخزينة العام داخل النظام.
-      تعرض حركة الخزينة حسب الحساب، التاريخ، نوع الحركة، الحالة، والرصيد الجاري.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Treasury General Statement Build
-
-   ✅ يعتمد على:
-      - /api/treasury/transactions/
-      - /api/treasury/accounts/
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Treasury overview page
-      - Treasury accounts pages
-      - Treasury account statement page
-      - Treasury vouchers pages
-      - Treasury transactions pages
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - عرض كشف حساب الخزينة العام.
-      - فلترة حسب حساب الخزينة.
-      - فلترة حسب نوع الحركة.
-      - فلترة حسب الحالة.
-      - فلترة حسب التاريخ من / إلى.
-      - بحث في صف مستقل.
-      - فلاتر في صف مستقل.
-      - حساب الرصيد الجاري محليًا حسب الفلاتر.
-      - Excel export بصيغة .xls HTML Workbook.
-      - Web PDF Print.
-      - Error State مستقل.
-      - Empty State ذكي.
-      - Skeleton Loading.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - أرقام إنجليزية دائمًا.
-      - رمز SAR من /currency/sar.svg بعد الرقم.
-      - استخدام sonner للتنبيهات.
-
+   🧠 Primey Care | Treasury Statement Page
    ------------------------------------------------------------
-   ملاحظة:
-      الملف المرفق كان خاصًا بقائمة القيود اليومية في المحاسبة وليس
-      ملف كشف حساب الخزينة المطلوب، لذلك تم بناء هذه الصفحة من الصفر
-      بنفس القاعدة والنمط المعتمد.
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Real API:
+      GET /api/treasury/transactions/
+      GET /api/treasury/accounts/
+   ✅ Account statement with running balance
+   ✅ Search / account / type / status / date / sort
+   ✅ Excel .xls HTML Workbook
+   ✅ Web Print
+   ✅ Skeleton Loading
+   ✅ Error / Empty states
+   ✅ sonner
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
+   ✅ Create/save/confirm buttons rule: black primary only
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
+  ArrowRight,
+  ArrowUpDown,
   Banknote,
   CalendarDays,
-  Download,
-  Eye,
-  FileText,
+  CircleDollarSign,
+  CreditCard,
+  FileSpreadsheet,
   Loader2,
   Printer,
-  RefreshCcw,
+  RefreshCw,
+  RotateCcw,
   Search,
-  ShieldCheck,
-  Wallet,
-  XCircle,
+  TriangleAlert,
+  WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -98,531 +72,308 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type TransactionType =
-  | "RECEIPT"
-  | "PAYMENT"
-  | "TRANSFER"
-  | "ADJUSTMENT"
-  | "UNKNOWN";
-
-type TransactionStatus = "DRAFT" | "CONFIRMED" | "CANCELLED" | "UNKNOWN";
-
-type TypeFilter = "ALL" | TransactionType;
-type StatusFilter = "ALL" | TransactionStatus;
-type AccountFilter = "ALL" | string;
-
-type SortKey =
-  | "transaction_date"
-  | "transaction_number"
-  | "transaction_type"
-  | "status"
-  | "account_name"
-  | "amount";
-
-type SortDirection = "asc" | "desc";
-
-type TreasuryAccountOption = {
-  id: string;
-  name: string;
-  code: string;
-  current_balance: number;
-};
-
-type StatementRow = {
-  id: string;
-  transaction_number: string;
-  transaction_type: TransactionType;
-  status: TransactionStatus;
-  amount: number;
-  debit: number;
-  credit: number;
-  running_balance: number;
-  transaction_date: string;
-  account_id: string;
-  account_name: string;
-  account_code: string;
-  to_account_id: string;
-  to_account_name: string;
-  to_account_code: string;
-  source_reference: string;
-  description: string;
-  is_treasury_posted: boolean;
-  is_accounting_posted: boolean;
-  created_at: string;
-};
-
-type StatementSummary = {
-  rows_count: number;
-  opening_balance: number;
-  total_debit: number;
-  total_credit: number;
-  closing_balance: number;
-  confirmed_count: number;
-  draft_count: number;
-  cancelled_count: number;
-  treasury_posted_count: number;
-  accounting_posted_count: number;
-};
-
-type ApiEnvelope<T> = {
+type ApiResponse = {
   ok?: boolean;
   success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
+  count?: number;
+  total?: number;
+  total_count?: number;
   results?: unknown[];
   items?: unknown[];
   rows?: unknown[];
-  transactions?: unknown[];
-  accounts?: unknown[];
+  data?: unknown;
+  summary?: unknown;
+  message?: string;
+  detail?: string;
+  error?: string;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-const PAGE_SIZE = 14;
-
-const DEFAULT_SUMMARY: StatementSummary = {
-  rows_count: 0,
-  opening_balance: 0,
-  total_debit: 0,
-  total_credit: 0,
-  closing_balance: 0,
-  confirmed_count: 0,
-  draft_count: 0,
-  cancelled_count: 0,
-  treasury_posted_count: 0,
-  accounting_posted_count: 0,
+type TreasuryAccount = {
+  id: string;
+  name: string;
+  code: string;
+  account_type: string;
+  account_type_label: string;
+  current_balance: number;
+  opening_balance: number;
+  currency: string;
+  status: string;
 };
 
-/* ============================================================
-   Locale / API
-============================================================ */
+type TreasuryTransaction = {
+  id: string;
+  transaction_number: string;
+  transaction_type: string;
+  transaction_type_label: string;
+  source: string;
+  source_label: string;
+  status: string;
+  status_label: string;
+  transaction_date: string | null;
+  treasury_account_id: string;
+  treasury_account_name: string;
+  treasury_account_code: string;
+  destination_account_id: string;
+  destination_account_name: string;
+  destination_account_code: string;
+  amount: number;
+  fees_amount: number;
+  net_amount: number;
+  currency: string;
+  reference: string;
+  source_number: string;
+  party_name: string;
+  description: string;
+  balance_applied: boolean;
+  created_at: string | null;
+};
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+type StatementRow = TreasuryTransaction & {
+  debit: number;
+  credit: number;
+  running_balance: number;
+};
 
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+type StatusFilter = "all" | "draft" | "confirmed" | "cancelled";
+type TypeFilter =
+  | "all"
+  | "income"
+  | "expense"
+  | "transfer"
+  | "deposit"
+  | "withdraw"
+  | "opening_balance"
+  | "refund"
+  | "fee"
+  | "adjustment";
+type SortKey = "newest" | "oldest" | "amount_high" | "amount_low" | "number";
 
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
+const API = {
+  transactions: "/api/treasury/transactions/",
+  accounts: "/api/treasury/accounts/",
+};
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+const translations = {
+  ar: {
+    title: "كشف حساب الخزينة",
+    subtitle: "كشف تفصيلي لحركات الخزينة حسب الحساب والفترة ونوع الحركة.",
+    back: "الخزينة",
+    transactions: "حركات الخزينة",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    all: "الكل",
+    from: "من",
+    to: "إلى",
+
+    openingBalance: "الرصيد الافتتاحي",
+    totalDebit: "إجمالي المدين",
+    totalCredit: "إجمالي الدائن",
+    closingBalance: "الرصيد الختامي",
+
+    statementTable: "جدول كشف الحساب",
+    statementTableDesc: "الحركات المالية مع الرصيد الجاري بعد كل حركة.",
+    searchPlaceholder: "ابحث برقم الحركة أو الحساب أو الطرف أو الوصف...",
+    account: "الحساب",
+    status: "الحالة",
+    type: "نوع الحركة",
+    sort: "الترتيب",
+
+    number: "رقم الحركة",
+    date: "التاريخ",
+    movementType: "نوع الحركة",
+    movementStatus: "الحالة",
+    treasuryAccount: "حساب الخزينة",
+    party: "الطرف",
+    description: "الوصف",
+    debit: "مدين",
+    credit: "دائن",
+    runningBalance: "الرصيد الجاري",
+    reference: "المرجع",
+
+    draft: "مسودة",
+    confirmed: "مؤكدة",
+    cancelled: "ملغاة",
+    income: "قبض",
+    expense: "صرف",
+    transfer: "تحويل",
+    deposit: "إيداع",
+    withdraw: "سحب",
+    openingBalanceType: "رصيد افتتاحي",
+    refund: "استرداد",
+    fee: "رسوم",
+    adjustment: "تسوية",
+
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    amountHigh: "الأعلى مبلغًا",
+    amountLow: "الأقل مبلغًا",
+    numberSort: "رقم الحركة",
+
+    showing: "عرض",
+    of: "من",
+    rows: "صفوف",
+
+    errorTitle: "تعذر تحميل كشف الحساب",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    refreshed: "تم تحديث كشف الحساب.",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "كشف حساب الخزينة",
+    generatedAt: "تاريخ الطباعة",
+    noDataTitle: "لا توجد حركات خزينة",
+    noDataDesc: "ستظهر حركات كشف الحساب هنا بعد تسجيلها.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+    notAvailable: "—",
+    sar: "ر.س",
+  },
+  en: {
+    title: "Treasury Statement",
+    subtitle: "Detailed treasury statement by account, date range, and movement type.",
+    back: "Treasury",
+    transactions: "Treasury transactions",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    all: "All",
+    from: "From",
+    to: "To",
+
+    openingBalance: "Opening balance",
+    totalDebit: "Total debit",
+    totalCredit: "Total credit",
+    closingBalance: "Closing balance",
+
+    statementTable: "Statement table",
+    statementTableDesc: "Financial movements with running balance after each transaction.",
+    searchPlaceholder: "Search by transaction number, account, party, or description...",
+    account: "Account",
+    status: "Status",
+    type: "Type",
+    sort: "Sort",
+
+    number: "Transaction number",
+    date: "Date",
+    movementType: "Type",
+    movementStatus: "Status",
+    treasuryAccount: "Treasury account",
+    party: "Party",
+    description: "Description",
+    debit: "Debit",
+    credit: "Credit",
+    runningBalance: "Running balance",
+    reference: "Reference",
+
+    draft: "Draft",
+    confirmed: "Confirmed",
+    cancelled: "Cancelled",
+    income: "Income",
+    expense: "Expense",
+    transfer: "Transfer",
+    deposit: "Deposit",
+    withdraw: "Withdraw",
+    openingBalanceType: "Opening balance",
+    refund: "Refund",
+    fee: "Fee",
+    adjustment: "Adjustment",
+
+    newest: "Newest",
+    oldest: "Oldest",
+    amountHigh: "Highest amount",
+    amountLow: "Lowest amount",
+    numberSort: "Transaction number",
+
+    showing: "Showing",
+    of: "of",
+    rows: "rows",
+
+    errorTitle: "Unable to load statement",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    refreshed: "Treasury statement refreshed.",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "Treasury statement",
+    generatedAt: "Generated at",
+    noDataTitle: "No treasury transactions",
+    noDataDesc: "Statement movements will appear here once recorded.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other results.",
+    notAvailable: "—",
+    sar: "SAR",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
 }
 
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
 
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  return true;
+  return fallback;
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (["1", "true", "yes", "on", "applied", "confirmed"].includes(normalized)) return true;
+    if (["0", "false", "no", "off", "draft", "cancelled"].includes(normalized)) return false;
+  }
 
-  return {
-    title: isArabic ? "كشف حساب الخزينة" : "Treasury Statement",
-    subtitle: isArabic
-      ? "مراجعة حركة الخزينة العامة مع الرصيد الجاري حسب الحساب والفترة ونوع الحركة."
-      : "Review the general treasury statement with running balance by account, period, and transaction type.",
-
-    back: isArabic ? "الخزينة" : "Treasury",
-    accounts: isArabic ? "حسابات الخزينة" : "Treasury Accounts",
-    transactions: isArabic ? "الحركات المالية" : "Transactions",
-    vouchers: isArabic ? "السندات" : "Vouchers",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-
-    summaryTitle: isArabic ? "ملخص كشف الحساب" : "Statement Summary",
-    summaryDesc: isArabic
-      ? "ملخص الأرصدة والحركات حسب الفلاتر الحالية."
-      : "Balance and movement summary based on the current filters.",
-
-    tableTitle: isArabic ? "حركة كشف الحساب" : "Statement Movements",
-    tableDesc: isArabic
-      ? "كل الحركات التي تؤثر على كشف حساب الخزينة."
-      : "All movements affecting the treasury statement.",
-
-    openingBalance: isArabic ? "رصيد افتتاحي" : "Opening Balance",
-    totalDebit: isArabic ? "إجمالي مدين" : "Total Debit",
-    totalCredit: isArabic ? "إجمالي دائن" : "Total Credit",
-    closingBalance: isArabic ? "الرصيد الختامي" : "Closing Balance",
-    rowsCount: isArabic ? "عدد الحركات" : "Rows Count",
-    confirmedCount: isArabic ? "مؤكدة" : "Confirmed",
-    draftCount: isArabic ? "مسودات" : "Drafts",
-    cancelledCount: isArabic ? "ملغاة" : "Cancelled",
-    treasuryPosted: isArabic ? "مرحّل خزينة" : "Treasury Posted",
-    accountingPosted: isArabic ? "مرحّل محاسبيًا" : "Accounting Posted",
-
-    searchPlaceholder: isArabic
-      ? "ابحث برقم الحركة أو الحساب أو المرجع أو الوصف..."
-      : "Search by transaction number, account, reference, or description...",
-
-    allAccounts: isArabic ? "كل حسابات الخزينة" : "All Treasury Accounts",
-    allTypes: isArabic ? "كل أنواع الحركات" : "All Transaction Types",
-    allStatuses: isArabic ? "كل الحالات" : "All Statuses",
-    fromDate: isArabic ? "من تاريخ" : "From Date",
-    toDate: isArabic ? "إلى تاريخ" : "To Date",
-    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
-
-    receipt: isArabic ? "قبض" : "Receipt",
-    payment: isArabic ? "صرف" : "Payment",
-    transfer: isArabic ? "تحويل" : "Transfer",
-    adjustment: isArabic ? "تسوية" : "Adjustment",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    draft: isArabic ? "مسودة" : "Draft",
-    confirmed: isArabic ? "مؤكد" : "Confirmed",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
-
-    debit: isArabic ? "مدين" : "Debit",
-    credit: isArabic ? "دائن" : "Credit",
-    runningBalance: isArabic ? "الرصيد الجاري" : "Running Balance",
-    posted: isArabic ? "مرحّل" : "Posted",
-    notPosted: isArabic ? "غير مرحّل" : "Not Posted",
-    accounting: isArabic ? "محاسبي" : "Accounting",
-    treasury: isArabic ? "خزينة" : "Treasury",
-
-    table: {
-      date: isArabic ? "التاريخ" : "Date",
-      number: isArabic ? "رقم الحركة" : "Transaction No.",
-      type: isArabic ? "نوع الحركة" : "Type",
-      status: isArabic ? "الحالة" : "Status",
-      account: isArabic ? "الحساب" : "Account",
-      debit: isArabic ? "مدين" : "Debit",
-      credit: isArabic ? "دائن" : "Credit",
-      balance: isArabic ? "الرصيد" : "Balance",
-      reference: isArabic ? "المرجع" : "Reference",
-      posting: isArabic ? "الترحيل" : "Posting",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    view: isArabic ? "عرض" : "View",
-
-    emptyTitle: isArabic ? "لا توجد حركات" : "No movements",
-    emptyText: isArabic
-      ? "ستظهر حركات كشف الحساب هنا بعد تسجيلها."
-      : "Statement movements will appear here after they are recorded.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير البحث أو الفلاتر."
-      : "Try changing the search or filters.",
-
-    accessDeniedTitle: isArabic
-      ? "غير مصرح بعرض كشف حساب الخزينة"
-      : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض كشف حساب الخزينة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view treasury statement. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل كشف حساب الخزينة."
-      : "Unable to load treasury statement.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث كشف حساب الخزينة بنجاح."
-      : "Treasury statement refreshed successfully.",
-
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    previous: isArabic ? "السابق" : "Previous",
-    next: isArabic ? "التالي" : "Next",
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-  };
+  return fallback;
 }
 
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
+function formatInteger(value: unknown) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(toNumber(value));
 }
 
-function formatNumber(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
-}
-
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function formatDate(value: string, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).replace("T", " ").slice(0, 16);
 
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
 }
 
-function escapeHtml(value: string | number) {
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -631,1643 +382,1138 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
 
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
 
-  for (const container of [
-    "account",
-    "treasury_account",
-    "from_account",
-    "to_account",
-    "destination_account",
-    "cashbox",
-    "bank",
-    "transaction",
-    "treasury_transaction",
-    "item",
-    "data",
-  ]) {
-    const nested = obj[container];
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
+}
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const query = params?.toString();
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
+}
 
-      if (value !== undefined && value !== null && value !== "") return value;
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  return (payload || {}) as T;
 }
 
-function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
+function extractData(payload: ApiResponse | null) {
+  return asRecord(payload?.data);
+}
+
+function extractItems(payload: ApiResponse | null) {
   if (!payload) return [];
 
-  const data = asDict(payload.data);
-  const directValue = (payload as Dict)[key];
-
-  if (Array.isArray(directValue)) return directValue;
   if (Array.isArray(payload.results)) return payload.results;
   if (Array.isArray(payload.items)) return payload.items;
   if (Array.isArray(payload.rows)) return payload.rows;
 
-  if (Array.isArray(data[key])) return data[key] as unknown[];
-  if (Array.isArray(data.results)) return data.results as unknown[];
-  if (Array.isArray(data.items)) return data.items as unknown[];
-  if (Array.isArray(data.rows)) return data.rows as unknown[];
+  const data = extractData(payload);
 
-  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.rows)) return data.rows;
+  if (Array.isArray(data.accounts)) return data.accounts;
+  if (Array.isArray(data.transactions)) return data.transactions;
 
   return [];
 }
 
-function normalizeTransactionType(value: unknown): TransactionType {
-  const clean = String(value || "").toUpperCase();
-
-  if (["RECEIPT", "INCOME", "RECEIVE", "CASH_IN"].includes(clean)) {
-    return "RECEIPT";
-  }
-
-  if (["PAYMENT", "EXPENSE", "PAY", "CASH_OUT"].includes(clean)) {
-    return "PAYMENT";
-  }
-
-  if (["TRANSFER", "INTERNAL_TRANSFER"].includes(clean)) return "TRANSFER";
-  if (["ADJUSTMENT", "OPENING_BALANCE"].includes(clean)) return "ADJUSTMENT";
-
-  return "UNKNOWN";
-}
-
-function normalizeStatus(value: unknown): TransactionStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["DRAFT", "PENDING"].includes(clean)) return "DRAFT";
-  if (["CONFIRMED", "POSTED", "APPROVED", "TRUE"].includes(clean)) {
-    return "CONFIRMED";
-  }
-  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
-
-  if (typeof value === "boolean") return value ? "CONFIRMED" : "DRAFT";
-
-  return "UNKNOWN";
-}
-
-function normalizeAccount(item: unknown): TreasuryAccountOption {
-  const obj = asDict(item);
+function normalizeAccount(value: unknown): TreasuryAccount {
+  const item = asRecord(value);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || ""),
-    name: String(getNestedValue(obj, ["name", "title", "label"]) || "-"),
-    code: String(getNestedValue(obj, ["code", "account_code", "number"]) || "-"),
-    current_balance: toNumber(
-      getNestedValue(obj, ["current_balance", "balance", "available_balance"]),
-    ),
+    id: normalizeText(item.id || item.pk || item.uuid),
+    name: normalizeText(item.name || item.title),
+    code: normalizeText(item.code || item.number),
+    account_type: normalizeText(item.account_type || item.type),
+    account_type_label: normalizeText(item.account_type_label || item.type_label),
+    current_balance: toNumber(item.current_balance ?? item.balance),
+    opening_balance: toNumber(item.opening_balance),
+    currency: normalizeText(item.currency || "SAR"),
+    status: normalizeText(item.status || "active"),
   };
 }
 
-function normalizeStatementRow(item: unknown, index: number): StatementRow {
-  const obj = asDict(item);
-  const accountObj = asDict(obj.account || obj.treasury_account || obj.from_account);
-  const toAccountObj = asDict(obj.to_account || obj.destination_account);
-
-  const transactionType = normalizeTransactionType(
-    getNestedValue(obj, ["transaction_type", "type", "kind", "voucher_type"]),
-  );
-
-  const amount = toNumber(getNestedValue(obj, ["amount", "total_amount", "value"]));
-
-  const debit =
-    transactionType === "RECEIPT" || transactionType === "ADJUSTMENT"
-      ? amount
-      : 0;
-
-  const credit = transactionType === "PAYMENT" ? amount : 0;
+function normalizeTransaction(value: unknown): TreasuryTransaction {
+  const item = asRecord(value);
+  const account = asRecord(item.treasury_account || item.account);
+  const destination = asRecord(item.destination_account || item.to_account);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    transaction_number: String(
-      getNestedValue(obj, [
-        "transaction_number",
-        "voucher_number",
-        "number",
-        "code",
-        "reference",
-      ]) || "-",
-    ),
-    transaction_type: transactionType,
-    status: normalizeStatus(getNestedValue(obj, ["status", "state", "is_confirmed"])),
-    amount,
-    debit,
-    credit,
-    running_balance: 0,
-    transaction_date: String(
-      getNestedValue(obj, ["transaction_date", "date", "created_at"]) || "",
-    ),
-    account_id: String(
-      getNestedValue(obj, [
-        "account_id",
-        "treasury_account_id",
-        "from_account_id",
-        "cashbox_id",
-        "bank_id",
-      ]) ||
-        accountObj.id ||
-        accountObj.uuid ||
-        "",
-    ),
-    account_name: String(
-      accountObj.name ||
-        accountObj.title ||
-        getNestedValue(obj, [
-          "account_name",
-          "treasury_account_name",
-          "from_account_name",
-          "cashbox_name",
-          "bank_name",
-        ]) ||
-        "",
-    ),
-    account_code: String(
-      accountObj.code ||
-        accountObj.account_code ||
-        getNestedValue(obj, [
-          "account_code",
-          "treasury_account_code",
-          "from_account_code",
-        ]) ||
-        "",
-    ),
-    to_account_id: String(
-      getNestedValue(obj, ["to_account_id", "destination_account_id"]) ||
-        toAccountObj.id ||
-        toAccountObj.uuid ||
-        "",
-    ),
-    to_account_name: String(
-      toAccountObj.name ||
-        toAccountObj.title ||
-        getNestedValue(obj, ["to_account_name", "destination_account_name"]) ||
-        "",
-    ),
-    to_account_code: String(
-      toAccountObj.code ||
-        toAccountObj.account_code ||
-        getNestedValue(obj, ["to_account_code", "destination_account_code"]) ||
-        "",
-    ),
-    source_reference: String(
-      getNestedValue(obj, [
-        "source_reference",
-        "external_reference",
-        "payment_reference",
-        "accounting_reference",
-        "ref",
-      ]) || "",
-    ),
-    description: String(getNestedValue(obj, ["description", "notes", "memo"]) || ""),
-    is_treasury_posted: Boolean(
-      getNestedValue(obj, ["is_treasury_posted", "treasury_posted"]),
-    ),
-    is_accounting_posted: Boolean(
-      getNestedValue(obj, ["is_accounting_posted", "accounting_posted"]),
-    ),
-    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
+    id: normalizeText(item.id || item.pk || item.uuid),
+    transaction_number: normalizeText(item.transaction_number || item.number || item.reference),
+    transaction_type: normalizeText(item.transaction_type || item.type || "adjustment"),
+    transaction_type_label: normalizeText(item.transaction_type_label || item.type_label),
+    source: normalizeText(item.source),
+    source_label: normalizeText(item.source_label),
+    status: normalizeText(item.status || "draft").toLowerCase(),
+    status_label: normalizeText(item.status_label),
+    transaction_date:
+      normalizeText(item.transaction_date || item.date || item.created_at) || null,
+    treasury_account_id: normalizeText(item.treasury_account_id || item.account_id || account.id || account.pk),
+    treasury_account_name: normalizeText(account.name || item.treasury_account_name || item.account_name),
+    treasury_account_code: normalizeText(account.code || item.treasury_account_code || item.account_code),
+    destination_account_id: normalizeText(item.destination_account_id || item.to_account_id || destination.id || destination.pk),
+    destination_account_name: normalizeText(destination.name || item.destination_account_name || item.to_account_name),
+    destination_account_code: normalizeText(destination.code || item.destination_account_code || item.to_account_code),
+    amount: toNumber(item.amount),
+    fees_amount: toNumber(item.fees_amount || item.fee_amount),
+    net_amount: toNumber(item.net_amount ?? item.amount),
+    currency: normalizeText(item.currency || "SAR"),
+    reference: normalizeText(item.reference || item.external_reference),
+    source_number: normalizeText(item.source_number || item.source_reference),
+    party_name: normalizeText(item.party_name),
+    description: normalizeText(item.description || item.notes),
+    balance_applied: toBoolean(item.balance_applied || item.is_balance_applied),
+    created_at: normalizeText(item.created_at) || null,
   };
 }
 
-function attachRunningBalance(rows: StatementRow[], openingBalance = 0) {
-  let balance = openingBalance;
+function statusLabel(status: string, locale: Locale) {
+  const t = translations[locale];
 
-  return rows.map((item) => {
-    const delta = item.debit - item.credit;
-    balance += delta;
+  if (status === "confirmed") return t.confirmed;
+  if (status === "cancelled") return t.cancelled;
 
-    return {
-      ...item,
-      running_balance: balance,
-    };
-  });
+  return t.draft;
 }
 
-function buildSummary(rows: StatementRow[], openingBalance = 0): StatementSummary {
-  const totalDebit = rows.reduce((sum, item) => sum + item.debit, 0);
-  const totalCredit = rows.reduce((sum, item) => sum + item.credit, 0);
+function typeLabel(type: string, locale: Locale) {
+  const t = translations[locale];
 
-  return {
-    rows_count: rows.length,
-    opening_balance: openingBalance,
-    total_debit: totalDebit,
-    total_credit: totalCredit,
-    closing_balance: openingBalance + totalDebit - totalCredit,
-    confirmed_count: rows.filter((item) => item.status === "CONFIRMED").length,
-    draft_count: rows.filter((item) => item.status === "DRAFT").length,
-    cancelled_count: rows.filter((item) => item.status === "CANCELLED").length,
-    treasury_posted_count: rows.filter((item) => item.is_treasury_posted).length,
-    accounting_posted_count: rows.filter((item) => item.is_accounting_posted)
-      .length,
-  };
+  if (type === "income") return t.income;
+  if (type === "expense") return t.expense;
+  if (type === "transfer") return t.transfer;
+  if (type === "deposit") return t.deposit;
+  if (type === "withdraw") return t.withdraw;
+  if (type === "opening_balance") return t.openingBalanceType;
+  if (type === "refund") return t.refund;
+  if (type === "fee") return t.fee;
+  if (type === "adjustment") return t.adjustment;
+
+  return type || t.notAvailable;
 }
 
-function transactionTypeLabel(type: TransactionType, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<TransactionType, string> = {
-    RECEIPT: t.receipt,
-    PAYMENT: t.payment,
-    TRANSFER: t.transfer,
-    ADJUSTMENT: t.adjustment,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[type];
-}
-
-function statusLabel(status: TransactionStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<TransactionStatus, string> = {
-    DRAFT: t.draft,
-    CONFIRMED: t.confirmed,
-    CANCELLED: t.cancelled,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function typeBadge(type: TransactionType, locale: AppLocale) {
-  const label = transactionTypeLabel(type, locale);
-
-  if (type === "RECEIPT") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+function statusClass(status: string) {
+  if (status === "confirmed") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
-  if (type === "PAYMENT") {
-    return (
-      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
-        {label}
-      </Badge>
-    );
+  if (status === "cancelled") {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
   }
 
-  if (type === "TRANSFER") {
-    return (
-      <Badge className="rounded-full border-sky-200 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50 dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-300">
-        {label}
-      </Badge>
-    );
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function typeClass(type: string) {
+  if (["income", "deposit", "opening_balance"].includes(type)) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
+  if (["expense", "withdraw", "refund", "fee"].includes(type)) {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+  }
+
+  if (type === "transfer") {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  return "border-violet-500/30 bg-violet-50 text-violet-700 hover:bg-violet-50";
+}
+
+function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", statusClass(status))}
+    >
+      {statusLabel(status, locale)}
     </Badge>
   );
 }
 
-function statusBadge(status: TransactionStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "CONFIRMED") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "DRAFT") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "CANCELLED") {
-    return (
-      <Badge variant="secondary" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
+function TypeBadge({ type, locale }: { type: string; locale: Locale }) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", typeClass(type))}
+    >
+      {typeLabel(type, locale)}
     </Badge>
   );
 }
 
-function sortValue(row: StatementRow, key: SortKey): string | number {
-  if (key === "amount") return row.amount;
-
-  return String(row[key] || "");
-}
-
-function isValidId(value: unknown) {
-  const id = String(value || "").trim();
-
-  return id && id !== "-" && id !== "undefined" && id !== "null";
-}
-
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+function MoneyValue({ value, label }: { value: number; label: string }) {
   return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
-  );
-}
-
-function MoneyText({ value }: { value: unknown }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <div className="flex items-center justify-start gap-1 text-sm font-semibold tabular-nums">
       <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function KpiSkeleton() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <SkeletonLine className="h-8 w-28" />
-            <SkeletonLine className="mt-3 h-4 w-24" />
-          </CardContent>
-        </Card>
-      ))}
+      <img src="/currency/sar.svg" alt={label} className="h-3.5 w-3.5" />
     </div>
   );
 }
 
-function TableSkeleton() {
+function KpiCard({
+  title,
+  value,
+  trend,
+  icon: Icon,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
   return (
-    <>
-      {Array.from({ length: 7 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: 11 }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 1
-                    ? "h-8 w-44 rounded-lg"
-                    : "h-4 w-24 rounded-lg"
-                }
-              />
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </>
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
+
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
+        </div>
+      </CardHeader>
+    </Card>
   );
 }
 
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  worksheetName,
-  title,
-  locale,
-  summary,
-  rows,
-}: {
-  filename: string;
-  worksheetName: string;
-  title: string;
-  locale: AppLocale;
-  summary: StatementSummary;
-  rows: StatementRow[];
-}) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const t = dictionary(locale);
-
-  const rowsHtml = rows
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(formatDate(item.transaction_date, locale))}</td>
-          <td>${escapeHtml(item.transaction_number)}</td>
-          <td>${escapeHtml(transactionTypeLabel(item.transaction_type, locale))}</td>
-          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(item.account_name || "-")}</td>
-          <td>${escapeHtml(item.account_code || "-")}</td>
-          <td>${escapeHtml(formatMoney(item.debit))}</td>
-          <td>${escapeHtml(formatMoney(item.credit))}</td>
-          <td>${escapeHtml(formatMoney(item.running_balance))}</td>
-          <td>${escapeHtml(item.source_reference || "-")}</td>
-          <td>${escapeHtml(item.is_treasury_posted ? t.posted : t.notPosted)}</td>
-          <td>${escapeHtml(item.is_accounting_posted ? t.posted : t.notPosted)}</td>
-          <td>${escapeHtml(item.description || "-")}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${isArabic ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; color: #000; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-          .summary-value { font-weight: 700; }
-        </style>
-      </head>
-
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="13">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="13"></td></tr>
-          <tr><td class="section" colspan="13">${escapeHtml(t.summaryTitle)}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.generatedAt)}</td><td class="summary-value" colspan="12">${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.openingBalance)}</td><td class="summary-value" colspan="12">${escapeHtml(formatMoney(summary.opening_balance))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalDebit)}</td><td class="summary-value" colspan="12">${escapeHtml(formatMoney(summary.total_debit))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalCredit)}</td><td class="summary-value" colspan="12">${escapeHtml(formatMoney(summary.total_credit))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.closingBalance)}</td><td class="summary-value" colspan="12">${escapeHtml(formatMoney(summary.closing_balance))}</td></tr>
-
-          <tr><td colspan="13"></td></tr>
-          <tr>
-            <th>${escapeHtml(t.table.date)}</th>
-            <th>${escapeHtml(t.table.number)}</th>
-            <th>${escapeHtml(t.table.type)}</th>
-            <th>${escapeHtml(t.table.status)}</th>
-            <th>${escapeHtml(t.table.account)}</th>
-            <th>${escapeHtml(isArabic ? "كود الحساب" : "Account Code")}</th>
-            <th>${escapeHtml(t.table.debit)}</th>
-            <th>${escapeHtml(t.table.credit)}</th>
-            <th>${escapeHtml(t.table.balance)}</th>
-            <th>${escapeHtml(t.table.reference)}</th>
-            <th>${escapeHtml(t.treasuryPosted)}</th>
-            <th>${escapeHtml(t.accountingPosted)}</th>
-            <th>${escapeHtml(isArabic ? "الوصف" : "Description")}</th>
-          </tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  summary,
-  rows,
-}: {
-  locale: AppLocale;
-  title: string;
-  summary: StatementSummary;
-  rows: StatementRow[];
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-  const now = new Date().toLocaleString("en-US");
-
-  const tableRows = rows
-    .map(
-      (item, index) => `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(formatDate(item.transaction_date, locale))}</td>
-          <td>${escapeHtml(item.transaction_number)}</td>
-          <td>${escapeHtml(transactionTypeLabel(item.transaction_type, locale))}</td>
-          <td>${escapeHtml(item.account_name || "-")}</td>
-          <td>${escapeHtml(formatMoney(item.debit))}</td>
-          <td>${escapeHtml(formatMoney(item.credit))}</td>
-          <td>${escapeHtml(formatMoney(item.running_balance))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .print-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 18px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .summary-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .summary-card span {
-            display: block;
-            color: #6b7280;
-            font-size: 11px;
-            margin-bottom: 5px;
-          }
-          .summary-card strong { font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; }
-          th { background: #f3f4f6; color: #111827; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 9px 8px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          tr:nth-child(even) td { background: #fafafa; }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-
-      <body>
-        <div class="print-header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
-          </div>
-          <div class="badge">Primey Care</div>
+function PageSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-96" />
         </div>
 
-        <div class="summary-grid">
-          <div class="summary-card"><span>${escapeHtml(t.openingBalance)}</span><strong>${formatMoney(summary.opening_balance)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.totalDebit)}</span><strong>${formatMoney(summary.total_debit)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.totalCredit)}</span><strong>${formatMoney(summary.total_credit)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.closingBalance)}</span><strong>${formatMoney(summary.closing_balance)}</strong></div>
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-24" />
         </div>
+      </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>${escapeHtml(t.table.date)}</th>
-              <th>${escapeHtml(t.table.number)}</th>
-              <th>${escapeHtml(t.table.type)}</th>
-              <th>${escapeHtml(t.table.account)}</th>
-              <th>${escapeHtml(t.table.debit)}</th>
-              <th>${escapeHtml(t.table.credit)}</th>
-              <th>${escapeHtml(t.table.balance)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="8" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
-        </table>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="min-h-[112px] px-6 py-5">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-5 w-20" />
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
 
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+      <Card className="rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-80 w-full" />
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
-
-/* ============================================================
-   Page
-============================================================ */
 
 export default function TreasuryStatementPage() {
-  const auth = useAuth() as unknown;
+  const searchParams = useSearchParams();
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [rows, setRows] = useState<StatementRow[]>([]);
-  const [accounts, setAccounts] = useState<TreasuryAccountOption[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [accounts, setAccounts] = React.useState<TreasuryAccount[]>([]);
+  const [transactions, setTransactions] = React.useState<TreasuryTransaction[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState("");
 
-  const [query, setQuery] = useState("");
-  const [accountFilter, setAccountFilter] = useState<AccountFilter>("ALL");
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("ALL");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("transaction_date");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = React.useState("");
+  const [accountFilter, setAccountFilter] = React.useState("all");
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
+  const [typeFilter, setTypeFilter] = React.useState<TypeFilter>("all");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
+  const [sortKey, setSortKey] = React.useState<SortKey>("newest");
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const canView = hasSafePermission(
-    auth,
-    [
-      "treasury.view",
-      "treasury.statement.view",
-      "treasury.transactions.view",
-      "treasury.reports.view",
-    ],
-    "view",
+  React.useEffect(() => {
+    const urlAccountId = searchParams.get("account_id") || searchParams.get("account") || "";
+    if (urlAccountId) setAccountFilter(urlAccountId);
+  }, [searchParams]);
+
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
+
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
+
+    applyLocale();
+
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
+
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
+
+  const loadStatement = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
+
+      try {
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setError("");
+
+        const transactionParams = new URLSearchParams({
+          page: "1",
+          page_size: "1000",
+          ordering: "transaction_date",
+        });
+
+        if (dateFrom) transactionParams.set("date_from", dateFrom);
+        if (dateTo) transactionParams.set("date_to", dateTo);
+
+        const accountParams = new URLSearchParams({
+          page: "1",
+          page_size: "500",
+          ordering: "account_type",
+        });
+
+        const [transactionsPayload, accountsPayload] = await Promise.all([
+          fetchJson<ApiResponse>(makeApiUrl(API.transactions, transactionParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API.accounts, accountParams), controller.signal).catch(() => null),
+        ]);
+
+        const nextTransactions = extractItems(transactionsPayload)
+          .map(normalizeTransaction)
+          .filter((row) => row.id || row.transaction_number);
+
+        const nextAccounts = extractItems(accountsPayload)
+          .map(normalizeAccount)
+          .filter((row) => row.id || row.name || row.code);
+
+        setTransactions(nextTransactions);
+        setAccounts(nextAccounts);
+
+        if (silent) toast.success(t.refreshed);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+
+      return () => controller.abort();
+    },
+    [dateFrom, dateTo, t.errorDesc, t.refreshed],
   );
 
-  const canExport = hasSafePermission(
-    auth,
-    ["treasury.export", "treasury.reports.export", "reports.export"],
-    "action",
-  );
+  React.useEffect(() => {
+    void loadStatement();
+  }, [loadStatement]);
 
-  const canPrint = hasSafePermission(
-    auth,
-    ["treasury.print", "treasury.reports.print", "reports.print"],
-    "action",
-  );
+  const selectedAccount = React.useMemo(() => {
+    return accounts.find((account) => account.id === accountFilter) || null;
+  }, [accountFilter, accounts]);
 
-  const canViewDetails = hasSafePermission(
-    auth,
-    ["treasury.view", "treasury.transactions.view"],
-    "view",
-  );
+  const statementRows = React.useMemo<StatementRow[]>(() => {
+    const query = searchInput.trim().toLowerCase();
 
-  const selectedAccount = useMemo(
-    () => accounts.find((item) => item.id === accountFilter) || null,
-    [accountFilter, accounts],
-  );
+    const filtered = transactions.filter((transaction) => {
+      const rowDate = formatDate(transaction.transaction_date).slice(0, 10);
 
-  const openingBalance = selectedAccount?.current_balance || 0;
+      const matchesSearch =
+        !query ||
+        transaction.transaction_number.toLowerCase().includes(query) ||
+        transaction.treasury_account_name.toLowerCase().includes(query) ||
+        transaction.destination_account_name.toLowerCase().includes(query) ||
+        transaction.party_name.toLowerCase().includes(query) ||
+        transaction.description.toLowerCase().includes(query) ||
+        transaction.reference.toLowerCase().includes(query) ||
+        transaction.source_number.toLowerCase().includes(query);
 
-  const filteredRows = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
-
-    const filtered = rows.filter((item) => {
       const matchesAccount =
-        accountFilter === "ALL"
-          ? true
-          : item.account_id === accountFilter ||
-            item.account_code === accountFilter ||
-            item.to_account_id === accountFilter ||
-            item.to_account_code === accountFilter;
+        accountFilter === "all" ||
+        transaction.treasury_account_id === accountFilter ||
+        transaction.destination_account_id === accountFilter;
 
-      const matchesType =
-        typeFilter === "ALL" ? true : item.transaction_type === typeFilter;
+      const matchesStatus = statusFilter === "all" || transaction.status === statusFilter;
+      const matchesType = typeFilter === "all" || transaction.transaction_type === typeFilter;
+      const matchesFrom = !dateFrom || rowDate >= dateFrom;
+      const matchesTo = !dateTo || rowDate <= dateTo;
 
-      const matchesStatus =
-        statusFilter === "ALL" ? true : item.status === statusFilter;
+      return matchesSearch && matchesAccount && matchesStatus && matchesType && matchesFrom && matchesTo;
+    });
 
-      const rowDate = item.transaction_date ? item.transaction_date.slice(0, 10) : "";
+    const chronological = [...filtered].sort((a, b) => {
+      const aDate = String(a.transaction_date || a.created_at || "");
+      const bDate = String(b.transaction_date || b.created_at || "");
+      return aDate.localeCompare(bDate);
+    });
 
-      const matchesFromDate = fromDate ? rowDate >= fromDate : true;
-      const matchesToDate = toDate ? rowDate <= toDate : true;
+    const openingBalance = selectedAccount ? selectedAccount.opening_balance : 0;
+    let runningBalance = openingBalance;
 
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            item.transaction_number,
-            item.account_name,
-            item.account_code,
-            item.to_account_name,
-            item.to_account_code,
-            item.source_reference,
-            item.description,
-            transactionTypeLabel(item.transaction_type, locale),
-            statusLabel(item.status, locale),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
+    const rows = chronological.map((transaction) => {
+      const type = transaction.transaction_type;
+      const isDestination =
+        accountFilter !== "all" && transaction.destination_account_id === accountFilter;
+      const isSource =
+        accountFilter === "all" || transaction.treasury_account_id === accountFilter;
 
-      return (
-        matchesAccount &&
-        matchesType &&
-        matchesStatus &&
-        matchesFromDate &&
-        matchesToDate &&
-        matchesQuery
+      let debit = 0;
+      let credit = 0;
+
+      if (type === "transfer") {
+        if (isDestination) debit = transaction.net_amount;
+        else if (isSource) credit = transaction.net_amount;
+      } else if (["income", "deposit", "opening_balance"].includes(type)) {
+        debit = transaction.net_amount;
+      } else if (["expense", "withdraw", "refund", "fee"].includes(type)) {
+        credit = transaction.net_amount;
+      } else if (type === "adjustment") {
+        if (transaction.net_amount >= 0) debit = transaction.net_amount;
+        else credit = Math.abs(transaction.net_amount);
+      }
+
+      runningBalance = runningBalance + debit - credit;
+
+      return {
+        ...transaction,
+        debit,
+        credit,
+        running_balance: runningBalance,
+      };
+    });
+
+    const sorted = [...rows].sort((a, b) => {
+      if (sortKey === "oldest") {
+        return String(a.transaction_date || a.created_at || "").localeCompare(
+          String(b.transaction_date || b.created_at || ""),
+        );
+      }
+
+      if (sortKey === "amount_high") return Math.abs(b.net_amount) - Math.abs(a.net_amount);
+      if (sortKey === "amount_low") return Math.abs(a.net_amount) - Math.abs(b.net_amount);
+      if (sortKey === "number") return a.transaction_number.localeCompare(b.transaction_number);
+
+      return String(b.transaction_date || b.created_at || "").localeCompare(
+        String(a.transaction_date || a.created_at || ""),
       );
     });
 
-    const sorted = [...filtered].sort((a, b) => {
-      const first = sortValue(a, sortKey);
-      const second = sortValue(b, sortKey);
-
-      if (typeof first === "number" && typeof second === "number") {
-        return sortDirection === "asc" ? first - second : second - first;
-      }
-
-      return sortDirection === "asc"
-        ? String(first).localeCompare(String(second))
-        : String(second).localeCompare(String(first));
-    });
-
-    const balanceRows = attachRunningBalance(
-      [...sorted].reverse(),
-      accountFilter === "ALL" ? 0 : openingBalance,
-    );
-
-    return sortDirection === "desc" ? [...balanceRows].reverse() : balanceRows;
+    return sorted;
   }, [
     accountFilter,
-    fromDate,
-    locale,
-    openingBalance,
-    query,
-    rows,
-    sortDirection,
+    dateFrom,
+    dateTo,
+    searchInput,
+    selectedAccount,
     sortKey,
     statusFilter,
-    toDate,
+    transactions,
     typeFilter,
   ]);
 
-  const activeSummary = useMemo(
-    () => buildSummary(filteredRows, accountFilter === "ALL" ? 0 : openingBalance),
-    [accountFilter, filteredRows, openingBalance],
-  );
+  const openingBalance = selectedAccount ? selectedAccount.opening_balance : 0;
+  const totalDebit = statementRows.reduce((sum, row) => sum + row.debit, 0);
+  const totalCredit = statementRows.reduce((sum, row) => sum + row.credit, 0);
+  const closingBalance = openingBalance + totalDebit - totalCredit;
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const hasFilters =
+    Boolean(searchInput.trim()) ||
+    accountFilter !== "all" ||
+    statusFilter !== "all" ||
+    typeFilter !== "all" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo) ||
+    sortKey !== "newest";
 
-  const paginatedRows = useMemo(() => {
-    const safePage = Math.min(page, totalPages);
-    const startIndex = (safePage - 1) * PAGE_SIZE;
-
-    return filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
-  }, [filteredRows, page, totalPages]);
-
-  const hasSearchOrFilter =
-    query.trim().length > 0 ||
-    accountFilter !== "ALL" ||
-    typeFilter !== "ALL" ||
-    statusFilter !== "ALL" ||
-    Boolean(fromDate) ||
-    Boolean(toDate);
-
-  const typeOptions: Array<{ value: TypeFilter; label: string }> = [
-    { value: "ALL", label: t.allTypes },
-    { value: "RECEIPT", label: t.receipt },
-    { value: "PAYMENT", label: t.payment },
-    { value: "TRANSFER", label: t.transfer },
-    { value: "ADJUSTMENT", label: t.adjustment },
-  ];
-
-  const statusOptions: Array<{ value: StatusFilter; label: string }> = [
-    { value: "ALL", label: t.allStatuses },
-    { value: "DRAFT", label: t.draft },
-    { value: "CONFIRMED", label: t.confirmed },
-    { value: "CANCELLED", label: t.cancelled },
-  ];
-
-  const loadStatement = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setRows([]);
-        setAccounts([]);
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        setIsLoading(true);
-        setErrorMessage("");
-
-        const [transactionsResponse, accountsResponse] = await Promise.allSettled([
-          fetch(apiUrl("/api/treasury/transactions/?page_size=500"), {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-          }),
-          fetch(apiUrl("/api/treasury/accounts/?page_size=500"), {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-          }),
-        ]);
-
-        async function readJson(result: PromiseSettledResult<Response>) {
-          if (result.status !== "fulfilled") return null;
-
-          const response = result.value;
-          const payload = (await response.json().catch(() => null)) as
-            | ApiEnvelope<unknown>
-            | null;
-
-          if ([400, 404, 405].includes(response.status)) return null;
-
-          if (
-            !response.ok ||
-            payload?.ok === false ||
-            payload?.success === false
-          ) {
-            throw new Error(
-              payload?.message ||
-                payload?.detail ||
-                payload?.error ||
-                `HTTP ${response.status}`,
-            );
-          }
-
-          return payload;
-        }
-
-        const transactionsPayload = await readJson(transactionsResponse);
-        const accountsPayload = await readJson(accountsResponse);
-
-        const normalizedRows = extractRows(transactionsPayload, "transactions")
-          .map(normalizeStatementRow)
-          .filter((item) => item.id || item.transaction_number);
-
-        const normalizedAccounts = extractRows(accountsPayload, "accounts")
-          .map(normalizeAccount)
-          .filter((item) => item.id || item.name);
-
-        setRows(normalizedRows);
-        setAccounts(normalizedAccounts);
-        setPage(1);
-
-        if (showToast) toast.success(t.loadSuccess);
-      } catch (error) {
-        console.error("Treasury statement load error:", error);
-        setRows([]);
-        setAccounts([]);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [canView, t.loadError, t.loadSuccess],
-  );
-
-  function clearFilters() {
-    setQuery("");
-    setAccountFilter("ALL");
-    setTypeFilter("ALL");
-    setStatusFilter("ALL");
-    setFromDate("");
-    setToDate("");
-    setPage(1);
+  function resetFilters() {
+    setSearchInput("");
+    setAccountFilter("all");
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setDateFrom("");
+    setDateTo("");
+    setSortKey("newest");
   }
 
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
-
-    setSortKey(key);
-    setSortDirection("asc");
+  function buildExportRows() {
+    return statementRows.map((row) => ({
+      number: row.transaction_number || t.notAvailable,
+      date: formatDate(row.transaction_date),
+      type: row.transaction_type_label || typeLabel(row.transaction_type, locale),
+      status: row.status_label || statusLabel(row.status, locale),
+      account: row.treasury_account_name || t.notAvailable,
+      party: row.party_name || t.notAvailable,
+      description: row.description || t.notAvailable,
+      reference: row.reference || row.source_number || t.notAvailable,
+      debit: formatMoney(row.debit),
+      credit: formatMoney(row.credit),
+      runningBalance: formatMoney(row.running_balance),
+    }));
   }
 
   function exportExcel() {
-    if (!canExport) return;
+    const rows = buildExportRows();
 
-    if (filteredRows.length === 0) {
+    if (!rows.length) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    downloadExcel({
-      filename: `primey-care-treasury-statement-${new Date()
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "كشف الخزينة" : "Statement",
-      title: t.title,
-      locale,
-      summary: activeSummary,
-      rows: filteredRows,
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(t.printTitle)}</h1>
+          <p>${escapeHtml(t.account)}: ${escapeHtml(selectedAccount?.name || t.all)}</p>
+          <p>${escapeHtml(t.openingBalance)}: ${escapeHtml(formatMoney(openingBalance))}</p>
+          <p>${escapeHtml(t.totalDebit)}: ${escapeHtml(formatMoney(totalDebit))}</p>
+          <p>${escapeHtml(t.totalCredit)}: ${escapeHtml(formatMoney(totalCredit))}</p>
+          <p>${escapeHtml(t.closingBalance)}: ${escapeHtml(formatMoney(closingBalance))}</p>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.number)}</th>
+                <th>${escapeHtml(t.date)}</th>
+                <th>${escapeHtml(t.movementType)}</th>
+                <th>${escapeHtml(t.movementStatus)}</th>
+                <th>${escapeHtml(t.treasuryAccount)}</th>
+                <th>${escapeHtml(t.party)}</th>
+                <th>${escapeHtml(t.description)}</th>
+                <th>${escapeHtml(t.reference)}</th>
+                <th>${escapeHtml(t.debit)}</th>
+                <th>${escapeHtml(t.credit)}</th>
+                <th>${escapeHtml(t.runningBalance)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.number)}</td>
+                      <td>${escapeHtml(row.date)}</td>
+                      <td>${escapeHtml(row.type)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.account)}</td>
+                      <td>${escapeHtml(row.party)}</td>
+                      <td>${escapeHtml(row.description)}</td>
+                      <td>${escapeHtml(row.reference)}</td>
+                      <td>${escapeHtml(row.debit)}</td>
+                      <td>${escapeHtml(row.credit)}</td>
+                      <td>${escapeHtml(row.runningBalance)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
     });
 
-    toast.success(t.exportSuccess);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-treasury-statement-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
   function printPage() {
-    if (!canPrint) return;
+    const rows = buildExportRows();
 
-    if (filteredRows.length === 0) {
-      toast.error(t.exportEmpty);
+    if (!rows.length) {
+      toast.error(t.printEmpty);
       return;
     }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.printError);
+      toast.error(t.printEmpty);
       return;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        summary: activeSummary,
-        rows: filteredRows,
-      }),
-    );
-    printWindow.document.close();
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+              margin-bottom: 18px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.account)}: ${escapeHtml(selectedAccount?.name || t.all)}</p>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+          </div>
 
-    toast.success(t.printSuccess);
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.openingBalance)}</span><strong>${escapeHtml(formatMoney(openingBalance))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.totalDebit)}</span><strong>${escapeHtml(formatMoney(totalDebit))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.totalCredit)}</span><strong>${escapeHtml(formatMoney(totalCredit))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.closingBalance)}</span><strong>${escapeHtml(formatMoney(closingBalance))}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.number)}</th>
+                <th>${escapeHtml(t.date)}</th>
+                <th>${escapeHtml(t.movementType)}</th>
+                <th>${escapeHtml(t.treasuryAccount)}</th>
+                <th>${escapeHtml(t.party)}</th>
+                <th>${escapeHtml(t.debit)}</th>
+                <th>${escapeHtml(t.credit)}</th>
+                <th>${escapeHtml(t.runningBalance)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.number)}</td>
+                      <td>${escapeHtml(row.date)}</td>
+                      <td>${escapeHtml(row.type)}</td>
+                      <td>${escapeHtml(row.account)}</td>
+                      <td>${escapeHtml(row.party)}</td>
+                      <td>${escapeHtml(row.debit)}</td>
+                      <td>${escapeHtml(row.credit)}</td>
+                      <td>${escapeHtml(row.runningBalance)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadStatement(false);
-  }, [authResolving, loadStatement]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [query, accountFilter, typeFilter, statusFilter, fromDate, toDate]);
-
-  if (!authResolving && !canView) {
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="w-full space-y-4" dir={dir}>
+        <PageSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/treasury">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury">
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
 
-          <Link href="/system/treasury/accounts">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <Wallet className="h-4 w-4" />
-              <span>{t.accounts}</span>
-            </Button>
-          </Link>
-
-          <Link href="/system/treasury/transactions">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <Banknote className="h-4 w-4" />
-              <span>{t.transactions}</span>
-            </Button>
-          </Link>
-
-          <Link href="/system/treasury/vouchers">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <FileText className="h-4 w-4" />
-              <span>{t.vouchers}</span>
-            </Button>
-          </Link>
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury/transactions">
+              <WalletCards className="h-4 w-4" />
+              {t.transactions}
+            </Link>
+          </Button>
 
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadStatement(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadStatement({ silent: true })}
+            disabled={refreshing}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canExport ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={
-                isLoading || filteredRows.length === 0 || Boolean(errorMessage)
-              }
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
 
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={
-                isLoading || filteredRows.length === 0 || Boolean(errorMessage)
-              }
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.openingBalance}
+          value={<MoneyValue value={openingBalance} label={t.sar} />}
+          trend={selectedAccount?.name || t.all}
+          icon={CalendarDays}
+        />
 
+        <KpiCard
+          title={t.totalDebit}
+          value={<MoneyValue value={totalDebit} label={t.sar} />}
+          trend={t.debit}
+          icon={Banknote}
+        />
+
+        <KpiCard
+          title={t.totalCredit}
+          value={<MoneyValue value={totalCredit} label={t.sar} />}
+          trend={t.credit}
+          icon={CreditCard}
+        />
+
+        <KpiCard
+          title={t.closingBalance}
+          value={<MoneyValue value={closingBalance} label={t.sar} />}
+          trend={`${t.rows}: ${formatInteger(statementRows.length)}`}
+          icon={CircleDollarSign}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadStatement(true)}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadStatement()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {isLoading ? (
-        <KpiSkeleton />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    <MoneyText value={activeSummary.opening_balance} />
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.openingBalance}
-                  </p>
-                </div>
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardHeader className="px-6 py-5">
+          <CardTitle>{t.statementTable}</CardTitle>
+          <CardDescription>{t.statementTableDesc}</CardDescription>
+        </CardHeader>
 
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300">
-                  <Wallet className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    <MoneyText value={activeSummary.total_debit} />
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.totalDebit}
-                  </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                  <ArrowUp className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    <MoneyText value={activeSummary.total_credit} />
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.totalCredit}
-                  </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">
-                  <ArrowDown className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    <MoneyText value={activeSummary.closing_balance} />
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.closingBalance}
-                  </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-300">
-                  <ShieldCheck className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-muted-foreground">{t.rowsCount}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.rows_count)}
-              </span>
+        <CardContent className="space-y-3 p-4">
+          <div className="grid gap-2 xl:grid-cols-[1fr_160px_160px]">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
             </div>
-          </CardContent>
-        </Card>
 
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-muted-foreground">{t.confirmedCount}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.confirmed_count)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="h-10 rounded-lg bg-background"
+              title={t.from}
+            />
 
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-muted-foreground">{t.treasuryPosted}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.treasury_posted_count)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="h-10 rounded-lg bg-background"
+              title={t.to}
+            />
+          </div>
 
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-muted-foreground">{t.accountingPosted}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.accounting_posted_count)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={accountFilter} onValueChange={setAccountFilter}>
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[240px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t.account}: {t.all}</SelectItem>
+                  {accounts.map((account) => (
+                    <SelectItem key={account.id || account.code} value={account.id || account.code}>
+                      {account.code ? `${account.code} — ${account.name}` : account.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardHeader className="space-y-4 pb-3">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <CardTitle className="text-base font-bold">
-                {t.tableTitle}
-              </CardTitle>
-              <CardDescription className="mt-1">{t.tableDesc}</CardDescription>
+              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[155px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t.status}: {t.all}</SelectItem>
+                  <SelectItem value="draft">{t.draft}</SelectItem>
+                  <SelectItem value="confirmed">{t.confirmed}</SelectItem>
+                  <SelectItem value="cancelled">{t.cancelled}</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value as TypeFilter)}>
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[170px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t.type}: {t.all}</SelectItem>
+                  <SelectItem value="income">{t.income}</SelectItem>
+                  <SelectItem value="expense">{t.expense}</SelectItem>
+                  <SelectItem value="transfer">{t.transfer}</SelectItem>
+                  <SelectItem value="deposit">{t.deposit}</SelectItem>
+                  <SelectItem value="withdraw">{t.withdraw}</SelectItem>
+                  <SelectItem value="opening_balance">{t.openingBalanceType}</SelectItem>
+                  <SelectItem value="refund">{t.refund}</SelectItem>
+                  <SelectItem value="fee">{t.fee}</SelectItem>
+                  <SelectItem value="adjustment">{t.adjustment}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              <Select value={sortKey} onValueChange={(value) => setSortKey(value as SortKey)}>
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[165px]">
+                  <ArrowUpDown className="h-4 w-4" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newest">{t.newest}</SelectItem>
+                  <SelectItem value="oldest">{t.oldest}</SelectItem>
+                  <SelectItem value="amount_high">{t.amountHigh}</SelectItem>
+                  <SelectItem value="amount_low">{t.amountLow}</SelectItem>
+                  <SelectItem value="number">{t.numberSort}</SelectItem>
+                </SelectContent>
+              </Select>
+
               <Button
                 variant="outline"
-                className="h-10 rounded-xl"
-                onClick={() => loadStatement(true)}
-                disabled={isLoading}
+                className="h-9 rounded-lg bg-background"
+                onClick={resetFilters}
               >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="h-4 w-4" />
-                )}
-                {t.refresh}
+                <RotateCcw className="h-4 w-4" />
+                {t.reset}
               </Button>
-
-              {hasSearchOrFilter ? (
-                <Button
-                  variant="outline"
-                  className="h-10 rounded-xl"
-                  onClick={clearFilters}
-                >
-                  {t.clearFilters}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          <div className="relative w-full">
-            <Search
-              className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                isArabic ? "right-3" : "left-3"
-              }`}
-            />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t.searchPlaceholder}
-              className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-            />
-          </div>
-
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-            <select
-              value={accountFilter}
-              onChange={(event) => setAccountFilter(event.target.value)}
-              className="h-11 rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="ALL">{t.allAccounts}</option>
-              {accounts.map((account) => (
-                <option key={account.id || account.code} value={account.id}>
-                  {account.name} {account.code ? `(${account.code})` : ""}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}
-              className="h-11 rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            >
-              {typeOptions.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(event.target.value as StatusFilter)
-              }
-              className="h-11 rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            >
-              {statusOptions.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-
-            <div className="relative">
-              <CalendarDays
-                className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                  isArabic ? "right-3" : "left-3"
-                }`}
-              />
-              <Input
-                type="date"
-                value={fromDate}
-                onChange={(event) => setFromDate(event.target.value)}
-                className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                dir="ltr"
-                aria-label={t.fromDate}
-              />
-            </div>
-
-            <div className="relative">
-              <CalendarDays
-                className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                  isArabic ? "right-3" : "left-3"
-                }`}
-              />
-              <Input
-                type="date"
-                value={toDate}
-                onChange={(event) => setToDate(event.target.value)}
-                className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                dir="ltr"
-                aria-label={t.toDate}
-              />
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border">
+          <div className="overflow-hidden rounded-lg border bg-background">
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="min-w-[1380px] table-fixed">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[130px]">
-                      <button
-                        type="button"
-                        onClick={() => toggleSort("transaction_date")}
-                        className="inline-flex items-center gap-1 font-medium"
-                      >
-                        {t.table.date}
-                        {sortKey === "transaction_date" &&
-                          (sortDirection === "asc" ? (
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          ) : (
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          ))}
-                      </button>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    <TableHead className="h-11 w-[170px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.number}
                     </TableHead>
-
-                    <TableHead className="min-w-[150px]">
-                      <button
-                        type="button"
-                        onClick={() => toggleSort("transaction_number")}
-                        className="inline-flex items-center gap-1 font-medium"
-                      >
-                        {t.table.number}
-                        {sortKey === "transaction_number" &&
-                          (sortDirection === "asc" ? (
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          ) : (
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          ))}
-                      </button>
+                    <TableHead className="h-11 w-[140px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.date}
                     </TableHead>
-
-                    <TableHead className="min-w-[120px]">{t.table.type}</TableHead>
-                    <TableHead className="min-w-[120px]">
-                      {t.table.status}
+                    <TableHead className="h-11 w-[125px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.movementType}
                     </TableHead>
-                    <TableHead className="min-w-[220px]">
-                      {t.table.account}
+                    <TableHead className="h-11 w-[115px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.movementStatus}
                     </TableHead>
-                    <TableHead className="min-w-[130px]">
-                      {t.table.debit}
+                    <TableHead className="h-11 w-[220px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.treasuryAccount}
                     </TableHead>
-                    <TableHead className="min-w-[130px]">
-                      {t.table.credit}
+                    <TableHead className="h-11 w-[150px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.party}
                     </TableHead>
-                    <TableHead className="min-w-[150px]">
-                      {t.table.balance}
+                    <TableHead className="h-11 w-[220px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.description}
                     </TableHead>
-                    <TableHead className="min-w-[150px]">
-                      {t.table.reference}
+                    <TableHead className="h-11 w-[125px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.debit}
                     </TableHead>
-                    <TableHead className="min-w-[170px]">
-                      {t.table.posting}
+                    <TableHead className="h-11 w-[125px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.credit}
                     </TableHead>
-
-                    {canViewDetails ? (
-                      <TableHead className="min-w-[90px]">
-                        {t.table.action}
-                      </TableHead>
-                    ) : null}
+                    <TableHead className="h-11 w-[145px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.runningBalance}
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
 
                 <TableBody>
-                  {isLoading ? (
-                    <TableSkeleton />
-                  ) : paginatedRows.length > 0 ? (
-                    paginatedRows.map((item) => (
-                      <TableRow key={`${item.id}-${item.transaction_number}`}>
-                        <TableCell className="whitespace-nowrap">
-                          {formatDate(item.transaction_date, locale)}
+                  {statementRows.length ? (
+                    statementRows.map((row) => (
+                      <TableRow key={row.id || row.transaction_number} className="h-[62px]">
+                        <TableCell className="h-[62px] w-[170px] overflow-hidden px-4 text-right align-middle">
+                          <Link
+                            href={`/system/treasury/transactions/${encodeURIComponent(row.id)}`}
+                            className="block truncate text-sm font-semibold text-foreground tabular-nums hover:underline"
+                          >
+                            {row.transaction_number || t.notAvailable}
+                          </Link>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {row.reference || row.source_number || t.notAvailable}
+                          </span>
                         </TableCell>
 
-                        <TableCell className="font-semibold" dir="ltr">
-                          {item.transaction_number || "-"}
+                        <TableCell className="h-[62px] w-[140px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                            {formatDate(row.transaction_date)}
+                          </span>
                         </TableCell>
 
-                        <TableCell>
-                          {typeBadge(item.transaction_type, locale)}
+                        <TableCell className="h-[62px] w-[125px] overflow-hidden px-4 text-right align-middle">
+                          <TypeBadge type={row.transaction_type} locale={locale} />
                         </TableCell>
 
-                        <TableCell>{statusBadge(item.status, locale)}</TableCell>
-
-                        <TableCell>
-                          <div className="min-w-[200px]">
-                            <p className="font-medium">
-                              {item.account_name || "-"}
-                            </p>
-                            <p className="text-xs text-muted-foreground" dir="ltr">
-                              {item.account_code || "-"}
-                            </p>
-                          </div>
+                        <TableCell className="h-[62px] w-[115px] overflow-hidden px-4 text-right align-middle">
+                          <StatusBadge status={row.status} locale={locale} />
                         </TableCell>
 
-                        <TableCell>
-                          <MoneyText value={item.debit} />
+                        <TableCell className="h-[62px] w-[220px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm font-medium text-foreground">
+                            {row.treasury_account_name || t.notAvailable}
+                          </span>
+                          <span className="block truncate text-xs text-muted-foreground tabular-nums">
+                            {row.treasury_account_code || row.destination_account_name || t.notAvailable}
+                          </span>
                         </TableCell>
 
-                        <TableCell>
-                          <MoneyText value={item.credit} />
+                        <TableCell className="h-[62px] w-[150px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm text-muted-foreground">
+                            {row.party_name || t.notAvailable}
+                          </span>
                         </TableCell>
 
-                        <TableCell className="font-semibold">
-                          <MoneyText value={item.running_balance} />
+                        <TableCell className="h-[62px] w-[220px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm text-muted-foreground">
+                            {row.description || t.notAvailable}
+                          </span>
                         </TableCell>
 
-                        <TableCell>
-                          <span dir="ltr">{item.source_reference || "-"}</span>
+                        <TableCell className="h-[62px] w-[125px] overflow-hidden px-4 text-right align-middle">
+                          <MoneyValue value={row.debit} label={t.sar} />
                         </TableCell>
 
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <Badge
-                              variant="outline"
-                              className="w-fit rounded-full px-3 py-1"
-                            >
-                              {t.treasury}:{" "}
-                              {item.is_treasury_posted ? t.posted : t.notPosted}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className="w-fit rounded-full px-3 py-1"
-                            >
-                              {t.accounting}:{" "}
-                              {item.is_accounting_posted ? t.posted : t.notPosted}
-                            </Badge>
-                          </div>
+                        <TableCell className="h-[62px] w-[125px] overflow-hidden px-4 text-right align-middle">
+                          <MoneyValue value={row.credit} label={t.sar} />
                         </TableCell>
 
-                        {canViewDetails ? (
-                          <TableCell>
-                            {isValidId(item.id) ? (
-                              <Link href={`/system/treasury/transactions/${item.id}`}>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 rounded-lg"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  <span className="sr-only">{t.view}</span>
-                                </Button>
-                              </Link>
-                            ) : (
-                              <span className="text-sm text-muted-foreground">
-                                -
-                              </span>
-                            )}
-                          </TableCell>
-                        ) : null}
+                        <TableCell className="h-[62px] w-[145px] overflow-hidden px-4 text-right align-middle">
+                          <MoneyValue value={row.running_balance} label={t.sar} />
+                        </TableCell>
                       </TableRow>
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell
-                        colSpan={canViewDetails ? 11 : 10}
-                        className="h-44 text-center"
-                      >
-                        <div className="flex flex-col items-center justify-center gap-2">
-                          <FileText className="h-10 w-10 text-muted-foreground/40" />
-                          <p className="font-semibold">
-                            {hasSearchOrFilter ? t.noResultsTitle : t.emptyTitle}
-                          </p>
-                          <p className="max-w-md text-sm text-muted-foreground">
-                            {hasSearchOrFilter ? t.noResultsText : t.emptyText}
-                          </p>
+                      <TableCell colSpan={10} className="h-72">
+                        <div className="flex flex-col items-center justify-center gap-3 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                            <Search className="h-6 w-6 text-muted-foreground" />
+                          </div>
 
-                          {hasSearchOrFilter ? (
+                          <div className="space-y-1">
+                            <p className="font-semibold text-foreground">
+                              {hasFilters ? t.noResultsTitle : t.noDataTitle}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {hasFilters ? t.noResultsDesc : t.noDataDesc}
+                            </p>
+                          </div>
+
+                          {hasFilters ? (
                             <Button
                               variant="outline"
-                              size="sm"
-                              className="mt-2 rounded-xl"
-                              onClick={clearFilters}
+                              className="h-9 rounded-lg"
+                              onClick={resetFilters}
                             >
-                              {t.clearFilters}
+                              <RotateCcw className="h-4 w-4" />
+                              {t.reset}
                             </Button>
                           ) : null}
                         </div>
@@ -2279,40 +1525,16 @@ export default function TreasuryStatementPage() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              {t.showing} {formatNumber(paginatedRows.length)} {t.from}{" "}
-              {formatNumber(filteredRows.length)}
-            </span>
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl"
-                disabled={page <= 1 || isLoading}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-              >
-                {t.previous}
-              </Button>
-
-              <Badge variant="outline" className="rounded-full px-3 py-1">
-                {formatNumber(Math.min(page, totalPages))} /{" "}
-                {formatNumber(totalPages)}
-              </Badge>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl"
-                disabled={page >= totalPages || isLoading}
-                onClick={() =>
-                  setPage((current) => Math.min(totalPages, current + 1))
-                }
-              >
-                {t.next}
-              </Button>
-            </div>
+          <div className="text-sm text-muted-foreground">
+            {t.showing}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(statementRows.length)}
+            </span>{" "}
+            {t.of}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(transactions.length)}
+            </span>{" "}
+            {t.rows}
           </div>
         </CardContent>
       </Card>

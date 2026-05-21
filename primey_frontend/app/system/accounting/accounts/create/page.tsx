@@ -2,1213 +2,963 @@
 
 /* ============================================================
    📂 app/system/accounting/accounts/create/page.tsx
-   🧠 Primey Care | Create Accounting Account Page
-
-   ✅ المسار:
-      app/system/accounting/accounts/create/page.tsx
-
-   ✅ العمل:
-      صفحة إنشاء حساب محاسبي داخل مديول المحاسبة.
-      تتيح إنشاء حساب جديد داخل دليل الحسابات مع اختيار النوع، الطبيعة، الحساب الأب، والتصنيف.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Auto Sequential Account Code
-
-   ✅ يعتمد على:
-      - /api/accounting/accounts/
-      - /api/accounting/accounts/create/ كـ fallback آمن
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Accounting accounts page
-      - Accounting journals approved pattern
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - إنشاء حساب محاسبي جديد.
-      - توليد كود الحساب تلقائيًا بالتسلسل.
-      - منع كتابة كود الحساب يدويًا.
-      - تحميل الحسابات الحالية لاختيار الحساب الأب.
-      - دعم الحسابات التجميعية وحسابات الترحيل.
-      - دعم نوع الحساب وطبيعة الحساب.
-      - دعم الرصيد الافتتاحي الاختياري.
-      - حماية مغادرة الصفحة عند وجود تغييرات غير محفوظة.
-      - مسح النموذج بتأكيد.
-      - Error State مستقل.
-      - Skeleton Loading للحسابات الأب.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - أرقام إنجليزية دائمًا.
-      - رمز SAR من /currency/sar.svg بعد الرقم.
-
+   🧾 Primey Care — Create Accounting Account
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - جعل كود الحساب يتولد تلقائيًا ولا يكتب يدويًا.
-      - عند اختيار الحساب الأب يتم توليد كود الابن التالي حسب أكواد الأبناء.
-      - عند عدم اختيار حساب أب يتم توليد كود رئيسي حسب نوع الحساب.
-      - الحفاظ على التصميم الحالي الظاهر بالصورة بدون تغييره.
-      - الالتزام بالقاعدة: w-full space-y-4 بدون main/min-h-screen/max-w.
-      - إزالة أي عبارات مؤقتة أو تقنية من الواجهة.
-      - إزالة localhost و API_BASE_URL الثابت.
-      - استخدام sonner للتنبيهات.
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Real API only:
+      GET  /api/accounting/accounts/
+      POST /api/accounting/accounts/
+      POST /api/accounting/accounts/create/ fallback
+   ✅ Auto sequential account code
+   ✅ Parent account selector
+   ✅ Unsaved changes protection
+   ✅ Skeleton loading
+   ✅ Error state
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  ArrowRight,
+  BookOpen,
   CheckCircle2,
-  FileText,
   FolderTree,
-  Layers3,
   Loader2,
-  RefreshCcw,
+  Plus,
+  RefreshCw,
   RotateCcw,
   Save,
-  ShieldCheck,
-  XCircle,
+  Search,
+  ShieldAlert,
+  WalletCards,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
+type ApiRecord = Record<string, unknown>;
 
-type AccountType =
-  | "ASSET"
-  | "LIABILITY"
-  | "EQUITY"
-  | "REVENUE"
-  | "EXPENSE";
-
-type NormalBalance = "DEBIT" | "CREDIT";
+type AccountType = "asset" | "liability" | "equity" | "revenue" | "expense";
+type AccountNature = "debit" | "credit";
+type AccountKind = "group" | "posting";
 
 type ParentAccount = {
   id: string;
   code: string;
   name: string;
-  accountType: string;
-  parentId: string;
-  isGroup: boolean;
-  isActive: boolean;
+  name_ar: string;
+  name_en: string;
+  account_type: AccountType;
+  nature: AccountNature;
+  is_group: boolean;
+  is_active: boolean;
 };
 
-type FormState = {
+type AccountForm = {
   code: string;
-  name: string;
-  accountType: AccountType;
-  normalBalance: NormalBalance;
-  parentId: string;
-  isGroup: boolean;
-  isActive: boolean;
-  openingBalance: string;
-  description: string;
+  name_ar: string;
+  name_en: string;
+  account_type: AccountType;
+  nature: AccountNature;
+  parent_id: string;
+  is_group: boolean;
+  is_active: boolean;
+  opening_balance: string;
+  currency: string;
+  notes: string;
 };
 
-type ApiEnvelope<T> = {
-  ok?: boolean;
-  success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
-  results?: unknown[];
-  items?: unknown[];
-  rows?: unknown[];
-  accounts?: unknown[];
-  tree?: unknown[];
+type FieldErrors = Partial<Record<keyof AccountForm | "general", string>>;
+
+const translations = {
+  ar: {
+    title: "إنشاء حساب محاسبي",
+    subtitle:
+      "إضافة حساب جديد داخل دليل الحسابات مع توليد الكود تلقائيًا حسب النوع أو الحساب الأب.",
+    back: "دليل الحسابات",
+    save: "حفظ الحساب",
+    saving: "جاري الحفظ",
+    refresh: "تحديث الحسابات",
+    reset: "مسح النموذج",
+
+    basicInfo: "بيانات الحساب",
+    basicInfoDesc: "حدد اسم الحساب ونوعه وطبيعته داخل الشجرة المحاسبية.",
+    structureInfo: "هيكل الحساب",
+    structureInfoDesc: "اختر الحساب الأب والتصنيف وطريقة الترحيل.",
+    balanceInfo: "الرصيد والملاحظات",
+    balanceInfoDesc: "أدخل الرصيد الافتتاحي عند الحاجة وملاحظات داخلية اختيارية.",
+    summary: "ملخص الحساب",
+    summaryDesc: "مراجعة جاهزية الحساب قبل الحفظ.",
+
+    accountName: "اسم الحساب",
+    accountNameAr: "اسم الحساب عربي",
+    accountNameEn: "اسم الحساب إنجليزي",
+    accountCode: "كود الحساب",
+    generatedCode: "يتم توليده تلقائيًا",
+    accountType: "نوع الحساب",
+    nature: "الطبيعة",
+    parentAccount: "الحساب الأب",
+    noParent: "بدون حساب أب",
+    searchParent: "ابحث عن حساب أب...",
+    accountKind: "تصنيف الحساب",
+    groupAccount: "حساب تجميعي",
+    postingAccount: "حساب ترحيل",
+    activeAccount: "حساب نشط",
+    accountStatus: "إظهار الحساب ضمن الحسابات النشطة والقابلة للاستخدام.",
+    openingBalance: "الرصيد الافتتاحي",
+    currency: "العملة",
+    notes: "ملاحظات",
+    notesPlaceholder: "ملاحظات داخلية اختيارية...",
+
+    asset: "أصول",
+    liability: "التزامات",
+    equity: "حقوق ملكية",
+    revenue: "إيرادات",
+    expense: "مصروفات",
+    debit: "مدين",
+    credit: "دائن",
+
+    ready: "جاهز للحفظ",
+    notReady: "غير مكتمل",
+    validName: "اسم الحساب مكتمل",
+    validType: "نوع الحساب محدد",
+    validCode: "كود الحساب جاهز",
+    validParent: "هيكل الحساب صحيح",
+    invalidName: "اسم الحساب مطلوب",
+    invalidCode: "تعذر توليد الكود",
+    invalidParent: "لا يمكن اختيار حساب ترحيل كحساب أب",
+
+    totalAccounts: "إجمالي الحسابات",
+    groupAccounts: "حسابات تجميعية",
+    postingAccounts: "حسابات ترحيل",
+    nextCode: "الكود التالي",
+
+    saved: "تم إنشاء الحساب المحاسبي بنجاح.",
+    refreshed: "تم تحديث قائمة الحسابات.",
+    resetDone: "تم مسح النموذج.",
+    errorTitle: "تعذر تحميل الحسابات",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    saveError: "تعذر حفظ الحساب المحاسبي.",
+    tryAgain: "إعادة المحاولة",
+    confirmReset: "لديك تغييرات غير محفوظة. هل تريد مسح النموذج؟",
+    leaveWarning: "لديك تغييرات غير محفوظة.",
+    sar: "ر.س",
+    unknown: "غير محدد",
+  },
+  en: {
+    title: "Create Accounting Account",
+    subtitle:
+      "Add a new account to the chart of accounts with an auto-generated sequential code.",
+    back: "Chart of accounts",
+    save: "Save account",
+    saving: "Saving",
+    refresh: "Refresh accounts",
+    reset: "Reset form",
+
+    basicInfo: "Account information",
+    basicInfoDesc: "Set the account name, type, and nature inside the accounting tree.",
+    structureInfo: "Account structure",
+    structureInfoDesc: "Choose the parent account, account kind, and posting behavior.",
+    balanceInfo: "Balance and notes",
+    balanceInfoDesc: "Enter an optional opening balance and internal notes.",
+    summary: "Account summary",
+    summaryDesc: "Review account readiness before saving.",
+
+    accountName: "Account name",
+    accountNameAr: "Arabic account name",
+    accountNameEn: "English account name",
+    accountCode: "Account code",
+    generatedCode: "Generated automatically",
+    accountType: "Account type",
+    nature: "Nature",
+    parentAccount: "Parent account",
+    noParent: "No parent account",
+    searchParent: "Search parent account...",
+    accountKind: "Account kind",
+    groupAccount: "Group account",
+    postingAccount: "Posting account",
+    activeAccount: "Active account",
+    accountStatus: "Show this account as active and available for use.",
+    openingBalance: "Opening balance",
+    currency: "Currency",
+    notes: "Notes",
+    notesPlaceholder: "Optional internal notes...",
+
+    asset: "Assets",
+    liability: "Liabilities",
+    equity: "Equity",
+    revenue: "Revenue",
+    expense: "Expenses",
+    debit: "Debit",
+    credit: "Credit",
+
+    ready: "Ready to save",
+    notReady: "Incomplete",
+    validName: "Account name completed",
+    validType: "Account type selected",
+    validCode: "Account code ready",
+    validParent: "Account structure valid",
+    invalidName: "Account name is required",
+    invalidCode: "Could not generate code",
+    invalidParent: "Posting account cannot be selected as parent",
+
+    totalAccounts: "Total accounts",
+    groupAccounts: "Group accounts",
+    postingAccounts: "Posting accounts",
+    nextCode: "Next code",
+
+    saved: "Accounting account created successfully.",
+    refreshed: "Accounts list refreshed.",
+    resetDone: "Form has been reset.",
+    errorTitle: "Could not load accounts",
+    errorDesc: "Make sure the backend is running, then try again.",
+    saveError: "Could not save accounting account.",
+    tryAgain: "Try again",
+    confirmReset: "You have unsaved changes. Do you want to reset the form?",
+    leaveWarning: "You have unsaved changes.",
+    sar: "SAR",
+    unknown: "Unknown",
+  },
+} as const;
+
+const ACCOUNT_TYPES: AccountType[] = ["asset", "liability", "equity", "revenue", "expense"];
+
+const TYPE_PREFIX: Record<AccountType, string> = {
+  asset: "1",
+  liability: "2",
+  equity: "3",
+  revenue: "4",
+  expense: "5",
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
+const TYPE_NATURE: Record<AccountType, AccountNature> = {
+  asset: "debit",
+  expense: "debit",
+  liability: "credit",
+  equity: "credit",
+  revenue: "credit",
+};
 
-function makeDefaultForm(): FormState {
-  return {
-    code: "",
-    name: "",
-    accountType: "ASSET",
-    normalBalance: "DEBIT",
-    parentId: "",
-    isGroup: false,
-    isActive: true,
-    openingBalance: "",
-    description: "",
-  };
+const EMPTY_FORM: AccountForm = {
+  code: "",
+  name_ar: "",
+  name_en: "",
+  account_type: "asset",
+  nature: "debit",
+  parent_id: "",
+  is_group: false,
+  is_active: true,
+  opening_balance: "0",
+  currency: "SAR",
+  notes: "",
+};
+
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-/* ============================================================
-   Locale / API
-============================================================ */
+function getCookie(name: string): string {
+  if (typeof document === "undefined") return "";
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
 
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+  if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
 
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+  return "";
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
-
-function apiUrl(path: string) {
-  const base =
+function getApiBaseUrl(): string {
+  const configured =
     process.env.NEXT_PUBLIC_API_URL ||
     process.env.NEXT_PUBLIC_API_BASE_URL ||
     "";
 
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+  return configured.replace(/\/+$/, "");
 }
 
-function getCookie(name: string) {
-  try {
-    if (typeof document === "undefined") return "";
+function apiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const baseUrl = getApiBaseUrl();
 
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
+  if (!baseUrl) return normalizedPath;
 
-    if (parts.length === 2) {
-      return parts.pop()?.split(";").shift() || "";
-    }
+  return `${baseUrl}${normalizedPath}`;
+}
 
-    return "";
-  } catch {
-    return "";
+function isRecord(value: unknown): value is ApiRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function asString(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+
+  return fallback;
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "active"].includes(normalized)) return true;
+    if (["false", "0", "no", "inactive"].includes(normalized)) return false;
   }
+
+  return fallback;
 }
 
-/* ============================================================
-   Auth / Permissions
-============================================================ */
+function normalizeType(value: unknown): AccountType {
+  const normalized = asString(value).toLowerCase();
 
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
+  if (ACCOUNT_TYPES.includes(normalized as AccountType)) return normalized as AccountType;
+
+  return "asset";
 }
 
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
+function normalizeNature(value: unknown, accountType: AccountType): AccountNature {
+  const normalized = asString(value).toLowerCase();
 
-    if (value && typeof value === "object") {
-      return value as Dict;
-    }
+  if (normalized === "debit" || normalized === "credit") return normalized;
+
+  return TYPE_NATURE[accountType];
+}
+
+function pickRecord(...values: unknown[]): ApiRecord {
+  for (const value of values) {
+    if (isRecord(value)) return value;
   }
 
   return {};
 }
 
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
+function normalizeAccount(raw: unknown): ParentAccount | null {
+  if (!isRecord(raw)) return null;
 
-          if (typeof value === "string") return [value];
+  const id = asString(raw.id || raw.pk || raw.account_id);
+  const accountType = normalizeType(raw.account_type || raw.type || raw.category);
+  const nature = normalizeNature(raw.nature || raw.normal_balance, accountType);
 
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
-  }
-
-  return true;
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
+  if (!id) return null;
 
   return {
-    title: isArabic ? "إنشاء حساب محاسبي" : "Create Accounting Account",
-    subtitle: isArabic
-      ? "أضف حسابًا جديدًا إلى دليل الحسابات مع تحديد النوع والطبيعة والحساب الأب عند الحاجة."
-      : "Add a new account to the chart of accounts with type, normal balance, and parent account when needed.",
-
-    back: isArabic ? "دليل الحسابات" : "Chart of Accounts",
-    refresh: isArabic ? "تحديث الحسابات" : "Refresh Accounts",
-    save: isArabic ? "حفظ الحساب" : "Save Account",
-    saving: isArabic ? "جاري الحفظ..." : "Saving...",
-    clear: isArabic ? "مسح النموذج" : "Clear Form",
-
-    mainInfo: isArabic ? "بيانات الحساب" : "Account Details",
-    mainInfoDesc: isArabic
-      ? "المعلومات الأساسية للحساب المحاسبي."
-      : "Basic accounting account information.",
-    classification: isArabic ? "تصنيف الحساب" : "Account Classification",
-    classificationDesc: isArabic
-      ? "حدد نوع الحساب وطبيعته ومكانه داخل الشجرة."
-      : "Set account type, normal balance, and position in the tree.",
-    summaryTitle: isArabic ? "ملخص الحساب" : "Account Summary",
-    summaryDesc: isArabic
-      ? "مراجعة بيانات الحساب قبل الحفظ."
-      : "Review account data before saving.",
-
-    code: isArabic ? "كود الحساب" : "Account Code",
-    autoCode: isArabic ? "يتولد تلقائيًا" : "Generated automatically",
-    name: isArabic ? "اسم الحساب" : "Account Name",
-    accountType: isArabic ? "نوع الحساب" : "Account Type",
-    normalBalance: isArabic ? "طبيعة الحساب" : "Normal Balance",
-    parentAccount: isArabic ? "الحساب الأب" : "Parent Account",
-    withoutParent: isArabic ? "بدون حساب أب" : "No Parent Account",
-    description: isArabic ? "الوصف" : "Description",
-    openingBalance: isArabic ? "الرصيد الافتتاحي" : "Opening Balance",
-
-    isGroup: isArabic ? "حساب تجميعي" : "Group Account",
-    isPostable: isArabic ? "حساب قابل للترحيل" : "Postable Account",
-    isActive: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-
-    asset: isArabic ? "أصول" : "Assets",
-    liability: isArabic ? "التزامات" : "Liabilities",
-    equity: isArabic ? "حقوق ملكية" : "Equity",
-    revenue: isArabic ? "إيرادات" : "Revenue",
-    expense: isArabic ? "مصروفات" : "Expenses",
-    debit: isArabic ? "مدين" : "Debit",
-    credit: isArabic ? "دائن" : "Credit",
-
-    parentAccountsCount: isArabic ? "الحسابات المتاحة كأب" : "Available Parent Accounts",
-    selectedType: isArabic ? "النوع المحدد" : "Selected Type",
-    selectedNature: isArabic ? "الطبيعة المحددة" : "Selected Nature",
-    selectedClass: isArabic ? "التصنيف المحدد" : "Selected Class",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بإنشاء حساب" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية إنشاء حسابات محاسبية. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to create accounting accounts. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل الحسابات الحالية."
-      : "Unable to load current accounts.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث الحسابات الحالية."
-      : "Current accounts refreshed.",
-    saveSuccess: isArabic
-      ? "تم إنشاء الحساب المحاسبي بنجاح."
-      : "Accounting account created successfully.",
-    saveError: isArabic
-      ? "تعذر حفظ الحساب المحاسبي."
-      : "Unable to save accounting account.",
-
-    validationTitle: isArabic ? "راجع بيانات الحساب" : "Review account data",
-    requiredCode: isArabic ? "كود الحساب لم يتولد بعد." : "Account code has not been generated yet.",
-    requiredName: isArabic ? "اسم الحساب مطلوب." : "Account name is required.",
-    invalidOpening: isArabic
-      ? "الرصيد الافتتاحي يجب أن يكون رقمًا صحيحًا."
-      : "Opening balance must be a valid number.",
-    confirmClear: isArabic
-      ? "هل تريد مسح النموذج الحالي؟"
-      : "Clear the current form?",
-    unsavedChanges: isArabic
-      ? "لديك تغييرات غير محفوظة. هل تريد المغادرة؟"
-      : "You have unsaved changes. Do you want to leave?",
+    id,
+    code: asString(raw.code || raw.account_code || raw.number),
+    name: asString(raw.name || raw.title || raw.name_ar || raw.name_en),
+    name_ar: asString(raw.name_ar || raw.arabic_name || raw.name),
+    name_en: asString(raw.name_en || raw.english_name || raw.name),
+    account_type: accountType,
+    nature,
+    is_group: asBoolean(raw.is_group ?? raw.group ?? raw.is_parent, true),
+    is_active: asBoolean(raw.is_active ?? raw.active, true),
   };
 }
 
-/* ============================================================
-   Helpers
-============================================================ */
+function normalizeAccountsResponse(payload: unknown): ParentAccount[] {
+  const root = pickRecord(payload);
+  const data = root.data;
+  const results = root.results;
+  const accounts = root.accounts;
 
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
+  const source = Array.isArray(payload)
+    ? payload
+    : Array.isArray(results)
+      ? results
+      : Array.isArray(data)
+        ? data
+        : Array.isArray(accounts)
+          ? accounts
+          : isRecord(data) && Array.isArray(data.results)
+            ? data.results
+            : isRecord(data) && Array.isArray(data.accounts)
+              ? data.accounts
+              : [];
+
+  return source
+    .map(normalizeAccount)
+    .filter((account): account is ParentAccount => Boolean(account))
+    .sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true }));
 }
 
-function formatNumber(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
+function extractApiError(payload: unknown, fallback: string): string {
+  if (!isRecord(payload)) return fallback;
+
+  const direct =
+    asString(payload.message) ||
+    asString(payload.detail) ||
+    asString(payload.error);
+
+  if (direct) return direct;
+
+  const errors = payload.errors;
+
+  if (typeof errors === "string") return errors;
+
+  if (Array.isArray(errors)) {
+    return errors.map((item) => asString(item)).filter(Boolean).join(" ") || fallback;
+  }
+
+  if (isRecord(errors)) {
+    const first = Object.values(errors)[0];
+
+    if (Array.isArray(first)) return first.map((item) => asString(item)).filter(Boolean).join(" ");
+    if (typeof first === "string") return first;
+  }
+
+  return fallback;
 }
 
-function formatMoney(value: unknown): string {
+function parseFieldErrors(payload: unknown): FieldErrors {
+  if (!isRecord(payload)) return {};
+
+  const errors = isRecord(payload.errors) ? payload.errors : payload;
+
+  const fieldErrors: FieldErrors = {};
+
+  for (const [key, value] of Object.entries(errors)) {
+    if (Array.isArray(value)) {
+      fieldErrors[key as keyof FieldErrors] = value.map((item) => asString(item)).filter(Boolean).join(" ");
+    } else if (typeof value === "string") {
+      fieldErrors[key as keyof FieldErrors] = value;
+    }
+  }
+
+  return fieldErrors;
+}
+
+function displayAccountName(account: ParentAccount, locale: Locale): string {
+  if (locale === "ar") return account.name_ar || account.name || account.name_en || account.code;
+  return account.name_en || account.name || account.name_ar || account.code;
+}
+
+function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(toNumber(value));
+  }).format(Number.isFinite(value) ? value : 0);
 }
 
-function escapeNumberInput(value: string) {
-  return value
-    .replace(/[^\d.-]/g, "")
-    .replace(/(?!^)-/g, "")
-    .replace(/(\..*)\./g, "$1");
+function normalizeDecimalInput(value: string): string {
+  return value.replace(/[^\d.-]/g, "");
 }
 
-function extractArray(payload: unknown): unknown[] {
-  const obj = asDict(payload);
-  const data = asDict(obj.data);
+function suggestNextCode(accounts: ParentAccount[], form: AccountForm): string {
+  const parent = accounts.find((account) => account.id === form.parent_id);
 
-  if (Array.isArray(obj.results)) return obj.results;
-  if (Array.isArray(obj.items)) return obj.items;
-  if (Array.isArray(obj.rows)) return obj.rows;
-  if (Array.isArray(obj.accounts)) return obj.accounts;
-  if (Array.isArray(obj.tree)) return obj.tree;
+  if (parent?.code) {
+    const directChildren = accounts.filter((account) => {
+      if (!account.code.startsWith(parent.code)) return false;
+      const suffix = account.code.slice(parent.code.length);
+      return /^\d{2,4}$/.test(suffix);
+    });
 
-  if (Array.isArray(data.results)) return data.results;
-  if (Array.isArray(data.items)) return data.items;
-  if (Array.isArray(data.rows)) return data.rows;
-  if (Array.isArray(data.accounts)) return data.accounts;
-  if (Array.isArray(data.tree)) return data.tree;
+    const childNumbers = directChildren
+      .map((account) => Number(account.code.slice(parent.code.length)))
+      .filter((number) => Number.isFinite(number));
 
-  if (Array.isArray(payload)) return payload;
+    const next = childNumbers.length ? Math.max(...childNumbers) + 1 : 1;
+    const width = Math.max(2, String(next).length);
 
-  return [];
+    return `${parent.code}${String(next).padStart(width, "0")}`;
+  }
+
+  const prefix = TYPE_PREFIX[form.account_type];
+
+  const sameTypeRootCodes = accounts
+    .filter((account) => account.account_type === form.account_type && account.code.startsWith(prefix))
+    .map((account) => account.code)
+    .filter((code) => /^\d+$/.test(code));
+
+  if (!sameTypeRootCodes.length) return `${prefix}001`;
+
+  const rootNumbers = sameTypeRootCodes
+    .map((code) => Number(code.slice(1)))
+    .filter((number) => Number.isFinite(number));
+
+  const next = rootNumbers.length ? Math.max(...rootNumbers) + 1 : 1;
+
+  return `${prefix}${String(next).padStart(3, "0")}`;
 }
 
-function flattenUnknownRows(items: unknown[]): unknown[] {
-  return items.flatMap((item) => {
-    const obj = asDict(item);
-    const children = Array.isArray(obj.children)
-      ? obj.children
-      : Array.isArray(obj.items)
-        ? obj.items
-        : Array.isArray(obj.accounts)
-          ? obj.accounts
-          : [];
+function validateForm(form: AccountForm): FieldErrors {
+  const errors: FieldErrors = {};
 
-    return [item, ...flattenUnknownRows(children)];
-  });
+  if (!form.name_ar.trim()) errors.name_ar = "required";
+  if (!form.name_en.trim()) errors.name_en = "required";
+
+  const openingBalance = Number(normalizeDecimalInput(form.opening_balance || "0"));
+
+  if (!Number.isFinite(openingBalance)) errors.opening_balance = "invalid";
+
+  return errors;
 }
 
-function normalizeParentAccount(item: unknown): ParentAccount {
-  const obj = asDict(item);
-  const account = asDict(obj.account || obj.chart_account);
-  const parent = asDict(obj.parent || account.parent);
+function FieldError({ message, locale }: { message?: string; locale: Locale }) {
+  if (!message) return null;
 
-  return {
-    id: String(obj.id || obj.account_id || obj.pk || account.id || ""),
-    code: String(obj.code || obj.account_code || account.code || ""),
-    name: String(obj.name || obj.account_name || obj.title || account.name || ""),
-    accountType: String(
-      obj.account_type || obj.type || account.account_type || account.type || "",
-    ),
-    parentId: String(
-      obj.parent_id ||
-        obj.parent_account_id ||
-        account.parent_id ||
-        parent.id ||
-        "",
-    ),
-    isGroup: Boolean(obj.is_group ?? obj.group ?? account.is_group ?? false),
-    isActive:
-      obj.is_active === undefined &&
-      obj.active === undefined &&
-      account.is_active === undefined
-        ? true
-        : Boolean(obj.is_active ?? obj.active ?? account.is_active),
-  };
+  const t = translations[locale];
+
+  const normalizedMessage =
+    message === "required"
+      ? "required"
+      : message === "invalid"
+        ? "invalid"
+        : message;
+
+  const label =
+    normalizedMessage === "required"
+      ? locale === "ar"
+        ? "هذا الحقل مطلوب."
+        : "This field is required."
+      : normalizedMessage === "invalid"
+        ? locale === "ar"
+          ? "أدخل رقمًا صحيحًا."
+          : "Enter a valid number."
+        : message;
+
+  return <p className="mt-1 text-xs text-red-600">{label}</p>;
 }
 
-function accountTypeLabel(type: AccountType, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<AccountType, string> = {
-    ASSET: t.asset,
-    LIABILITY: t.liability,
-    EQUITY: t.equity,
-    REVENUE: t.revenue,
-    EXPENSE: t.expense,
-  };
-
-  return labels[type];
-}
-
-function normalBalanceLabel(balance: NormalBalance, locale: AppLocale) {
-  const t = dictionary(locale);
-  return balance === "DEBIT" ? t.debit : t.credit;
-}
-
-function getDefaultNormalBalance(accountType: AccountType): NormalBalance {
-  if (accountType === "ASSET" || accountType === "EXPENSE") return "DEBIT";
-  return "CREDIT";
-}
-
-function accountTypePrefix(accountType: AccountType) {
-  const prefixes: Record<AccountType, string> = {
-    ASSET: "1",
-    LIABILITY: "2",
-    EQUITY: "3",
-    REVENUE: "4",
-    EXPENSE: "5",
-  };
-
-  return prefixes[accountType];
-}
-
-function nextNumericCode(codes: string[], baseCode: string, minLength: number) {
-  const numericCodes = codes
-    .map((code) => String(code || "").replace(/\D/g, ""))
-    .filter(Boolean)
-    .map((code) => Number(code))
-    .filter((value) => Number.isFinite(value));
-
-  const baseNumber = Number(baseCode.replace(/\D/g, ""));
-  const maxNumber =
-    numericCodes.length > 0 ? Math.max(...numericCodes) : baseNumber;
-
-  const next = maxNumber + 1;
-  return String(next).padStart(minLength, "0");
-}
-
-function generateSequentialAccountCode({
-  accounts,
-  parentId,
-  accountType,
+function InfoBadge({
+  children,
+  tone = "default",
 }: {
-  accounts: ParentAccount[];
-  parentId: string;
-  accountType: AccountType;
+  children: React.ReactNode;
+  tone?: "default" | "success" | "warning";
 }) {
-  const activeAccounts = accounts.filter((account) => account.code);
+  const className =
+    tone === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : tone === "warning"
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : "border-slate-200 bg-slate-50 text-slate-700";
 
-  if (parentId) {
-    const parent = activeAccounts.find((account) => account.id === parentId);
-    const parentCode = parent?.code?.trim() || "";
-
-    if (!parentCode) return "";
-
-    const directChildren = activeAccounts.filter(
-      (account) => account.parentId === parentId,
-    );
-
-    const childCodes = directChildren.map((account) => account.code);
-
-    if (childCodes.length > 0) {
-      return nextNumericCode(childCodes, `${parentCode}00`, parentCode.length + 2);
-    }
-
-    return `${parentCode}01`;
-  }
-
-  const prefix = accountTypePrefix(accountType);
-  const rootAccounts = activeAccounts.filter((account) => {
-    const code = account.code.trim();
-    const hasNoParent = !account.parentId;
-    return hasNoParent && code.startsWith(prefix);
-  });
-
-  const rootCodes = rootAccounts.map((account) => account.code);
-
-  if (rootCodes.length > 0) {
-    return nextNumericCode(rootCodes, `${prefix}000`, 4);
-  }
-
-  return `${prefix}000`;
-}
-
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
+    <Badge variant="outline" className={className}>
+      {children}
+    </Badge>
   );
 }
 
-function MoneyText({ value }: { value: unknown }) {
+function PageSkeleton() {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-72" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Skeleton className="h-[720px] rounded-lg" />
+        <Skeleton className="h-[420px] rounded-lg" />
+      </div>
+    </div>
   );
 }
-
-/* ============================================================
-   Page
-============================================================ */
 
 export default function CreateAccountingAccountPage() {
-  const auth = useAuth() as unknown;
+  const router = useRouter();
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [form, setForm] = useState<FormState>(() => makeDefaultForm());
-  const [parentAccounts, setParentAccounts] = useState<ParentAccount[]>([]);
-  const [isLoadingParents, setIsLoadingParents] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const [submitError, setSubmitError] = useState("");
-  const [isDirty, setIsDirty] = useState(false);
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [accounts, setAccounts] = React.useState<ParentAccount[]>([]);
+  const [form, setForm] = React.useState<AccountForm>(EMPTY_FORM);
+  const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({});
+  const [searchParent, setSearchParent] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [pageError, setPageError] = React.useState("");
+  const [isDirty, setIsDirty] = React.useState(false);
+  const [createdId, setCreatedId] = React.useState("");
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const canCreate = hasSafePermission(
-    auth,
-    ["accounting.create", "accounting.accounts.create", "accounting.manage"],
-    "action",
+  const selectedParent = React.useMemo(
+    () => accounts.find((account) => account.id === form.parent_id) || null,
+    [accounts, form.parent_id],
   );
 
-  const activeParentAccounts = useMemo(
-    () =>
-      parentAccounts
-        .filter((item) => item.id && item.name && item.isActive)
-        .sort((a, b) => `${a.code} ${a.name}`.localeCompare(`${b.code} ${b.name}`)),
-    [parentAccounts],
+  const suggestedCode = React.useMemo(
+    () => suggestNextCode(accounts, form),
+    [accounts, form],
   );
 
-  const selectedParent = useMemo(
-    () => activeParentAccounts.find((item) => item.id === form.parentId),
-    [activeParentAccounts, form.parentId],
-  );
+  const filteredParents = React.useMemo(() => {
+    const query = searchParent.trim().toLowerCase();
 
-  const generatedCode = useMemo(
-    () =>
-      generateSequentialAccountCode({
-        accounts: activeParentAccounts,
-        parentId: form.parentId,
-        accountType: form.accountType,
-      }),
-    [activeParentAccounts, form.accountType, form.parentId],
-  );
+    return accounts.filter((account) => {
+      if (!account.is_group || !account.is_active) return false;
+      if (account.account_type !== form.account_type) return false;
 
-  const openingBalanceNumber = useMemo(
-    () => toNumber(form.openingBalance || 0),
-    [form.openingBalance],
-  );
+      if (!query) return true;
 
-  const canSubmit = canCreate && !isSaving && Boolean(form.code);
+      return [
+        account.code,
+        account.name,
+        account.name_ar,
+        account.name_en,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [accounts, form.account_type, searchParent]);
 
-  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({
-      ...current,
-      [key]: value,
-    }));
-    setIsDirty(true);
-  }
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  function handleAccountTypeChange(value: AccountType) {
-    setForm((current) => ({
-      ...current,
-      accountType: value,
-      normalBalance: getDefaultNormalBalance(value),
-      parentId: "",
-    }));
-    setIsDirty(true);
-  }
-
-  function clearForm() {
-    if (isDirty && !window.confirm(t.confirmClear)) return;
-
-    setForm(makeDefaultForm());
-    setSubmitError("");
-    setIsDirty(false);
-  }
-
-  function validateForm() {
-    const errors: string[] = [];
-
-    if (!form.code.trim()) errors.push(t.requiredCode);
-    if (!form.name.trim()) errors.push(t.requiredName);
-
-    if (
-      form.openingBalance.trim() &&
-      !Number.isFinite(Number(form.openingBalance))
-    ) {
-      errors.push(t.invalidOpening);
-    }
-
-    return Array.from(new Set(errors));
-  }
-
-  function buildPayload() {
-    return {
-      code: form.code.trim(),
-      account_code: form.code.trim(),
-      name: form.name.trim(),
-      account_name: form.name.trim(),
-      account_type: form.accountType,
-      type: form.accountType,
-      normal_balance: form.normalBalance,
-      parent_id: form.parentId || null,
-      parent: form.parentId || null,
-      is_group: form.isGroup,
-      is_active: form.isActive,
-      opening_balance: openingBalanceNumber,
-      description: form.description.trim(),
-      notes: form.description.trim(),
-    };
-  }
-
-  const loadParentAccounts = useCallback(
-    async (showToast = false) => {
-      try {
-        setIsLoadingParents(true);
-        setLoadError("");
-
-        const endpoints = [
-          "/api/accounting/accounts/?page_size=500",
-          "/api/accounting/accounts/tree/?page_size=500",
-        ];
-
-        let loadedRows: ParentAccount[] = [];
-        let loaded = false;
-        let lastError = "";
-
-        for (const endpoint of endpoints) {
-          const response = await fetch(apiUrl(endpoint), {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-          });
-
-          const payload = (await response.json().catch(() => null)) as
-            | ApiEnvelope<unknown>
-            | null;
-
-          if ([400, 404, 405].includes(response.status)) {
-            lastError =
-              payload?.message ||
-              payload?.detail ||
-              payload?.error ||
-              `HTTP ${response.status}`;
-            continue;
-          }
-
-          if (
-            !response.ok ||
-            payload?.ok === false ||
-            payload?.success === false
-          ) {
-            throw new Error(
-              payload?.message ||
-                payload?.detail ||
-                payload?.error ||
-                `HTTP ${response.status}`,
-            );
-          }
-
-          loadedRows = flattenUnknownRows(extractArray(payload))
-            .map(normalizeParentAccount)
-            .filter((item) => item.id && item.name && item.code);
-
-          loaded = true;
-          break;
-        }
-
-        if (!loaded) {
-          throw new Error(lastError || t.loadError);
-        }
-
-        setParentAccounts(loadedRows);
-
-        if (showToast) {
-          toast.success(t.loadSuccess);
-        }
-      } catch (error) {
-        console.error("Parent accounts load error:", error);
-        setParentAccounts([]);
-        setLoadError(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoadingParents(false);
-      }
-    },
-    [t.loadError, t.loadSuccess],
-  );
-
-  async function submitForm() {
-    if (!canCreate) return;
-
-    const errors = validateForm();
-
-    if (errors.length > 0) {
-      setSubmitError(errors.join("\n"));
-      toast.error(t.validationTitle);
-      return;
-    }
-
-    try {
-      setIsSaving(true);
-      setSubmitError("");
-
-      const payload = buildPayload();
-      const csrfToken = getCookie("csrftoken");
-
-      const endpoints = ["/api/accounting/accounts/create/", "/api/accounting/accounts/"];
-
-      let saved = false;
-      let lastMessage = "";
-
-      for (const endpoint of endpoints) {
-        const response = await fetch(apiUrl(endpoint), {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-          },
-          body: JSON.stringify(payload),
-        });
-
-        const responsePayload = (await response.json().catch(() => null)) as
-          | ApiEnvelope<unknown>
-          | null;
-
-        if ([400, 404, 405].includes(response.status)) {
-          lastMessage =
-            responsePayload?.message ||
-            responsePayload?.detail ||
-            responsePayload?.error ||
-            `HTTP ${response.status}`;
-
-          if (response.status === 400) break;
-
-          continue;
-        }
-
-        if (
-          !response.ok ||
-          responsePayload?.ok === false ||
-          responsePayload?.success === false
-        ) {
-          throw new Error(
-            responsePayload?.message ||
-              responsePayload?.detail ||
-              responsePayload?.error ||
-              `HTTP ${response.status}`,
-          );
-        }
-
-        saved = true;
-        break;
-      }
-
-      if (!saved) {
-        throw new Error(lastMessage || t.saveError);
-      }
-
-      toast.success(t.saveSuccess);
-      setForm(makeDefaultForm());
-      setIsDirty(false);
-      await loadParentAccounts(false);
-    } catch (error) {
-      console.error("Create account submit error:", error);
-      const message = error instanceof Error ? error.message : t.saveError;
-
-      setSubmitError(message || t.saveError);
-      toast.error(t.saveError);
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
       setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
     };
 
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
+    applyLocale();
 
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
     };
   }, []);
 
-  useEffect(() => {
-    if (authResolving) return;
-    loadParentAccounts(false);
-  }, [authResolving, loadParentAccounts]);
-
-  useEffect(() => {
-    if (!generatedCode) return;
-
-    setForm((current) => {
-      if (current.code === generatedCode) return current;
-
-      return {
-        ...current,
-        code: generatedCode,
-      };
-    });
-  }, [generatedCode]);
-
-  useEffect(() => {
-    const handler = (event: BeforeUnloadEvent) => {
-      if (!isDirty || isSaving) return;
+  React.useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirty || saving) return;
 
       event.preventDefault();
       event.returnValue = "";
     };
 
-    window.addEventListener("beforeunload", handler);
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
-    return () => {
-      window.removeEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty, saving]);
+
+  const loadAccounts = React.useCallback(async () => {
+    setLoading(true);
+    setPageError("");
+
+    try {
+      const response = await fetch(apiUrl("/api/accounting/accounts/"), {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      let payload: unknown = null;
+
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        throw new Error(extractApiError(payload, t.errorDesc));
+      }
+
+      setAccounts(normalizeAccountsResponse(payload));
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : t.errorDesc;
+
+      setPageError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [t.errorDesc]);
+
+  React.useEffect(() => {
+    void loadAccounts();
+  }, [loadAccounts]);
+
+  React.useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      nature: TYPE_NATURE[current.account_type],
+      code: suggestNextCode(accounts, current),
+    }));
+  }, [accounts]);
+
+  const updateForm = React.useCallback(
+    <K extends keyof AccountForm>(key: K, value: AccountForm[K]) => {
+      setForm((current) => {
+        const next = {
+          ...current,
+          [key]: value,
+        };
+
+        if (key === "account_type") {
+          const nextType = value as AccountType;
+
+          next.nature = TYPE_NATURE[nextType];
+          next.parent_id = "";
+          next.code = suggestNextCode(accounts, {
+            ...next,
+            account_type: nextType,
+            parent_id: "",
+          });
+        } else if (key === "parent_id") {
+          next.code = suggestNextCode(accounts, next);
+        }
+
+        return next;
+      });
+
+      setFieldErrors((current) => ({
+        ...current,
+        [key]: undefined,
+        general: undefined,
+      }));
+
+      setIsDirty(true);
+      setCreatedId("");
+    },
+    [accounts],
+  );
+
+  const handleReset = React.useCallback(() => {
+    if (isDirty && !window.confirm(t.confirmReset)) return;
+
+    const initial = {
+      ...EMPTY_FORM,
+      code: suggestNextCode(accounts, EMPTY_FORM),
     };
-  }, [isDirty, isSaving]);
 
-  if (!authResolving && !canCreate) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
+    setForm(initial);
+    setFieldErrors({});
+    setSearchParent("");
+    setPageError("");
+    setIsDirty(false);
+    setCreatedId("");
+    toast.success(t.resetDone);
+  }, [accounts, isDirty, t.confirmReset, t.resetDone]);
 
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const buildPayload = React.useCallback(() => {
+    const openingBalance = Number(normalizeDecimalInput(form.opening_balance || "0"));
+
+    return {
+      code: form.code || suggestedCode,
+      name: form.name_ar.trim() || form.name_en.trim(),
+      name_ar: form.name_ar.trim(),
+      name_en: form.name_en.trim(),
+      account_type: form.account_type,
+      nature: form.nature,
+      parent: form.parent_id || null,
+      parent_id: form.parent_id || null,
+      is_group: form.is_group,
+      is_active: form.is_active,
+      opening_balance: Number.isFinite(openingBalance) ? openingBalance : 0,
+      currency: form.currency || "SAR",
+      notes: form.notes.trim(),
+    };
+  }, [form, suggestedCode]);
+
+  const submitToEndpoint = React.useCallback(
+    async (endpoint: string, payload: ApiRecord) => {
+      const response = await fetch(apiUrl(endpoint), {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCookie("csrftoken"),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      let responsePayload: unknown = null;
+
+      try {
+        responsePayload = await response.json();
+      } catch {
+        responsePayload = null;
+      }
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        payload: responsePayload,
+      };
+    },
+    [],
+  );
+
+  const handleSubmit = React.useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+
+      const errors = validateForm(form);
+
+      if (Object.keys(errors).length) {
+        setFieldErrors(errors);
+        toast.error(t.saveError);
+        return;
+      }
+
+      setSaving(true);
+      setPageError("");
+      setFieldErrors({});
+
+      const payload = buildPayload();
+
+      try {
+        let result = await submitToEndpoint("/api/accounting/accounts/", payload);
+
+        if (!result.ok && [404, 405].includes(result.status)) {
+          result = await submitToEndpoint("/api/accounting/accounts/create/", payload);
+        }
+
+        if (!result.ok) {
+          setFieldErrors(parseFieldErrors(result.payload));
+          throw new Error(extractApiError(result.payload, t.saveError));
+        }
+
+        const responseRecord = pickRecord(result.payload);
+        const data = pickRecord(responseRecord.data, responseRecord.account, responseRecord.result, result.payload);
+        const id = asString(data.id || data.pk || responseRecord.id);
+
+        setCreatedId(id);
+        setIsDirty(false);
+        toast.success(t.saved);
+
+        if (id) {
+          router.push(`/system/accounting/accounts/${encodeURIComponent(id)}`);
+        }
+      } catch (error) {
+        const message = error instanceof Error && error.message ? error.message : t.saveError;
+
+        setPageError(message);
+        toast.error(message);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [buildPayload, form, router, submitToEndpoint, t.saveError, t.saved],
+  );
+
+  const handleBack = React.useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (!isDirty || saving) return;
+
+      const accepted = window.confirm(t.leaveWarning);
+
+      if (!accepted) event.preventDefault();
+    },
+    [isDirty, saving, t.leaveWarning],
+  );
+
+  if (loading) return <PageSkeleton />;
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+    <form onSubmit={handleSubmit} className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.title}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <Link href="/system/accounting" className="hover:text-foreground">
+              {locale === "ar" ? "المحاسبة" : "Accounting"}
+            </Link>
+            <span>/</span>
+            <Link href="/system/accounting/accounts" className="hover:text-foreground">
+              {t.back}
+            </Link>
+            <span>/</span>
+            <span className="text-foreground">{t.title}</span>
+          </div>
 
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight">{t.title}</h1>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link
-            href="/system/accounting/accounts"
-            onClick={(event) => {
-              if (isDirty && !window.confirm(t.unsavedChanges)) {
-                event.preventDefault();
-              }
-            }}
-          >
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadParentAccounts(true)}
-            disabled={isLoadingParents || isSaving}
-          >
-            {isLoadingParents ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            <span>{t.refresh}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/system/accounting/accounts" onClick={handleBack}>
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
           </Button>
 
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={clearForm}
-            disabled={isSaving}
-          >
+          <Button type="button" variant="outline" onClick={() => void loadAccounts()} disabled={saving}>
+            <RefreshCw className="h-4 w-4" />
+            {t.refresh}
+          </Button>
+
+          <Button type="button" variant="outline" onClick={handleReset} disabled={saving}>
             <RotateCcw className="h-4 w-4" />
-            <span>{t.clear}</span>
+            {t.reset}
           </Button>
 
-          <Button
-            type="button"
-            className="h-10 rounded-xl"
-            onClick={submitForm}
-            disabled={!canSubmit}
-          >
-            {isSaving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
-            <span>{isSaving ? t.saving : t.save}</span>
+          <Button type="submit" disabled={saving} className="bg-foreground text-background hover:bg-foreground/90">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? t.saving : t.save}
           </Button>
         </div>
       </div>
 
-      {loadError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p className="font-semibold text-destructive">{loadError}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
-              </div>
+      {pageError ? (
+        <Card className="border-red-200 bg-red-50/60 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4">
+            <div className="rounded-lg bg-red-100 p-2 text-red-700">
+              <ShieldAlert className="h-5 w-5" />
             </div>
-
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadParentAccounts(true)}
-              disabled={isLoadingParents}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t.refresh}
-            </Button>
+            <div>
+              <div className="font-semibold text-red-900">{t.saveError}</div>
+              <p className="mt-1 text-sm text-red-700">{pageError}</p>
+            </div>
           </CardContent>
         </Card>
       ) : null}
 
-      {submitError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
+      {isDirty ? (
+        <Card className="border-amber-200 bg-amber-50/50 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4">
+            <div className="rounded-lg bg-amber-100 p-2 text-amber-700">
+              <ShieldAlert className="h-5 w-5" />
             </div>
-
             <div>
-              <p className="font-semibold text-destructive">
-                {t.validationTitle}
-              </p>
-              <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">
-                {submitError}
-              </p>
+              <div className="font-semibold text-amber-900">{t.leaveWarning}</div>
+              <p className="mt-1 text-sm text-amber-700">{t.leaveWarning}</p>
             </div>
           </CardContent>
         </Card>
@@ -1216,304 +966,343 @@ export default function CreateAccountingAccountPage() {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <FileText className="h-4 w-4" />
-                {t.mainInfo}
-              </CardTitle>
-              <CardDescription>{t.mainInfoDesc}</CardDescription>
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="border-b">
+              <div>
+                <CardTitle>{t.basicInfo}</CardTitle>
+                <CardDescription>{t.basicInfoDesc}</CardDescription>
+              </div>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
+            <CardContent className="grid gap-4 p-4 lg:grid-cols-2">
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t.code}</label>
+                <label className="text-sm font-medium">{t.accountNameAr}</label>
                 <Input
-                  value={form.code}
-                  readOnly
-                  disabled={isSaving || isLoadingParents}
+                  value={form.name_ar}
+                  onChange={(event) => updateForm("name_ar", event.target.value)}
+                  placeholder={locale === "ar" ? "مثال: النقدية بالصندوق" : "Arabic account name"}
+                  disabled={saving}
+                />
+                <FieldError message={fieldErrors.name_ar} locale={locale} />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.accountNameEn}</label>
+                <Input
+                  value={form.name_en}
+                  onChange={(event) => updateForm("name_en", event.target.value)}
+                  placeholder="Example: Cash in Hand"
+                  disabled={saving}
                   dir="ltr"
-                  className="h-11 rounded-xl bg-muted/40"
                 />
-                <p className="text-xs text-muted-foreground">{t.autoCode}</p>
+                <FieldError message={fieldErrors.name_en} locale={locale} />
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">{t.name}</label>
-                <Input
-                  value={form.name}
-                  onChange={(event) => updateForm("name", event.target.value)}
-                  disabled={isSaving}
-                  className="h-11 rounded-xl"
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">{t.description}</label>
-                <textarea
-                  value={form.description}
-                  onChange={(event) =>
-                    updateForm("description", event.target.value)
-                  }
-                  disabled={isSaving}
-                  rows={3}
-                  className="w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <FolderTree className="h-4 w-4" />
-                {t.classification}
-              </CardTitle>
-              <CardDescription>{t.classificationDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.accountType}</label>
-                <select
-                  value={form.accountType}
-                  onChange={(event) =>
-                    handleAccountTypeChange(event.target.value as AccountType)
-                  }
-                  disabled={isSaving}
-                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="ASSET">{t.asset}</option>
-                  <option value="LIABILITY">{t.liability}</option>
-                  <option value="EQUITY">{t.equity}</option>
-                  <option value="REVENUE">{t.revenue}</option>
-                  <option value="EXPENSE">{t.expense}</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.normalBalance}</label>
-                <select
-                  value={form.normalBalance}
-                  onChange={(event) =>
-                    updateForm(
-                      "normalBalance",
-                      event.target.value as NormalBalance,
-                    )
-                  }
-                  disabled={isSaving}
-                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="DEBIT">{t.debit}</option>
-                  <option value="CREDIT">{t.credit}</option>
-                </select>
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">{t.parentAccount}</label>
-                {isLoadingParents ? (
-                  <div className="h-11 animate-pulse rounded-xl bg-muted" />
-                ) : (
-                  <select
-                    value={form.parentId}
-                    onChange={(event) =>
-                      updateForm("parentId", event.target.value)
-                    }
-                    disabled={isSaving}
-                    className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">{t.withoutParent}</option>
-                    {activeParentAccounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {[account.code, account.name].filter(Boolean).join(" - ")}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  {t.openingBalance}
-                </label>
-                <div className="relative">
-                  <Input
-                    inputMode="decimal"
-                    value={form.openingBalance}
-                    onChange={(event) =>
-                      updateForm(
-                        "openingBalance",
-                        escapeNumberInput(event.target.value),
-                      )
-                    }
-                    disabled={isSaving}
-                    dir="ltr"
-                    className="h-11 rounded-xl pe-10"
-                  />
-                  <SarIcon
-                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-                      isArabic ? "left-3" : "right-3"
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-3">
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl border bg-background p-3 text-sm">
-                  <Checkbox
-                    checked={form.isGroup}
-                    onCheckedChange={(checked) =>
-                      updateForm("isGroup", Boolean(checked))
-                    }
-                    disabled={isSaving}
-                  />
-                  <span>{t.isGroup}</span>
-                </label>
-
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl border bg-background p-3 text-sm">
-                  <Checkbox
-                    checked={form.isActive}
-                    onCheckedChange={(checked) =>
-                      updateForm("isActive", Boolean(checked))
-                    }
-                    disabled={isSaving}
-                  />
-                  <span>{t.isActive}</span>
-                </label>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <aside className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <CheckCircle2 className="h-4 w-4" />
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.code}</p>
-                <p className="mt-2 font-semibold" dir="ltr">
-                  {form.code || "-"}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.name}</p>
-                <p className="mt-2 font-semibold">{form.name || "-"}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.selectedType}
-                  </p>
-                  <p className="mt-2 font-semibold">
-                    {accountTypeLabel(form.accountType, locale)}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.selectedNature}
-                  </p>
-                  <p className="mt-2 font-semibold">
-                    {normalBalanceLabel(form.normalBalance, locale)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">
-                  {t.selectedClass}
-                </p>
-                <div className="mt-2">
-                  <Badge variant={form.isGroup ? "secondary" : "outline"}>
-                    {form.isGroup ? t.isGroup : t.isPostable}
+                <label className="text-sm font-medium">{t.accountCode}</label>
+                <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
+                  <BookOpen className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-mono text-sm font-semibold">{form.code || suggestedCode}</span>
+                  <Badge variant="outline" className="ms-auto">
+                    {t.generatedCode}
                   </Badge>
                 </div>
               </div>
 
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">
-                  {t.openingBalance}
-                </p>
-                <div className="mt-2 text-xl font-bold">
-                  <MoneyText value={openingBalanceNumber} />
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.openingBalance}</label>
+                <Input
+                  value={form.opening_balance}
+                  onChange={(event) => updateForm("opening_balance", normalizeDecimalInput(event.target.value))}
+                  disabled={saving}
+                  inputMode="decimal"
+                  dir="ltr"
+                />
+                <FieldError message={fieldErrors.opening_balance} locale={locale} />
+              </div>
+
+              <div className="space-y-2 lg:col-span-2">
+                <label className="text-sm font-medium">{t.notes}</label>
+                <Textarea
+                  value={form.notes}
+                  onChange={(event) => updateForm("notes", event.target.value)}
+                  placeholder={t.notesPlaceholder}
+                  disabled={saving}
+                  rows={4}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="border-b">
+              <CardTitle>{t.structureInfo}</CardTitle>
+              <CardDescription>{t.structureInfoDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 p-4 lg:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.accountType}</label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {ACCOUNT_TYPES.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      disabled={saving}
+                      onClick={() => updateForm("account_type", type)}
+                      className={`rounded-lg border p-3 text-start transition hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        form.account_type === type
+                          ? "border-foreground bg-foreground text-background"
+                          : "bg-background"
+                      }`}
+                    >
+                      <div className="font-medium">{t[type]}</div>
+                      <div className={`mt-1 text-xs ${form.account_type === type ? "text-background/70" : "text-muted-foreground"}`}>
+                        {TYPE_PREFIX[type]}
+                      </div>
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              <div className="grid gap-2 pt-2">
-                <Button
-                  type="button"
-                  className="h-11 rounded-2xl"
-                  onClick={submitForm}
-                  disabled={!canSubmit}
-                >
-                  {isSaving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  {isSaving ? t.saving : t.save}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t.nature}</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["debit", "credit"] as AccountNature[]).map((nature) => (
+                    <button
+                      key={nature}
+                      type="button"
+                      disabled
+                      className={`rounded-lg border p-3 text-start ${
+                        form.nature === nature
+                          ? "border-foreground bg-muted"
+                          : "bg-background opacity-60"
+                      }`}
+                    >
+                      <div className="font-medium">{t[nature]}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{t.generatedCode}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-3 lg:col-span-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <label className="text-sm font-medium">{t.parentAccount}</label>
+                    <p className="mt-1 text-xs text-muted-foreground">{t.structureInfoDesc}</p>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant={!form.parent_id ? "default" : "outline"}
+                    className={!form.parent_id ? "bg-foreground text-background hover:bg-foreground/90" : ""}
+                    onClick={() => updateForm("parent_id", "")}
+                    disabled={saving}
+                  >
+                    <FolderTree className="h-4 w-4" />
+                    {t.noParent}
+                  </Button>
+                </div>
+
+                <div className="relative">
+                  <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={searchParent}
+                    onChange={(event) => setSearchParent(event.target.value)}
+                    placeholder={t.searchParent}
+                    className="ps-9"
+                    disabled={saving}
+                  />
+                </div>
+
+                <div className="overflow-hidden rounded-lg border bg-background">
+                  <ScrollArea className="h-[260px]">
+                    <div className="divide-y">
+                      {filteredParents.length ? (
+                        filteredParents.map((account) => {
+                          const selected = form.parent_id === account.id;
+
+                          return (
+                            <button
+                              key={account.id}
+                              type="button"
+                              disabled={saving}
+                              onClick={() => updateForm("parent_id", account.id)}
+                              className={`flex w-full items-start justify-between gap-3 p-3 text-start transition hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+                                selected ? "bg-muted/60" : ""
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-mono text-sm font-semibold">{account.code}</span>
+                                  <span className="font-medium">{displayAccountName(account, locale)}</span>
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  <InfoBadge>{t[account.account_type]}</InfoBadge>
+                                  <InfoBadge>{t[account.nature]}</InfoBadge>
+                                </div>
+                              </div>
+
+                              <div className="shrink-0">
+                                {selected ? (
+                                  <InfoBadge tone="success">
+                                    <CheckCircle2 className="me-1 h-3.5 w-3.5" />
+                                    {locale === "ar" ? "محدد" : "Selected"}
+                                  </InfoBadge>
+                                ) : (
+                                  <Badge variant="outline">{locale === "ar" ? "اختيار" : "Select"}</Badge>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <div className="flex min-h-[180px] flex-col items-center justify-center p-6 text-center">
+                          <FolderTree className="h-8 w-8 text-muted-foreground" />
+                          <p className="mt-2 text-sm font-medium">
+                            {locale === "ar" ? "لا توجد حسابات أب مطابقة." : "No matching parent accounts."}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="border-b">
+              <CardTitle>{t.balanceInfo}</CardTitle>
+              <CardDescription>{t.balanceInfoDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 p-4 lg:grid-cols-2">
+              <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border bg-background p-4">
+                <div>
+                  <p className="text-sm font-semibold">{t.groupAccount}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{t.structureInfoDesc}</p>
+                </div>
+                <Switch
+                  checked={form.is_group}
+                  disabled={saving}
+                  onCheckedChange={(value) => updateForm("is_group", Boolean(value))}
+                  className="mt-1"
+                />
+              </label>
+
+              <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border bg-background p-4">
+                <div>
+                  <p className="text-sm font-semibold">{t.activeAccount}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{t.accountStatus}</p>
+                </div>
+                <Switch
+                  checked={form.is_active}
+                  disabled={saving}
+                  onCheckedChange={(value) => updateForm("is_active", Boolean(value))}
+                  className="mt-1"
+                />
+              </label>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-4">
+          <Card className="sticky top-4 rounded-lg border bg-card shadow-none">
+            <CardHeader className="border-b">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle>{t.summary}</CardTitle>
+                  <CardDescription>{t.summaryDesc}</CardDescription>
+                </div>
+                <CardAction>
+                  <div className="rounded-lg bg-muted p-2 text-muted-foreground">
+                    <WalletCards className="h-5 w-5" />
+                  </div>
+                </CardAction>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4 p-4">
+              <div className="rounded-lg border bg-background p-4">
+                <div className="text-xs text-muted-foreground">{t.nextCode}</div>
+                <div className="mt-2 font-mono text-2xl font-semibold">{form.code || suggestedCode}</div>
+              </div>
+
+              <div className="space-y-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{t.accountNameAr}</span>
+                  <span className="max-w-[60%] truncate font-medium">{form.name_ar || t.unknown}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{t.accountNameEn}</span>
+                  <span className="max-w-[60%] truncate font-medium" dir="ltr">{form.name_en || t.unknown}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{t.accountType}</span>
+                  <InfoBadge>{t[form.account_type]}</InfoBadge>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{t.nature}</span>
+                  <InfoBadge>{t[form.nature]}</InfoBadge>
+                </div>
+
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-muted-foreground">{t.parentAccount}</span>
+                  <span className="max-w-[62%] text-end font-medium">
+                    {selectedParent ? `${selectedParent.code} · ${displayAccountName(selectedParent, locale)}` : t.noParent}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{t.accountKind}</span>
+                  <InfoBadge>{form.is_group ? t.groupAccount : t.postingAccount}</InfoBadge>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{t.openingBalance}</span>
+                  <span className="font-medium">{formatNumber(Number(normalizeDecimalInput(form.opening_balance || "0")))}</span>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{t.currency}</span>
+                  <InfoBadge>{form.currency}</InfoBadge>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">{t.activeAccount}</span>
+                  <InfoBadge tone={form.is_active ? "success" : "warning"}>
+                    {form.is_active ? t.activeAccount : t.unknown}
+                  </InfoBadge>
+                </div>
+              </div>
+
+              {createdId ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                  <CheckCircle2 className="me-2 inline h-4 w-4" />
+                  {t.saved}
+                </div>
+              ) : null}
+
+              <div className="grid gap-2">
+                <Button type="submit" disabled={saving} className="bg-foreground text-background hover:bg-foreground/90">
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  {saving ? t.saving : t.save}
                 </Button>
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 rounded-2xl"
-                  onClick={clearForm}
-                  disabled={isSaving}
-                >
+                <Button type="button" variant="outline" onClick={handleReset} disabled={saving}>
                   <RotateCcw className="h-4 w-4" />
-                  {t.clear}
+                  {locale === "ar" ? "إنشاء حساب آخر" : "Create another"}
                 </Button>
               </div>
             </CardContent>
           </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Layers3 className="h-4 w-4" />
-                {t.parentAccountsCount}
-              </div>
-
-              <div className="text-2xl font-bold">
-                {isLoadingParents
-                  ? "..."
-                  : formatNumber(activeParentAccounts.length)}
-              </div>
-
-              <p className="text-sm leading-6 text-muted-foreground">
-                {selectedParent
-                  ? [selectedParent.code, selectedParent.name]
-                      .filter(Boolean)
-                      .join(" - ")
-                  : t.withoutParent}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <ShieldCheck className="h-4 w-4" />
-                {form.isActive ? t.isActive : t.inactive}
-              </div>
-
-              <p className="text-sm leading-6 text-muted-foreground">
-                {form.isGroup ? t.isGroup : t.isPostable}
-              </p>
-            </CardContent>
-          </Card>
-        </aside>
+        </div>
       </div>
-    </div>
+    </form>
   );
 }

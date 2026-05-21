@@ -2,103 +2,71 @@
 
 /* ============================================================
    📂 app/system/accounting/cost-centers/page.tsx
-   🧠 Primey Care | Accounting Cost Centers Page
-
-   ✅ المسار:
-      app/system/accounting/cost-centers/page.tsx
-
-   ✅ العمل:
-      صفحة مراكز التكلفة داخل مديول المحاسبة.
-      تعرض مراكز التكلفة، حالتها، الأرصدة المرتبطة، وعدد الحركات/الحسابات المرتبطة.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Accounting Cost Centers Build
-
-   ✅ يعتمد على:
-      - /api/accounting/cost-centers/
-      - /api/accounting/reports/cost-centers/ كـ fallback آمن
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Accounting accounts page
-      - Accounting journals approved pattern
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - عرض مراكز التكلفة.
-      - بحث في صف مستقل.
-      - الفلاتر والأعمدة في صف منفصل.
-      - فلترة حسب الحالة والنوع.
-      - فرز الأعمدة.
-      - صفحات محلية.
-      - Excel export بصيغة .xls HTML Workbook.
-      - Web PDF Print.
-      - Error State مستقل.
-      - Empty State ذكي.
-      - Skeleton Loading.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - أرقام إنجليزية دائمًا.
-      - رمز SAR من /currency/sar.svg بعد الرقم.
-
+   🧾 Primey Care — Accounting Cost Centers
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - بناء الصفحة من الصفر كمركز تكلفة وليس صفحة تفاصيل حساب.
-      - الالتزام بالقاعدة: w-full space-y-4 بدون main/min-h-screen/max-w.
-      - إزالة أي عبارات تقنية أو مؤقتة من واجهة المستخدم.
-      - إزالة localhost و API_BASE_URL الثابت.
-      - استخدام sonner للتنبيهات.
-      - استخدام Excel HTML Workbook بدل CSV أو فتح ملف من الباكند.
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Real API:
+      GET /api/accounting/cost-centers/?page=1&page_size=500
+      fallback:
+      GET /api/accounting/reports/cost-centers/?page=1&page_size=500
+      GET /api/accounting/cost_centers/?page=1&page_size=500
+   ✅ Create + details links
+   ✅ Search / status / type / sort / columns
+   ✅ Local pagination
+   ✅ Excel .xls + Web print
+   ✅ Skeleton loading
+   ✅ Error / Empty states
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
-  BarChart3,
+  ArrowRight,
+  ArrowUpDown,
   Building2,
-  Columns3,
-  Download,
+  CheckCircle2,
   Eye,
-  Filter,
-  Layers3,
+  FileSpreadsheet,
+  FolderTree,
   Loader2,
-  PlusCircle,
+  Plus,
   Printer,
-  RefreshCcw,
+  RefreshCw,
+  RotateCcw,
   Search,
+  Settings2,
   ShieldCheck,
-  TrendingDown,
-  TrendingUp,
+  TriangleAlert,
   WalletCards,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -108,520 +76,321 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type CostCenterStatus = "ACTIVE" | "INACTIVE" | "UNKNOWN";
-type CostCenterKind = "OPERATIONAL" | "ADMINISTRATIVE" | "SALES" | "SERVICE" | "OTHER" | "UNKNOWN";
-
-type StatusFilter = "ALL" | CostCenterStatus;
-type KindFilter = "ALL" | CostCenterKind;
-
-type SortKey =
-  | "code"
-  | "name"
-  | "kind"
-  | "status"
-  | "total_debit"
-  | "total_credit"
-  | "net_amount"
-  | "transactions_count"
-  | "created_at";
-
-type SortDirection = "asc" | "desc";
-
-type CostCenterRow = {
-  id: string;
-  code: string;
-  name: string;
-  description: string;
-  kind: CostCenterKind;
-  status: CostCenterStatus;
-  parent_id: string;
-  parent_name: string;
-  manager_name: string;
-  total_debit: number;
-  total_credit: number;
-  net_amount: number;
-  accounts_count: number;
-  transactions_count: number;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-type CostCentersSummary = {
-  total_centers: number;
-  active_centers: number;
-  inactive_centers: number;
-  total_debit: number;
-  total_credit: number;
-  net_amount: number;
-  accounts_count: number;
-  transactions_count: number;
-};
-
-type ApiEnvelope<T> = {
-  ok?: boolean;
-  success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
+type ApiResponse = {
+  count?: number;
+  total?: number;
+  total_count?: number;
   results?: unknown[];
   items?: unknown[];
   rows?: unknown[];
-  cost_centers?: unknown[];
-  summary?: Partial<CostCentersSummary>;
-  count?: number;
-  pagination?: {
-    total_items?: number;
-    count?: number;
-  };
+  data?: unknown;
+  summary?: unknown;
 };
 
-type VisibleColumns = {
-  code: boolean;
-  name: boolean;
-  kind: boolean;
-  status: boolean;
-  manager: boolean;
-  totalDebit: boolean;
-  totalCredit: boolean;
-  netAmount: boolean;
-  transactions: boolean;
-  actions: boolean;
+type CostCenterStatus = "active" | "inactive" | "archived" | "draft" | "unknown";
+type CostCenterType =
+  | "department"
+  | "branch"
+  | "project"
+  | "provider"
+  | "agent"
+  | "operation"
+  | "other";
+
+type StatusFilter = "all" | CostCenterStatus;
+type TypeFilter = "all" | CostCenterType;
+
+type SortKey =
+  | "newest"
+  | "oldest"
+  | "name"
+  | "code"
+  | "status"
+  | "balance_high"
+  | "debit_high"
+  | "credit_high"
+  | "transactions_high";
+
+type ColumnKey =
+  | "center"
+  | "code"
+  | "type"
+  | "status"
+  | "manager"
+  | "transactions"
+  | "debit"
+  | "credit"
+  | "balance"
+  | "actions";
+
+type CostCenterRecord = {
+  id: string;
+  code: string;
+  name: string;
+  type: CostCenterType;
+  type_label: string;
+  status: CostCenterStatus;
+  is_active: boolean;
+  manager_name: string;
+  parent_name: string;
+  accounts_count: number;
+  transactions_count: number;
+  total_debit: number;
+  total_credit: number;
+  balance: number;
+  notes: string;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-const PAGE_SIZE = 16;
-
-const DEFAULT_COLUMNS: VisibleColumns = {
+const DEFAULT_COLUMNS: Record<ColumnKey, boolean> = {
+  center: true,
   code: true,
-  name: true,
-  kind: true,
+  type: true,
   status: true,
   manager: true,
-  totalDebit: true,
-  totalCredit: true,
-  netAmount: true,
   transactions: true,
+  debit: true,
+  credit: true,
+  balance: true,
   actions: true,
 };
 
-const DEFAULT_SUMMARY: CostCentersSummary = {
-  total_centers: 0,
-  active_centers: 0,
-  inactive_centers: 0,
-  total_debit: 0,
-  total_credit: 0,
-  net_amount: 0,
-  accounts_count: 0,
-  transactions_count: 0,
-};
+const translations = {
+  ar: {
+    title: "مراكز التكلفة",
+    subtitle: "إدارة مراكز التكلفة وتتبع الأرصدة والحركات المرتبطة بها.",
+    back: "المحاسبة",
+    create: "مركز تكلفة جديد",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    openDetails: "فتح التفاصيل",
 
-/* ============================================================
-   Locale / API
-============================================================ */
+    totalCenters: "إجمالي المراكز",
+    activeCenters: "المراكز النشطة",
+    totalTransactions: "إجمالي الحركات",
+    totalBalance: "إجمالي الرصيد",
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+    all: "الكل",
+    searchPlaceholder: "ابحث باسم مركز التكلفة أو الكود أو المسؤول...",
+    statusFilter: "الحالة",
+    typeFilter: "النوع",
+    sort: "الترتيب",
+    columns: "الأعمدة",
+    rowsPerPage: "عدد الصفوف",
 
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+    center: "مركز التكلفة",
+    code: "الكود",
+    type: "النوع",
+    status: "الحالة",
+    manager: "المسؤول",
+    transactions: "الحركات",
+    debit: "مدين",
+    credit: "دائن",
+    balance: "الرصيد",
+    actions: "الإجراءات",
 
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
+    active: "نشط",
+    inactive: "غير نشط",
+    archived: "مؤرشف",
+    draft: "مسودة",
+    unknown: "غير محدد",
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
+    department: "قسم",
+    branch: "فرع",
+    project: "مشروع",
+    provider: "مقدم خدمة",
+    agent: "مندوب",
+    operation: "تشغيلي",
+    other: "أخرى",
+
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    nameSort: "الاسم",
+    codeSort: "الكود",
+    statusSort: "الحالة",
+    balanceHigh: "الأعلى رصيدًا",
+    debitHigh: "الأعلى مدين",
+    creditHigh: "الأعلى دائن",
+    transactionsHigh: "الأكثر حركات",
+
+    showing: "عرض",
+    of: "من",
+    rows: "صفوف",
+    page: "صفحة",
+    previous: "السابق",
+    next: "التالي",
+    noDataTitle: "لا توجد مراكز تكلفة",
+    noDataDesc: "ستظهر مراكز التكلفة هنا بعد إنشائها.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+    errorTitle: "تعذر تحميل مراكز التكلفة",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    refreshed: "تم تحديث مراكز التكلفة.",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير مراكز التكلفة",
+    generatedAt: "تاريخ الطباعة",
+    sar: "ر.س",
+    notAvailable: "—",
+  },
+  en: {
+    title: "Cost Centers",
+    subtitle: "Manage cost centers and track related balances and transactions.",
+    back: "Accounting",
+    create: "New cost center",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    openDetails: "Open details",
+
+    totalCenters: "Total centers",
+    activeCenters: "Active centers",
+    totalTransactions: "Total transactions",
+    totalBalance: "Total balance",
+
+    all: "All",
+    searchPlaceholder: "Search by cost center name, code, or manager...",
+    statusFilter: "Status",
+    typeFilter: "Type",
+    sort: "Sort",
+    columns: "Columns",
+    rowsPerPage: "Rows per page",
+
+    center: "Cost center",
+    code: "Code",
+    type: "Type",
+    status: "Status",
+    manager: "Manager",
+    transactions: "Transactions",
+    debit: "Debit",
+    credit: "Credit",
+    balance: "Balance",
+    actions: "Actions",
+
+    active: "Active",
+    inactive: "Inactive",
+    archived: "Archived",
+    draft: "Draft",
+    unknown: "Unknown",
+
+    department: "Department",
+    branch: "Branch",
+    project: "Project",
+    provider: "Provider",
+    agent: "Agent",
+    operation: "Operation",
+    other: "Other",
+
+    newest: "Newest",
+    oldest: "Oldest",
+    nameSort: "Name",
+    codeSort: "Code",
+    statusSort: "Status",
+    balanceHigh: "Highest balance",
+    debitHigh: "Highest debit",
+    creditHigh: "Highest credit",
+    transactionsHigh: "Most transactions",
+
+    showing: "Showing",
+    of: "of",
+    rows: "rows",
+    page: "Page",
+    previous: "Previous",
+    next: "Next",
+    noDataTitle: "No cost centers",
+    noDataDesc: "Cost centers will appear here once created.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other results.",
+    errorTitle: "Unable to load cost centers",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    refreshed: "Cost centers refreshed.",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "Cost centers report",
+    generatedAt: "Generated at",
+    sar: "SAR",
+    notAvailable: "—",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
+}
+
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
+
+  return fallback;
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
+    if (["1", "true", "yes", "on", "active", "enabled"].includes(normalized)) {
+      return true;
+    }
 
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as Dict;
+    if (["0", "false", "no", "off", "inactive", "disabled", "archived"].includes(normalized)) {
+      return false;
     }
   }
 
-  return {};
+  return fallback;
 }
 
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
+function formatInteger(value: unknown) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(toNumber(value));
 }
 
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
-  }
-
-  return true;
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "مراكز التكلفة" : "Cost Centers",
-    subtitle: isArabic
-      ? "إدارة ومراجعة مراكز التكلفة المرتبطة بالحسابات والحركات المحاسبية."
-      : "Manage and review cost centers linked to accounting accounts and movements.",
-
-    back: isArabic ? "لوحة المحاسبة" : "Accounting Overview",
-    reports: isArabic ? "تقارير المحاسبة" : "Accounting Reports",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-    create: isArabic ? "إنشاء مركز تكلفة" : "Create Cost Center",
-
-    statusTitle: isArabic ? "حالة مراكز التكلفة" : "Cost Centers Status",
-    statusDesc: isArabic
-      ? "تحليل سريع للمراكز النشطة وغير النشطة والحركات المرتبطة."
-      : "Quick analysis of active, inactive, and linked movements.",
-    summaryTitle: isArabic ? "ملخص مراكز التكلفة" : "Cost Centers Summary",
-    summaryDesc: isArabic
-      ? "أهم مؤشرات مراكز التكلفة حسب البيانات الحالية."
-      : "Key indicators for current cost center data.",
-
-    totalCenters: isArabic ? "إجمالي المراكز" : "Total Centers",
-    activeCenters: isArabic ? "مراكز نشطة" : "Active Centers",
-    inactiveCenters: isArabic ? "مراكز غير نشطة" : "Inactive Centers",
-    accountsCount: isArabic ? "الحسابات المرتبطة" : "Linked Accounts",
-    transactionsCount: isArabic ? "الحركات المرتبطة" : "Linked Transactions",
-    totalDebit: isArabic ? "إجمالي المدين" : "Total Debit",
-    totalCredit: isArabic ? "إجمالي الدائن" : "Total Credit",
-    netAmount: isArabic ? "الصافي" : "Net Amount",
-
-    searchPlaceholder: isArabic
-      ? "ابحث باسم المركز أو الكود أو المسؤول..."
-      : "Search by name, code, or manager...",
-
-    filters: isArabic ? "الفلاتر" : "Filters",
-    columns: isArabic ? "الأعمدة" : "Columns",
-    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
-
-    all: isArabic ? "الكل" : "All",
-    allStatuses: isArabic ? "كل الحالات" : "All Statuses",
-    allKinds: isArabic ? "كل الأنواع" : "All Types",
-
-    active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    operational: isArabic ? "تشغيلي" : "Operational",
-    administrative: isArabic ? "إداري" : "Administrative",
-    sales: isArabic ? "مبيعات" : "Sales",
-    service: isArabic ? "خدمة" : "Service",
-    other: isArabic ? "أخرى" : "Other",
-
-    table: {
-      code: isArabic ? "الكود" : "Code",
-      name: isArabic ? "اسم مركز التكلفة" : "Cost Center Name",
-      kind: isArabic ? "النوع" : "Type",
-      status: isArabic ? "الحالة" : "Status",
-      manager: isArabic ? "المسؤول" : "Manager",
-      debit: isArabic ? "المدين" : "Debit",
-      credit: isArabic ? "الدائن" : "Credit",
-      net: isArabic ? "الصافي" : "Net",
-      transactions: isArabic ? "الحركات" : "Transactions",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    view: isArabic ? "عرض" : "View",
-
-    emptyTitle: isArabic ? "لا توجد مراكز تكلفة" : "No cost centers",
-    emptyText: isArabic
-      ? "ستظهر مراكز التكلفة هنا بعد إنشائها أو ربطها بالحركات."
-      : "Cost centers will appear here after they are created or linked to movements.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير البحث أو الفلاتر."
-      : "Try changing the search or filters.",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض مراكز التكلفة" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض مراكز التكلفة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view cost centers. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل مراكز التكلفة."
-      : "Unable to load cost centers.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث مراكز التكلفة بنجاح."
-      : "Cost centers refreshed successfully.",
-
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    previous: isArabic ? "السابق" : "Previous",
-    next: isArabic ? "التالي" : "Next",
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
-}
-
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function escapeHtml(value: string | number) {
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).replace("T", " ").slice(0, 16);
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -630,1824 +399,1237 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
 
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
 
-  for (const container of ["cost_center", "costCenter", "center", "item", "data"]) {
-    const nested = obj[container];
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
+}
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const query = params?.toString();
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
+}
 
-      if (value !== undefined && value !== null && value !== "") return value;
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
-}
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
 
-function normalizeStatus(value: unknown): CostCenterStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["ACTIVE", "ENABLED", "OPEN"].includes(clean)) return "ACTIVE";
-  if (["INACTIVE", "DISABLED", "CLOSED"].includes(clean)) return "INACTIVE";
-
-  if (typeof value === "boolean") return value ? "ACTIVE" : "INACTIVE";
-
-  return "UNKNOWN";
-}
-
-function normalizeKind(value: unknown): CostCenterKind {
-  const clean = String(value || "").toUpperCase();
-
-  if (["OPERATIONAL", "OPERATIONS", "OPERATION"].includes(clean)) {
-    return "OPERATIONAL";
+    throw new Error(message);
   }
 
-  if (["ADMINISTRATIVE", "ADMIN"].includes(clean)) {
-    return "ADMINISTRATIVE";
-  }
-
-  if (["SALES", "SALE"].includes(clean)) return "SALES";
-  if (["SERVICE", "SERVICES"].includes(clean)) return "SERVICE";
-  if (["OTHER", "GENERAL"].includes(clean)) return "OTHER";
-
-  return "UNKNOWN";
+  return (payload || {}) as T;
 }
 
-function extractRows(payload: ApiEnvelope<unknown> | null): unknown[] {
-  if (!payload) return [];
-
-  const data = asDict(payload.data);
-
+function extractArray(payload: ApiResponse) {
   if (Array.isArray(payload.results)) return payload.results;
   if (Array.isArray(payload.items)) return payload.items;
   if (Array.isArray(payload.rows)) return payload.rows;
-  if (Array.isArray(payload.cost_centers)) return payload.cost_centers;
+
+  const data = asRecord(payload.data);
 
   if (Array.isArray(data.results)) return data.results;
   if (Array.isArray(data.items)) return data.items;
   if (Array.isArray(data.rows)) return data.rows;
   if (Array.isArray(data.cost_centers)) return data.cost_centers;
-
-  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(data.costCenters)) return data.costCenters;
+  if (Array.isArray(data.centers)) return data.centers;
 
   return [];
 }
 
-function extractSummary(payload: ApiEnvelope<unknown> | null) {
-  if (!payload) return {};
+function normalizeType(value: unknown): CostCenterType {
+  const type = normalizeText(value).toLowerCase();
 
-  const data = asDict(payload.data);
+  if (["department", "dept", "section"].includes(type)) return "department";
+  if (["branch", "location"].includes(type)) return "branch";
+  if (["project", "program"].includes(type)) return "project";
+  if (["provider", "center", "service_provider"].includes(type)) return "provider";
+  if (["agent", "sales_agent", "delivery_agent"].includes(type)) return "agent";
+  if (["operation", "operational", "ops"].includes(type)) return "operation";
 
-  return {
-    ...asDict(payload.summary),
-    ...asDict(data.summary),
-  } as Partial<CostCentersSummary>;
+  return "other";
 }
 
-function normalizeCostCenter(item: unknown): CostCenterRow {
-  const obj = asDict(item);
-  const parent = asDict(obj.parent || obj.parent_cost_center);
-  const manager = asDict(obj.manager || obj.owner || obj.responsible_user);
+function normalizeStatus(value: unknown, isActive: boolean): CostCenterStatus {
+  const status = normalizeText(value).toLowerCase();
 
-  const totalDebit = toNumber(
-    getNestedValue(obj, ["total_debit", "debit", "debit_amount"]),
-  );
+  if (["active", "enabled", "open"].includes(status)) return "active";
+  if (["inactive", "disabled", "closed"].includes(status)) return "inactive";
+  if (["archived", "archive"].includes(status)) return "archived";
+  if (["draft", "pending", "new"].includes(status)) return "draft";
 
-  const totalCredit = toNumber(
-    getNestedValue(obj, ["total_credit", "credit", "credit_amount"]),
-  );
+  return isActive ? "active" : "inactive";
+}
 
-  const explicitNet = getNestedValue(obj, [
-    "net_amount",
-    "net_balance",
-    "balance",
-    "closing_balance",
-  ]);
+function normalizeCostCenter(value: unknown): CostCenterRecord {
+  const item = asRecord(value);
+  const parent = asRecord(item.parent || item.parent_cost_center || item.parent_center);
+  const manager = asRecord(item.manager || item.responsible_user || item.owner);
+
+  const id = normalizeText(item.id || item.pk || item.uuid);
+  const isActive = toBoolean(item.is_active ?? item.active ?? item.enabled, true);
+  const type = normalizeType(item.type || item.center_type || item.cost_center_type || item.category);
+
+  const totalDebit = toNumber(item.total_debit ?? item.debit ?? item.debit_amount);
+  const totalCredit = toNumber(item.total_credit ?? item.credit ?? item.credit_amount);
+  const balance = toNumber(item.balance ?? item.current_balance ?? totalDebit - totalCredit);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || ""),
-    code: String(getNestedValue(obj, ["code", "cost_center_code", "number"]) || "-"),
-    name: String(
-      getNestedValue(obj, ["name", "cost_center_name", "title", "name_ar"]) ||
-        "-",
-    ),
-    description: String(
-      getNestedValue(obj, ["description", "notes", "memo"]) || "",
-    ),
-    kind: normalizeKind(getNestedValue(obj, ["kind", "type", "category"])),
-    status: normalizeStatus(
-      getNestedValue(obj, ["status", "is_active", "active"]),
-    ),
-    parent_id: String(parent.id || getNestedValue(obj, ["parent_id"]) || ""),
-    parent_name: String(parent.name || parent.title || ""),
-    manager_name: String(
-      manager.name ||
+    id,
+    code: normalizeText(item.code || item.cost_center_code || item.center_code || item.number),
+    name:
+      normalizeText(item.name || item.title || item.cost_center_name || item.name_ar || item.name_en) ||
+      (id ? `#${id}` : ""),
+    type,
+    type_label: normalizeText(item.type_label || item.center_type_label || item.category_label),
+    status: normalizeStatus(item.status || item.center_status, isActive),
+    is_active: isActive,
+    manager_name: normalizeText(
+      item.manager_name ||
+        item.responsible_name ||
+        item.owner_name ||
+        manager.name ||
         manager.full_name ||
-        manager.email ||
-        getNestedValue(obj, ["manager_name", "owner_name", "responsible_name"]) ||
-        "",
+        manager.username,
+    ),
+    parent_name: normalizeText(
+      item.parent_name ||
+        item.parent_cost_center_name ||
+        parent.name ||
+        parent.title ||
+        parent.code,
+    ),
+    accounts_count: toNumber(item.accounts_count ?? item.linked_accounts_count),
+    transactions_count: toNumber(
+      item.transactions_count ??
+        item.entries_count ??
+        item.journal_entries_count ??
+        item.movements_count,
     ),
     total_debit: totalDebit,
     total_credit: totalCredit,
-    net_amount:
-      explicitNet === undefined || explicitNet === null || explicitNet === ""
-        ? totalDebit - totalCredit
-        : toNumber(explicitNet),
-    accounts_count: toNumber(
-      getNestedValue(obj, ["accounts_count", "linked_accounts_count"]),
-    ),
-    transactions_count: toNumber(
-      getNestedValue(obj, [
-        "transactions_count",
-        "entries_count",
-        "movements_count",
-        "lines_count",
-      ]),
-    ),
-    is_active:
-      normalizeStatus(getNestedValue(obj, ["status", "is_active", "active"])) ===
-      "ACTIVE",
-    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
-    updated_at: String(getNestedValue(obj, ["updated_at", "modified"]) || ""),
+    balance,
+    notes: normalizeText(item.notes || item.description || item.internal_notes),
+    created_at: normalizeText(item.created_at) || null,
+    updated_at: normalizeText(item.updated_at) || null,
   };
 }
 
-function buildSummary(
-  rows: CostCenterRow[],
-  apiSummary?: Partial<CostCentersSummary>,
-): CostCentersSummary {
-  const fallback: CostCentersSummary = {
-    total_centers: rows.length,
-    active_centers: rows.filter((item) => item.status === "ACTIVE").length,
-    inactive_centers: rows.filter((item) => item.status === "INACTIVE").length,
-    total_debit: rows.reduce((sum, item) => sum + item.total_debit, 0),
-    total_credit: rows.reduce((sum, item) => sum + item.total_credit, 0),
-    net_amount: rows.reduce((sum, item) => sum + item.net_amount, 0),
-    accounts_count: rows.reduce((sum, item) => sum + item.accounts_count, 0),
-    transactions_count: rows.reduce(
-      (sum, item) => sum + item.transactions_count,
-      0,
-    ),
-  };
+function statusLabel(status: CostCenterStatus, locale: Locale) {
+  const t = translations[locale];
 
-  return {
-    total_centers: toNumber(apiSummary?.total_centers) || fallback.total_centers,
-    active_centers: toNumber(apiSummary?.active_centers) || fallback.active_centers,
-    inactive_centers:
-      toNumber(apiSummary?.inactive_centers) || fallback.inactive_centers,
-    total_debit: toNumber(apiSummary?.total_debit) || fallback.total_debit,
-    total_credit: toNumber(apiSummary?.total_credit) || fallback.total_credit,
-    net_amount:
-      apiSummary?.net_amount === undefined
-        ? fallback.net_amount
-        : toNumber(apiSummary.net_amount),
-    accounts_count: toNumber(apiSummary?.accounts_count) || fallback.accounts_count,
-    transactions_count:
-      toNumber(apiSummary?.transactions_count) || fallback.transactions_count,
-  };
+  if (status === "active") return t.active;
+  if (status === "inactive") return t.inactive;
+  if (status === "archived") return t.archived;
+  if (status === "draft") return t.draft;
+
+  return t.unknown;
 }
 
-function statusLabel(status: CostCenterStatus, locale: AppLocale) {
-  const t = dictionary(locale);
+function typeLabel(type: CostCenterType, locale: Locale) {
+  const t = translations[locale];
 
-  const labels: Record<CostCenterStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
-    UNKNOWN: t.unknown,
-  };
+  if (type === "department") return t.department;
+  if (type === "branch") return t.branch;
+  if (type === "project") return t.project;
+  if (type === "provider") return t.provider;
+  if (type === "agent") return t.agent;
+  if (type === "operation") return t.operation;
 
-  return labels[status];
+  return t.other;
 }
 
-function kindLabel(kind: CostCenterKind, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<CostCenterKind, string> = {
-    OPERATIONAL: t.operational,
-    ADMINISTRATIVE: t.administrative,
-    SALES: t.sales,
-    SERVICE: t.service,
-    OTHER: t.other,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[kind];
-}
-
-function statusBadge(status: CostCenterStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+function getStatusClass(status: CostCenterStatus) {
+  if (status === "active") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
-  if (status === "INACTIVE") {
-    return (
-      <Badge variant="secondary" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
+  if (status === "inactive") {
+    return "border-slate-500/30 bg-slate-50 text-slate-700 hover:bg-slate-50";
   }
 
+  if (status === "draft") {
+    return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+  }
+
+  if (status === "archived") {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+  }
+
+  return "border-muted bg-muted/40 text-muted-foreground hover:bg-muted/40";
+}
+
+function getTypeClass(type: CostCenterType) {
+  if (type === "department") return "border-violet-500/30 bg-violet-50 text-violet-700 hover:bg-violet-50";
+  if (type === "branch") return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  if (type === "project") return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  if (type === "provider") return "border-cyan-500/30 bg-cyan-50 text-cyan-700 hover:bg-cyan-50";
+  if (type === "agent") return "border-orange-500/30 bg-orange-50 text-orange-700 hover:bg-orange-50";
+  if (type === "operation") return "border-indigo-500/30 bg-indigo-50 text-indigo-700 hover:bg-indigo-50";
+
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function StatusBadge({ status, locale }: { status: CostCenterStatus; locale: Locale }) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", getStatusClass(status))}
+    >
+      {statusLabel(status, locale)}
     </Badge>
   );
 }
 
-function kindBadge(kind: CostCenterKind, locale: AppLocale) {
-  const label = kindLabel(kind, locale);
-
-  if (kind === "OPERATIONAL" || kind === "SERVICE") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (kind === "SALES") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (kind === "ADMINISTRATIVE") {
-    return (
-      <Badge className="rounded-full border-violet-200 bg-violet-50 px-3 py-1 text-violet-700 hover:bg-violet-50 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-300">
-        {label}
-      </Badge>
-    );
-  }
-
+function TypeBadge({ type, locale }: { type: CostCenterType; locale: Locale }) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", getTypeClass(type))}
+    >
+      {typeLabel(type, locale)}
     </Badge>
   );
 }
 
-function sortValue(row: CostCenterRow, key: SortKey): string | number {
-  if (key === "total_debit") return row.total_debit;
-  if (key === "total_credit") return row.total_credit;
-  if (key === "net_amount") return row.net_amount;
-  if (key === "transactions_count") return row.transactions_count;
-
-  return String(row[key] || "");
-}
-
-function isValidId(value: unknown) {
-  const id = String(value || "").trim();
-
-  return id && id !== "-" && id !== "undefined" && id !== "null";
-}
-
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+function MoneyValue({ value, label }: { value: number; label: string }) {
   return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
-  );
-}
-
-function MoneyText({ value }: { value: unknown }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <div className="flex items-center justify-start gap-1 text-sm font-semibold tabular-nums">
       <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-/* ============================================================
-   Skeleton
-============================================================ */
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function TableSkeleton({ columnsCount }: { columnsCount: number }) {
-  return (
-    <>
-      {Array.from({ length: 7 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 1
-                    ? "h-8 w-44 rounded-lg"
-                    : "h-4 w-24 rounded-lg"
-                }
-              />
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </>
-  );
-}
-
-function KpiSkeleton() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <SkeletonLine className="h-8 w-28" />
-            <SkeletonLine className="mt-3 h-4 w-24" />
-          </CardContent>
-        </Card>
-      ))}
+      <img src="/currency/sar.svg" alt={label} className="h-3.5 w-3.5" />
     </div>
   );
 }
 
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  worksheetName,
+function KpiCard({
   title,
-  locale,
-  summaryRows,
-  headers,
-  rows,
+  value,
+  trend,
+  icon: Icon,
 }: {
-  filename: string;
-  worksheetName: string;
   title: string;
-  locale: AppLocale;
-  summaryRows: Array<[string, string | number]>;
-  headers: string[];
-  rows: Array<Array<string | number>>;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
-  const dir = locale === "ar" ? "rtl" : "ltr";
-  const align = locale === "ar" ? "right" : "left";
-  const colspan = Math.max(headers.length, 2);
+  return (
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-  const summaryHtml = summaryRows
-    .map(
-      ([label, value]) => `
-        <tr>
-          <td class="summary-label">${escapeHtml(label)}</td>
-          <td class="summary-value">${escapeHtml(value)}</td>
-        </tr>`,
-    )
-    .join("");
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
 
-  const headerHtml = headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
-    .join("");
-
-  const rowsHtml = rows
-    .map(
-      (row) => `
-        <tr>
-          ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${locale === "ar" ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; color: #000; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-          .summary-value { font-weight: 700; }
-        </style>
-      </head>
-
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="${colspan}">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr><td class="section" colspan="${colspan}">
-            ${locale === "ar" ? "ملخص مراكز التكلفة" : "Cost Centers Summary"}
-          </td></tr>
-          ${summaryHtml}
-          <tr><td colspan="${colspan}"></td></tr>
-          <tr>${headerHtml}</tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  rows,
-  summary,
-  t,
-}: {
-  locale: AppLocale;
-  title: string;
-  rows: CostCenterRow[];
-  summary: CostCentersSummary;
-  t: ReturnType<typeof dictionary>;
-}) {
-  const isArabic = locale === "ar";
-  const now = new Date().toLocaleString("en-US");
-
-  const tableRows = rows
-    .map(
-      (item, index) => `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(item.code)}</td>
-          <td>${escapeHtml(item.name)}</td>
-          <td>${escapeHtml(kindLabel(item.kind, locale))}</td>
-          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(item.manager_name || "-")}</td>
-          <td>${escapeHtml(formatMoney(item.total_debit))}</td>
-          <td>${escapeHtml(formatMoney(item.total_credit))}</td>
-          <td>${escapeHtml(formatMoney(item.net_amount))}</td>
-          <td>${escapeHtml(formatNumber(item.transactions_count))}</td>
-        </tr>
-      `,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #ffffff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .print-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 16px;
-            margin-bottom: 18px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
-          .badge {
-            display: inline-block;
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            color: #374151;
-          }
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .summary-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .summary-card span {
-            display: block;
-            color: #6b7280;
-            font-size: 11px;
-            margin-bottom: 5px;
-          }
-          .summary-card strong { font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; }
-          th { background: #f3f4f6; color: #111827; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 9px 8px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          tr:nth-child(even) td { background: #fafafa; }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-
-      <body>
-        <div class="print-header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
           </div>
-          <div class="badge">Primey Care</div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
         </div>
-
-        <div class="summary-grid">
-          <div class="summary-card"><span>${escapeHtml(t.totalCenters)}</span><strong>${formatNumber(summary.total_centers)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.activeCenters)}</span><strong>${formatNumber(summary.active_centers)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.totalDebit)}</span><strong>${formatMoney(summary.total_debit)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.totalCredit)}</span><strong>${formatMoney(summary.total_credit)}</strong></div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>${escapeHtml(t.table.code)}</th>
-              <th>${escapeHtml(t.table.name)}</th>
-              <th>${escapeHtml(t.table.kind)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-              <th>${escapeHtml(t.table.manager)}</th>
-              <th>${escapeHtml(t.table.debit)}</th>
-              <th>${escapeHtml(t.table.credit)}</th>
-              <th>${escapeHtml(t.table.net)}</th>
-              <th>${escapeHtml(t.table.transactions)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="10" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+      </CardHeader>
+    </Card>
+  );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function PageSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="min-h-[112px] px-6 py-5">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-5 w-20" />
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-80 w-full" />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 export default function AccountingCostCentersPage() {
-  const auth = useAuth() as unknown;
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [centers, setCenters] = React.useState<CostCenterRecord[]>([]);
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [rows, setRows] = useState<CostCenterRow[]>([]);
-  const [summary, setSummary] = useState<CostCentersSummary>(DEFAULT_SUMMARY);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState("");
 
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-  const [kindFilter, setKindFilter] = useState<KindFilter>("ALL");
-  const [sortKey, setSortKey] = useState<SortKey>("code");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-  const [page, setPage] = useState(1);
-  const [visibleColumns, setVisibleColumns] =
-    useState<VisibleColumns>(DEFAULT_COLUMNS);
+  const [searchInput, setSearchInput] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
+  const [typeFilter, setTypeFilter] = React.useState<TypeFilter>("all");
+  const [sortKey, setSortKey] = React.useState<SortKey>("newest");
+  const [columns, setColumns] = React.useState<Record<ColumnKey, boolean>>(DEFAULT_COLUMNS);
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(10);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const canView = hasSafePermission(
-    auth,
-    ["accounting.view", "accounting.cost_centers.view"],
-    "view",
-  );
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const canCreate = hasSafePermission(
-    auth,
-    ["accounting.create", "accounting.cost_centers.create", "accounting.manage"],
-    "action",
-  );
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-  const canExport = hasSafePermission(
-    auth,
-    ["accounting.export", "reports.accounting.export", "reports.export"],
-    "action",
-  );
+    applyLocale();
 
-  const canPrint = hasSafePermission(
-    auth,
-    ["accounting.print", "reports.accounting.print", "reports.print"],
-    "action",
-  );
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-  const canViewDetails = hasSafePermission(
-    auth,
-    ["accounting.view", "accounting.cost_centers.view"],
-    "view",
-  );
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
 
-  const filteredRows = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
-
-    const filtered = rows.filter((item) => {
-      const matchesStatus =
-        statusFilter === "ALL" ? true : item.status === statusFilter;
-
-      const matchesKind = kindFilter === "ALL" ? true : item.kind === kindFilter;
-
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            item.code,
-            item.name,
-            item.description,
-            item.manager_name,
-            item.parent_name,
-            kindLabel(item.kind, locale),
-            statusLabel(item.status, locale),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
-
-      return matchesStatus && matchesKind && matchesQuery;
-    });
-
-    return [...filtered].sort((a, b) => {
-      const first = sortValue(a, sortKey);
-      const second = sortValue(b, sortKey);
-
-      if (typeof first === "number" && typeof second === "number") {
-        return sortDirection === "asc" ? first - second : second - first;
-      }
-
-      return sortDirection === "asc"
-        ? String(first).localeCompare(String(second))
-        : String(second).localeCompare(String(first));
-    });
-  }, [kindFilter, locale, query, rows, sortDirection, sortKey, statusFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
-
-  const paginatedRows = useMemo(() => {
-    const safePage = Math.min(page, totalPages);
-    const startIndex = (safePage - 1) * PAGE_SIZE;
-
-    return filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
-  }, [filteredRows, page, totalPages]);
-
-  const hasSearchOrFilter =
-    query.trim().length > 0 || statusFilter !== "ALL" || kindFilter !== "ALL";
-
-  const visibleColumnCount = Object.entries(visibleColumns).filter(
-    ([key, value]) => value && (key !== "actions" || canViewDetails),
-  ).length;
-
-  const statusOptions = useMemo(
-    () => [
-      { value: "ALL" as StatusFilter, label: t.allStatuses, count: rows.length },
-      {
-        value: "ACTIVE" as StatusFilter,
-        label: t.active,
-        count: rows.filter((item) => item.status === "ACTIVE").length,
-      },
-      {
-        value: "INACTIVE" as StatusFilter,
-        label: t.inactive,
-        count: rows.filter((item) => item.status === "INACTIVE").length,
-      },
-    ],
-    [rows, t],
-  );
-
-  const kindOptions = useMemo(
-    () => [
-      { value: "ALL" as KindFilter, label: t.allKinds, count: rows.length },
-      {
-        value: "OPERATIONAL" as KindFilter,
-        label: t.operational,
-        count: rows.filter((item) => item.kind === "OPERATIONAL").length,
-      },
-      {
-        value: "ADMINISTRATIVE" as KindFilter,
-        label: t.administrative,
-        count: rows.filter((item) => item.kind === "ADMINISTRATIVE").length,
-      },
-      {
-        value: "SALES" as KindFilter,
-        label: t.sales,
-        count: rows.filter((item) => item.kind === "SALES").length,
-      },
-      {
-        value: "SERVICE" as KindFilter,
-        label: t.service,
-        count: rows.filter((item) => item.kind === "SERVICE").length,
-      },
-      {
-        value: "OTHER" as KindFilter,
-        label: t.other,
-        count: rows.filter((item) => item.kind === "OTHER").length,
-      },
-    ],
-    [rows, t],
-  );
-
-  const columnOptions: Array<{ key: keyof VisibleColumns; label: string }> = [
-    { key: "code", label: t.table.code },
-    { key: "name", label: t.table.name },
-    { key: "kind", label: t.table.kind },
-    { key: "status", label: t.table.status },
-    { key: "manager", label: t.table.manager },
-    { key: "totalDebit", label: t.table.debit },
-    { key: "totalCredit", label: t.table.credit },
-    { key: "netAmount", label: t.table.net },
-    { key: "transactions", label: t.table.transactions },
-    { key: "actions", label: t.table.action },
-  ];
-
-  const loadCostCenters = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setRows([]);
-        setSummary(DEFAULT_SUMMARY);
-        setIsLoading(false);
-        return;
-      }
+  const loadCostCenters = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
 
       try {
-        setIsLoading(true);
-        setErrorMessage("");
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setError("");
+
+        const params = new URLSearchParams({
+          page: "1",
+          page_size: "500",
+        });
 
         const endpoints = [
-          "/api/accounting/cost-centers/?page_size=500",
-          "/api/accounting/reports/cost-centers/?page_size=500",
+          "/api/accounting/cost-centers/",
+          "/api/accounting/reports/cost-centers/",
+          "/api/accounting/cost_centers/",
         ];
 
-        let loadedPayload: ApiEnvelope<unknown> | null = null;
-        let loaded = false;
-        let lastError = "";
+        let payload: ApiResponse | null = null;
+        let lastError: unknown = null;
 
         for (const endpoint of endpoints) {
-          const response = await fetch(apiUrl(endpoint), {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-          });
-
-          const payload = (await response.json().catch(() => null)) as
-            | ApiEnvelope<unknown>
-            | null;
-
-          if ([400, 404, 405].includes(response.status)) {
-            lastError =
-              payload?.message ||
-              payload?.detail ||
-              payload?.error ||
-              `HTTP ${response.status}`;
-            continue;
-          }
-
-          if (
-            !response.ok ||
-            payload?.ok === false ||
-            payload?.success === false
-          ) {
-            throw new Error(
-              payload?.message ||
-                payload?.detail ||
-                payload?.error ||
-                `HTTP ${response.status}`,
+          try {
+            payload = await fetchJson<ApiResponse>(
+              makeApiUrl(endpoint, params),
+              controller.signal,
             );
+            break;
+          } catch (caughtError) {
+            lastError = caughtError;
           }
-
-          loadedPayload = payload;
-          loaded = true;
-          break;
         }
 
-        if (!loaded || !loadedPayload) {
-          throw new Error(lastError || t.loadError);
+        if (!payload) {
+          throw lastError instanceof Error ? lastError : new Error(t.errorDesc);
         }
 
-        const normalizedRows = extractRows(loadedPayload)
+        const rows = extractArray(payload)
           .map(normalizeCostCenter)
-          .filter((item) => item.id || item.code || item.name);
+          .filter((center) => center.id || center.name || center.code);
 
-        setRows(normalizedRows);
-        setSummary(buildSummary(normalizedRows, extractSummary(loadedPayload)));
-        setPage(1);
+        setCenters(rows);
 
-        if (showToast) {
-          toast.success(t.loadSuccess);
-        }
-      } catch (error) {
-        console.error("Cost centers load error:", error);
-        setRows([]);
-        setSummary(DEFAULT_SUMMARY);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
+        if (silent) toast.success(t.refreshed);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setError(message);
       } finally {
-        setIsLoading(false);
+        setLoading(false);
+        setRefreshing(false);
       }
+
+      return () => controller.abort();
     },
-    [canView, t.loadError, t.loadSuccess],
+    [t.errorDesc, t.refreshed],
   );
 
-  function clearFilters() {
-    setQuery("");
-    setStatusFilter("ALL");
-    setKindFilter("ALL");
+  React.useEffect(() => {
+    void loadCostCenters();
+  }, [loadCostCenters]);
+
+  const summary = React.useMemo(() => {
+    return {
+      total: centers.length,
+      active: centers.filter((center) => center.status === "active" || center.is_active).length,
+      transactions: centers.reduce((sum, center) => sum + center.transactions_count, 0),
+      debit: centers.reduce((sum, center) => sum + center.total_debit, 0),
+      credit: centers.reduce((sum, center) => sum + center.total_credit, 0),
+      balance: centers.reduce((sum, center) => sum + center.balance, 0),
+    };
+  }, [centers]);
+
+  const filteredCenters = React.useMemo(() => {
+    const query = searchInput.trim().toLowerCase();
+
+    let result = centers.filter((center) => {
+      const matchesSearch =
+        !query ||
+        center.name.toLowerCase().includes(query) ||
+        center.code.toLowerCase().includes(query) ||
+        center.manager_name.toLowerCase().includes(query) ||
+        center.parent_name.toLowerCase().includes(query) ||
+        center.notes.toLowerCase().includes(query) ||
+        center.type.toLowerCase().includes(query);
+
+      const matchesStatus = statusFilter === "all" || center.status === statusFilter;
+      const matchesType = typeFilter === "all" || center.type === typeFilter;
+
+      return matchesSearch && matchesStatus && matchesType;
+    });
+
+    result = [...result].sort((a, b) => {
+      if (sortKey === "oldest") {
+        return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+      }
+
+      if (sortKey === "name") return a.name.localeCompare(b.name);
+      if (sortKey === "code") return a.code.localeCompare(b.code);
+      if (sortKey === "status") return a.status.localeCompare(b.status);
+      if (sortKey === "balance_high") return b.balance - a.balance;
+      if (sortKey === "debit_high") return b.total_debit - a.total_debit;
+      if (sortKey === "credit_high") return b.total_credit - a.total_credit;
+      if (sortKey === "transactions_high") return b.transactions_count - a.transactions_count;
+
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    });
+
+    return result;
+  }, [centers, searchInput, sortKey, statusFilter, typeFilter]);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [pageSize, searchInput, sortKey, statusFilter, typeFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredCenters.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = filteredCenters.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  const hasActiveFilters =
+    Boolean(searchInput.trim()) ||
+    statusFilter !== "all" ||
+    typeFilter !== "all" ||
+    sortKey !== "newest";
+
+  const visibleColumnCount = Object.values(columns).filter(Boolean).length;
+
+  function resetFilters() {
+    setSearchInput("");
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setSortKey("newest");
     setPage(1);
   }
 
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
+  function columnLabel(key: ColumnKey) {
+    if (key === "center") return t.center;
+    if (key === "code") return t.code;
+    if (key === "type") return t.type;
+    if (key === "status") return t.status;
+    if (key === "manager") return t.manager;
+    if (key === "transactions") return t.transactions;
+    if (key === "debit") return t.debit;
+    if (key === "credit") return t.credit;
+    if (key === "balance") return t.balance;
+    return t.actions;
+  }
 
-    setSortKey(key);
-    setSortDirection("asc");
+  function buildExportRows() {
+    return filteredCenters.map((center) => ({
+      center: center.name || t.notAvailable,
+      code: center.code || t.notAvailable,
+      type: typeLabel(center.type, locale),
+      status: statusLabel(center.status, locale),
+      manager: center.manager_name || t.notAvailable,
+      transactions: center.transactions_count,
+      debit: formatMoney(center.total_debit),
+      credit: formatMoney(center.total_credit),
+      balance: formatMoney(center.balance),
+    }));
   }
 
   function exportExcel() {
-    if (!canExport) return;
+    const rows = buildExportRows();
 
-    if (filteredRows.length === 0) {
+    if (!rows.length) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    const generatedAt = new Date();
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(t.printTitle)}</h1>
+          <p>${escapeHtml(t.totalCenters)}: ${escapeHtml(summary.total)}</p>
+          <p>${escapeHtml(t.activeCenters)}: ${escapeHtml(summary.active)}</p>
+          <p>${escapeHtml(t.totalTransactions)}: ${escapeHtml(summary.transactions)}</p>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
 
-    downloadExcel({
-      filename: `primey-care-cost-centers-${generatedAt
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "مراكز التكلفة" : "Cost Centers",
-      title: t.title,
-      locale,
-      summaryRows: [
-        [t.generatedAt, generatedAt.toLocaleString("en-US")],
-        [t.totalCenters, summary.total_centers],
-        [t.activeCenters, summary.active_centers],
-        [t.inactiveCenters, summary.inactive_centers],
-        [t.totalDebit, formatMoney(summary.total_debit)],
-        [t.totalCredit, formatMoney(summary.total_credit)],
-        [t.netAmount, formatMoney(summary.net_amount)],
-        [t.transactionsCount, summary.transactions_count],
-      ],
-      headers: [
-        "ID",
-        t.table.code,
-        t.table.name,
-        t.table.kind,
-        t.table.status,
-        t.table.manager,
-        t.table.debit,
-        t.table.credit,
-        t.table.net,
-        t.table.transactions,
-      ],
-      rows: filteredRows.map((item) => [
-        item.id || "-",
-        item.code || "-",
-        item.name || "-",
-        kindLabel(item.kind, locale),
-        statusLabel(item.status, locale),
-        item.manager_name || "-",
-        formatMoney(item.total_debit),
-        formatMoney(item.total_credit),
-        formatMoney(item.net_amount),
-        item.transactions_count,
-      ]),
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.center)}</th>
+                <th>${escapeHtml(t.code)}</th>
+                <th>${escapeHtml(t.type)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.manager)}</th>
+                <th>${escapeHtml(t.transactions)}</th>
+                <th>${escapeHtml(t.debit)}</th>
+                <th>${escapeHtml(t.credit)}</th>
+                <th>${escapeHtml(t.balance)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.center)}</td>
+                      <td>${escapeHtml(row.code)}</td>
+                      <td>${escapeHtml(row.type)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.manager)}</td>
+                      <td>${escapeHtml(row.transactions)}</td>
+                      <td>${escapeHtml(row.debit)}</td>
+                      <td>${escapeHtml(row.credit)}</td>
+                      <td>${escapeHtml(row.balance)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
     });
 
-    toast.success(t.exportSuccess);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-cost-centers-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
   function printPage() {
-    if (!canPrint) return;
+    const rows = buildExportRows();
 
-    if (filteredRows.length === 0) {
-      toast.error(t.exportEmpty);
+    if (!rows.length) {
+      toast.error(t.printEmpty);
       return;
     }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.printError);
+      toast.error(t.printEmpty);
       return;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        rows: filteredRows,
-        summary,
-        t,
-      }),
-    );
-    printWindow.document.close();
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+              margin-bottom: 18px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.showing)}: ${escapeHtml(rows.length)}</p>
+            </div>
+          </div>
 
-    toast.success(t.printSuccess);
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.totalCenters)}</span><strong>${escapeHtml(summary.total)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.activeCenters)}</span><strong>${escapeHtml(summary.active)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.totalTransactions)}</span><strong>${escapeHtml(summary.transactions)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.totalBalance)}</span><strong>${escapeHtml(formatMoney(summary.balance))}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.center)}</th>
+                <th>${escapeHtml(t.code)}</th>
+                <th>${escapeHtml(t.type)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.manager)}</th>
+                <th>${escapeHtml(t.transactions)}</th>
+                <th>${escapeHtml(t.debit)}</th>
+                <th>${escapeHtml(t.credit)}</th>
+                <th>${escapeHtml(t.balance)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.center)}</td>
+                      <td>${escapeHtml(row.code)}</td>
+                      <td>${escapeHtml(row.type)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.manager)}</td>
+                      <td>${escapeHtml(row.transactions)}</td>
+                      <td>${escapeHtml(row.debit)}</td>
+                      <td>${escapeHtml(row.credit)}</td>
+                      <td>${escapeHtml(row.balance)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadCostCenters(false);
-  }, [authResolving, loadCostCenters]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [query, statusFilter, kindFilter]);
-
-  if (!authResolving && !canView) {
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="w-full space-y-4" dir={dir}>
+        <PageSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/accounting">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
-
-          <Link href="/system/reports/accounting">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <BarChart3 className="h-4 w-4" />
-              <span>{t.reports}</span>
-            </Button>
-          </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/accounting">
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
 
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadCostCenters(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadCostCenters({ silent: true })}
+            disabled={refreshing}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canExport ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={isLoading || filteredRows.length === 0 || Boolean(errorMessage)}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
 
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={isLoading || filteredRows.length === 0 || Boolean(errorMessage)}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
 
-          {canCreate ? (
+          <Button asChild className="h-9 rounded-lg bg-black text-white hover:bg-black/90">
             <Link href="/system/accounting/cost-centers/create">
-              <Button
-                variant="outline"
-                className="h-10 w-full rounded-xl sm:w-auto"
-              >
-                <PlusCircle className="h-4 w-4" />
-                <span>{t.create}</span>
-              </Button>
+              <Plus className="h-4 w-4" />
+              {t.create}
             </Link>
-          ) : null}
+          </Button>
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.totalCenters}
+          value={formatInteger(summary.total)}
+          trend={t.center}
+          icon={FolderTree}
+        />
 
+        <KpiCard
+          title={t.activeCenters}
+          value={formatInteger(summary.active)}
+          trend={t.active}
+          icon={CheckCircle2}
+        />
+
+        <KpiCard
+          title={t.totalTransactions}
+          value={formatInteger(summary.transactions)}
+          trend={t.transactions}
+          icon={ShieldCheck}
+        />
+
+        <KpiCard
+          title={t.totalBalance}
+          value={<MoneyValue value={summary.balance} label={t.sar} />}
+          trend={t.balance}
+          icon={WalletCards}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-destructive">
-                  {errorMessage}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadCostCenters(true)}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadCostCenters()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {!errorMessage ? (
-        <>
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="flex flex-col gap-3 pb-3 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <CardTitle className="text-base font-bold">
-                    {t.statusTitle}
-                  </CardTitle>
-                  <CardDescription>{t.statusDesc}</CardDescription>
-                </div>
-
-                {canExport ? (
-                  <Button
-                    variant="outline"
-                    className="h-10 rounded-xl"
-                    onClick={exportExcel}
-                    disabled={isLoading || filteredRows.length === 0}
-                  >
-                    <Download className="h-4 w-4" />
-                    {t.exportExcel}
-                  </Button>
-                ) : null}
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                {isLoading ? (
-                  <KpiSkeleton />
-                ) : (
-                  <div className="grid gap-3 md:grid-cols-4">
-                    <div className="rounded-2xl border bg-background p-4">
-                      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Building2 className="h-3.5 w-3.5" />
-                        {t.totalCenters}
-                      </p>
-                      <div className="mt-3 text-2xl font-bold">
-                        {formatNumber(summary.total_centers)}
-                      </div>
-                      <div className="mt-3 h-2 rounded-full bg-slate-950 dark:bg-slate-200" />
-                    </div>
-
-                    <div className="rounded-2xl border bg-background p-4">
-                      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                        {t.activeCenters}
-                      </p>
-                      <div className="mt-3 text-2xl font-bold">
-                        {formatNumber(summary.active_centers)}
-                      </div>
-                      <div className="mt-3 h-2 rounded-full bg-emerald-500" />
-                    </div>
-
-                    <div className="rounded-2xl border bg-background p-4">
-                      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <TrendingUp className="h-3.5 w-3.5" />
-                        {t.totalDebit}
-                      </p>
-                      <div className="mt-3 text-2xl font-bold">
-                        <MoneyText value={summary.total_debit} />
-                      </div>
-                      <div className="mt-3 h-2 rounded-full bg-sky-500" />
-                    </div>
-
-                    <div className="rounded-2xl border bg-background p-4">
-                      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <TrendingDown className="h-3.5 w-3.5" />
-                        {t.totalCredit}
-                      </p>
-                      <div className="mt-3 text-2xl font-bold">
-                        <MoneyText value={summary.total_credit} />
-                      </div>
-                      <div className="mt-3 h-2 rounded-full bg-violet-500" />
-                    </div>
-                  </div>
-                )}
-
-                <div className="relative w-full">
-                  <Search
-                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder={t.searchPlaceholder}
-                    className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap gap-2">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" className="h-10 rounded-xl">
-                          <Filter className="h-4 w-4" />
-                          {t.filters}
-                        </Button>
-                      </DropdownMenuTrigger>
-
-                      <DropdownMenuContent
-                        align={isArabic ? "start" : "end"}
-                        className="w-72 rounded-2xl"
-                      >
-                        <div dir={isArabic ? "rtl" : "ltr"}>
-                          <DropdownMenuLabel>{t.allStatuses}</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-
-                          {statusOptions.map((item) => (
-                            <DropdownMenuCheckboxItem
-                              key={item.value}
-                              checked={statusFilter === item.value}
-                              onCheckedChange={() => setStatusFilter(item.value)}
-                            >
-                              {item.label} ({formatNumber(item.count)})
-                            </DropdownMenuCheckboxItem>
-                          ))}
-
-                          <DropdownMenuSeparator />
-                          <DropdownMenuLabel>{t.allKinds}</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-
-                          {kindOptions.map((item) => (
-                            <DropdownMenuCheckboxItem
-                              key={item.value}
-                              checked={kindFilter === item.value}
-                              onCheckedChange={() => setKindFilter(item.value)}
-                            >
-                              {item.label} ({formatNumber(item.count)})
-                            </DropdownMenuCheckboxItem>
-                          ))}
-                        </div>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" className="h-10 rounded-xl">
-                          <Columns3 className="h-4 w-4" />
-                          {t.columns}
-                        </Button>
-                      </DropdownMenuTrigger>
-
-                      <DropdownMenuContent
-                        align={isArabic ? "start" : "end"}
-                        className="w-64 rounded-2xl"
-                      >
-                        <div dir={isArabic ? "rtl" : "ltr"}>
-                          <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-
-                          {columnOptions.map((column) => {
-                            if (column.key === "actions" && !canViewDetails) {
-                              return null;
-                            }
-
-                            return (
-                              <DropdownMenuCheckboxItem
-                                key={column.key}
-                                checked={visibleColumns[column.key]}
-                                onCheckedChange={(checked) =>
-                                  setVisibleColumns((current) => ({
-                                    ...current,
-                                    [column.key]: Boolean(checked),
-                                  }))
-                                }
-                              >
-                                {column.label}
-                              </DropdownMenuCheckboxItem>
-                            );
-                          })}
-                        </div>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-
-                    {hasSearchOrFilter ? (
-                      <Button
-                        variant="outline"
-                        className="h-10 rounded-xl"
-                        onClick={clearFilters}
-                      >
-                        {t.clearFilters}
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="overflow-hidden rounded-xl border">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          {visibleColumns.code ? (
-                            <TableHead className="min-w-[110px]">
-                              <button
-                                type="button"
-                                onClick={() => toggleSort("code")}
-                                className="inline-flex items-center gap-1 font-medium"
-                              >
-                                {t.table.code}
-                                {sortKey === "code" &&
-                                  (sortDirection === "asc" ? (
-                                    <ArrowUp className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ArrowDown className="h-3.5 w-3.5" />
-                                  ))}
-                              </button>
-                            </TableHead>
-                          ) : null}
-
-                          {visibleColumns.name ? (
-                            <TableHead className="min-w-[220px]">
-                              <button
-                                type="button"
-                                onClick={() => toggleSort("name")}
-                                className="inline-flex items-center gap-1 font-medium"
-                              >
-                                {t.table.name}
-                                {sortKey === "name" &&
-                                  (sortDirection === "asc" ? (
-                                    <ArrowUp className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ArrowDown className="h-3.5 w-3.5" />
-                                  ))}
-                              </button>
-                            </TableHead>
-                          ) : null}
-
-                          {visibleColumns.kind ? (
-                            <TableHead className="min-w-[120px]">
-                              {t.table.kind}
-                            </TableHead>
-                          ) : null}
-
-                          {visibleColumns.status ? (
-                            <TableHead className="min-w-[120px]">
-                              {t.table.status}
-                            </TableHead>
-                          ) : null}
-
-                          {visibleColumns.manager ? (
-                            <TableHead className="min-w-[150px]">
-                              {t.table.manager}
-                            </TableHead>
-                          ) : null}
-
-                          {visibleColumns.totalDebit ? (
-                            <TableHead className="min-w-[140px]">
-                              <button
-                                type="button"
-                                onClick={() => toggleSort("total_debit")}
-                                className="inline-flex items-center gap-1 font-medium"
-                              >
-                                {t.table.debit}
-                                {sortKey === "total_debit" &&
-                                  (sortDirection === "asc" ? (
-                                    <ArrowUp className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ArrowDown className="h-3.5 w-3.5" />
-                                  ))}
-                              </button>
-                            </TableHead>
-                          ) : null}
-
-                          {visibleColumns.totalCredit ? (
-                            <TableHead className="min-w-[140px]">
-                              <button
-                                type="button"
-                                onClick={() => toggleSort("total_credit")}
-                                className="inline-flex items-center gap-1 font-medium"
-                              >
-                                {t.table.credit}
-                                {sortKey === "total_credit" &&
-                                  (sortDirection === "asc" ? (
-                                    <ArrowUp className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ArrowDown className="h-3.5 w-3.5" />
-                                  ))}
-                              </button>
-                            </TableHead>
-                          ) : null}
-
-                          {visibleColumns.netAmount ? (
-                            <TableHead className="min-w-[140px]">
-                              <button
-                                type="button"
-                                onClick={() => toggleSort("net_amount")}
-                                className="inline-flex items-center gap-1 font-medium"
-                              >
-                                {t.table.net}
-                                {sortKey === "net_amount" &&
-                                  (sortDirection === "asc" ? (
-                                    <ArrowUp className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ArrowDown className="h-3.5 w-3.5" />
-                                  ))}
-                              </button>
-                            </TableHead>
-                          ) : null}
-
-                          {visibleColumns.transactions ? (
-                            <TableHead className="min-w-[120px]">
-                              <button
-                                type="button"
-                                onClick={() => toggleSort("transactions_count")}
-                                className="inline-flex items-center gap-1 font-medium"
-                              >
-                                {t.table.transactions}
-                                {sortKey === "transactions_count" &&
-                                  (sortDirection === "asc" ? (
-                                    <ArrowUp className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ArrowDown className="h-3.5 w-3.5" />
-                                  ))}
-                              </button>
-                            </TableHead>
-                          ) : null}
-
-                          {visibleColumns.actions && canViewDetails ? (
-                            <TableHead className="min-w-[100px]">
-                              {t.table.action}
-                            </TableHead>
-                          ) : null}
-                        </TableRow>
-                      </TableHeader>
-
-                      <TableBody>
-                        {isLoading ? (
-                          <TableSkeleton columnsCount={visibleColumnCount || 1} />
-                        ) : paginatedRows.length > 0 ? (
-                          paginatedRows.map((item) => (
-                            <TableRow key={`${item.id}-${item.code}`}>
-                              {visibleColumns.code ? (
-                                <TableCell className="font-semibold" dir="ltr">
-                                  {item.code || "-"}
-                                </TableCell>
-                              ) : null}
-
-                              {visibleColumns.name ? (
-                                <TableCell>
-                                  <div className="min-w-[200px]">
-                                    <p className="font-medium">
-                                      {item.name || "-"}
-                                    </p>
-                                    <p className="line-clamp-1 text-xs text-muted-foreground">
-                                      {item.description || item.parent_name || "-"}
-                                    </p>
-                                  </div>
-                                </TableCell>
-                              ) : null}
-
-                              {visibleColumns.kind ? (
-                                <TableCell>{kindBadge(item.kind, locale)}</TableCell>
-                              ) : null}
-
-                              {visibleColumns.status ? (
-                                <TableCell>
-                                  {statusBadge(item.status, locale)}
-                                </TableCell>
-                              ) : null}
-
-                              {visibleColumns.manager ? (
-                                <TableCell>{item.manager_name || "-"}</TableCell>
-                              ) : null}
-
-                              {visibleColumns.totalDebit ? (
-                                <TableCell>
-                                  <MoneyText value={item.total_debit} />
-                                </TableCell>
-                              ) : null}
-
-                              {visibleColumns.totalCredit ? (
-                                <TableCell>
-                                  <MoneyText value={item.total_credit} />
-                                </TableCell>
-                              ) : null}
-
-                              {visibleColumns.netAmount ? (
-                                <TableCell>
-                                  <MoneyText value={item.net_amount} />
-                                </TableCell>
-                              ) : null}
-
-                              {visibleColumns.transactions ? (
-                                <TableCell>
-                                  {formatNumber(item.transactions_count)}
-                                </TableCell>
-                              ) : null}
-
-                              {visibleColumns.actions && canViewDetails ? (
-                                <TableCell>
-                                  {isValidId(item.id) ? (
-                                    <Link
-                                      href={`/system/accounting/cost-centers/${item.id}`}
-                                    >
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-8 rounded-lg"
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                        <span className="sr-only">{t.view}</span>
-                                      </Button>
-                                    </Link>
-                                  ) : null}
-                                </TableCell>
-                              ) : null}
-                            </TableRow>
-                          ))
-                        ) : (
-                          <TableRow>
-                            <TableCell
-                              colSpan={visibleColumnCount || 1}
-                              className="h-44 text-center"
-                            >
-                              <div className="flex flex-col items-center justify-center gap-2">
-                                <Building2 className="h-10 w-10 text-muted-foreground/40" />
-                                <p className="font-semibold">
-                                  {hasSearchOrFilter
-                                    ? t.noResultsTitle
-                                    : t.emptyTitle}
-                                </p>
-                                <p className="max-w-md text-sm text-muted-foreground">
-                                  {hasSearchOrFilter
-                                    ? t.noResultsText
-                                    : t.emptyText}
-                                </p>
-
-                                {hasSearchOrFilter ? (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="mt-2 rounded-xl"
-                                    onClick={clearFilters}
-                                  >
-                                    {t.clearFilters}
-                                  </Button>
-                                ) : canCreate ? (
-                                  <Link href="/system/accounting/cost-centers/create">
-                                    <Button size="sm" className="mt-2 rounded-xl">
-                                      <PlusCircle className="h-4 w-4" />
-                                      {t.create}
-                                    </Button>
-                                  </Link>
-                                ) : null}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                  <span>
-                    {t.showing} {formatNumber(paginatedRows.length)} {t.from}{" "}
-                    {formatNumber(filteredRows.length)}
-                  </span>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl"
-                      disabled={page <= 1 || isLoading}
-                      onClick={() => setPage((current) => Math.max(1, current - 1))}
-                    >
-                      {t.previous}
-                    </Button>
-
-                    <Badge variant="outline" className="rounded-full px-3 py-1">
-                      {formatNumber(Math.min(page, totalPages))} /{" "}
-                      {formatNumber(totalPages)}
-                    </Badge>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl"
-                      disabled={page >= totalPages || isLoading}
-                      onClick={() =>
-                        setPage((current) => Math.min(totalPages, current + 1))
-                      }
-                    >
-                      {t.next}
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-bold">
-                  <BarChart3 className="h-4 w-4" />
-                  {t.summaryTitle}
-                </CardTitle>
-                <CardDescription>{t.summaryDesc}</CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                <div className="rounded-2xl border bg-background p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-white dark:bg-slate-100 dark:text-slate-950">
-                      <Building2 className="h-5 w-5" />
-                    </div>
-
-                    <div>
-                      <p className="text-sm font-semibold">{t.totalCenters}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatNumber(summary.total_centers)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border bg-background p-4">
-                    <p className="text-xs text-muted-foreground">
-                      {t.activeCenters}
-                    </p>
-                    <div className="mt-2 text-lg font-bold">
-                      {formatNumber(summary.active_centers)}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border bg-background p-4">
-                    <p className="text-xs text-muted-foreground">
-                      {t.inactiveCenters}
-                    </p>
-                    <div className="mt-2 text-lg font-bold">
-                      {formatNumber(summary.inactive_centers)}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border bg-background p-4">
-                    <p className="text-xs text-muted-foreground">
-                      {t.accountsCount}
-                    </p>
-                    <div className="mt-2 text-lg font-bold">
-                      {formatNumber(summary.accounts_count)}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border bg-background p-4">
-                    <p className="text-xs text-muted-foreground">
-                      {t.transactionsCount}
-                    </p>
-                    <div className="mt-2 text-lg font-bold">
-                      {formatNumber(summary.transactions_count)}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <div className="flex items-center justify-between rounded-xl border bg-muted/40 px-3 py-2 text-sm">
-                    <span>{t.totalDebit}</span>
-                    <MoneyText value={summary.total_debit} />
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                    <span>{t.totalCredit}</span>
-                    <MoneyText value={summary.total_credit} />
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-                    <span>{t.netAmount}</span>
-                    <MoneyText value={summary.net_amount} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <div className="relative w-full">
+            <Search
+              className={cn(
+                "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                locale === "ar" ? "right-3" : "left-3",
+              )}
+            />
+            <Input
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder={t.searchPlaceholder}
+              className={cn(
+                "h-10 rounded-lg bg-background",
+                locale === "ar" ? "pr-9" : "pl-9",
+              )}
+            />
           </div>
 
-          {isLoading ? (
-            <KpiSkeleton />
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-2xl font-bold">
-                        {formatNumber(summary.active_centers)}
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {t.activeCenters}
-                      </p>
-                    </div>
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={statusFilter}
+                onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+              >
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[165px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    {t.statusFilter}: {t.all}
+                  </SelectItem>
+                  <SelectItem value="active">{t.active}</SelectItem>
+                  <SelectItem value="inactive">{t.inactive}</SelectItem>
+                  <SelectItem value="draft">{t.draft}</SelectItem>
+                  <SelectItem value="archived">{t.archived}</SelectItem>
+                  <SelectItem value="unknown">{t.unknown}</SelectItem>
+                </SelectContent>
+              </Select>
 
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                      <ShieldCheck className="h-5 w-5" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-2xl font-bold">
-                        <MoneyText value={summary.total_debit} />
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {t.totalDebit}
-                      </p>
-                    </div>
-
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300">
-                      <TrendingUp className="h-5 w-5" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-2xl font-bold">
-                        <MoneyText value={summary.total_credit} />
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {t.totalCredit}
-                      </p>
-                    </div>
-
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-300">
-                      <TrendingDown className="h-5 w-5" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-2xl font-bold">
-                        {formatNumber(summary.transactions_count)}
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {t.transactionsCount}
-                      </p>
-                    </div>
-
-                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-50 text-teal-700 dark:bg-teal-950/30 dark:text-teal-300">
-                      <WalletCards className="h-5 w-5" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              <Select
+                value={typeFilter}
+                onValueChange={(value) => setTypeFilter(value as TypeFilter)}
+              >
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    {t.typeFilter}: {t.all}
+                  </SelectItem>
+                  <SelectItem value="department">{t.department}</SelectItem>
+                  <SelectItem value="branch">{t.branch}</SelectItem>
+                  <SelectItem value="project">{t.project}</SelectItem>
+                  <SelectItem value="provider">{t.provider}</SelectItem>
+                  <SelectItem value="agent">{t.agent}</SelectItem>
+                  <SelectItem value="operation">{t.operation}</SelectItem>
+                  <SelectItem value="other">{t.other}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          )}
-        </>
-      ) : null}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={sortKey} onValueChange={(value) => setSortKey(value as SortKey)}>
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[170px]">
+                  <ArrowUpDown className="h-4 w-4" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newest">{t.newest}</SelectItem>
+                  <SelectItem value="oldest">{t.oldest}</SelectItem>
+                  <SelectItem value="name">{t.nameSort}</SelectItem>
+                  <SelectItem value="code">{t.codeSort}</SelectItem>
+                  <SelectItem value="status">{t.statusSort}</SelectItem>
+                  <SelectItem value="balance_high">{t.balanceHigh}</SelectItem>
+                  <SelectItem value="debit_high">{t.debitHigh}</SelectItem>
+                  <SelectItem value="credit_high">{t.creditHigh}</SelectItem>
+                  <SelectItem value="transactions_high">{t.transactionsHigh}</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select
+                value="columns"
+                onValueChange={(value) => {
+                  if (value in columns) {
+                    setColumns((current) => ({
+                      ...current,
+                      [value]: !current[value as ColumnKey],
+                    }));
+                  }
+                }}
+              >
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[150px]">
+                  <Settings2 className="h-4 w-4" />
+                  <SelectValue placeholder={t.columns} />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(columns) as ColumnKey[]).map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {columns[key] ? "✓ " : ""}
+                      {columnLabel(key)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                onClick={resetFilters}
+              >
+                <RotateCcw className="h-4 w-4" />
+                {t.reset}
+              </Button>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1260px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    {columns.center ? (
+                      <TableHead className="h-11 w-[230px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.center}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.code ? (
+                      <TableHead className="h-11 w-[120px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.code}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.type ? (
+                      <TableHead className="h-11 w-[135px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.type}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.status ? (
+                      <TableHead className="h-11 w-[120px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.status}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.manager ? (
+                      <TableHead className="h-11 w-[150px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.manager}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.transactions ? (
+                      <TableHead className="h-11 w-[105px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.transactions}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.debit ? (
+                      <TableHead className="h-11 w-[125px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.debit}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.credit ? (
+                      <TableHead className="h-11 w-[125px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.credit}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.balance ? (
+                      <TableHead className="h-11 w-[125px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.balance}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.actions ? (
+                      <TableHead className="h-11 w-[85px] whitespace-nowrap px-4 text-center text-xs font-semibold text-muted-foreground">
+                        {t.actions}
+                      </TableHead>
+                    ) : null}
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {pageRows.length ? (
+                    pageRows.map((center) => (
+                      <TableRow key={center.id || center.code || center.name} className="h-[62px]">
+                        {columns.center ? (
+                          <TableCell className="h-[62px] w-[230px] overflow-hidden px-4 text-right align-middle">
+                            <div className="min-w-0">
+                              <span className="block truncate text-sm font-semibold text-foreground">
+                                {center.name || t.notAvailable}
+                              </span>
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {center.parent_name || center.id || t.notAvailable}
+                              </span>
+                            </div>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.code ? (
+                          <TableCell className="h-[62px] w-[120px] overflow-hidden px-4 text-right align-middle">
+                            <span className="block truncate text-sm font-medium text-foreground tabular-nums">
+                              {center.code || t.notAvailable}
+                            </span>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.type ? (
+                          <TableCell className="h-[62px] w-[135px] overflow-hidden px-4 text-right align-middle">
+                            <TypeBadge type={center.type} locale={locale} />
+                          </TableCell>
+                        ) : null}
+
+                        {columns.status ? (
+                          <TableCell className="h-[62px] w-[120px] overflow-hidden px-4 text-right align-middle">
+                            <StatusBadge status={center.status} locale={locale} />
+                          </TableCell>
+                        ) : null}
+
+                        {columns.manager ? (
+                          <TableCell className="h-[62px] w-[150px] overflow-hidden px-4 text-right align-middle">
+                            <span className="block truncate text-sm text-muted-foreground">
+                              {center.manager_name || t.notAvailable}
+                            </span>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.transactions ? (
+                          <TableCell className="h-[62px] w-[105px] overflow-hidden px-4 text-right align-middle">
+                            <span className="text-sm font-medium tabular-nums">
+                              {formatInteger(center.transactions_count)}
+                            </span>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.debit ? (
+                          <TableCell className="h-[62px] w-[125px] overflow-hidden px-4 text-right align-middle">
+                            <MoneyValue value={center.total_debit} label={t.sar} />
+                          </TableCell>
+                        ) : null}
+
+                        {columns.credit ? (
+                          <TableCell className="h-[62px] w-[125px] overflow-hidden px-4 text-right align-middle">
+                            <MoneyValue value={center.total_credit} label={t.sar} />
+                          </TableCell>
+                        ) : null}
+
+                        {columns.balance ? (
+                          <TableCell className="h-[62px] w-[125px] overflow-hidden px-4 text-right align-middle">
+                            <MoneyValue value={center.balance} label={t.sar} />
+                          </TableCell>
+                        ) : null}
+
+                        {columns.actions ? (
+                          <TableCell className="h-[62px] w-[85px] overflow-hidden px-4 text-center align-middle">
+                            {center.id ? (
+                              <Button asChild variant="ghost" size="sm" className="h-8 rounded-lg">
+                                <Link
+                                  href={`/system/accounting/cost-centers/${encodeURIComponent(center.id)}`}
+                                  title={t.openDetails}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Link>
+                              </Button>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        ) : null}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={Math.max(1, visibleColumnCount)} className="h-72">
+                        <div className="flex flex-col items-center justify-center gap-3 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                            <Search className="h-6 w-6 text-muted-foreground" />
+                          </div>
+
+                          <div className="space-y-1">
+                            <p className="font-semibold text-foreground">
+                              {hasActiveFilters ? t.noResultsTitle : t.noDataTitle}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {hasActiveFilters ? t.noResultsDesc : t.noDataDesc}
+                            </p>
+                          </div>
+
+                          {hasActiveFilters ? (
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-lg"
+                              onClick={resetFilters}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              {t.reset}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+            <div>
+              {t.showing}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(pageRows.length)}
+              </span>{" "}
+              {t.of}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(filteredCenters.length)}
+              </span>{" "}
+              {t.rows}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={String(pageSize)} onValueChange={(value) => setPageSize(Number(value))}>
+                <SelectTrigger className="h-9 w-[140px] rounded-lg bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[10, 20, 50, 100].map((size) => (
+                    <SelectItem key={size} value={String(size)}>
+                      {t.rowsPerPage}: {size}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+              >
+                {t.previous}
+              </Button>
+
+              <div className="flex h-9 items-center rounded-lg border bg-background px-3 text-sm font-medium text-foreground">
+                {t.page}{" "}
+                <span className="mx-1 tabular-nums">{formatInteger(currentPage)}</span>{" "}
+                {t.of}{" "}
+                <span className="mx-1 tabular-nums">{formatInteger(totalPages)}</span>
+              </div>
+
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              >
+                {t.next}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

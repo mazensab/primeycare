@@ -3,1569 +3,1313 @@
 /* ============================================================
    📂 app/system/treasury/transactions/create/page.tsx
    🧠 Primey Care | Create Treasury Transaction Page
-
-   ✅ المسار:
-      app/system/treasury/transactions/create/page.tsx
-
-   ✅ العمل:
-      صفحة إنشاء حركة خزينة داخل النظام.
-      تدعم إنشاء سند قبض، سند صرف، تحويل داخلي، وتسوية مالية.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Treasury Transaction Create Build
-
-   ✅ يعتمد على:
-      - /api/treasury/transactions/create/
-      - /api/treasury/transactions/
-      - /api/treasury/accounts/
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Treasury overview page
-      - Treasury transactions page
-      - Treasury transaction details page
-      - Treasury accounts page
-      - Treasury account statement page
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - إنشاء سند قبض.
-      - إنشاء سند صرف.
-      - إنشاء تحويل داخلي.
-      - إنشاء تسوية.
-      - اختيار حساب الخزينة.
-      - اختيار حساب التحويل المستلم عند نوع التحويل.
-      - مبلغ الحركة.
-      - تاريخ الحركة.
-      - مرجع خارجي اختياري.
-      - وصف وملاحظات.
-      - حفظ كمسودة أو تأكيد مباشر حسب دعم الباكند.
-      - حماية مغادرة الصفحة عند وجود تغييرات غير محفوظة.
-      - مسح النموذج بتأكيد.
-      - Error State مستقل.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - أرقام إنجليزية دائمًا.
-      - رمز SAR من /currency/sar.svg بعد الرقم.
-      - استخدام sonner للتنبيهات.
-
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - الملف المرفق كان فارغًا تقريبًا، وتم بناء الصفحة كاملة من الصفر.
-      - الالتزام بالقاعدة: w-full space-y-4 بدون main/min-h-screen/max-w.
-      - عدم عرض أي مسارات أو عبارات تقنية داخل واجهة المستخدم.
-      - إخفاء الأزرار غير المصرح بها بدل تعطيلها.
-      - إزالة أي localhost أو API base ثابت.
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Real API:
+      GET  /api/treasury/accounts/
+      POST /api/treasury/transactions/create/
+      fallback POST /api/treasury/transactions/
+   ✅ Create income / expense / transfer / deposit / withdraw / refund / fee / adjustment
+   ✅ Source account + destination account for transfers
+   ✅ Draft / confirmed submit modes
+   ✅ Unsaved changes protection
+   ✅ Form validation
+   ✅ Error state
+   ✅ sonner
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  ArrowLeftRight,
-  Banknote,
-  CalendarDays,
+  ArrowRight,
   CheckCircle2,
-  CreditCard,
-  FileText,
   Loader2,
-  Receipt,
-  RefreshCcw,
+  RefreshCw,
   RotateCcw,
   Save,
   ShieldCheck,
-  Wallet,
-  XCircle,
+  TriangleAlert,
+  WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
+type ApiResponse = {
+  ok?: boolean;
+  success?: boolean;
+  id?: string | number;
+  transaction_id?: string | number;
+  data?: unknown;
+  result?: unknown;
+  results?: unknown[];
+  items?: unknown[];
+  rows?: unknown[];
+  message?: string;
+  detail?: string;
+  error?: string;
+  errors?: unknown;
+};
 
-type TransactionType = "RECEIPT" | "PAYMENT" | "TRANSFER" | "ADJUSTMENT";
-type TransactionStatus = "DRAFT" | "CONFIRMED";
-
-type TreasuryAccountOption = {
+type TreasuryAccount = {
   id: string;
   name: string;
   code: string;
   account_type: string;
+  account_type_label: string;
   status: string;
   current_balance: number;
-  bank_name: string;
-  account_number: string;
-  iban: string;
+  currency: string;
+  is_default: boolean;
 };
 
+type TransactionType =
+  | "income"
+  | "expense"
+  | "transfer"
+  | "deposit"
+  | "withdraw"
+  | "refund"
+  | "fee"
+  | "adjustment";
+
+type SubmitMode = "draft" | "confirmed";
+
 type FormState = {
-  transactionType: TransactionType;
-  status: TransactionStatus;
-  transactionDate: string;
-  accountId: string;
-  toAccountId: string;
+  transaction_type: TransactionType;
+  treasury_account_id: string;
+  destination_account_id: string;
+  transaction_date: string;
   amount: string;
-  sourceReference: string;
+  fees_amount: string;
+  reference: string;
+  source_number: string;
+  party_name: string;
   description: string;
   notes: string;
 };
 
-type ApiEnvelope<T> = {
-  ok?: boolean;
-  success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
-  id?: string | number;
-  results?: unknown[];
-  items?: unknown[];
-  rows?: unknown[];
-  accounts?: unknown[];
+type FormErrors = Partial<Record<keyof FormState, string>>;
+
+const API = {
+  accounts: "/api/treasury/accounts/",
+  create: "/api/treasury/transactions/create/",
+  transactions: "/api/treasury/transactions/",
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
+const translations = {
+  ar: {
+    title: "إنشاء حركة خزينة",
+    subtitle: "تسجيل حركة مالية جديدة داخل الخزينة مع ربط الحساب والمبلغ والمرجع.",
+    back: "حركات الخزينة",
+    treasury: "الخزينة",
+    refresh: "تحديث الحسابات",
+    clear: "مسح النموذج",
+    saveDraft: "حفظ كمسودة",
+    saveConfirmed: "حفظ وتأكيد",
+    saving: "جاري الحفظ...",
+    loading: "جاري تحميل البيانات",
 
-function todayInputValue() {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+    basicInfo: "بيانات الحركة",
+    basicInfoDesc: "حدد نوع الحركة والحساب والتاريخ والمبلغ.",
+    accountingInfo: "البيانات المالية",
+    accountingInfoDesc: "المبلغ والرسوم والصافي المتوقع.",
+    referenceInfo: "المرجع والوصف",
+    referenceInfoDesc: "أضف بيانات الطرف والمرجع والوصف عند الحاجة.",
+    summary: "ملخص الحركة",
+    summaryDesc: "راجع البيانات قبل الحفظ.",
 
-  return `${year}-${month}-${day}`;
+    transactionType: "نوع الحركة",
+    sourceAccount: "حساب الخزينة",
+    destinationAccount: "حساب الوجهة",
+    transactionDate: "تاريخ الحركة",
+    amount: "المبلغ",
+    feesAmount: "الرسوم",
+    netAmount: "الصافي",
+    reference: "مرجع خارجي",
+    sourceNumber: "رقم المصدر",
+    partyName: "الطرف",
+    description: "الوصف",
+    notes: "ملاحظات",
+    currentBalance: "الرصيد الحالي",
+    accountType: "نوع الحساب",
+    chooseAccount: "اختر الحساب",
+    chooseDestination: "اختر حساب الوجهة",
+    optional: "اختياري",
+
+    income: "قبض",
+    expense: "صرف",
+    transfer: "تحويل داخلي",
+    deposit: "إيداع",
+    withdraw: "سحب",
+    refund: "استرداد",
+    fee: "رسوم",
+    adjustment: "تسوية",
+
+    draft: "مسودة",
+    confirmed: "مؤكدة",
+    source: "المصدر",
+    destination: "الوجهة",
+    movementDirection: "اتجاه الحركة",
+    incoming: "وارد",
+    outgoing: "صادر",
+    internalTransfer: "تحويل بين حسابين",
+    neutral: "تسوية",
+
+    required: "هذا الحقل مطلوب.",
+    invalidAmount: "أدخل مبلغًا صحيحًا أكبر من صفر.",
+    invalidFees: "أدخل رسومًا صحيحة أو اتركها صفر.",
+    sameAccount: "لا يمكن أن يكون حساب الوجهة هو نفس حساب المصدر.",
+    dateRequired: "تاريخ الحركة مطلوب.",
+    accountRequired: "حساب الخزينة مطلوب.",
+    destinationRequired: "حساب الوجهة مطلوب للتحويل.",
+    confirmClear: "هل تريد مسح النموذج؟",
+    leaveWarning: "لديك تغييرات غير محفوظة.",
+    created: "تم إنشاء حركة الخزينة بنجاح.",
+    createdDraft: "تم حفظ حركة الخزينة كمسودة.",
+    createdConfirmed: "تم إنشاء وتأكيد حركة الخزينة بنجاح.",
+    errorTitle: "تعذر تجهيز صفحة إنشاء الحركة",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    submitError: "تعذر حفظ حركة الخزينة.",
+    noAccountsTitle: "لا توجد حسابات خزينة",
+    noAccountsDesc: "أضف صندوقًا أو حسابًا بنكيًا قبل إنشاء حركة خزينة.",
+    tryAgain: "إعادة المحاولة",
+    notAvailable: "—",
+    sar: "ر.س",
+  },
+  en: {
+    title: "Create Treasury Transaction",
+    subtitle: "Record a new treasury movement with account, amount, and reference.",
+    back: "Treasury transactions",
+    treasury: "Treasury",
+    refresh: "Refresh accounts",
+    clear: "Clear form",
+    saveDraft: "Save draft",
+    saveConfirmed: "Save & confirm",
+    saving: "Saving...",
+    loading: "Loading data",
+
+    basicInfo: "Transaction details",
+    basicInfoDesc: "Select transaction type, account, date, and amount.",
+    accountingInfo: "Financial data",
+    accountingInfoDesc: "Amount, fees, and expected net amount.",
+    referenceInfo: "Reference and description",
+    referenceInfoDesc: "Add party, reference, and description when needed.",
+    summary: "Transaction summary",
+    summaryDesc: "Review the data before saving.",
+
+    transactionType: "Transaction type",
+    sourceAccount: "Treasury account",
+    destinationAccount: "Destination account",
+    transactionDate: "Transaction date",
+    amount: "Amount",
+    feesAmount: "Fees",
+    netAmount: "Net amount",
+    reference: "External reference",
+    sourceNumber: "Source number",
+    partyName: "Party",
+    description: "Description",
+    notes: "Notes",
+    currentBalance: "Current balance",
+    accountType: "Account type",
+    chooseAccount: "Choose account",
+    chooseDestination: "Choose destination account",
+    optional: "Optional",
+
+    income: "Income",
+    expense: "Expense",
+    transfer: "Internal transfer",
+    deposit: "Deposit",
+    withdraw: "Withdraw",
+    refund: "Refund",
+    fee: "Fee",
+    adjustment: "Adjustment",
+
+    draft: "Draft",
+    confirmed: "Confirmed",
+    source: "Source",
+    destination: "Destination",
+    movementDirection: "Movement direction",
+    incoming: "Incoming",
+    outgoing: "Outgoing",
+    internalTransfer: "Internal transfer",
+    neutral: "Adjustment",
+
+    required: "This field is required.",
+    invalidAmount: "Enter a valid amount greater than zero.",
+    invalidFees: "Enter valid fees or keep it zero.",
+    sameAccount: "Destination account cannot be the same as source account.",
+    dateRequired: "Transaction date is required.",
+    accountRequired: "Treasury account is required.",
+    destinationRequired: "Destination account is required for transfers.",
+    confirmClear: "Clear the form?",
+    leaveWarning: "You have unsaved changes.",
+    created: "Treasury transaction created successfully.",
+    createdDraft: "Treasury transaction saved as draft.",
+    createdConfirmed: "Treasury transaction created and confirmed successfully.",
+    errorTitle: "Unable to prepare create transaction page",
+    errorDesc: "Make sure the backend is running, then try again.",
+    submitError: "Unable to save treasury transaction.",
+    noAccountsTitle: "No treasury accounts",
+    noAccountsDesc: "Add a cashbox or bank account before creating a treasury transaction.",
+    tryAgain: "Try again",
+    notAvailable: "—",
+    sar: "SAR",
+  },
+} as const;
+
+const INITIAL_FORM: FormState = {
+  transaction_type: "income",
+  treasury_account_id: "",
+  destination_account_id: "",
+  transaction_date: new Date().toISOString().slice(0, 10),
+  amount: "",
+  fees_amount: "0",
+  reference: "",
+  source_number: "",
+  party_name: "",
+  description: "",
+  notes: "",
+};
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function makeDefaultForm(): FormState {
-  return {
-    transactionType: "RECEIPT",
-    status: "CONFIRMED",
-    transactionDate: todayInputValue(),
-    accountId: "",
-    toAccountId: "",
-    amount: "",
-    sourceReference: "",
-    description: "",
-    notes: "",
-  };
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/* ============================================================
-   Locale / API
-============================================================ */
-
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
-
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
 
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-function getCookie(name: string) {
-  try {
-    if (typeof document === "undefined") return "";
-
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-
-    if (parts.length === 2) {
-      return parts.pop()?.split(";").shift() || "";
-    }
-
-    return "";
-  } catch {
-    return "";
-  }
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  const roles = getAuthRoles(authValue);
+  return fallback;
+}
 
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (["1", "true", "yes", "on", "active", "default"].includes(normalized)) return true;
+    if (["0", "false", "no", "off", "inactive"].includes(normalized)) return false;
   }
 
-  return true;
+  return fallback;
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "إنشاء حركة مالية" : "Create Treasury Transaction",
-    subtitle: isArabic
-      ? "سجل سند قبض أو سند صرف أو تحويل داخلي أو تسوية مالية داخل الخزينة."
-      : "Record a receipt, payment, internal transfer, or treasury adjustment.",
-
-    back: isArabic ? "الحركات المالية" : "Transactions",
-    treasury: isArabic ? "الخزينة" : "Treasury",
-    accounts: isArabic ? "حسابات الخزينة" : "Treasury Accounts",
-    save: isArabic ? "حفظ الحركة" : "Save Transaction",
-    saving: isArabic ? "جاري الحفظ..." : "Saving...",
-    clear: isArabic ? "مسح النموذج" : "Clear Form",
-    refreshAccounts: isArabic ? "تحديث الحسابات" : "Refresh Accounts",
-
-    mainInfo: isArabic ? "بيانات الحركة" : "Transaction Details",
-    mainInfoDesc: isArabic
-      ? "حدد نوع الحركة وحالتها وتاريخها."
-      : "Select transaction type, status, and date.",
-
-    accountInfo: isArabic ? "حسابات الخزينة" : "Treasury Accounts",
-    accountInfoDesc: isArabic
-      ? "اختر الحساب المرتبط بالحركة. في التحويل الداخلي اختر حساب المصدر والمستلم."
-      : "Select the linked account. For transfers, select source and destination accounts.",
-
-    amountInfo: isArabic ? "المبلغ والمرجع" : "Amount and Reference",
-    amountInfoDesc: isArabic
-      ? "أدخل مبلغ الحركة والمرجع والوصف."
-      : "Enter amount, reference, and description.",
-
-    summaryTitle: isArabic ? "ملخص الحركة" : "Transaction Summary",
-    summaryDesc: isArabic
-      ? "راجع بيانات الحركة قبل الحفظ."
-      : "Review transaction data before saving.",
-
-    transactionType: isArabic ? "نوع الحركة" : "Transaction Type",
-    status: isArabic ? "حالة الحركة" : "Status",
-    date: isArabic ? "تاريخ الحركة" : "Transaction Date",
-    account: isArabic ? "حساب الخزينة" : "Treasury Account",
-    fromAccount: isArabic ? "حساب المصدر" : "Source Account",
-    toAccount: isArabic ? "حساب المستلم" : "Destination Account",
-    amount: isArabic ? "المبلغ" : "Amount",
-    sourceReference: isArabic ? "المرجع" : "Reference",
-    description: isArabic ? "الوصف" : "Description",
-    notes: isArabic ? "ملاحظات داخلية" : "Internal Notes",
-
-    receipt: isArabic ? "سند قبض" : "Receipt Voucher",
-    payment: isArabic ? "سند صرف" : "Payment Voucher",
-    transfer: isArabic ? "تحويل داخلي" : "Internal Transfer",
-    adjustment: isArabic ? "تسوية مالية" : "Adjustment",
-
-    draft: isArabic ? "مسودة" : "Draft",
-    confirmed: isArabic ? "مؤكدة" : "Confirmed",
-
-    selectedType: isArabic ? "النوع المحدد" : "Selected Type",
-    selectedStatus: isArabic ? "الحالة المحددة" : "Selected Status",
-    selectedAccount: isArabic ? "الحساب المحدد" : "Selected Account",
-    selectedToAccount: isArabic ? "حساب المستلم" : "Destination Account",
-    currentBalance: isArabic ? "الرصيد الحالي" : "Current Balance",
-    notSet: isArabic ? "غير محدد" : "Not set",
-    noAccounts: isArabic ? "لا توجد حسابات متاحة" : "No accounts available",
-
-    accessDeniedTitle: isArabic
-      ? "غير مصرح بإنشاء حركة مالية"
-      : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية إنشاء حركات الخزينة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to create treasury transactions. Contact your system administrator if you need access.",
-
-    validationTitle: isArabic ? "راجع بيانات الحركة" : "Review transaction data",
-    requiredDate: isArabic ? "تاريخ الحركة مطلوب." : "Transaction date is required.",
-    requiredAccount: isArabic
-      ? "حساب الخزينة مطلوب."
-      : "Treasury account is required.",
-    requiredToAccount: isArabic
-      ? "حساب المستلم مطلوب للتحويل الداخلي."
-      : "Destination account is required for internal transfer.",
-    sameTransferAccount: isArabic
-      ? "لا يمكن أن يكون حساب المصدر وحساب المستلم نفس الحساب."
-      : "Source and destination accounts cannot be the same.",
-    requiredAmount: isArabic ? "المبلغ مطلوب." : "Amount is required.",
-    invalidAmount: isArabic
-      ? "المبلغ يجب أن يكون رقمًا أكبر من صفر."
-      : "Amount must be a number greater than zero.",
-
-    loadAccountsError: isArabic
-      ? "تعذر تحميل حسابات الخزينة."
-      : "Unable to load treasury accounts.",
-    accountsLoaded: isArabic
-      ? "تم تحديث حسابات الخزينة بنجاح."
-      : "Treasury accounts refreshed successfully.",
-    saveSuccess: isArabic
-      ? "تم إنشاء الحركة المالية بنجاح."
-      : "Treasury transaction created successfully.",
-    saveError: isArabic
-      ? "تعذر حفظ الحركة المالية."
-      : "Unable to save treasury transaction.",
-
-    confirmClear: isArabic
-      ? "هل تريد مسح النموذج الحالي؟"
-      : "Clear the current form?",
-    unsavedChanges: isArabic
-      ? "لديك تغييرات غير محفوظة. هل تريد المغادرة؟"
-      : "You have unsaved changes. Do you want to leave?",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function normalizeMoneyInput(value: string) {
-  const cleaned = value.replace(/[^\d.-]/g, "");
-  const parts = cleaned.split(".");
-  const integerPart = parts[0] || "";
-  const decimalPart = parts.slice(1).join("");
-
-  if (parts.length > 1) {
-    return `${integerPart}.${decimalPart.slice(0, 2)}`;
-  }
-
-  return integerPart;
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-function isValidPositiveAmount(value: string) {
-  const amount = Number(value);
-  return Number.isFinite(amount) && amount > 0;
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const query = params?.toString();
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
+}
 
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
 
-  for (const container of [
-    "account",
-    "treasury_account",
-    "cashbox",
-    "bank",
-    "item",
-    "data",
-  ]) {
-    const nested = obj[container];
+  const match = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${name}=`));
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+  return match ? decodeURIComponent(match.split("=")[1] || "") : "";
+}
 
-      if (value !== undefined && value !== null && value !== "") return value;
+async function fetchJson<T>(
+  url: string,
+  options: RequestInit & { signal?: AbortSignal } = {},
+): Promise<T> {
+  const response = await fetch(url, {
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    ...options,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options.method && options.method !== "GET"
+        ? {
+            "Content-Type": "application/json",
+            "X-CSRFToken": getCookie("csrftoken"),
+          }
+        : {}),
+      ...(options.headers || {}),
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      payload?.errors ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+
+  return (payload || {}) as T;
 }
 
-function extractRows(payload: ApiEnvelope<unknown> | null): unknown[] {
+function extractData(payload: ApiResponse | null) {
+  return asRecord(payload?.data);
+}
+
+function extractItems(payload: ApiResponse | null) {
   if (!payload) return [];
 
-  const data = asDict(payload.data);
-
-  if (Array.isArray(payload.accounts)) return payload.accounts;
   if (Array.isArray(payload.results)) return payload.results;
   if (Array.isArray(payload.items)) return payload.items;
   if (Array.isArray(payload.rows)) return payload.rows;
 
-  if (Array.isArray(data.accounts)) return data.accounts as unknown[];
-  if (Array.isArray(data.results)) return data.results as unknown[];
-  if (Array.isArray(data.items)) return data.items as unknown[];
-  if (Array.isArray(data.rows)) return data.rows as unknown[];
+  const data = extractData(payload);
 
-  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.rows)) return data.rows;
+  if (Array.isArray(data.accounts)) return data.accounts;
 
   return [];
 }
 
-function normalizeAccount(item: unknown): TreasuryAccountOption {
-  const obj = asDict(item);
+function normalizeAccount(value: unknown): TreasuryAccount {
+  const item = asRecord(value);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || ""),
-    name: String(getNestedValue(obj, ["name", "title", "label"]) || "-"),
-    code: String(getNestedValue(obj, ["code", "account_code", "number"]) || "-"),
-    account_type: String(
-      getNestedValue(obj, ["account_type", "type", "kind"]) || "",
-    ),
-    status: String(getNestedValue(obj, ["status", "state", "is_active"]) || ""),
-    current_balance: toNumber(
-      getNestedValue(obj, ["current_balance", "balance", "available_balance"]),
-    ),
-    bank_name: String(getNestedValue(obj, ["bank_name", "bank"]) || ""),
-    account_number: String(
-      getNestedValue(obj, ["account_number", "bank_account_number"]) || "",
-    ),
-    iban: String(getNestedValue(obj, ["iban", "IBAN"]) || ""),
+    id: normalizeText(item.id || item.pk || item.uuid),
+    name: normalizeText(item.name || item.title),
+    code: normalizeText(item.code || item.number),
+    account_type: normalizeText(item.account_type || item.type),
+    account_type_label: normalizeText(item.account_type_label || item.type_label),
+    status: normalizeText(item.status || "active"),
+    current_balance: toNumber(item.current_balance ?? item.balance),
+    currency: normalizeText(item.currency || "SAR"),
+    is_default: toBoolean(item.is_default),
   };
 }
 
-function transactionTypeLabel(type: TransactionType, locale: AppLocale) {
-  const t = dictionary(locale);
+function getCreatedId(payload: ApiResponse) {
+  const data = asRecord(payload.data);
+  const result = asRecord(payload.result);
 
-  const labels: Record<TransactionType, string> = {
-    RECEIPT: t.receipt,
-    PAYMENT: t.payment,
-    TRANSFER: t.transfer,
-    ADJUSTMENT: t.adjustment,
-  };
-
-  return labels[type];
-}
-
-function statusLabel(status: TransactionStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<TransactionStatus, string> = {
-    DRAFT: t.draft,
-    CONFIRMED: t.confirmed,
-  };
-
-  return labels[status];
-}
-
-function transactionTypeBadge(type: TransactionType, locale: AppLocale) {
-  const label = transactionTypeLabel(type, locale);
-
-  if (type === "RECEIPT") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (type === "PAYMENT") {
-    return (
-      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (type === "TRANSFER") {
-    return (
-      <Badge className="rounded-full border-sky-200 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50 dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge className="rounded-full border-violet-200 bg-violet-50 px-3 py-1 text-violet-700 hover:bg-violet-50 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-300">
-      {label}
-    </Badge>
+  return normalizeText(
+    payload.id ||
+      payload.transaction_id ||
+      data.id ||
+      data.transaction_id ||
+      result.id ||
+      result.transaction_id,
   );
 }
 
-function statusBadge(status: TransactionStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
+function getTypeLabel(type: TransactionType, locale: Locale) {
+  const t = translations[locale];
 
-  if (status === "CONFIRMED") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+  if (type === "income") return t.income;
+  if (type === "expense") return t.expense;
+  if (type === "transfer") return t.transfer;
+  if (type === "deposit") return t.deposit;
+  if (type === "withdraw") return t.withdraw;
+  if (type === "refund") return t.refund;
+  if (type === "fee") return t.fee;
+
+  return t.adjustment;
+}
+
+function getDirection(type: TransactionType, locale: Locale) {
+  const t = translations[locale];
+
+  if (["income", "deposit"].includes(type)) return t.incoming;
+  if (["expense", "withdraw", "refund", "fee"].includes(type)) return t.outgoing;
+  if (type === "transfer") return t.internalTransfer;
+
+  return t.neutral;
+}
+
+function typeClass(type: TransactionType) {
+  if (["income", "deposit"].includes(type)) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
-  return (
-    <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-      {label}
-    </Badge>
-  );
+  if (["expense", "withdraw", "refund", "fee"].includes(type)) {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+  }
+
+  if (type === "transfer") {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  return "border-violet-500/30 bg-violet-50 text-violet-700 hover:bg-violet-50";
 }
 
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+function MoneyValue({ value, label }: { value: number; label: string }) {
   return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
-  );
-}
-
-function MoneyText({ value }: { value: unknown }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <div className="flex items-center gap-1 text-sm font-semibold tabular-nums">
       <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
+      <img src="/currency/sar.svg" alt={label} className="h-3.5 w-3.5" />
+    </div>
   );
 }
 
-function getAccountTitle(account?: TreasuryAccountOption | null) {
-  if (!account) return "-";
-  return `${account.name}${account.code ? ` (${account.code})` : ""}`;
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+
+  return <p className="mt-1 text-xs font-medium text-red-600">{message}</p>;
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function PageSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-96" />
+        </div>
 
-export default function CreateTreasuryTransactionPage() {
-  const auth = useAuth() as unknown;
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-32" />
+        </div>
+      </div>
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [form, setForm] = useState<FormState>(() => makeDefaultForm());
-  const [accounts, setAccounts] = useState<TreasuryAccountOption[]>([]);
-  const [isAccountsLoading, setIsAccountsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [submitError, setSubmitError] = useState("");
-  const [isDirty, setIsDirty] = useState(false);
+      <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-4 p-4">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-48 w-full" />
+            <Skeleton className="h-40 w-full" />
+          </CardContent>
+        </Card>
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
-
-  const canCreate = hasSafePermission(
-    auth,
-    ["treasury.create", "treasury.transactions.create", "treasury.manage"],
-    "action",
-  );
-
-  const canViewAccounts = hasSafePermission(
-    auth,
-    ["treasury.view", "treasury.accounts.view"],
-    "view",
-  );
-
-  const canSubmit = canCreate && !isSaving && !isAccountsLoading;
-
-  const isTransfer = form.transactionType === "TRANSFER";
-
-  const selectedAccount = useMemo(
-    () => accounts.find((item) => item.id === form.accountId) || null,
-    [accounts, form.accountId],
-  );
-
-  const selectedToAccount = useMemo(
-    () => accounts.find((item) => item.id === form.toAccountId) || null,
-    [accounts, form.toAccountId],
-  );
-
-  const availableToAccounts = useMemo(
-    () => accounts.filter((item) => item.id !== form.accountId),
-    [accounts, form.accountId],
-  );
-
-  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({
-      ...current,
-      [key]: value,
-    }));
-    setIsDirty(true);
-  }
-
-  function updateMoneyField(value: string) {
-    updateForm("amount", normalizeMoneyInput(value));
-  }
-
-  function handleTypeChange(value: TransactionType) {
-    setForm((current) => ({
-      ...current,
-      transactionType: value,
-      toAccountId: value === "TRANSFER" ? current.toAccountId : "",
-      description:
-        current.description ||
-        (value === "RECEIPT"
-          ? t.receipt
-          : value === "PAYMENT"
-            ? t.payment
-            : value === "TRANSFER"
-              ? t.transfer
-              : t.adjustment),
-    }));
-
-    setIsDirty(true);
-  }
-
-  function clearForm() {
-    if (isDirty && !window.confirm(t.confirmClear)) return;
-
-    setForm(makeDefaultForm());
-    setSubmitError("");
-    setIsDirty(false);
-  }
-
-  function validateForm() {
-    const errors: string[] = [];
-
-    if (!form.transactionDate) errors.push(t.requiredDate);
-    if (!form.accountId) errors.push(t.requiredAccount);
-    if (!form.amount.trim()) errors.push(t.requiredAmount);
-    if (form.amount.trim() && !isValidPositiveAmount(form.amount)) {
-      errors.push(t.invalidAmount);
-    }
-
-    if (form.transactionType === "TRANSFER") {
-      if (!form.toAccountId) errors.push(t.requiredToAccount);
-      if (form.accountId && form.toAccountId && form.accountId === form.toAccountId) {
-        errors.push(t.sameTransferAccount);
-      }
-    }
-
-    return Array.from(new Set(errors));
-  }
-
-  function buildPayload() {
-    const amount = toNumber(form.amount);
-
-    return {
-      transaction_type: form.transactionType,
-      voucher_type: form.transactionType,
-      type: form.transactionType,
-      status: form.status,
-      state: form.status,
-      is_confirmed: form.status === "CONFIRMED",
-      transaction_date: form.transactionDate,
-      date: form.transactionDate,
-      account_id: form.accountId,
-      treasury_account_id: form.accountId,
-      from_account_id: form.accountId,
-      to_account_id: isTransfer ? form.toAccountId : undefined,
-      destination_account_id: isTransfer ? form.toAccountId : undefined,
-      amount,
-      total_amount: amount,
-      value: amount,
-      currency: "SAR",
-      source_reference: form.sourceReference.trim(),
-      external_reference: form.sourceReference.trim(),
-      reference: form.sourceReference.trim(),
-      description: form.description.trim(),
-      notes: form.notes.trim(),
-      memo: form.notes.trim() || form.description.trim(),
-    };
-  }
-
-  const loadAccounts = useCallback(
-    async (showToast = false) => {
-      if (!canViewAccounts) {
-        setAccounts([]);
-        setIsAccountsLoading(false);
-        return;
-      }
-
-      try {
-        setIsAccountsLoading(true);
-
-        const response = await fetch(apiUrl("/api/treasury/accounts/?page_size=500"), {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-        });
-
-        const payload = (await response.json().catch(() => null)) as
-          | ApiEnvelope<unknown>
-          | null;
-
-        if (!response.ok || payload?.ok === false || payload?.success === false) {
-          throw new Error(
-            payload?.message ||
-              payload?.detail ||
-              payload?.error ||
-              `HTTP ${response.status}`,
-          );
-        }
-
-        const normalizedAccounts = extractRows(payload)
-          .map(normalizeAccount)
-          .filter((item) => item.id && item.name);
-
-        setAccounts(normalizedAccounts);
-
-        if (showToast) {
-          toast.success(t.accountsLoaded);
-        }
-      } catch (error) {
-        console.error("Treasury accounts load error:", error);
-        setAccounts([]);
-        toast.error(t.loadAccountsError);
-      } finally {
-        setIsAccountsLoading(false);
-      }
-    },
-    [canViewAccounts, t.accountsLoaded, t.loadAccountsError],
-  );
-
-  const submitForm = useCallback(async () => {
-    if (!canCreate) return;
-
-    const errors = validateForm();
-
-    if (errors.length > 0) {
-      setSubmitError(errors.join("\n"));
-      toast.error(t.validationTitle);
-      return;
-    }
-
-    try {
-      setIsSaving(true);
-      setSubmitError("");
-
-      const csrfToken = getCookie("csrftoken");
-      const payload = buildPayload();
-
-      const endpoints = [
-        "/api/treasury/transactions/create/",
-        "/api/treasury/transactions/",
-      ];
-
-      let saved = false;
-      let lastMessage = "";
-
-      for (const endpoint of endpoints) {
-        const response = await fetch(apiUrl(endpoint), {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-          },
-          body: JSON.stringify(payload),
-        });
-
-        const responsePayload = (await response.json().catch(() => null)) as
-          | ApiEnvelope<unknown>
-          | null;
-
-        if ([404, 405].includes(response.status)) {
-          lastMessage =
-            responsePayload?.message ||
-            responsePayload?.detail ||
-            responsePayload?.error ||
-            `HTTP ${response.status}`;
-          continue;
-        }
-
-        if (response.status === 400) {
-          lastMessage =
-            responsePayload?.message ||
-            responsePayload?.detail ||
-            responsePayload?.error ||
-            t.saveError;
-          break;
-        }
-
-        if (
-          !response.ok ||
-          responsePayload?.ok === false ||
-          responsePayload?.success === false
-        ) {
-          throw new Error(
-            responsePayload?.message ||
-              responsePayload?.detail ||
-              responsePayload?.error ||
-              `HTTP ${response.status}`,
-          );
-        }
-
-        saved = true;
-        break;
-      }
-
-      if (!saved) {
-        throw new Error(lastMessage || t.saveError);
-      }
-
-      toast.success(t.saveSuccess);
-      setForm(makeDefaultForm());
-      setIsDirty(false);
-      setSubmitError("");
-      await loadAccounts(false);
-    } catch (error) {
-      console.error("Create treasury transaction submit error:", error);
-      const message = error instanceof Error ? error.message : t.saveError;
-
-      setSubmitError(message || t.saveError);
-      toast.error(t.saveError);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [canCreate, form, isTransfer, loadAccounts, t]);
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadAccounts(false);
-  }, [authResolving, loadAccounts]);
-
-  useEffect(() => {
-    const handler = (event: BeforeUnloadEvent) => {
-      if (!isDirty || isSaving) return;
-
-      event.preventDefault();
-      event.returnValue = "";
-    };
-
-    window.addEventListener("beforeunload", handler);
-
-    return () => {
-      window.removeEventListener("beforeunload", handler);
-    };
-  }, [isDirty, isSaving]);
-
-  if (!authResolving && !canCreate) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-4">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-40 w-full" />
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+export default function TreasuryTransactionCreatePage() {
+  const router = useRouter();
+
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [accounts, setAccounts] = React.useState<TreasuryAccount[]>([]);
+  const [form, setForm] = React.useState<FormState>(INITIAL_FORM);
+  const [errors, setErrors] = React.useState<FormErrors>({});
+  const [submitError, setSubmitError] = React.useState("");
+  const [dirty, setDirty] = React.useState(false);
+
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [savingMode, setSavingMode] = React.useState<SubmitMode | null>(null);
+  const [loadError, setLoadError] = React.useState("");
+
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
+
+  const amount = toNumber(form.amount);
+  const fees = toNumber(form.fees_amount);
+  const netAmount = Math.max(0, amount - fees);
+
+  const selectedAccount = React.useMemo(() => {
+    return accounts.find((account) => account.id === form.treasury_account_id) || null;
+  }, [accounts, form.treasury_account_id]);
+
+  const destinationAccount = React.useMemo(() => {
+    return accounts.find((account) => account.id === form.destination_account_id) || null;
+  }, [accounts, form.destination_account_id]);
+
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
+
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
+
+    applyLocale();
+
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
+
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty || savingMode) return;
+
+      event.preventDefault();
+      event.returnValue = t.leaveWarning;
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [dirty, savingMode, t.leaveWarning]);
+
+  const loadAccounts = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
+
+      try {
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setLoadError("");
+
+        const params = new URLSearchParams({
+          page: "1",
+          page_size: "500",
+          ordering: "account_type",
+        });
+
+        const payload = await fetchJson<ApiResponse>(
+          makeApiUrl(API.accounts, params),
+          {
+            method: "GET",
+            signal: controller.signal,
+          },
+        );
+
+        const nextAccounts = extractItems(payload)
+          .map(normalizeAccount)
+          .filter((account) => {
+            if (!account.id && !account.name && !account.code) return false;
+            return account.status !== "inactive" && account.status !== "archived";
+          });
+
+        setAccounts(nextAccounts);
+
+        setForm((current) => {
+          if (current.treasury_account_id || !nextAccounts.length) return current;
+          return {
+            ...current,
+            treasury_account_id:
+              nextAccounts.find((account) => account.is_default)?.id || nextAccounts[0].id,
+          };
+        });
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setLoadError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+
+      return () => controller.abort();
+    },
+    [t.errorDesc],
+  );
+
+  React.useEffect(() => {
+    void loadAccounts();
+  }, [loadAccounts]);
+
+  function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((current) => {
+      const next = { ...current, [key]: value };
+
+      if (key === "transaction_type" && value !== "transfer") {
+        next.destination_account_id = "";
+      }
+
+      return next;
+    });
+
+    setErrors((current) => ({ ...current, [key]: undefined }));
+    setSubmitError("");
+    setDirty(true);
+  }
+
+  function validateForm() {
+    const nextErrors: FormErrors = {};
+
+    if (!form.transaction_type) nextErrors.transaction_type = t.required;
+    if (!form.treasury_account_id) nextErrors.treasury_account_id = t.accountRequired;
+    if (!form.transaction_date) nextErrors.transaction_date = t.dateRequired;
+
+    if (amount <= 0) nextErrors.amount = t.invalidAmount;
+    if (fees < 0) nextErrors.fees_amount = t.invalidFees;
+
+    if (form.transaction_type === "transfer") {
+      if (!form.destination_account_id) {
+        nextErrors.destination_account_id = t.destinationRequired;
+      }
+
+      if (
+        form.destination_account_id &&
+        form.destination_account_id === form.treasury_account_id
+      ) {
+        nextErrors.destination_account_id = t.sameAccount;
+      }
+    }
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  function buildPayload(mode: SubmitMode) {
+    return {
+      transaction_type: form.transaction_type,
+      type: form.transaction_type,
+      treasury_account_id: form.treasury_account_id,
+      account_id: form.treasury_account_id,
+      destination_account_id:
+        form.transaction_type === "transfer" ? form.destination_account_id : null,
+      transaction_date: form.transaction_date,
+      date: form.transaction_date,
+      amount,
+      fees_amount: fees,
+      net_amount: netAmount,
+      reference: form.reference.trim(),
+      source_number: form.source_number.trim(),
+      party_name: form.party_name.trim(),
+      description: form.description.trim(),
+      notes: form.notes.trim(),
+      status: mode,
+      confirm: mode === "confirmed",
+      should_confirm: mode === "confirmed",
+      balance_applied: mode === "confirmed",
+    };
+  }
+
+  async function submitForm(mode: SubmitMode) {
+    if (!validateForm()) {
+      toast.error(t.submitError);
+      return;
+    }
+
+    setSavingMode(mode);
+    setSubmitError("");
+
+    const payload = buildPayload(mode);
+
+    try {
+      let responsePayload: ApiResponse | null = null;
+
+      try {
+        responsePayload = await fetchJson<ApiResponse>(makeApiUrl(API.create), {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        responsePayload = await fetchJson<ApiResponse>(makeApiUrl(API.transactions), {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      const createdId = responsePayload ? getCreatedId(responsePayload) : "";
+
+      setDirty(false);
+
+      toast.success(mode === "confirmed" ? t.createdConfirmed : t.createdDraft);
+
+      if (createdId) {
+        router.push(`/system/treasury/transactions/${encodeURIComponent(createdId)}`);
+      } else {
+        router.push("/system/treasury/transactions");
+      }
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.submitError;
+
+      setSubmitError(message);
+      toast.error(t.submitError);
+    } finally {
+      setSavingMode(null);
+    }
+  }
+
+  function clearForm() {
+    if (dirty && !window.confirm(t.confirmClear)) return;
+
+    setForm({
+      ...INITIAL_FORM,
+      treasury_account_id:
+        accounts.find((account) => account.is_default)?.id || accounts[0]?.id || "",
+      transaction_date: new Date().toISOString().slice(0, 10),
+    });
+
+    setErrors({});
+    setSubmitError("");
+    setDirty(false);
+  }
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <PageSkeleton />
+      </div>
     );
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link
-            href="/system/treasury/transactions"
-            onClick={(event) => {
-              if (isDirty && !window.confirm(t.unsavedChanges)) {
-                event.preventDefault();
-              }
-            }}
-          >
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury/transactions">
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
 
-          <Link
-            href="/system/treasury"
-            onClick={(event) => {
-              if (isDirty && !window.confirm(t.unsavedChanges)) {
-                event.preventDefault();
-              }
-            }}
-          >
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <Wallet className="h-4 w-4" />
-              <span>{t.treasury}</span>
-            </Button>
-          </Link>
-
-          <Link
-            href="/system/treasury/accounts"
-            onClick={(event) => {
-              if (isDirty && !window.confirm(t.unsavedChanges)) {
-                event.preventDefault();
-              }
-            }}
-          >
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <CreditCard className="h-4 w-4" />
-              <span>{t.accounts}</span>
-            </Button>
-          </Link>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadAccounts(true)}
-            disabled={isAccountsLoading || isSaving}
-          >
-            {isAccountsLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            <span>{t.refreshAccounts}</span>
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury">
+              <WalletCards className="h-4 w-4" />
+              {t.treasury}
+            </Link>
           </Button>
 
           <Button
-            type="button"
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={clearForm}
-            disabled={isSaving}
+            className="h-9 rounded-lg"
+            onClick={() => void loadAccounts({ silent: true })}
+            disabled={refreshing || Boolean(savingMode)}
           >
-            <RotateCcw className="h-4 w-4" />
-            <span>{t.clear}</span>
-          </Button>
-
-          <Button
-            type="button"
-            className="h-10 rounded-xl"
-            onClick={submitForm}
-            disabled={!canSubmit}
-          >
-            {isSaving ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Save className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{isSaving ? t.saving : t.save}</span>
+            {t.refresh}
           </Button>
         </div>
       </div>
 
-      {submitError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
+      {loadError ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+              <div>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{loadError || t.errorDesc}</p>
+              </div>
             </div>
 
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.validationTitle}
-              </p>
-              <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">
-                {submitError}
-              </p>
-            </div>
+            <Button
+              variant="outline"
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadAccounts()}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
+            </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <FileText className="h-4 w-4" />
-                {t.mainInfo}
-              </CardTitle>
-              <CardDescription>{t.mainInfoDesc}</CardDescription>
-            </CardHeader>
+      {!accounts.length && !loadError ? (
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="flex min-h-[260px] flex-col items-center justify-center gap-3 p-6 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+              <WalletCards className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <div className="space-y-1">
+              <p className="font-semibold text-foreground">{t.noAccountsTitle}</p>
+              <p className="text-sm text-muted-foreground">{t.noAccountsDesc}</p>
+            </div>
+            <Button asChild variant="outline" className="h-9 rounded-lg">
+              <Link href="/system/treasury">
+                <WalletCards className="h-4 w-4" />
+                {t.treasury}
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
-            <CardContent className="grid gap-4 md:grid-cols-3">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.transactionType}</label>
-                <select
-                  value={form.transactionType}
-                  onChange={(event) =>
-                    handleTypeChange(event.target.value as TransactionType)
-                  }
-                  disabled={isSaving}
-                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <option value="RECEIPT">{t.receipt}</option>
-                  <option value="PAYMENT">{t.payment}</option>
-                  <option value="TRANSFER">{t.transfer}</option>
-                  <option value="ADJUSTMENT">{t.adjustment}</option>
-                </select>
-              </div>
+      {accounts.length ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-4">
+            {submitError ? (
+              <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+                <CardContent className="flex items-start gap-3 p-4 text-right">
+                  <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                  <div>
+                    <p className="font-semibold text-red-900">{t.submitError}</p>
+                    <p className="text-sm text-red-700">{submitError}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.status}</label>
-                <select
-                  value={form.status}
-                  onChange={(event) =>
-                    updateForm("status", event.target.value as TransactionStatus)
-                  }
-                  disabled={isSaving}
-                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <option value="CONFIRMED">{t.confirmed}</option>
-                  <option value="DRAFT">{t.draft}</option>
-                </select>
-              </div>
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <CardTitle>{t.basicInfo}</CardTitle>
+                <CardDescription>{t.basicInfoDesc}</CardDescription>
+              </CardHeader>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.date}</label>
-                <div className="relative">
+              <CardContent className="grid gap-4 px-6 pb-6 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.transactionType}
+                  </label>
+                  <Select
+                    value={form.transaction_type}
+                    onValueChange={(value) => updateField("transaction_type", value as TransactionType)}
+                    disabled={Boolean(savingMode)}
+                  >
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="income">{t.income}</SelectItem>
+                      <SelectItem value="expense">{t.expense}</SelectItem>
+                      <SelectItem value="transfer">{t.transfer}</SelectItem>
+                      <SelectItem value="deposit">{t.deposit}</SelectItem>
+                      <SelectItem value="withdraw">{t.withdraw}</SelectItem>
+                      <SelectItem value="refund">{t.refund}</SelectItem>
+                      <SelectItem value="fee">{t.fee}</SelectItem>
+                      <SelectItem value="adjustment">{t.adjustment}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FieldError message={errors.transaction_type} />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.transactionDate}
+                  </label>
                   <Input
                     type="date"
-                    value={form.transactionDate}
-                    onChange={(event) =>
-                      updateForm("transactionDate", event.target.value)
-                    }
-                    disabled={isSaving}
-                    className="h-11 rounded-xl"
-                    dir="ltr"
+                    value={form.transaction_date}
+                    onChange={(event) => updateField("transaction_date", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
                   />
-                  <CalendarDays className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground end-3" />
+                  <FieldError message={errors.transaction_date} />
                 </div>
-              </div>
-            </CardContent>
-          </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Wallet className="h-4 w-4" />
-                {t.accountInfo}
-              </CardTitle>
-              <CardDescription>{t.accountInfoDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  {isTransfer ? t.fromAccount : t.account}
-                </label>
-                <select
-                  value={form.accountId}
-                  onChange={(event) => updateForm("accountId", event.target.value)}
-                  disabled={isSaving || isAccountsLoading}
-                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <option value="">
-                    {isAccountsLoading ? t.refreshAccounts : t.notSet}
-                  </option>
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {getAccountTitle(account)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {isTransfer ? (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">{t.toAccount}</label>
-                  <select
-                    value={form.toAccountId}
-                    onChange={(event) =>
-                      updateForm("toAccountId", event.target.value)
-                    }
-                    disabled={isSaving || isAccountsLoading || !form.accountId}
-                    className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.sourceAccount}
+                  </label>
+                  <Select
+                    value={form.treasury_account_id || undefined}
+                    onValueChange={(value) => updateField("treasury_account_id", value)}
+                    disabled={Boolean(savingMode)}
                   >
-                    <option value="">{t.notSet}</option>
-                    {availableToAccounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {getAccountTitle(account)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue placeholder={t.chooseAccount} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((account) => (
+                        <SelectItem key={account.id || account.code} value={account.id}>
+                          {account.code ? `${account.code} — ${account.name}` : account.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FieldError message={errors.treasury_account_id} />
                 </div>
-              ) : null}
 
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">
-                  {isTransfer ? t.fromAccount : t.selectedAccount}
-                </p>
-                <p className="mt-2 font-semibold">
-                  {selectedAccount ? getAccountTitle(selectedAccount) : t.notSet}
-                </p>
-                <div className="mt-2 text-sm text-muted-foreground">
-                  <MoneyText value={selectedAccount?.current_balance || 0} />
-                </div>
-              </div>
-
-              {isTransfer ? (
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.selectedToAccount}
-                  </p>
-                  <p className="mt-2 font-semibold">
-                    {selectedToAccount
-                      ? getAccountTitle(selectedToAccount)
-                      : t.notSet}
-                  </p>
-                  <div className="mt-2 text-sm text-muted-foreground">
-                    <MoneyText value={selectedToAccount?.current_balance || 0} />
+                {form.transaction_type === "transfer" ? (
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-foreground">
+                      {t.destinationAccount}
+                    </label>
+                    <Select
+                      value={form.destination_account_id || undefined}
+                      onValueChange={(value) => updateField("destination_account_id", value)}
+                      disabled={Boolean(savingMode)}
+                    >
+                      <SelectTrigger className="h-10 rounded-lg bg-background">
+                        <SelectValue placeholder={t.chooseDestination} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {accounts
+                          .filter((account) => account.id !== form.treasury_account_id)
+                          .map((account) => (
+                            <SelectItem key={account.id || account.code} value={account.id}>
+                              {account.code ? `${account.code} — ${account.name}` : account.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    <FieldError message={errors.destination_account_id} />
                   </div>
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
+                ) : null}
+              </CardContent>
+            </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Banknote className="h-4 w-4" />
-                {t.amountInfo}
-              </CardTitle>
-              <CardDescription>{t.amountInfoDesc}</CardDescription>
-            </CardHeader>
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <CardTitle>{t.accountingInfo}</CardTitle>
+                <CardDescription>{t.accountingInfoDesc}</CardDescription>
+              </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.amount}</label>
-                <div className="relative">
+              <CardContent className="grid gap-4 px-6 pb-6 md:grid-cols-3">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.amount}
+                  </label>
                   <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
                     value={form.amount}
-                    onChange={(event) => updateMoneyField(event.target.value)}
-                    disabled={isSaving}
-                    inputMode="decimal"
-                    dir="ltr"
-                    className="h-11 rounded-xl pe-10"
+                    onChange={(event) => updateField("amount", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                    placeholder="0.00"
                   />
-                  <div className="absolute top-1/2 -translate-y-1/2 end-3">
-                    <SarIcon className="h-4 w-4" />
+                  <FieldError message={errors.amount} />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.feesAmount}
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.fees_amount}
+                    onChange={(event) => updateField("fees_amount", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                    placeholder="0.00"
+                  />
+                  <FieldError message={errors.fees_amount} />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.netAmount}
+                  </label>
+                  <div className="flex h-10 items-center rounded-lg border bg-muted/30 px-3">
+                    <MoneyValue value={netAmount} label={t.sar} />
                   </div>
                 </div>
-              </div>
+              </CardContent>
+            </Card>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.sourceReference}</label>
-                <Input
-                  value={form.sourceReference}
-                  onChange={(event) =>
-                    updateForm("sourceReference", event.target.value)
-                  }
-                  disabled={isSaving}
-                  dir="ltr"
-                  className="h-11 rounded-xl"
-                />
-              </div>
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <CardTitle>{t.referenceInfo}</CardTitle>
+                <CardDescription>{t.referenceInfoDesc}</CardDescription>
+              </CardHeader>
 
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">{t.description}</label>
-                <textarea
-                  value={form.description}
-                  onChange={(event) =>
-                    updateForm("description", event.target.value)
-                  }
-                  disabled={isSaving}
-                  rows={3}
-                  className="w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">{t.notes}</label>
-                <textarea
-                  value={form.notes}
-                  onChange={(event) => updateForm("notes", event.target.value)}
-                  disabled={isSaving}
-                  rows={3}
-                  className="w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <aside className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <CheckCircle2 className="h-4 w-4" />
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">
-                  {t.selectedType}
-                </p>
-                <div className="mt-2">
-                  {transactionTypeBadge(form.transactionType, locale)}
+              <CardContent className="grid gap-4 px-6 pb-6 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.partyName}{" "}
+                    <span className="text-xs text-muted-foreground">({t.optional})</span>
+                  </label>
+                  <Input
+                    value={form.party_name}
+                    onChange={(event) => updateField("party_name", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                  />
                 </div>
-              </div>
 
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">
-                  {t.selectedStatus}
-                </p>
-                <div className="mt-2">{statusBadge(form.status, locale)}</div>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">
-                  {isTransfer ? t.fromAccount : t.selectedAccount}
-                </p>
-                <p className="mt-2 font-semibold">
-                  {selectedAccount ? getAccountTitle(selectedAccount) : t.notSet}
-                </p>
-              </div>
-
-              {isTransfer ? (
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.selectedToAccount}
-                  </p>
-                  <p className="mt-2 font-semibold">
-                    {selectedToAccount
-                      ? getAccountTitle(selectedToAccount)
-                      : t.notSet}
-                  </p>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.reference}{" "}
+                    <span className="text-xs text-muted-foreground">({t.optional})</span>
+                  </label>
+                  <Input
+                    value={form.reference}
+                    onChange={(event) => updateField("reference", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                  />
                 </div>
-              ) : null}
 
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.amount}</p>
-                <div className="mt-2 font-semibold">
-                  <MoneyText value={form.amount || 0} />
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.sourceNumber}{" "}
+                    <span className="text-xs text-muted-foreground">({t.optional})</span>
+                  </label>
+                  <Input
+                    value={form.source_number}
+                    onChange={(event) => updateField("source_number", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                  />
                 </div>
-              </div>
 
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.date}</p>
-                <p className="mt-2 font-semibold">
-                  {form.transactionDate || t.notSet}
-                </p>
-              </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.description}{" "}
+                    <span className="text-xs text-muted-foreground">({t.optional})</span>
+                  </label>
+                  <Input
+                    value={form.description}
+                    onChange={(event) => updateField("description", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                  />
+                </div>
 
-              <div className="grid gap-2 pt-2">
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.notes}{" "}
+                    <span className="text-xs text-muted-foreground">({t.optional})</span>
+                  </label>
+                  <textarea
+                    value={form.notes}
+                    onChange={(event) => updateField("notes", event.target.value)}
+                    className="min-h-[110px] w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={Boolean(savingMode)}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-4">
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="relative px-6 py-5">
+                <CardDescription>{t.summaryDesc}</CardDescription>
+                <CardTitle>{t.summary}</CardTitle>
+                <CardAction>
+                  <Badge
+                    variant="outline"
+                    className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", typeClass(form.transaction_type))}
+                  >
+                    {getTypeLabel(form.transaction_type, locale)}
+                  </Badge>
+                </CardAction>
+              </CardHeader>
+
+              <CardContent className="space-y-4 px-6 pb-6">
+                <div className="rounded-lg border bg-background p-4">
+                  <div className="mb-1 text-xs text-muted-foreground">
+                    {t.movementDirection}
+                  </div>
+                  <div className="text-sm font-semibold text-foreground">
+                    {getDirection(form.transaction_type, locale)}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border bg-background p-4">
+                  <div className="mb-1 text-xs text-muted-foreground">{t.source}</div>
+                  <div className="text-sm font-semibold text-foreground">
+                    {selectedAccount?.name || t.notAvailable}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground tabular-nums">
+                    {selectedAccount?.code || t.notAvailable}
+                  </div>
+                </div>
+
+                {form.transaction_type === "transfer" ? (
+                  <div className="rounded-lg border bg-background p-4">
+                    <div className="mb-1 text-xs text-muted-foreground">
+                      {t.destination}
+                    </div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {destinationAccount?.name || t.notAvailable}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground tabular-nums">
+                      {destinationAccount?.code || t.notAvailable}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-3">
+                  <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                    <span className="text-sm text-muted-foreground">{t.amount}</span>
+                    <MoneyValue value={amount} label={t.sar} />
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                    <span className="text-sm text-muted-foreground">{t.feesAmount}</span>
+                    <MoneyValue value={fees} label={t.sar} />
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                    <span className="text-sm font-medium text-foreground">{t.netAmount}</span>
+                    <MoneyValue value={netAmount} label={t.sar} />
+                  </div>
+                </div>
+
+                {selectedAccount ? (
+                  <div className="rounded-lg border bg-muted/30 p-4">
+                    <div className="mb-1 text-xs text-muted-foreground">
+                      {t.currentBalance}
+                    </div>
+                    <MoneyValue value={selectedAccount.current_balance} label={t.sar} />
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {t.accountType}:{" "}
+                      {selectedAccount.account_type_label ||
+                        selectedAccount.account_type ||
+                        t.notAvailable}
+                    </div>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardContent className="space-y-2 p-4">
                 <Button
-                  type="button"
-                  className="h-11 rounded-2xl"
-                  onClick={submitForm}
-                  disabled={!canSubmit}
+                  variant="outline"
+                  className="h-10 w-full rounded-lg bg-background"
+                  onClick={() => void submitForm("confirmed")}
+                  disabled={Boolean(savingMode)}
                 >
-                  {isSaving ? (
+                  {savingMode === "confirmed" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4" />
+                  )}
+                  {savingMode === "confirmed" ? t.saving : t.saveConfirmed}
+                </Button>
+
+                <Button
+                  variant="outline"
+                  className="h-10 w-full rounded-lg bg-background"
+                  onClick={() => void submitForm("draft")}
+                  disabled={Boolean(savingMode)}
+                >
+                  {savingMode === "draft" ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Save className="h-4 w-4" />
                   )}
-                  {isSaving ? t.saving : t.save}
+                  {savingMode === "draft" ? t.saving : t.saveDraft}
                 </Button>
 
                 <Button
-                  type="button"
                   variant="outline"
-                  className="h-11 rounded-2xl"
+                  className="h-10 w-full rounded-lg bg-background"
                   onClick={clearForm}
-                  disabled={isSaving}
+                  disabled={Boolean(savingMode)}
                 >
-                  <RefreshCcw className="h-4 w-4" />
+                  <RotateCcw className="h-4 w-4" />
                   {t.clear}
                 </Button>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <ShieldCheck className="h-4 w-4" />
-                {t.accountInfo}
-              </div>
-
-              <p className="text-sm leading-6 text-muted-foreground">
-                {accounts.length > 0 ? t.accounts : t.noAccounts}
-              </p>
-
-              <div className="flex items-center gap-2">
-                {form.transactionType === "RECEIPT" ? (
-                  <Receipt className="h-5 w-5 text-emerald-600" />
-                ) : form.transactionType === "PAYMENT" ? (
-                  <Banknote className="h-5 w-5 text-rose-600" />
-                ) : form.transactionType === "TRANSFER" ? (
-                  <ArrowLeftRight className="h-5 w-5 text-sky-600" />
-                ) : (
-                  <CreditCard className="h-5 w-5 text-violet-600" />
-                )}
-
-                <span className="text-sm font-semibold">
-                  {transactionTypeLabel(form.transactionType, locale)}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        </aside>
-      </div>
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardContent className="flex items-start gap-3 p-4 text-right">
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-foreground">
+                    {t.confirmed}
+                  </p>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {locale === "ar"
+                      ? "عند الحفظ والتأكيد سيتم إرسال الطلب للباكند كحركة مؤكدة مع تطبيق أثر الرصيد إذا كان مدعومًا."
+                      : "Save & confirm sends the transaction as confirmed and applies balance impact when supported by the backend."}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 # ===============================================================
 # 📂 الملف: auth_center/services.py
 # 🧭 Primey Care — Auth Center Services
-# 🚀 الإصدار: Primey Care Auth Services V1.1
+# 🚀 الإصدار: Primey Care Auth Services V1.3
 # ---------------------------------------------------------------
 # ✅ خدمة مركزية لإنشاء حسابات دخول لكل أطراف Primey Care
 # ✅ تدعم:
@@ -9,6 +9,7 @@
 #    - provider_admin
 #    - customer_user
 #    - agent_user
+#    - broker_user
 #    - accountant
 #    - support
 #    - viewer
@@ -16,6 +17,8 @@
 # ✅ لا تربط auth_center مباشرة بأي موديول تشغيلي
 # ✅ تحفظ الربط داخل UserProfile.extra_data بشكل مرن
 # ✅ تستخدم Django Groups لتجهيز الصلاحيات لاحقًا
+# ✅ تجعل الوسيط Broker يملك role مستقل broker_user
+# ✅ تدعم linked في نتيجة الإنشاء للتوافق مع agents/contracts/providers
 # ===============================================================
 
 from __future__ import annotations
@@ -60,6 +63,7 @@ class ActorUserCreationResult:
     entity_type: str | None
     entity_id: int | None
     message: str
+    linked: bool = False
 
 
 # ===============================================================
@@ -84,6 +88,14 @@ CUSTOMER_USER_TYPES = {
 
 AGENT_USER_TYPES = {
     UserType.AGENT,
+}
+
+BROKER_USER_TYPES = {
+    UserType.BROKER,
+}
+
+SERVICE_NETWORK_USER_TYPES = {
+    UserType.AGENT,
     UserType.BROKER,
 }
 
@@ -107,6 +119,7 @@ SUPPORTED_ROLES = {
     RoleChoices.PROVIDER_ADMIN,
     RoleChoices.CUSTOMER_USER,
     RoleChoices.AGENT_USER,
+    RoleChoices.BROKER_USER,
     RoleChoices.ACCOUNTANT,
     RoleChoices.SUPPORT,
     RoleChoices.VIEWER,
@@ -132,6 +145,7 @@ GROUP_NAME_BY_ROLE = {
     RoleChoices.PROVIDER_ADMIN: "role_provider_admin",
     RoleChoices.CUSTOMER_USER: "role_customer_user",
     RoleChoices.AGENT_USER: "role_agent_user",
+    RoleChoices.BROKER_USER: "role_broker_user",
     RoleChoices.ACCOUNTANT: "role_accountant",
     RoleChoices.SUPPORT: "role_support",
     RoleChoices.VIEWER: "role_viewer",
@@ -154,15 +168,30 @@ def _safe_int(value: Any) -> int | None:
     try:
         if value in (None, "", 0, "0"):
             return None
-        return int(value)
+        parsed = int(value)
+        return parsed if parsed > 0 else None
     except (TypeError, ValueError):
         return None
 
 
-def _normalize_user_type(user_type: str | UserType | None) -> str:
-    normalized = _clean_text(user_type).upper() or UserType.OTHER
+def _choice_value(value: Any) -> str:
+    """
+    يدعم TextChoices أو string عادي.
+    """
+    if hasattr(value, "value"):
+        return str(value.value)
 
-    valid_values = {choice.value for choice in UserType}
+    return str(value)
+
+
+def _choice_values(values: set[Any]) -> set[str]:
+    return {_choice_value(item) for item in values}
+
+
+def _normalize_user_type(user_type: str | UserType | None) -> str:
+    normalized = _clean_text(_choice_value(user_type)).upper() or _choice_value(UserType.OTHER)
+    valid_values = _choice_values(SUPPORTED_USER_TYPES)
+
     if normalized not in valid_values:
         raise ValidationError(f"Unsupported user_type: {normalized}")
 
@@ -173,8 +202,8 @@ def _normalize_role(role: str | RoleChoices | None) -> str | None:
     if role in (None, ""):
         return None
 
-    normalized = _clean_text(role).lower()
-    valid_values = {choice.value for choice in RoleChoices}
+    normalized = _clean_text(_choice_value(role)).lower()
+    valid_values = _choice_values(SUPPORTED_ROLES)
 
     if normalized not in valid_values:
         raise ValidationError(f"Unsupported role: {normalized}")
@@ -187,7 +216,8 @@ def _resolve_role(*, user_type: str, role: str | RoleChoices | None) -> str:
     if explicit_role:
         return explicit_role
 
-    return resolve_default_role_for_user_type(user_type)
+    resolved = resolve_default_role_for_user_type(user_type)
+    return _normalize_role(resolved) or _choice_value(RoleChoices.VIEWER)
 
 
 def _validate_email_or_empty(email: str) -> None:
@@ -203,6 +233,7 @@ def _generate_secure_password(length: int = 16) -> str:
     لاحقًا يمكن استبدال هذا بتدفق reset password token.
     """
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+
     while True:
         password = "".join(secrets.choice(alphabet) for _ in range(length))
 
@@ -213,6 +244,22 @@ def _generate_secure_password(length: int = 16) -> str:
 
         if has_lower and has_upper and has_digit and has_symbol:
             return password
+
+
+def _compact_username_part(value: str) -> str:
+    compacted = (
+        _clean_text(value)
+        .replace("+", "")
+        .replace(" ", "")
+        .replace("-", "")
+        .replace(".", "_")
+        .replace("@", "_")
+    )
+
+    compacted = slugify(compacted, allow_unicode=False) or compacted
+    compacted = compacted.replace("-", "_")
+
+    return compacted or "user"
 
 
 def _build_username(
@@ -230,18 +277,17 @@ def _build_username(
     if email:
         base = email.split("@")[0]
     elif phone_number:
-        base = phone_number.replace("+", "").replace(" ", "").replace("-", "")
+        base = phone_number
     elif display_name:
-        base = slugify(display_name, allow_unicode=False) or "user"
+        base = display_name
     else:
         base = "user"
 
-    prefix = _clean_text(entity_type).lower() or _clean_text(user_type).lower() or "user"
+    prefix = _compact_username_part(entity_type or user_type or "user")
+    base_part = _compact_username_part(base)
     suffix = str(entity_id) if entity_id else secrets.token_hex(3)
 
-    username = f"{prefix}_{base}_{suffix}"
-    username = username.replace(".", "_").replace("@", "_")
-    username = username[:120]
+    username = f"{prefix}_{base_part}_{suffix}"[:120]
 
     original = username
     counter = 1
@@ -294,29 +340,27 @@ def _resolve_entity_from_payload(
 
     if normalized_entity_type and normalized_entity_id:
         ids[f"{normalized_entity_type}_id"] = normalized_entity_id
-
-    if normalized_entity_type and normalized_entity_id:
         return normalized_entity_type, normalized_entity_id, ids
 
-    if user_type == UserType.CUSTOMER and customer_id:
+    if user_type == _choice_value(UserType.CUSTOMER) and customer_id:
         return "customer", customer_id, ids
 
-    if user_type == UserType.PROVIDER and provider_id:
+    if user_type == _choice_value(UserType.PROVIDER) and provider_id:
         return "provider", provider_id, ids
 
-    if user_type == UserType.CENTER and center_id:
+    if user_type == _choice_value(UserType.CENTER) and center_id:
         return "center", center_id, ids
 
-    if user_type == UserType.AGENT and agent_id:
+    if user_type == _choice_value(UserType.AGENT) and agent_id:
         return "agent", agent_id, ids
 
-    if user_type == UserType.BROKER and broker_id:
+    if user_type == _choice_value(UserType.BROKER) and broker_id:
         return "broker", broker_id, ids
 
-    if user_type in SYSTEM_USER_TYPES:
+    if user_type in _choice_values(SYSTEM_USER_TYPES):
         return "system", None, ids
 
-    if user_type == UserType.COMPANY and company_id:
+    if user_type == _choice_value(UserType.COMPANY) and company_id:
         return "company", company_id, ids
 
     return normalized_entity_type, normalized_entity_id, ids
@@ -358,10 +402,31 @@ def _merge_extra_data(
     updates: dict[str, Any] | None,
 ) -> dict[str, Any]:
     base = existing.copy() if isinstance(existing, dict) else {}
+
     if isinstance(updates, dict):
         for key, value in updates.items():
             if value not in (None, ""):
                 base[key] = value
+
+    return base
+
+
+def _merge_tags(existing: Any, updates: list[str] | None) -> list[str]:
+    if updates is None:
+        if isinstance(existing, list):
+            return existing
+        return []
+
+    base: list[str] = []
+
+    if isinstance(existing, list):
+        base.extend(str(item) for item in existing if _clean_text(item))
+
+    for item in updates:
+        cleaned = _clean_text(item)
+        if cleaned and cleaned not in base:
+            base.append(cleaned)
+
     return base
 
 
@@ -373,6 +438,7 @@ def _find_existing_user(
 ) -> Any | None:
     """
     البحث عن مستخدم موجود لتجنب إنشاء حسابات مكررة.
+
     الأولوية:
     1) username إن تم تمريره
     2) email
@@ -390,11 +456,51 @@ def _find_existing_user(
             return user
 
     if phone_number:
-        profile = UserProfile.objects.filter(phone_number=phone_number).select_related("user").first()
+        profile = (
+            UserProfile.objects
+            .filter(
+                phone_number=phone_number,
+            )
+            .select_related("user")
+            .first()
+        )
+        if profile:
+            return profile.user
+
+        profile = (
+            UserProfile.objects
+            .filter(
+                whatsapp_number=phone_number,
+            )
+            .select_related("user")
+            .first()
+        )
         if profile:
             return profile.user
 
     return None
+
+
+def _profile_update_fields(profile: UserProfile) -> list[str]:
+    fields = [
+        "user_type",
+        "role",
+        "display_name",
+        "phone_number",
+        "whatsapp_number",
+        "alternate_email",
+        "preferred_language",
+        "timezone",
+        "extra_data",
+        "is_profile_completed",
+        "last_profile_update_at",
+        "updated_at",
+    ]
+
+    if hasattr(profile, "tags"):
+        fields.append("tags")
+
+    return fields
 
 
 # ===============================================================
@@ -435,40 +541,13 @@ def create_actor_user(
 ) -> ActorUserCreationResult:
     """
     إنشاء أو تحديث مستخدم دخول لأي Actor داخل Primey Care.
-
-    أمثلة:
-
-    system_admin:
-        create_actor_user(
-            user_type=UserType.SUPER_ADMIN,
-            role=RoleChoices.SYSTEM_ADMIN,
-            email="admin@example.com",
-        )
-
-    accountant:
-        create_actor_user(
-            user_type=UserType.ACCOUNTANT,
-            role=RoleChoices.ACCOUNTANT,
-            email="accountant@example.com",
-        )
-
-    support:
-        create_actor_user(
-            user_type=UserType.STAFF,
-            role=RoleChoices.SUPPORT,
-            email="support@example.com",
-        )
-
-    viewer:
-        create_actor_user(
-            user_type=UserType.STAFF,
-            role=RoleChoices.VIEWER,
-            email="viewer@example.com",
-        )
     """
 
     normalized_user_type = _normalize_user_type(user_type)
     normalized_role = _resolve_role(user_type=normalized_user_type, role=role)
+
+    if normalized_role not in _choice_values(SUPPORTED_ROLES):
+        raise ValidationError(f"Unsupported role: {normalized_role}")
 
     clean_email = _clean_email(email)
     clean_username = _clean_text(username)
@@ -549,6 +628,10 @@ def create_actor_user(
     # -----------------------------------------------------------
     user_dirty_fields: list[str] = []
 
+    if clean_username and user.username != clean_username:
+        user.username = clean_username
+        user_dirty_fields.append("username")
+
     if clean_email and user.email != clean_email:
         user.email = clean_email
         user_dirty_fields.append("email")
@@ -563,16 +646,16 @@ def create_actor_user(
 
     desired_is_staff = (
         normalized_role in {
-            RoleChoices.SYSTEM_ADMIN,
-            RoleChoices.ACCOUNTANT,
-            RoleChoices.SUPPORT,
+            _choice_value(RoleChoices.SYSTEM_ADMIN),
+            _choice_value(RoleChoices.ACCOUNTANT),
+            _choice_value(RoleChoices.SUPPORT),
         }
         if is_staff is None
         else bool(is_staff)
     )
 
     desired_is_superuser = (
-        normalized_role == RoleChoices.SYSTEM_ADMIN
+        normalized_role == _choice_value(RoleChoices.SYSTEM_ADMIN)
         if is_superuser is None
         else bool(is_superuser)
     )
@@ -611,6 +694,7 @@ def create_actor_user(
         profile_extra_data["entity_id"] = resolved_entity_id
 
     profile_extra_data["role"] = normalized_role
+    profile_extra_data["user_type"] = normalized_user_type
 
     profile.user_type = normalized_user_type
     profile.role = normalized_role
@@ -622,8 +706,8 @@ def create_actor_user(
     profile.timezone = clean_timezone
     profile.extra_data = profile_extra_data
 
-    if tags is not None:
-        profile.tags = tags
+    if hasattr(profile, "tags"):
+        profile.tags = _merge_tags(profile.tags, tags)
 
     profile.is_profile_completed = bool(
         profile.display_name
@@ -636,29 +720,20 @@ def create_actor_user(
     )
 
     profile.mark_profile_updated(commit=False)
-    profile.save(
-        update_fields=[
-            "user_type",
-            "role",
-            "display_name",
-            "phone_number",
-            "whatsapp_number",
-            "alternate_email",
-            "preferred_language",
-            "timezone",
-            "tags",
-            "extra_data",
-            "is_profile_completed",
-            "last_profile_update_at",
-            "updated_at",
-        ]
-    )
+    profile.save(update_fields=_profile_update_fields(profile))
 
     group_name = None
     if create_group:
         group_name = _assign_groups(user, normalized_user_type, normalized_role)
 
-    message = "User created successfully." if created else "User updated successfully."
+    linked = bool(resolved_entity_type or resolved_entity_id or entity_ids)
+
+    if created:
+        message = "User created successfully."
+    elif linked:
+        message = "User updated and linked successfully."
+    else:
+        message = "User updated successfully."
 
     return ActorUserCreationResult(
         user=user,
@@ -669,6 +744,7 @@ def create_actor_user(
         entity_type=resolved_entity_type,
         entity_id=resolved_entity_id,
         message=message,
+        linked=linked,
     )
 
 
@@ -734,6 +810,8 @@ def create_customer_user(
         user_type=UserType.CUSTOMER,
         role=RoleChoices.CUSTOMER_USER,
         customer_id=customer_id,
+        entity_type="customer",
+        entity_id=customer_id,
         email=email,
         display_name=display_name,
         phone_number=phone_number,
@@ -755,6 +833,8 @@ def create_center_user(
         user_type=UserType.CENTER,
         role=RoleChoices.PROVIDER_ADMIN,
         center_id=center_id,
+        entity_type="center",
+        entity_id=center_id,
         email=email,
         display_name=display_name,
         phone_number=phone_number,
@@ -776,6 +856,8 @@ def create_provider_user(
         user_type=UserType.PROVIDER,
         role=RoleChoices.PROVIDER_ADMIN,
         provider_id=provider_id,
+        entity_type="provider",
+        entity_id=provider_id,
         email=email,
         display_name=display_name,
         phone_number=phone_number,
@@ -797,6 +879,8 @@ def create_agent_user(
         user_type=UserType.AGENT,
         role=RoleChoices.AGENT_USER,
         agent_id=agent_id,
+        entity_type="agent",
+        entity_id=agent_id,
         email=email,
         display_name=display_name,
         phone_number=phone_number,
@@ -816,8 +900,10 @@ def create_broker_user(
 ) -> ActorUserCreationResult:
     return create_actor_user(
         user_type=UserType.BROKER,
-        role=RoleChoices.AGENT_USER,
+        role=RoleChoices.BROKER_USER,
         broker_id=broker_id,
+        entity_type="broker",
+        entity_id=broker_id,
         email=email,
         display_name=display_name,
         phone_number=phone_number,

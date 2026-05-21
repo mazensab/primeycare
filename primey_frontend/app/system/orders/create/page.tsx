@@ -2,50 +2,41 @@
 
 /* ============================================================
    📂 app/system/orders/create/page.tsx
-   🧠 Primey Care | Create Order
+   🧠 Primey Care | Create Order Premium Form
    ------------------------------------------------------------
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ مبني بنفس نمط إنشاء المراكز/العملاء المعتمد
-   ✅ Full Width Layout
-   ✅ Main Form + Sidebar Summary
-   ✅ حماية زر الإنشاء وطلبات البيانات حسب الصلاحيات
-   ✅ fallback آمن لـ system_admin / superadmin
-   ✅ Error Alert داخلي
-   ✅ Field-level validation
-   ✅ beforeunload protection
-   ✅ حفظ واستعادة مسودة محلية
-   ✅ تعطيل الحقول أثناء الحفظ
-   ✅ تنظيف البيانات قبل الإرسال
-   ✅ استخدام /currency/sar.svg
-   ✅ استخدام toast من sonner
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ بدون localhost hardcoded
-   ✅ الأرقام بالإنجليزية
+   ✅ Premium paid-dashboard inspired layout
+   ✅ Real lookups from /api/customers/ /api/products/ /api/agents/
+   ✅ Create order through /api/orders/
+   ✅ No manual contract selector
+   ✅ Agent selector only for authorized users
+   ✅ Agent users do not see agent selector
+   ✅ COD supported without visible custody alert card
+   ✅ Local draft + unsaved changes protection
+   ✅ Arabic / English
+   ✅ English numerals
+   ✅ sonner
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost hardcoded
 ============================================================ */
 
-import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ComponentType, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import * as React from "react";
 import {
   AlertTriangle,
   ArrowLeft,
-  BadgeCheck,
   CalendarDays,
   CheckCircle2,
-  ClipboardList,
-  CreditCard,
+  ChevronRight,
   FileText,
-  Layers3,
   Loader2,
   Package,
   RefreshCcw,
   RotateCcw,
   Save,
-  ShieldCheck,
   ShoppingCart,
-  Stethoscope,
-  Trash2,
+  Sparkles,
+  Truck,
   UserRound,
   Users,
   Wallet,
@@ -54,13 +45,11 @@ import {
 import { toast } from "sonner";
 
 import { useAuth } from "@/components/providers/AuthProvider";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -68,131 +57,123 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-/* ============================================================
-   Types
-============================================================ */
-
 type AppLocale = "ar" | "en";
-type AuthRecord = Record<string, unknown>;
+type Dict = Record<string, unknown>;
 
-type OrderStatus = "pending" | "confirmed" | "processing" | "completed";
-type PaymentStatus = "unpaid" | "partial" | "paid";
-type FulfillmentStatus = "not_started" | "in_progress" | "fulfilled";
+type OrderKind = "card" | "membership" | "program" | "service" | "package" | "general";
+
+type PaymentMethod =
+  | "none"
+  | "cash"
+  | "cash_on_delivery"
+  | "bank_transfer"
+  | "gateway"
+  | "card"
+  | "wallet"
+  | "tamara"
+  | "tabby";
 
 type OptionItem = {
   id: string;
   label: string;
-  subtitle?: string;
-  raw?: Record<string, unknown>;
+  subtitle: string;
+  raw: Dict;
 };
 
-type OrderFormData = {
+type FormState = {
   customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+  customer_city: string;
+  customer_address: string;
+
   product_id: string;
-  provider_id: string;
-  agent_id: string;
-  contract_id: string;
-
-  order_number: string;
-  status: OrderStatus;
-  payment_status: PaymentStatus;
-  fulfillment_status: FulfillmentStatus;
-
+  order_kind: OrderKind;
   quantity: string;
   unit_price: string;
   discount_amount: string;
   tax_amount: string;
-  total_amount: string;
-  paid_amount: string;
-  agent_commission: string;
 
-  preferred_date: string;
-  notes: string;
+  starts_at: string;
+  ends_at: string;
+  scheduled_at: string;
+
+  payment_method: PaymentMethod;
+  amount_paid: string;
+  payment_reference: string;
+
+  agent_id: string;
+  referral_code: string;
+
+  customer_notes: string;
+  delivery_notes: string;
   internal_notes: string;
 
   create_invoice: boolean;
+  issue_invoice_immediately: boolean;
   notify_customer: boolean;
 };
 
-type OrderFormErrors = Partial<Record<keyof OrderFormData, string>>;
+type ValidationErrors = Partial<Record<keyof FormState, string>>;
 
-type CreateOrderApiResponse = {
-  ok?: boolean;
-  message?: string;
-  errors?: Record<string, string[] | string>;
-  id?: number | string;
-  order?: {
-    id?: number | string;
-  };
-  data?: {
-    id?: number | string;
-    order?: {
-      id?: number | string;
-    };
-  };
+type LookupState = {
+  customers: OptionItem[];
+  products: OptionItem[];
+  agents: OptionItem[];
 };
 
-type ApiListResponse = {
+type ApiResponse = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
-  results?: unknown[];
-  items?: unknown[];
-  data?:
-    | unknown[]
-    | {
-        results?: unknown[];
-        items?: unknown[];
-        customers?: unknown[];
-        products?: unknown[];
-        providers?: unknown[];
-        agents?: unknown[];
-        contracts?: unknown[];
-      };
-  customers?: unknown[];
-  products?: unknown[];
-  providers?: unknown[];
-  agents?: unknown[];
-  contracts?: unknown[];
+  data?: unknown;
+  order?: unknown;
+  item?: unknown;
+  id?: string | number;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-const DRAFT_STORAGE_KEY = "primey-care-order-create-draft";
+const SAR_ICON = "/currency/sar.svg";
+const DRAFT_STORAGE_KEY = "primey-orders-create-draft-v2";
 
-/* ============================================================
-   Locale Helpers
-============================================================ */
+const initialForm: FormState = {
+  customer_id: "",
+  customer_name: "",
+  customer_phone: "",
+  customer_email: "",
+  customer_city: "",
+  customer_address: "",
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+  product_id: "",
+  order_kind: "card",
+  quantity: "1",
+  unit_price: "",
+  discount_amount: "0",
+  tax_amount: "0",
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+  starts_at: "",
+  ends_at: "",
+  scheduled_at: "",
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+  payment_method: "cash_on_delivery",
+  amount_paid: "0",
+  payment_reference: "",
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
-    return "ar";
-  }
+  agent_id: "",
+  referral_code: "",
+
+  customer_notes: "",
+  delivery_notes: "",
+  internal_notes: "",
+
+  create_invoice: true,
+  issue_invoice_immediately: false,
+  notify_customer: true,
+};
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
-
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
-
-/* ============================================================
-   API Helpers
-============================================================ */
 
 function apiUrl(path: string) {
   const base =
@@ -201,8 +182,12 @@ function apiUrl(path: string) {
     "";
 
   if (!base) return path;
-
   return `${base.replace(/\/$/, "")}${path}`;
+}
+
+function readLocale(): AppLocale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
 function readCookie(name: string) {
@@ -215,27 +200,82 @@ function readCookie(name: string) {
   return match ? decodeURIComponent(match.split("=")[1] || "") : "";
 }
 
-/* ============================================================
-   Permission Helpers
-============================================================ */
-
-function asRecord(value: unknown): AuthRecord {
-  return value && typeof value === "object" ? (value as AuthRecord) : {};
+function asRecord(value: unknown): Dict {
+  return value && typeof value === "object" ? (value as Dict) : {};
 }
 
-function getNestedRecord(source: AuthRecord, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
+function stringify(value: unknown) {
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
 
-    if (value && typeof value === "object") {
-      return value as AuthRecord;
+function toNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  const cleaned = stringify(value).replace(/,/g, "").replace(/[^\d.-]/g, "");
+  const parsed = Number(cleaned);
+
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toBool(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value > 0;
+
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "y", "on"].includes(value.toLowerCase());
+  }
+
+  return Boolean(value);
+}
+
+function readNested(source: Dict, keys: string[]) {
+  for (const key of keys) {
+    const parts = key.split(".");
+    let current: unknown = source;
+    let found = true;
+
+    for (const part of parts) {
+      const obj = asRecord(current);
+
+      if (part in obj) {
+        current = obj[part];
+      } else {
+        found = false;
+        break;
+      }
+    }
+
+    if (found && current !== null && current !== undefined && current !== "") {
+      return current;
     }
   }
 
-  return {};
+  return "";
 }
 
-function uniqueStrings(values: unknown[]): string[] {
+function unwrapList(payload: unknown) {
+  const obj = asRecord(payload);
+  const data = asRecord(obj.data);
+
+  const candidates = [
+    data.results,
+    data.items,
+    data.data,
+    obj.results,
+    obj.items,
+    obj.data,
+    payload,
+  ];
+
+  for (const value of candidates) {
+    if (Array.isArray(value)) return value;
+  }
+
+  return [];
+}
+
+function uniqueStrings(values: unknown[]) {
   return Array.from(
     new Set(
       values
@@ -248,86 +288,68 @@ function uniqueStrings(values: unknown[]): string[] {
             return value.flatMap((item) => {
               if (typeof item === "string") return [item];
 
-              if (item && typeof item === "object") {
-                const obj = item as AuthRecord;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
+              const obj = asRecord(item);
+              return [
+                obj.code,
+                obj.codename,
+                obj.permission,
+                obj.name,
+                obj.role,
+              ].filter(Boolean) as string[];
             });
           }
 
-          if (value && typeof value === "object") {
-            const obj = value as AuthRecord;
+          const obj = asRecord(value);
 
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
+          return [
+            obj.code,
+            obj.codename,
+            obj.permission,
+            obj.name,
+            obj.role,
+          ].filter(Boolean) as string[];
         })
         .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
+        .filter(Boolean)
+    )
   );
 }
 
-function getAuthUser(authValue: unknown): AuthRecord {
+function getAuthUser(authValue: unknown) {
   const auth = asRecord(authValue);
 
-  return getNestedRecord(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
+  for (const key of ["user", "currentUser", "profile", "account", "session", "data"]) {
+    const value = auth[key];
+    if (value && typeof value === "object") return value as Dict;
+  }
+
+  return {};
 }
 
-function getAuthRoles(authValue: unknown): string[] {
+function getAuthRoles(authValue: unknown) {
   const auth = asRecord(authValue);
   const user = getAuthUser(authValue);
 
   return uniqueStrings([
     auth.role,
     auth.roles,
-    auth.user_role,
-    auth.userType,
     auth.user_type,
+    auth.userType,
     auth.workspace,
-    auth.workspaces,
-    auth.type,
     user.role,
     user.roles,
-    user.user_role,
-    user.userType,
     user.user_type,
+    user.userType,
     user.workspace,
-    user.workspaces,
-    user.type,
   ]).map((item) => item.toLowerCase());
 }
 
-function getAuthPermissionCodes(authValue: unknown): string[] {
+function getAuthPermissions(authValue: unknown) {
   const auth = asRecord(authValue);
   const user = getAuthUser(authValue);
-
   const authPermissions = asRecord(auth.permissions);
   const userPermissions = asRecord(user.permissions);
-  const authProfilePermissions = asRecord(auth.profile_permissions);
+  const profilePermissions = asRecord(auth.profile_permissions);
   const userProfilePermissions = asRecord(user.profile_permissions);
 
   return uniqueStrings([
@@ -336,7 +358,7 @@ function getAuthPermissionCodes(authValue: unknown): string[] {
     auth.codes,
     auth.profile_permissions,
     authPermissions.codes,
-    authProfilePermissions.codes,
+    profilePermissions.codes,
     user.permission_codes,
     user.permissions,
     user.codes,
@@ -346,1178 +368,968 @@ function getAuthPermissionCodes(authValue: unknown): string[] {
   ]);
 }
 
-function isAuthResolving(authValue: unknown) {
-  const auth = asRecord(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
 function isSystemAdmin(authValue: unknown) {
   const auth = asRecord(authValue);
   const user = getAuthUser(authValue);
   const roles = getAuthRoles(authValue);
 
   return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
+    toBool(auth.is_superuser) ||
+    toBool(auth.isSuperuser) ||
+    toBool(user.is_superuser) ||
     roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
+      ["system_admin", "superuser", "super_admin", "admin", "owner"].includes(role)
     )
   );
 }
 
-function hasKnownPermissionSignal(authValue: unknown) {
-  return (
-    getAuthRoles(authValue).length > 0 ||
-    getAuthPermissionCodes(authValue).length > 0
-  );
-}
-
-function hasPermissionCode(authValue: unknown, codes: string[]) {
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length === 0) return undefined;
-
-  return codes.some((code) => permissions.includes(code));
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
+function hasPermission(authValue: unknown, permissions: string[], mode: "view" | "action") {
   if (isSystemAdmin(authValue)) return true;
 
-  const explicitPermission = hasPermissionCode(authValue, codes);
-
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
-  }
-
   const roles = getAuthRoles(authValue);
+  const codes = getAuthPermissions(authValue);
 
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "support",
-          "accountant",
-          "viewer",
-        ].includes(role),
-      );
-    }
+  if (codes.some((code) => permissions.includes(code))) return true;
 
+  if (mode === "view" && !codes.length && !roles.length) return true;
+
+  if (mode === "view") {
     return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin"].includes(role),
+      ["order_manager", "orders_manager", "support", "accountant", "sales_manager"].includes(role)
     );
   }
 
-  if (!hasKnownPermissionSignal(authValue)) {
-    return true;
-  }
-
-  return mode === "view";
+  return roles.some((role) =>
+    ["order_manager", "orders_manager", "sales_manager"].includes(role)
+  );
 }
 
-/* ============================================================
-   Data Helpers
-============================================================ */
+function isAgentUser(authValue: unknown) {
+  const roles = getAuthRoles(authValue);
 
-function getValue(obj: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = obj[key];
-
-    if (value !== undefined && value !== null && value !== "") {
-      return value;
-    }
-  }
-
-  return "";
+  return roles.some((role) =>
+    ["agent", "agent_user", "sales_agent", "delivery_agent"].includes(role)
+  );
 }
 
-function extractList(payload: unknown, keys: string[]): unknown[] {
-  if (Array.isArray(payload)) return payload;
-
-  if (!payload || typeof payload !== "object") return [];
-
-  const response = payload as ApiListResponse;
-
-  if (Array.isArray(response.results)) return response.results;
-  if (Array.isArray(response.items)) return response.items;
-
-  for (const key of keys) {
-    const value = (response as Record<string, unknown>)[key];
-
-    if (Array.isArray(value)) return value;
-  }
-
-  if (Array.isArray(response.data)) return response.data;
-
-  if (response.data && typeof response.data === "object") {
-    const dataObj = response.data as Record<string, unknown>;
-
-    if (Array.isArray(dataObj.results)) return dataObj.results;
-    if (Array.isArray(dataObj.items)) return dataObj.items;
-
-    for (const key of keys) {
-      const value = dataObj[key];
-
-      if (Array.isArray(value)) return value;
-    }
-  }
-
-  return [];
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(value) ? value : 0);
 }
 
-function normalizeOption(item: unknown, fallbackPrefix: string): OptionItem {
-  const obj = (item || {}) as Record<string, unknown>;
-  const id = String(getValue(obj, ["id", "uuid", "pk"]));
+function normalizeCustomer(value: unknown): OptionItem {
+  const obj = asRecord(value);
+  const user = asRecord(obj.user);
 
-  const label = String(
-    getValue(obj, [
-      "name",
+  const name = stringify(
+    readNested(obj, [
+      "display_name",
       "full_name",
-      "title",
-      "label",
-      "code",
-      "order_number",
-      "invoice_number",
-      "contract_number",
-    ]) || (id ? `${fallbackPrefix}-${id}` : "-"),
+      "name",
+      "customer_name",
+      "user.full_name",
+      "user.name",
+    ]) ||
+      user.full_name ||
+      user.name ||
+      "-"
   );
 
-  const subtitle = String(
-    getValue(obj, [
-      "code",
+  const phone = stringify(
+    readNested(obj, [
+      "normalized_phone",
       "phone",
       "mobile",
-      "email",
-      "city",
-      "category_name",
-      "product_type",
-      "status",
-      "contract_number",
-    ]) || "",
+      "whatsapp_number",
+      "user.phone",
+    ])
   );
 
   return {
-    id,
-    label,
-    subtitle,
+    id: stringify(obj.id ?? obj.pk),
+    label: name,
+    subtitle: phone,
     raw: obj,
   };
 }
 
-function toNumber(value: string | number) {
-  const parsed = Number(String(value || "").replace(/,/g, ""));
+function normalizeProduct(value: unknown): OptionItem {
+  const obj = asRecord(value);
 
-  return Number.isFinite(parsed) ? parsed : 0;
-}
+  const name = stringify(
+    readNested(obj, [
+      "name_ar",
+      "name_en",
+      "name",
+      "title",
+      "product_name",
+      "offer_title",
+    ]) || "-"
+  );
 
-function isValidNumber(value: string) {
-  if (!value.trim()) return true;
-
-  const parsed = Number(value.replace(/,/g, ""));
-
-  return Number.isFinite(parsed);
-}
-
-function normalizeNumberString(value: string, fallback = "0.00") {
-  const clean = value.replace(/,/g, "").replace(/[^\d.]/g, "");
-  const parsed = Number(clean);
-
-  if (!Number.isFinite(parsed)) return fallback;
-
-  return parsed.toFixed(2);
-}
-
-function generateOrderNumber() {
-  const now = new Date();
-  const stamp = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-    String(now.getHours()).padStart(2, "0"),
-    String(now.getMinutes()).padStart(2, "0"),
-  ].join("");
-
-  return `ORD-${stamp}`;
-}
-
-function hasFormChanges(formData: OrderFormData) {
-  return JSON.stringify(formData) !== JSON.stringify(initialFormData);
-}
-
-function normalizePayload(formData: OrderFormData) {
-  const quantity = Math.max(1, Math.floor(toNumber(formData.quantity) || 1));
-  const unitPrice = toNumber(formData.unit_price);
-  const discountAmount = toNumber(formData.discount_amount);
-  const taxAmount = toNumber(formData.tax_amount);
-  const totalAmount =
-    toNumber(formData.total_amount) ||
-    Math.max(quantity * unitPrice - discountAmount + taxAmount, 0);
-  const paidAmount = Math.min(toNumber(formData.paid_amount), totalAmount);
+  const type = stringify(
+    readNested(obj, ["product_type", "type", "kind", "order_kind"])
+  );
 
   return {
-    customer_id: formData.customer_id || null,
-    product_id: formData.product_id || null,
-    provider_id: formData.provider_id || null,
-    center_id: formData.provider_id || null,
-    agent_id: formData.agent_id || null,
-    contract_id: formData.contract_id || null,
-
-    order_number: formData.order_number.trim() || generateOrderNumber(),
-    status: formData.status,
-    payment_status: formData.payment_status,
-    fulfillment_status: formData.fulfillment_status,
-
-    quantity,
-    unit_price: unitPrice.toFixed(2),
-    discount_amount: discountAmount.toFixed(2),
-    tax_amount: taxAmount.toFixed(2),
-    total_amount: totalAmount.toFixed(2),
-    paid_amount: paidAmount.toFixed(2),
-    agent_commission: toNumber(formData.agent_commission).toFixed(2),
-
-    preferred_date: formData.preferred_date || null,
-    notes: formData.notes.trim(),
-    internal_notes: formData.internal_notes.trim(),
-
-    create_invoice: formData.create_invoice,
-    notify_customer: formData.notify_customer,
+    id: stringify(obj.id ?? obj.pk),
+    label: name,
+    subtitle: type,
+    raw: obj,
   };
 }
 
-function resolveCreatedId(result: CreateOrderApiResponse) {
-  return (
-    result.order?.id ||
-    result.data?.order?.id ||
-    result.data?.id ||
-    result.id ||
-    null
+function normalizeAgent(value: unknown): OptionItem {
+  const obj = asRecord(value);
+  const user = asRecord(obj.user);
+
+  const name = stringify(
+    readNested(obj, ["name", "full_name", "user.full_name", "user.name"]) ||
+      user.full_name ||
+      user.name ||
+      "-"
+  );
+
+  const code = stringify(readNested(obj, ["code", "agent_code"]));
+
+  return {
+    id: stringify(obj.id ?? obj.pk),
+    label: name,
+    subtitle: code,
+    raw: obj,
+  };
+}
+
+function getProductPrice(product: OptionItem | undefined) {
+  if (!product) return 0;
+
+  const obj = product.raw;
+
+  return toNumber(
+    readNested(obj, [
+      "unit_price",
+      "price",
+      "final_price",
+      "price_after_discount",
+      "sale_price",
+      "default_price",
+    ])
   );
 }
 
-function mapApiFieldErrors(
-  errors: CreateOrderApiResponse["errors"],
-): OrderFormErrors {
-  const nextErrors: OrderFormErrors = {};
+function getProductOrderKind(product: OptionItem | undefined): OrderKind {
+  if (!product) return "card";
 
-  if (!errors) return nextErrors;
+  const rawKind = stringify(
+    readNested(product.raw, ["order_kind", "kind", "product_type", "type"])
+  ).toLowerCase();
 
-  Object.entries(errors).forEach(([key, value]) => {
-    const message = Array.isArray(value) ? value[0] : value;
+  if (rawKind.includes("membership")) return "membership";
+  if (rawKind.includes("program")) return "program";
+  if (rawKind.includes("service")) return "service";
+  if (rawKind.includes("package")) return "package";
+  if (rawKind.includes("card")) return "card";
 
-    if (!message) return;
-
-    if (key in initialFormData) {
-      nextErrors[key as keyof OrderFormData] = String(message);
-    }
-  });
-
-  return nextErrors;
+  return "card";
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
+function getTranslation(locale: AppLocale) {
   const isArabic = locale === "ar";
 
   return {
+    orders: isArabic ? "الطلبات" : "Orders",
     title: isArabic ? "إنشاء طلب جديد" : "Create New Order",
     subtitle: isArabic
-      ? "إنشاء طلب وربطه بالعميل والمنتج والمركز والمندوب والعقد مع تجهيز الفاتورة عند الحاجة."
-      : "Create an order and link it with customer, product, provider, agent, and contract with invoice preparation when needed.",
-
+      ? "سجل طلبًا تشغيليًا جديدًا مع العميل والمنتج وطريقة الدفع ومعلومات التوصيل."
+      : "Create an operational order with customer, product, payment, and delivery details.",
     back: isArabic ? "العودة للطلبات" : "Back to Orders",
-    ordersList: isArabic ? "قائمة الطلبات" : "Orders List",
-    create: isArabic ? "إنشاء الطلب" : "Create Order",
+    refresh: isArabic ? "تحديث البيانات" : "Refresh",
+    reset: isArabic ? "تفريغ النموذج" : "Reset Form",
+    save: isArabic ? "حفظ الطلب" : "Save Order",
     saving: isArabic ? "جاري الحفظ..." : "Saving...",
-    saveDraft: isArabic ? "حفظ كمسودة محلية" : "Save Local Draft",
-    restoreDraft: isArabic ? "استعادة المسودة" : "Restore Draft",
-    clearForm: isArabic ? "تفريغ النموذج" : "Clear Form",
-    refreshOptions: isArabic ? "تحديث الخيارات" : "Refresh Options",
+    select: isArabic ? "اختر" : "Select",
+    required: isArabic ? "هذا الحقل مطلوب" : "This field is required",
+    invalidPhone: isArabic ? "رقم الجوال غير صحيح" : "Invalid mobile number",
+    invalidAmount: isArabic ? "المبلغ غير صحيح" : "Invalid amount",
+    created: isArabic ? "تم إنشاء الطلب بنجاح" : "Order created successfully",
+    createError: isArabic ? "تعذر إنشاء الطلب" : "Unable to create order",
+    loadError: isArabic ? "تعذر تحميل بيانات النموذج" : "Unable to load form data",
+    draftRestored: isArabic ? "تم استرجاع مسودة الطلب" : "Order draft restored",
+    draftCleared: isArabic ? "تم تفريغ النموذج" : "Form cleared",
+    unsaved: isArabic
+      ? "لديك تغييرات غير محفوظة، هل تريد المتابعة؟"
+      : "You have unsaved changes. Continue?",
+    noPermissionTitle: isArabic ? "لا تملك صلاحية إنشاء الطلبات" : "No permission to create orders",
+    noPermissionDesc: isArabic
+      ? "لا يمكن لهذا الحساب إنشاء طلبات جديدة."
+      : "This account cannot create new orders.",
 
-    basicInfo: isArabic ? "بيانات الطلب" : "Order Information",
-    basicDesc: isArabic
-      ? "رقم الطلب والحالات الأساسية."
-      : "Order number and core statuses.",
+    stepCustomer: isArabic ? "العميل" : "Customer",
+    stepProduct: isArabic ? "المنتج" : "Product",
+    stepPayment: isArabic ? "الدفع" : "Payment",
+    stepReview: isArabic ? "المراجعة" : "Review",
 
-    partiesInfo: isArabic ? "الأطراف والربط" : "Parties & Links",
-    partiesDesc: isArabic
-      ? "اختيار العميل والمنتج والمركز والمندوب والعقد."
-      : "Select customer, product, provider, agent, and contract.",
+    customerSection: isArabic ? "بيانات العميل" : "Customer Details",
+    customerSectionDesc: isArabic
+      ? "اختر عميلًا موجودًا أو أدخل بيانات عميل جديد."
+      : "Select an existing customer or enter a new customer details.",
+    productSection: isArabic ? "المنتج والطلب" : "Product & Order",
+    productSectionDesc: isArabic
+      ? "حدد المنتج ونوع الطلب والقيمة المالية."
+      : "Choose the product, order kind, and financial values.",
+    datesSection: isArabic ? "التواريخ والمواعيد" : "Dates & Schedule",
+    datesSectionDesc: isArabic
+      ? "حدد بداية ونهاية الاشتراك أو موعد التنفيذ عند الحاجة."
+      : "Set subscription dates or service schedule when needed.",
+    paymentSection: isArabic ? "الدفع والتحصيل" : "Payment & Collection",
+    paymentSectionDesc: isArabic
+      ? "حدد طريقة الدفع والمبلغ المدفوع والمرجع عند وجوده."
+      : "Choose payment method, paid amount, and reference when available.",
+    agentSection: isArabic ? "المندوب والإحالة" : "Agent & Referral",
+    agentSectionDesc: isArabic
+      ? "مستخدم المندوب يتم ربط طلبه تلقائيًا، والمدير يمكنه اختيار مندوب."
+      : "Agent users are linked automatically; managers can assign an agent.",
+    notesSection: isArabic ? "الملاحظات" : "Notes",
+    notesSectionDesc: isArabic
+      ? "أضف ملاحظات العميل أو التوصيل أو الملاحظات الداخلية."
+      : "Add customer, delivery, or internal notes.",
+    optionsSection: isArabic ? "خيارات إضافية" : "Additional Options",
 
-    financialInfo: isArabic ? "البيانات المالية" : "Financial Details",
-    financialDesc: isArabic
-      ? "الكمية والسعر والخصم والضريبة والإجمالي والمدفوع."
-      : "Quantity, price, discount, tax, total, and paid amount.",
+    contractHint: isArabic
+      ? "لا يتم اختيار العقد يدويًا؛ النظام يربط العقد المناسب من المنتج ومقدم الخدمة والعقد التسويقي النشط."
+      : "Contract is not selected manually; the system resolves it from product, provider, and active marketing contract.",
 
-    scheduleInfo: isArabic ? "التاريخ والملاحظات" : "Date & Notes",
-    scheduleDesc: isArabic
-      ? "التاريخ المفضل والملاحظات العامة والداخلية."
-      : "Preferred date, public notes, and internal notes.",
-
-    actionsInfo: isArabic ? "إعدادات بعد الإنشاء" : "Post-create Options",
-    actionsDesc: isArabic
-      ? "تحديد إنشاء الفاتورة وإشعار العميل بعد حفظ الطلب."
-      : "Choose invoice creation and customer notification after saving.",
-
-    summaryTitle: isArabic ? "ملخص الطلب" : "Order Summary",
-    summaryDesc: isArabic
-      ? "مراجعة سريعة للطلب قبل الحفظ."
-      : "Quick review before saving.",
-
-    stepsTitle: isArabic ? "إرشادات قبل الحفظ" : "Before Saving",
-    stepsDesc: isArabic
-      ? "نقاط مهمة تساعدك على إنشاء طلب صحيح."
-      : "Important points to help you create a correct order.",
-
-    formErrorTitle: isArabic ? "تعذر حفظ البيانات" : "Unable to save data",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بإنشاء طلب" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية إنشاء الطلبات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to create orders. Contact your system administrator if you need access.",
-
-    optionLoadError: isArabic
-      ? "تعذر تحميل بعض خيارات النموذج."
-      : "Unable to load some form options.",
-
-    labels: {
-      orderNumber: isArabic ? "رقم الطلب" : "Order Number",
-      customer: isArabic ? "العميل" : "Customer",
-      product: isArabic ? "المنتج" : "Product",
-      provider: isArabic ? "المركز / مقدم الخدمة" : "Provider / Center",
-      agent: isArabic ? "المندوب" : "Agent",
-      contract: isArabic ? "العقد" : "Contract",
-      status: isArabic ? "حالة الطلب" : "Order Status",
-      paymentStatus: isArabic ? "حالة الدفع" : "Payment Status",
-      fulfillmentStatus: isArabic ? "حالة التنفيذ" : "Fulfillment Status",
+    fields: {
+      customer: isArabic ? "عميل موجود" : "Existing Customer",
+      customerName: isArabic ? "اسم العميل" : "Customer Name",
+      customerPhone: isArabic ? "رقم الجوال" : "Mobile",
+      customerEmail: isArabic ? "البريد الإلكتروني" : "Email",
+      customerCity: isArabic ? "المدينة" : "City",
+      customerAddress: isArabic ? "العنوان" : "Address",
+      product: isArabic ? "المنتج / البطاقة" : "Product / Card",
+      orderKind: isArabic ? "نوع الطلب" : "Order Kind",
       quantity: isArabic ? "الكمية" : "Quantity",
       unitPrice: isArabic ? "سعر الوحدة" : "Unit Price",
       discountAmount: isArabic ? "الخصم" : "Discount",
       taxAmount: isArabic ? "الضريبة" : "Tax",
-      totalAmount: isArabic ? "إجمالي الطلب" : "Total Amount",
-      paidAmount: isArabic ? "المدفوع" : "Paid Amount",
-      remainingAmount: isArabic ? "المتبقي" : "Remaining",
-      agentCommission: isArabic ? "عمولة المندوب" : "Agent Commission",
-      preferredDate: isArabic ? "التاريخ المفضل" : "Preferred Date",
-      notes: isArabic ? "ملاحظات الطلب" : "Order Notes",
+      startsAt: isArabic ? "بداية الاشتراك" : "Start Date",
+      endsAt: isArabic ? "نهاية الاشتراك" : "End Date",
+      scheduledAt: isArabic ? "موعد التنفيذ" : "Schedule",
+      paymentMethod: isArabic ? "طريقة الدفع" : "Payment Method",
+      amountPaid: isArabic ? "المبلغ المدفوع" : "Amount Paid",
+      paymentReference: isArabic ? "مرجع الدفع" : "Payment Reference",
+      agent: isArabic ? "مندوب الطلب" : "Order Agent",
+      referralCode: isArabic ? "كود الإحالة" : "Referral Code",
+      customerNotes: isArabic ? "ملاحظات العميل" : "Customer Notes",
+      deliveryNotes: isArabic ? "ملاحظات التوصيل" : "Delivery Notes",
       internalNotes: isArabic ? "ملاحظات داخلية" : "Internal Notes",
-      createInvoice: isArabic ? "إنشاء فاتورة بعد حفظ الطلب" : "Create invoice after saving",
-      notifyCustomer: isArabic ? "إشعار العميل بعد إنشاء الطلب" : "Notify customer after creating order",
+      createInvoice: isArabic ? "إنشاء فاتورة للطلب" : "Create invoice for order",
+      issueInvoice: isArabic ? "إصدار الفاتورة مباشرة" : "Issue invoice immediately",
+      notifyCustomer: isArabic ? "إشعار العميل" : "Notify customer",
     },
 
-    placeholders: {
-      orderNumber: isArabic ? "يتم توليده تلقائيًا عند تركه فارغًا" : "Auto-generated if left empty",
-      quantity: isArabic ? "مثال: 1" : "Example: 1",
-      unitPrice: isArabic ? "مثال: 199" : "Example: 199",
-      discountAmount: isArabic ? "مثال: 0" : "Example: 0",
-      taxAmount: isArabic ? "مثال: 0" : "Example: 0",
-      totalAmount: isArabic ? "يحسب تلقائيًا عند تركه فارغًا" : "Auto-calculated if left empty",
-      paidAmount: isArabic ? "مثال: 0" : "Example: 0",
-      agentCommission: isArabic ? "مثال: 0" : "Example: 0",
-      notes: isArabic ? "ملاحظات تظهر على الطلب..." : "Notes visible on order...",
-      internalNotes: isArabic ? "ملاحظات داخلية لفريق التشغيل..." : "Internal notes for operations team...",
-    },
+    orderKind: {
+      card: isArabic ? "بطاقة" : "Card",
+      membership: isArabic ? "عضوية" : "Membership",
+      program: isArabic ? "برنامج" : "Program",
+      service: isArabic ? "خدمة" : "Service",
+      package: isArabic ? "باقة" : "Package",
+      general: isArabic ? "عام" : "General",
+    } as Record<OrderKind, string>,
 
-    orderStatuses: {
-      pending: isArabic ? "معلق" : "Pending",
-      confirmed: isArabic ? "مؤكد" : "Confirmed",
-      processing: isArabic ? "قيد التنفيذ" : "Processing",
-      completed: isArabic ? "مكتمل" : "Completed",
-    } satisfies Record<OrderStatus, string>,
+    paymentMethods: {
+      none: isArabic ? "بدون دفع الآن" : "No payment now",
+      cash: isArabic ? "نقدي" : "Cash",
+      cash_on_delivery: isArabic ? "الدفع عند الاستلام" : "Cash on delivery",
+      bank_transfer: isArabic ? "تحويل بنكي" : "Bank transfer",
+      gateway: isArabic ? "بوابة دفع" : "Payment gateway",
+      card: isArabic ? "بطاقة بنكية" : "Card",
+      wallet: isArabic ? "محفظة" : "Wallet",
+      tamara: isArabic ? "تمارا" : "Tamara",
+      tabby: isArabic ? "تابي" : "Tabby",
+    } as Record<PaymentMethod, string>,
 
-    paymentStatuses: {
-      unpaid: isArabic ? "غير مدفوع" : "Unpaid",
-      partial: isArabic ? "مدفوع جزئيًا" : "Partial",
-      paid: isArabic ? "مدفوع" : "Paid",
-    } satisfies Record<PaymentStatus, string>,
-
-    fulfillmentStatuses: {
-      not_started: isArabic ? "لم يبدأ" : "Not Started",
-      in_progress: isArabic ? "قيد التنفيذ" : "In Progress",
-      fulfilled: isArabic ? "منفذ" : "Fulfilled",
-    } satisfies Record<FulfillmentStatus, string>,
-
-    validation: {
-      customer: isArabic ? "اختيار العميل مطلوب." : "Customer is required.",
-      product: isArabic ? "اختيار المنتج مطلوب." : "Product is required.",
-      provider: isArabic ? "اختيار المركز مطلوب." : "Provider is required.",
-      number: isArabic ? "القيمة يجب أن تكون رقمًا صحيحًا." : "Value must be a valid number.",
-      total: isArabic ? "الإجمالي لا يمكن أن يكون أقل من صفر." : "Total cannot be negative.",
-      paidGreater: isArabic
-        ? "المبلغ المدفوع لا يجب أن يكون أكبر من إجمالي الطلب."
-        : "Paid amount must not be greater than total amount.",
-    },
-
-    success: isArabic ? "تم إنشاء الطلب بنجاح." : "Order created successfully.",
-    draftSaved: isArabic ? "تم حفظ المسودة محليًا." : "Draft saved locally.",
-    draftRestored: isArabic ? "تمت استعادة المسودة." : "Draft restored.",
-    noDraft: isArabic ? "لا توجد مسودة محفوظة." : "No saved draft found.",
-    formCleared: isArabic ? "تم تفريغ النموذج." : "Form cleared.",
-    apiError: isArabic
-      ? "تعذر إنشاء الطلب. تحقق من البيانات وحاول مرة أخرى."
-      : "Unable to create order. Please check the data and try again.",
-    validationToast: isArabic
-      ? "يرجى تصحيح الحقول المطلوبة قبل المتابعة."
-      : "Please fix the required fields before continuing.",
-    confirmLeave: isArabic
-      ? "لديك بيانات غير محفوظة. هل تريد المغادرة؟"
-      : "You have unsaved changes. Do you want to leave?",
-    confirmClear: isArabic
-      ? "سيتم تفريغ النموذج الحالي. هل تريد المتابعة؟"
-      : "The current form will be cleared. Do you want to continue?",
-
-    selectPlaceholder: isArabic ? "اختر..." : "Select...",
-    noOptions: isArabic ? "لا توجد خيارات متاحة" : "No options available",
-
-    completion: isArabic ? "نسبة الاكتمال" : "Completion",
-    ready: isArabic ? "جاهز للحفظ" : "Ready to save",
-    missingData: isArabic ? "ينقصه بيانات أساسية" : "Missing required data",
-    calculatedTotal: isArabic ? "الإجمالي المحسوب" : "Calculated Total",
-
-    yes: isArabic ? "نعم" : "Yes",
-    no: isArabic ? "لا" : "No",
-
-    quickNotes: [
-      isArabic
-        ? "تأكد من اختيار العميل والمنتج والمركز قبل الحفظ."
-        : "Make sure customer, product, and provider are selected before saving.",
-      isArabic
-        ? "يمكن ترك رقم الطلب فارغًا ليتم توليده تلقائيًا."
-        : "You can leave order number empty to auto-generate it.",
-      isArabic
-        ? "الإجمالي يحسب من الكمية والسعر والخصم والضريبة عند تركه فارغًا."
-        : "Total is calculated from quantity, price, discount, and tax when left empty.",
-      isArabic
-        ? "إنشاء الفاتورة بعد الحفظ يعتمد على دعم الباك إند لهذا الخيار."
-        : "Invoice creation after saving depends on backend support for this option.",
-    ],
+    summary: isArabic ? "ملخص الطلب" : "Order Summary",
+    liveSummary: isArabic
+      ? "مراجعة سريعة قبل حفظ الطلب."
+      : "Quick review before saving.",
+    customer: isArabic ? "العميل" : "Customer",
+    product: isArabic ? "المنتج" : "Product",
+    orderType: isArabic ? "نوع الطلب" : "Order type",
+    method: isArabic ? "طريقة الدفع" : "Method",
+    quantity: isArabic ? "الكمية" : "Quantity",
+    unitPrice: isArabic ? "سعر الوحدة" : "Unit price",
+    subtotal: isArabic ? "الإجمالي قبل الخصم" : "Subtotal",
+    discount: isArabic ? "الخصم" : "Discount",
+    tax: isArabic ? "الضريبة" : "Tax",
+    total: isArabic ? "الإجمالي" : "Total",
+    paid: isArabic ? "المدفوع" : "Paid",
+    remaining: isArabic ? "المتبقي" : "Remaining",
+    readiness: isArabic ? "جاهزية الطلب" : "Order Readiness",
+    customerReady: isArabic ? "بيانات العميل مكتملة" : "Customer ready",
+    productReady: isArabic ? "المنتج والقيمة مكتملة" : "Product ready",
+    paymentReady: isArabic ? "الدفع مضبوط" : "Payment ready",
   };
 }
 
-/* ============================================================
-   Defaults
-============================================================ */
+function getCreatedId(payload: ApiResponse) {
+  const data = asRecord(payload.data);
+  const order = asRecord(payload.order);
+  const item = asRecord(payload.item);
 
-const initialFormData: OrderFormData = {
-  customer_id: "",
-  product_id: "",
-  provider_id: "",
-  agent_id: "",
-  contract_id: "",
-
-  order_number: "",
-  status: "pending",
-  payment_status: "unpaid",
-  fulfillment_status: "not_started",
-
-  quantity: "1",
-  unit_price: "",
-  discount_amount: "0.00",
-  tax_amount: "0.00",
-  total_amount: "",
-  paid_amount: "0.00",
-  agent_commission: "0.00",
-
-  preferred_date: "",
-  notes: "",
-  internal_notes: "",
-
-  create_invoice: true,
-  notify_customer: false,
-};
-
-/* ============================================================
-   UI Helpers
-============================================================ */
-
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0";
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(numericValue);
+  return stringify(
+    payload.id ||
+      data.id ||
+      data.order_id ||
+      order.id ||
+      item.id
+  );
 }
 
-function formatMoney(value: number | string): string {
-  const numericValue = Number(value);
+function buildPayload(form: FormState) {
+  const quantity = Math.max(toNumber(form.quantity), 1);
+  const unitPrice = toNumber(form.unit_price);
+  const discountAmount = toNumber(form.discount_amount);
+  const taxAmount = toNumber(form.tax_amount);
+  const amountPaid =
+    form.payment_method === "cash_on_delivery" ? 0 : toNumber(form.amount_paid);
 
-  if (!Number.isFinite(numericValue)) return "0.00";
+  const subtotalAmount = quantity * unitPrice;
+  const totalAmount = Math.max(subtotalAmount - discountAmount + taxAmount, 0);
 
-  return numericValue.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return {
+    customer_id: form.customer_id || undefined,
+    customer_name: form.customer_name.trim(),
+    customer_phone: form.customer_phone.trim(),
+    customer_email: form.customer_email.trim(),
+    customer_city: form.customer_city.trim(),
+    customer_address: form.customer_address.trim(),
+
+    product_id: form.product_id || undefined,
+    order_kind: form.order_kind,
+    quantity,
+    unit_price: unitPrice,
+    discount_amount: discountAmount,
+    tax_amount: taxAmount,
+    subtotal_amount: subtotalAmount,
+    total_amount: totalAmount,
+
+    starts_at: form.starts_at || undefined,
+    ends_at: form.ends_at || undefined,
+    scheduled_at: form.scheduled_at || undefined,
+
+    payment_method: form.payment_method === "none" ? "" : form.payment_method,
+    amount_paid: amountPaid,
+    payment_reference: form.payment_reference.trim(),
+
+    agent_id: form.agent_id || undefined,
+    referral_code: form.referral_code.trim(),
+
+    customer_notes: form.customer_notes.trim(),
+    delivery_notes: form.delivery_notes.trim(),
+    internal_notes: form.internal_notes.trim(),
+
+    create_invoice: form.create_invoice,
+    issue_invoice_immediately: form.issue_invoice_immediately,
+    notify_customer: form.notify_customer,
+  };
 }
 
-function SarAmount({ value }: { value: number | string }) {
+function validateForm(form: FormState, t: ReturnType<typeof getTranslation>) {
+  const errors: ValidationErrors = {};
+
+  if (!form.customer_id && !form.customer_name.trim()) {
+    errors.customer_name = t.required;
+  }
+
+  if (!form.customer_id && !form.customer_phone.trim()) {
+    errors.customer_phone = t.required;
+  }
+
+  if (form.customer_phone.trim() && form.customer_phone.replace(/\D/g, "").length < 8) {
+    errors.customer_phone = t.invalidPhone;
+  }
+
+  if (!form.product_id) {
+    errors.product_id = t.required;
+  }
+
+  if (toNumber(form.quantity) <= 0) {
+    errors.quantity = t.invalidAmount;
+  }
+
+  if (toNumber(form.unit_price) < 0) {
+    errors.unit_price = t.invalidAmount;
+  }
+
+  if (toNumber(form.discount_amount) < 0) {
+    errors.discount_amount = t.invalidAmount;
+  }
+
+  if (toNumber(form.tax_amount) < 0) {
+    errors.tax_amount = t.invalidAmount;
+  }
+
+  if (form.payment_method !== "cash_on_delivery" && toNumber(form.amount_paid) < 0) {
+    errors.amount_paid = t.invalidAmount;
+  }
+
+  return errors;
+}
+
+function SarAmount({ value }: { value: number }) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <span className="inline-flex items-center gap-1 whitespace-nowrap font-semibold tabular-nums">
       <span>{formatMoney(value)}</span>
-      <Image
-        src={SAR_ICON_PATH}
-        alt=""
-        width={14}
-        height={14}
-        className="h-3.5 w-3.5"
-      />
+      <img src={SAR_ICON} alt="SAR" className="h-3.5 w-3.5 opacity-80" />
     </span>
   );
 }
 
-function FieldBlock({
+function TextInput({
   label,
+  value,
+  onChange,
   error,
-  required,
-  children,
+  type = "text",
+  disabled,
+  placeholder,
 }: {
   label: string;
+  value: string;
+  onChange: (value: string) => void;
   error?: string;
-  required?: boolean;
-  children: ReactNode;
+  type?: string;
+  disabled?: boolean;
+  placeholder?: string;
 }) {
   return (
     <div className="space-y-2">
-      <Label className="text-sm font-medium">
-        {label}
-        {required ? <span className="ms-1 text-destructive">*</span> : null}
-      </Label>
-
-      {children}
-
-      {error ? <p className="text-xs font-medium text-destructive">{error}</p> : null}
+      <Label className="text-xs font-medium text-muted-foreground">{label}</Label>
+      <Input
+        type={type}
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className={cn(
+          "h-10 rounded-lg",
+          error && "border-red-500 focus-visible:ring-red-500"
+        )}
+      />
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }
 
-function ToggleBox({
-  checked,
-  disabled,
-  title,
-  description,
+function TextAreaInput({
+  label,
+  value,
   onChange,
+  error,
+  disabled,
 }: {
-  checked: boolean;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  error?: string;
   disabled?: boolean;
-  title: string;
-  description: string;
-  onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-xl border bg-background p-4">
-      <Checkbox
-        checked={checked}
+    <div className="space-y-2">
+      <Label className="text-xs font-medium text-muted-foreground">{label}</Label>
+      <Textarea
+        value={value}
         disabled={disabled}
-        onCheckedChange={(value) => onChange(Boolean(value))}
+        onChange={(event) => onChange(event.target.value)}
+        className={cn(
+          "min-h-[92px] rounded-lg",
+          error && "border-red-500 focus-visible:ring-red-500"
+        )}
       />
-
-      <div>
-        <p className="text-sm font-semibold">{title}</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          {description}
-        </p>
-      </div>
-    </label>
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+    </div>
   );
 }
 
-function SummaryItem({
-  icon: Icon,
+function SelectInput({
+  label,
+  value,
+  onChange,
+  children,
+  error,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+  error?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label className="text-xs font-medium text-muted-foreground">{label}</Label>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className={cn(
+          "h-10 w-full rounded-lg border bg-background px-3 text-sm outline-none transition focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+          error && "border-red-500 focus:ring-red-500"
+        )}
+      >
+        {children}
+      </select>
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+    </div>
+  );
+}
+
+function FormPanel({
+  title,
+  description,
+  icon,
+  children,
+}: {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="border-b px-4 py-4">
+        <div className="flex items-start gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted">
+            {icon}
+          </div>
+          <div className="space-y-1">
+            <CardTitle className="text-base">{title}</CardTitle>
+            <p className="text-sm text-muted-foreground">{description}</p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-4">{children}</CardContent>
+    </Card>
+  );
+}
+
+function SummaryRow({
   label,
   value,
 }: {
-  icon: ComponentType<{ className?: string }>;
   label: string;
-  value: ReactNode;
+  value: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border bg-background p-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <Icon className="h-4 w-4" />
-      </div>
-
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <div className="mt-1 truncate text-sm font-semibold">{value || "-"}</div>
-      </div>
+    <div className="flex items-start justify-between gap-4 border-b py-3 text-sm last:border-b-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="max-w-[60%] text-end font-semibold">{value || "—"}</span>
     </div>
   );
 }
 
-function SelectField({
-  value,
-  disabled,
-  options,
-  placeholder,
-  noOptions,
-  onChange,
+function StepPill({
+  active,
+  done,
+  index,
+  label,
 }: {
-  value: string;
-  disabled?: boolean;
-  options: OptionItem[];
-  placeholder: string;
-  noOptions: string;
-  onChange: (value: string) => void;
+  active: boolean;
+  done: boolean;
+  index: number;
+  label: string;
 }) {
   return (
-    <select
-      value={value}
-      disabled={disabled}
-      className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-      onChange={(event) => onChange(event.target.value)}
+    <div
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition",
+        active && "border-black bg-black text-white",
+        !active && done && "border-emerald-200 bg-emerald-50 text-emerald-700",
+        !active && !done && "bg-background text-muted-foreground"
+      )}
     >
-      <option value="">{options.length ? placeholder : noOptions}</option>
-
-      {options.map((item) => (
-        <option key={item.id} value={item.id}>
-          {item.subtitle ? `${item.label} - ${item.subtitle}` : item.label}
-        </option>
-      ))}
-    </select>
+      <span
+        className={cn(
+          "flex size-5 items-center justify-center rounded-full text-[11px]",
+          active ? "bg-white/20" : "bg-muted"
+        )}
+      >
+        {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : index}
+      </span>
+      {label}
+    </div>
   );
 }
 
-/* ============================================================
-   Page
-============================================================ */
-
-export default function SystemCreateOrderPage() {
+export default function SystemOrdersCreatePage() {
   const router = useRouter();
-  const auth = useAuth() as unknown;
+  const authContext = useAuth() as unknown;
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [formData, setFormData] = useState<OrderFormData>(initialFormData);
-  const [errors, setErrors] = useState<OrderFormErrors>({});
-  const [submitError, setSubmitError] = useState("");
-  const [optionsError, setOptionsError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isLoadingOptions, setIsLoadingOptions] = useState(false);
+  const [locale, setLocale] = React.useState<AppLocale>("ar");
+  const [form, setForm] = React.useState<FormState>(initialForm);
+  const [errors, setErrors] = React.useState<ValidationErrors>({});
 
-  const [customers, setCustomers] = useState<OptionItem[]>([]);
-  const [products, setProducts] = useState<OptionItem[]>([]);
-  const [providers, setProviders] = useState<OptionItem[]>([]);
-  const [agents, setAgents] = useState<OptionItem[]>([]);
-  const [contracts, setContracts] = useState<OptionItem[]>([]);
+  const [customers, setCustomers] = React.useState<OptionItem[]>([]);
+  const [products, setProducts] = React.useState<OptionItem[]>([]);
+  const [agents, setAgents] = React.useState<OptionItem[]>([]);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const [isLoadingLookups, setIsLoadingLookups] = React.useState(true);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [loadError, setLoadError] = React.useState("");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = React.useState(false);
 
-  const canCreateOrders = hasSafePermission(
-    auth,
-    ["orders.create"],
-    "action",
+  const t = React.useMemo(() => getTranslation(locale), [locale]);
+  const isRtl = locale === "ar";
+
+  const canCreate = hasPermission(authContext, ["orders.create"], "action");
+  const canAssignAgent =
+    !isAgentUser(authContext) &&
+    hasPermission(
+      authContext,
+      ["orders.assign_agent", "orders.create_for_agent", "agents.view"],
+      "action"
+    );
+
+  const selectedCustomer = React.useMemo(
+    () => customers.find((customer) => customer.id === form.customer_id),
+    [customers, form.customer_id]
   );
 
-  const canViewOrders = hasSafePermission(
-    auth,
-    ["orders.view", "orders.list"],
-    "view",
+  const selectedProduct = React.useMemo(
+    () => products.find((product) => product.id === form.product_id),
+    [products, form.product_id]
   );
 
-  const canViewCustomers = hasSafePermission(
-    auth,
-    ["customers.view", "customers.list"],
-    "view",
+  const selectedAgent = React.useMemo(
+    () => agents.find((agent) => agent.id === form.agent_id),
+    [agents, form.agent_id]
   );
 
-  const canViewProducts = hasSafePermission(
-    auth,
-    ["products.view", "products.list"],
-    "view",
-  );
+  const quantity = Math.max(toNumber(form.quantity), 1);
+  const unitPrice = toNumber(form.unit_price);
+  const discountAmount = toNumber(form.discount_amount);
+  const taxAmount = toNumber(form.tax_amount);
+  const subtotalAmount = quantity * unitPrice;
+  const totalAmount = Math.max(subtotalAmount - discountAmount + taxAmount, 0);
+  const amountPaid =
+    form.payment_method === "cash_on_delivery" ? 0 : Math.min(toNumber(form.amount_paid), totalAmount);
+  const remainingAmount = Math.max(totalAmount - amountPaid, 0);
 
-  const canViewProviders = hasSafePermission(
-    auth,
-    ["providers.view", "providers.list", "centers.view", "centers.list"],
-    "view",
-  );
+  const stepState = {
+    customer: Boolean(form.customer_id || (form.customer_name && form.customer_phone)),
+    product: Boolean(form.product_id && toNumber(form.unit_price) >= 0 && toNumber(form.quantity) > 0),
+    payment: Boolean(form.payment_method),
+  };
 
-  const canViewAgents = hasSafePermission(
-    auth,
-    ["agents.view", "agents.list"],
-    "view",
-  );
+  const activeStep = !stepState.customer
+    ? 1
+    : !stepState.product
+      ? 2
+      : !stepState.payment
+        ? 3
+        : 4;
 
-  const canViewContracts = hasSafePermission(
-    auth,
-    ["contracts.view", "contracts.list"],
-    "view",
-  );
+  React.useEffect(() => {
+    const syncLocale = () => {
+      const nextLocale = readLocale();
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-  const isDirty = useMemo(() => hasFormChanges(formData), [formData]);
+    syncLocale();
 
-  const calculatedTotal = useMemo(() => {
-    const quantity = Math.max(1, toNumber(formData.quantity) || 1);
-    const unitPrice = toNumber(formData.unit_price);
-    const discount = toNumber(formData.discount_amount);
-    const tax = toNumber(formData.tax_amount);
+    window.addEventListener("storage", syncLocale);
+    window.addEventListener("primey-locale-changed", syncLocale);
 
-    return Math.max(quantity * unitPrice - discount + tax, 0);
-  }, [
-    formData.discount_amount,
-    formData.quantity,
-    formData.tax_amount,
-    formData.unit_price,
-  ]);
+    return () => {
+      window.removeEventListener("storage", syncLocale);
+      window.removeEventListener("primey-locale-changed", syncLocale);
+    };
+  }, []);
 
-  const finalTotal = useMemo(
-    () => toNumber(formData.total_amount) || calculatedTotal,
-    [calculatedTotal, formData.total_amount],
-  );
+  React.useEffect(() => {
+    try {
+      const draft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (!draft) return;
 
-  const remainingAmount = useMemo(
-    () => Math.max(finalTotal - toNumber(formData.paid_amount), 0),
-    [finalTotal, formData.paid_amount],
-  );
+      const parsed = JSON.parse(draft) as Partial<FormState>;
+      setForm((current) => ({
+        ...current,
+        ...parsed,
+      }));
+      toast.success(getTranslation(readLocale()).draftRestored);
+    } catch {
+      // ignore invalid draft
+    }
+  }, []);
 
-  const selectedCustomer = useMemo(
-    () => customers.find((item) => item.id === formData.customer_id),
-    [customers, formData.customer_id],
-  );
+  React.useEffect(() => {
+    if (!hasUnsavedChanges) return;
 
-  const selectedProduct = useMemo(
-    () => products.find((item) => item.id === formData.product_id),
-    [products, formData.product_id],
-  );
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(form));
+      } catch {
+        // ignore storage errors
+      }
+    }, 400);
 
-  const selectedProvider = useMemo(
-    () => providers.find((item) => item.id === formData.provider_id),
-    [providers, formData.provider_id],
-  );
+    return () => window.clearTimeout(timer);
+  }, [form, hasUnsavedChanges]);
 
-  const selectedAgent = useMemo(
-    () => agents.find((item) => item.id === formData.agent_id),
-    [agents, formData.agent_id],
-  );
+  React.useEffect(() => {
+    if (!hasUnsavedChanges) return;
 
-  const selectedContract = useMemo(
-    () => contracts.find((item) => item.id === formData.contract_id),
-    [contracts, formData.contract_id],
-  );
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = t.unsaved;
+      return t.unsaved;
+    };
 
-  const completedFields = useMemo(() => {
-    const keys: Array<keyof OrderFormData> = [
-      "customer_id",
-      "product_id",
-      "provider_id",
-      "status",
-      "payment_status",
-      "fulfillment_status",
-      "quantity",
-      "unit_price",
-      "discount_amount",
-      "tax_amount",
-      "paid_amount",
-    ];
+    window.addEventListener("beforeunload", handler);
 
-    return keys.filter((key) => String(formData[key] || "").trim().length > 0)
-      .length;
-  }, [formData]);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasUnsavedChanges, t.unsaved]);
 
-  const progressPercent = Math.round((completedFields / 11) * 100);
+  const loadLookups = React.useCallback(async () => {
+    setIsLoadingLookups(true);
+    setLoadError("");
 
-  const isReadyToSave =
-    formData.customer_id.trim().length > 0 &&
-    formData.product_id.trim().length > 0 &&
-    formData.provider_id.trim().length > 0 &&
-    isValidNumber(formData.quantity) &&
-    isValidNumber(formData.unit_price);
+    try {
+      const [customersResponse, productsResponse, agentsResponse] = await Promise.all([
+        fetch(apiUrl("/api/customers/?page_size=100"), {
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Accept-Language": locale,
+          },
+        }),
+        fetch(apiUrl("/api/products/?page_size=100"), {
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Accept-Language": locale,
+          },
+        }),
+        canAssignAgent
+          ? fetch(apiUrl("/api/agents/?page_size=100"), {
+              credentials: "include",
+              headers: {
+                Accept: "application/json",
+                "Accept-Language": locale,
+              },
+            })
+          : Promise.resolve(null),
+      ]);
 
-  function updateField<K extends keyof OrderFormData>(
-    key: K,
-    value: OrderFormData[K],
-  ) {
-    setFormData((current) => ({
+      if (!customersResponse.ok) throw new Error(t.loadError);
+      if (!productsResponse.ok) throw new Error(t.loadError);
+
+      const customersPayload = await customersResponse.json().catch(() => ({}));
+      const productsPayload = await productsResponse.json().catch(() => ({}));
+      const agentsPayload = agentsResponse
+        ? await agentsResponse.json().catch(() => ({}))
+        : {};
+
+      if (agentsResponse && !agentsResponse.ok) throw new Error(t.loadError);
+
+      setCustomers(unwrapList(customersPayload).map(normalizeCustomer).filter((item) => item.id));
+      setProducts(unwrapList(productsPayload).map(normalizeProduct).filter((item) => item.id));
+      setAgents(canAssignAgent ? unwrapList(agentsPayload).map(normalizeAgent).filter((item) => item.id) : []);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : t.loadError);
+      setCustomers([]);
+      setProducts([]);
+      setAgents([]);
+    } finally {
+      setIsLoadingLookups(false);
+    }
+  }, [canAssignAgent, locale, t.loadError]);
+
+  React.useEffect(() => {
+    void loadLookups();
+  }, [loadLookups]);
+
+  function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((current) => ({
       ...current,
       [key]: value,
     }));
 
-    setErrors((current) => ({
-      ...current,
-      [key]: undefined,
-    }));
+    setErrors((current) => {
+      if (!current[key]) return current;
 
-    if (submitError) {
-      setSubmitError("");
-    }
-  }
-
-  function validateForm() {
-    const nextErrors: OrderFormErrors = {};
-    const total = toNumber(formData.total_amount) || calculatedTotal;
-    const paid = toNumber(formData.paid_amount);
-
-    if (!formData.customer_id) {
-      nextErrors.customer_id = t.validation.customer;
-    }
-
-    if (!formData.product_id) {
-      nextErrors.product_id = t.validation.product;
-    }
-
-    if (!formData.provider_id) {
-      nextErrors.provider_id = t.validation.provider;
-    }
-
-    const numericFields: Array<keyof OrderFormData> = [
-      "quantity",
-      "unit_price",
-      "discount_amount",
-      "tax_amount",
-      "total_amount",
-      "paid_amount",
-      "agent_commission",
-    ];
-
-    numericFields.forEach((key) => {
-      if (!isValidNumber(String(formData[key] || ""))) {
-        nextErrors[key] = t.validation.number;
-      }
+      const next = { ...current };
+      delete next[key];
+      return next;
     });
 
-    if (total < 0) {
-      nextErrors.total_amount = t.validation.total;
-    }
-
-    if (paid > total) {
-      nextErrors.paid_amount = t.validation.paidGreater;
-    }
-
-    setErrors(nextErrors);
-
-    return Object.keys(nextErrors).length === 0;
+    setHasUnsavedChanges(true);
   }
 
-  const loadOptions = useCallback(
-    async (showToast = false) => {
-      if (!canCreateOrders) return;
+  function handleCustomerChange(value: string) {
+    const customer = customers.find((item) => item.id === value);
 
-      try {
-        setIsLoadingOptions(true);
-        setOptionsError("");
-
-        const requests: Array<Promise<void>> = [];
-
-        if (canViewCustomers) {
-          requests.push(
-            fetch(apiUrl("/api/customers/?page_size=200"), {
-              credentials: "include",
-              headers: { Accept: "application/json" },
-            })
-              .then((response) => response.json())
-              .then((payload) => {
-                setCustomers(
-                  extractList(payload, ["customers"]).map((item) =>
-                    normalizeOption(item, "CUS"),
-                  ),
-                );
-              }),
-          );
-        }
-
-        if (canViewProducts) {
-          requests.push(
-            fetch(apiUrl("/api/products/?page_size=200"), {
-              credentials: "include",
-              headers: { Accept: "application/json" },
-            })
-              .then((response) => response.json())
-              .then((payload) => {
-                setProducts(
-                  extractList(payload, ["products"]).map((item) =>
-                    normalizeOption(item, "PRD"),
-                  ),
-                );
-              }),
-          );
-        }
-
-        if (canViewProviders) {
-          requests.push(
-            fetch(apiUrl("/api/providers/?page_size=200"), {
-              credentials: "include",
-              headers: { Accept: "application/json" },
-            })
-              .then((response) => response.json())
-              .then((payload) => {
-                setProviders(
-                  extractList(payload, ["providers", "centers"]).map((item) =>
-                    normalizeOption(item, "PRV"),
-                  ),
-                );
-              }),
-          );
-        }
-
-        if (canViewAgents) {
-          requests.push(
-            fetch(apiUrl("/api/agents/?page_size=200"), {
-              credentials: "include",
-              headers: { Accept: "application/json" },
-            })
-              .then((response) => response.json())
-              .then((payload) => {
-                setAgents(
-                  extractList(payload, ["agents"]).map((item) =>
-                    normalizeOption(item, "AGT"),
-                  ),
-                );
-              }),
-          );
-        }
-
-        if (canViewContracts) {
-          requests.push(
-            fetch(apiUrl("/api/contracts/?page_size=200"), {
-              credentials: "include",
-              headers: { Accept: "application/json" },
-            })
-              .then((response) => response.json())
-              .then((payload) => {
-                setContracts(
-                  extractList(payload, ["contracts"]).map((item) =>
-                    normalizeOption(item, "CTR"),
-                  ),
-                );
-              }),
-          );
-        }
-
-        await Promise.all(requests);
-
-        if (showToast) {
-          toast.success(t.refreshOptions);
-        }
-      } catch (error) {
-        console.error("Load order form options error:", error);
-        setOptionsError(t.optionLoadError);
-        toast.error(t.optionLoadError);
-      } finally {
-        setIsLoadingOptions(false);
-      }
-    },
-    [
-      canCreateOrders,
-      canViewAgents,
-      canViewContracts,
-      canViewCustomers,
-      canViewProducts,
-      canViewProviders,
-      t.optionLoadError,
-      t.refreshOptions,
-    ],
-  );
-
-  async function submitForm() {
-    setSubmitError("");
-
-    if (!validateForm()) {
-      toast.error(t.validationToast);
+    if (!customer) {
+      updateField("customer_id", "");
       return;
     }
 
+    const raw = customer.raw;
+
+    setForm((current) => ({
+      ...current,
+      customer_id: customer.id,
+      customer_name: customer.label,
+      customer_phone: stringify(
+        readNested(raw, [
+          "normalized_phone",
+          "phone",
+          "mobile",
+          "whatsapp_number",
+          "user.phone",
+        ])
+      ),
+      customer_email: stringify(readNested(raw, ["email", "user.email"])),
+      customer_city: stringify(readNested(raw, ["city", "address_city"])),
+      customer_address: stringify(readNested(raw, ["address", "full_address"])),
+    }));
+
+    setErrors((current) => {
+      const next = { ...current };
+      delete next.customer_name;
+      delete next.customer_phone;
+      return next;
+    });
+
+    setHasUnsavedChanges(true);
+  }
+
+  function handleProductChange(value: string) {
+    const product = products.find((item) => item.id === value);
+
+    if (!product) {
+      updateField("product_id", "");
+      return;
+    }
+
+    const price = getProductPrice(product);
+    const orderKind = getProductOrderKind(product);
+
+    setForm((current) => ({
+      ...current,
+      product_id: product.id,
+      order_kind: orderKind,
+      unit_price: price > 0 ? price.toFixed(2) : current.unit_price,
+    }));
+
+    setErrors((current) => {
+      const next = { ...current };
+      delete next.product_id;
+      delete next.unit_price;
+      return next;
+    });
+
+    setHasUnsavedChanges(true);
+  }
+
+  async function submitOrder() {
+    if (!canCreate) {
+      toast.error(t.noPermissionTitle);
+      return;
+    }
+
+    const nextErrors = validateForm(form, t);
+    setErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length) {
+      toast.error(t.createError);
+      return;
+    }
+
+    setIsSaving(true);
+
     try {
-      setIsSubmitting(true);
+      const payload = buildPayload(form);
 
-      const csrfToken = readCookie("csrftoken");
-
-      const response = await fetch(apiUrl("/api/orders/create/"), {
+      const response = await fetch(apiUrl("/api/orders/"), {
         method: "POST",
         credentials: "include",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+          "X-CSRFToken": readCookie("csrftoken"),
+          "Accept-Language": locale,
         },
-        body: JSON.stringify(normalizePayload(formData)),
+        body: JSON.stringify(payload),
       });
 
-      const result = (await response.json().catch(() => null)) as
-        | CreateOrderApiResponse
-        | null;
+      const result = (await response.json().catch(() => ({}))) as ApiResponse;
 
-      if (!response.ok || result?.ok === false) {
-        const apiErrors = mapApiFieldErrors(result?.errors);
-        const message = result?.message || t.apiError;
-
-        setErrors((current) => ({
-          ...current,
-          ...apiErrors,
-        }));
-
-        setSubmitError(message);
-        toast.error(message);
-        return;
+      if (!response.ok || result.ok === false || result.success === false) {
+        throw new Error(stringify(result.message || t.createError));
       }
 
-      const createdId = result ? resolveCreatedId(result) : null;
+      const createdId = getCreatedId(result);
 
-      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
-      toast.success(t.success);
+      toast.success(stringify(result.message || t.created));
+      setHasUnsavedChanges(false);
+
+      try {
+        window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
 
       if (createdId) {
         router.push(`/system/orders/${createdId}`);
-        return;
+      } else {
+        router.push("/system/orders");
       }
-
-      router.push("/system/orders/list");
     } catch (error) {
-      console.error("Create order error:", error);
-      setSubmitError(t.apiError);
-      toast.error(t.apiError);
+      toast.error(error instanceof Error ? error.message : t.createError);
     } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  function saveDraft() {
-    try {
-      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(formData));
-      toast.success(t.draftSaved);
-    } catch (error) {
-      console.error("Save order draft error:", error);
-      toast.error(t.apiError);
-    }
-  }
-
-  function restoreDraft() {
-    try {
-      const rawDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
-
-      if (!rawDraft) {
-        toast.error(t.noDraft);
-        return;
-      }
-
-      const parsed = JSON.parse(rawDraft) as OrderFormData;
-
-      setFormData({
-        ...initialFormData,
-        ...parsed,
-      });
-
-      setErrors({});
-      setSubmitError("");
-      toast.success(t.draftRestored);
-    } catch (error) {
-      console.error("Restore order draft error:", error);
-      toast.error(t.apiError);
+      setIsSaving(false);
     }
   }
 
   function clearForm() {
-    if (isDirty && !window.confirm(t.confirmClear)) return;
+    if (hasUnsavedChanges && !window.confirm(t.unsaved)) return;
 
-    setFormData(initialFormData);
+    setForm(initialForm);
     setErrors({});
-    setSubmitError("");
-    toast.success(t.formCleared);
-  }
+    setHasUnsavedChanges(false);
 
-  function confirmNavigate(path: string) {
-    if (isSubmitting) return;
-
-    if (isDirty && !window.confirm(t.confirmLeave)) {
-      return;
+    try {
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } catch {
+      // ignore
     }
 
-    router.push(path);
+    toast.success(t.draftCleared);
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadOptions(false);
-  }, [authResolving, loadOptions]);
-
-  useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!isDirty || isSubmitting) return;
-
-      event.preventDefault();
-      event.returnValue = t.confirmLeave;
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [isDirty, isSubmitting, t.confirmLeave]);
-
-  if (!authResolving && !canCreateOrders) {
+  if (!canCreate) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
+      <div className="w-full space-y-4" dir={isRtl ? "rtl" : "ltr"}>
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="flex min-h-[340px] flex-col items-center justify-center p-8 text-center">
+            <div className="mb-4 flex size-14 items-center justify-center rounded-lg bg-muted">
+              <XCircle className="h-7 w-7 text-muted-foreground" />
             </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
+            <h2 className="text-xl font-bold">{t.noPermissionTitle}</h2>
+            <p className="mt-2 max-w-xl text-sm text-muted-foreground">{t.noPermissionDesc}</p>
+            <Button asChild className="mt-5 h-9 rounded-lg bg-black px-3 text-white hover:bg-black/90">
+              <Link href="/system/orders">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Link>
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -1525,661 +1337,501 @@ export default function SystemCreateOrderPage() {
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.title}
-          </h1>
+    <div className="w-full space-y-4" dir={isRtl ? "rtl" : "ltr"}>
+      <div className="flex flex-row items-center justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Button asChild variant="outline" className="h-9 gap-2 rounded-lg px-3">
+              <Link href="/system/orders">
+                <ArrowLeft className="h-4 w-4" />
+                {t.back}
+              </Link>
+            </Button>
+          </div>
 
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">{t.title}</h1>
+          <p className="max-w-3xl text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="outline"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={() => confirmNavigate("/system/orders")}
+            className="h-9 gap-2 rounded-lg px-3"
+            onClick={() => void loadLookups()}
+            disabled={isLoadingLookups}
           >
-            <ArrowLeft className="h-4 w-4" />
-            <span>{t.back}</span>
-          </Button>
-
-          {canViewOrders ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-              disabled={isSubmitting}
-              onClick={() => confirmNavigate("/system/orders/list")}
-            >
-              <ClipboardList className="h-4 w-4" />
-              <span>{t.ordersList}</span>
-            </Button>
-          ) : null}
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting || isLoadingOptions}
-            onClick={() => loadOptions(true)}
-          >
-            {isLoadingOptions ? (
+            {isLoadingLookups ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RefreshCcw className="h-4 w-4" />
             )}
-            <span>{t.refreshOptions}</span>
+            {t.refresh}
           </Button>
 
           <Button
             type="button"
             variant="outline"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={saveDraft}
+            className="h-9 gap-2 rounded-lg px-3"
+            onClick={clearForm}
           >
-            <Save className="h-4 w-4" />
-            <span>{t.saveDraft}</span>
+            <RotateCcw className="h-4 w-4" />
+            {t.reset}
           </Button>
 
           <Button
             type="button"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={submitForm}
+            className="h-9 gap-2 rounded-lg bg-black px-3 text-white hover:bg-black/90"
+            onClick={submitOrder}
+            disabled={isSaving}
           >
-            {isSubmitting ? (
+            {isSaving ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <CheckCircle2 className="h-4 w-4" />
+              <Save className="h-4 w-4" />
             )}
-            <span>{isSubmitting ? t.saving : t.create}</span>
+            {isSaving ? t.saving : t.save}
           </Button>
         </div>
       </div>
 
-      {/* Errors */}
-      {submitError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5 text-destructive">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-            <div>
-              <p className="font-semibold">{t.formErrorTitle}</p>
-              <p className="mt-1 text-sm">{submitError}</p>
+      <div className="flex flex-wrap gap-2">
+        <StepPill active={activeStep === 1} done={stepState.customer} index={1} label={t.stepCustomer} />
+        <StepPill active={activeStep === 2} done={stepState.product} index={2} label={t.stepProduct} />
+        <StepPill active={activeStep === 3} done={stepState.payment} index={3} label={t.stepPayment} />
+        <StepPill active={activeStep === 4} done={stepState.customer && stepState.product && stepState.payment} index={4} label={t.stepReview} />
+      </div>
+
+      {loadError ? (
+        <Card className="rounded-lg border-red-200 bg-red-50/80 shadow-none">
+          <CardContent className="p-5">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-1 h-5 w-5 text-red-600" />
+              <div>
+                <p className="font-bold text-red-800">{t.loadError}</p>
+                <p className="mt-1 text-sm text-red-700">{loadError}</p>
+              </div>
             </div>
           </CardContent>
         </Card>
       ) : null}
 
-      {optionsError ? (
-        <Card className="rounded-2xl border border-orange-200 bg-orange-50 shadow-sm dark:border-orange-900/40 dark:bg-orange-950/20">
-          <CardContent className="flex items-start gap-3 p-5 text-orange-700 dark:text-orange-300">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-            <p className="text-sm font-medium">{optionsError}</p>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        {/* Main Form */}
+      <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
         <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <ShoppingCart className="h-4 w-4" />
-                {t.basicInfo}
-              </CardTitle>
-              <CardDescription>{t.basicDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock label={t.labels.orderNumber} error={errors.order_number}>
-                <Input
-                  value={formData.order_number}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.orderNumber}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
-                  onChange={(event) =>
-                    updateField("order_number", event.target.value)
-                  }
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.labels.status} error={errors.status}>
-                <select
-                  value={formData.status}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  onChange={(event) =>
-                    updateField("status", event.target.value as OrderStatus)
-                  }
-                >
-                  {Object.entries(t.orderStatuses).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-
-              <FieldBlock
-                label={t.labels.paymentStatus}
-                error={errors.payment_status}
+          <FormPanel
+            title={t.customerSection}
+            description={t.customerSectionDesc}
+            icon={<UserRound className="h-5 w-5 text-muted-foreground" />}
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <SelectInput
+                label={t.fields.customer}
+                value={form.customer_id}
+                onChange={handleCustomerChange}
               >
-                <select
-                  value={formData.payment_status}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  onChange={(event) =>
-                    updateField(
-                      "payment_status",
-                      event.target.value as PaymentStatus,
-                    )
-                  }
-                >
-                  {Object.entries(t.paymentStatuses).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
+                <option value="">{t.select}</option>
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.label}
+                    {customer.subtitle ? ` - ${customer.subtitle}` : ""}
+                  </option>
+                ))}
+              </SelectInput>
 
-              <FieldBlock
-                label={t.labels.fulfillmentStatus}
-                error={errors.fulfillment_status}
+              <TextInput
+                label={t.fields.customerName}
+                value={form.customer_name}
+                onChange={(value) => updateField("customer_name", value)}
+                error={errors.customer_name}
+                disabled={Boolean(form.customer_id)}
+              />
+
+              <TextInput
+                label={t.fields.customerPhone}
+                value={form.customer_phone}
+                onChange={(value) => updateField("customer_phone", value)}
+                error={errors.customer_phone}
+                disabled={Boolean(form.customer_id)}
+              />
+
+              <TextInput
+                label={t.fields.customerEmail}
+                value={form.customer_email}
+                onChange={(value) => updateField("customer_email", value)}
+                type="email"
+                disabled={Boolean(form.customer_id)}
+              />
+
+              <TextInput
+                label={t.fields.customerCity}
+                value={form.customer_city}
+                onChange={(value) => updateField("customer_city", value)}
+                disabled={Boolean(form.customer_id)}
+              />
+
+              <TextInput
+                label={t.fields.customerAddress}
+                value={form.customer_address}
+                onChange={(value) => updateField("customer_address", value)}
+                disabled={Boolean(form.customer_id)}
+              />
+            </div>
+          </FormPanel>
+
+          <FormPanel
+            title={t.productSection}
+            description={t.productSectionDesc}
+            icon={<Package className="h-5 w-5 text-muted-foreground" />}
+          >
+            <div className="mb-4 rounded-lg border bg-muted/30 p-4 text-sm leading-6 text-muted-foreground">
+              <div className="flex gap-2">
+                <Sparkles className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>{t.contractHint}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <SelectInput
+                label={t.fields.product}
+                value={form.product_id}
+                onChange={handleProductChange}
+                error={errors.product_id}
               >
-                <select
-                  value={formData.fulfillment_status}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  onChange={(event) =>
-                    updateField(
-                      "fulfillment_status",
-                      event.target.value as FulfillmentStatus,
-                    )
-                  }
-                >
-                  {Object.entries(t.fulfillmentStatuses).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-            </CardContent>
-          </Card>
+                <option value="">{t.select}</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.label}
+                    {product.subtitle ? ` - ${product.subtitle}` : ""}
+                  </option>
+                ))}
+              </SelectInput>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Layers3 className="h-4 w-4" />
-                {t.partiesInfo}
-              </CardTitle>
-              <CardDescription>{t.partiesDesc}</CardDescription>
-            </CardHeader>
+              <SelectInput
+                label={t.fields.orderKind}
+                value={form.order_kind}
+                onChange={(value) => updateField("order_kind", value as OrderKind)}
+              >
+                {Object.entries(t.orderKind).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </SelectInput>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock label={t.labels.customer} error={errors.customer_id} required>
-                <SelectField
-                  value={formData.customer_id}
-                  disabled={isSubmitting || isLoadingOptions}
-                  options={customers}
-                  placeholder={t.selectPlaceholder}
-                  noOptions={t.noOptions}
-                  onChange={(value) => updateField("customer_id", value)}
-                />
-              </FieldBlock>
+              <TextInput
+                label={t.fields.quantity}
+                value={form.quantity}
+                onChange={(value) => updateField("quantity", value)}
+                type="number"
+                error={errors.quantity}
+              />
 
-              <FieldBlock label={t.labels.product} error={errors.product_id} required>
-                <SelectField
-                  value={formData.product_id}
-                  disabled={isSubmitting || isLoadingOptions}
-                  options={products}
-                  placeholder={t.selectPlaceholder}
-                  noOptions={t.noOptions}
-                  onChange={(value) => {
-                    const selected = products.find((item) => item.id === value);
-                    const price = selected?.raw
-                      ? getValue(selected.raw, [
-                          "effective_price",
-                          "sale_price",
-                          "price",
-                          "base_price",
-                        ])
-                      : "";
-
-                    updateField("product_id", value);
-
-                    if (price && !formData.unit_price) {
-                      updateField("unit_price", normalizeNumberString(String(price)));
-                    }
-                  }}
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.labels.provider} error={errors.provider_id} required>
-                <SelectField
-                  value={formData.provider_id}
-                  disabled={isSubmitting || isLoadingOptions}
-                  options={providers}
-                  placeholder={t.selectPlaceholder}
-                  noOptions={t.noOptions}
-                  onChange={(value) => updateField("provider_id", value)}
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.labels.agent} error={errors.agent_id}>
-                <SelectField
-                  value={formData.agent_id}
-                  disabled={isSubmitting || isLoadingOptions}
-                  options={agents}
-                  placeholder={t.selectPlaceholder}
-                  noOptions={t.noOptions}
-                  onChange={(value) => updateField("agent_id", value)}
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.labels.contract} error={errors.contract_id}>
-                <SelectField
-                  value={formData.contract_id}
-                  disabled={isSubmitting || isLoadingOptions}
-                  options={contracts}
-                  placeholder={t.selectPlaceholder}
-                  noOptions={t.noOptions}
-                  onChange={(value) => updateField("contract_id", value)}
-                />
-              </FieldBlock>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <Wallet className="h-4 w-4" />
-                {t.financialInfo}
-              </CardTitle>
-              <CardDescription>{t.financialDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <FieldBlock label={t.labels.quantity} error={errors.quantity}>
-                <Input
-                  value={formData.quantity}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.quantity}
-                  className="h-10 rounded-xl"
-                  onChange={(event) => updateField("quantity", event.target.value)}
-                />
-              </FieldBlock>
-
-              <MoneyField
-                label={t.labels.unitPrice}
-                value={formData.unit_price}
-                error={errors.unit_price}
-                placeholder={t.placeholders.unitPrice}
-                disabled={isSubmitting}
-                isArabic={isArabic}
+              <TextInput
+                label={t.fields.unitPrice}
+                value={form.unit_price}
                 onChange={(value) => updateField("unit_price", value)}
+                type="number"
+                error={errors.unit_price}
               />
 
-              <MoneyField
-                label={t.labels.discountAmount}
-                value={formData.discount_amount}
-                error={errors.discount_amount}
-                placeholder={t.placeholders.discountAmount}
-                disabled={isSubmitting}
-                isArabic={isArabic}
+              <TextInput
+                label={t.fields.discountAmount}
+                value={form.discount_amount}
                 onChange={(value) => updateField("discount_amount", value)}
+                type="number"
+                error={errors.discount_amount}
               />
 
-              <MoneyField
-                label={t.labels.taxAmount}
-                value={formData.tax_amount}
-                error={errors.tax_amount}
-                placeholder={t.placeholders.taxAmount}
-                disabled={isSubmitting}
-                isArabic={isArabic}
+              <TextInput
+                label={t.fields.taxAmount}
+                value={form.tax_amount}
                 onChange={(value) => updateField("tax_amount", value)}
+                type="number"
+                error={errors.tax_amount}
+              />
+            </div>
+          </FormPanel>
+
+          <FormPanel
+            title={t.datesSection}
+            description={t.datesSectionDesc}
+            icon={<CalendarDays className="h-5 w-5 text-muted-foreground" />}
+          >
+            <div className="grid gap-4 md:grid-cols-3">
+              <TextInput
+                label={t.fields.startsAt}
+                value={form.starts_at}
+                onChange={(value) => updateField("starts_at", value)}
+                type="date"
               />
 
-              <MoneyField
-                label={t.labels.totalAmount}
-                value={formData.total_amount}
-                error={errors.total_amount}
-                placeholder={t.placeholders.totalAmount}
-                disabled={isSubmitting}
-                isArabic={isArabic}
-                onChange={(value) => updateField("total_amount", value)}
+              <TextInput
+                label={t.fields.endsAt}
+                value={form.ends_at}
+                onChange={(value) => updateField("ends_at", value)}
+                type="date"
               />
 
-              <MoneyField
-                label={t.labels.paidAmount}
-                value={formData.paid_amount}
-                error={errors.paid_amount}
-                placeholder={t.placeholders.paidAmount}
-                disabled={isSubmitting}
-                isArabic={isArabic}
-                onChange={(value) => updateField("paid_amount", value)}
+              <TextInput
+                label={t.fields.scheduledAt}
+                value={form.scheduled_at}
+                onChange={(value) => updateField("scheduled_at", value)}
+                type="datetime-local"
+              />
+            </div>
+          </FormPanel>
+
+          <FormPanel
+            title={t.paymentSection}
+            description={t.paymentSectionDesc}
+            icon={<Wallet className="h-5 w-5 text-muted-foreground" />}
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <SelectInput
+                label={t.fields.paymentMethod}
+                value={form.payment_method}
+                onChange={(value) => updateField("payment_method", value as PaymentMethod)}
+              >
+                {Object.entries(t.paymentMethods).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </SelectInput>
+
+              <TextInput
+                label={t.fields.amountPaid}
+                value={form.amount_paid}
+                onChange={(value) => updateField("amount_paid", value)}
+                type="number"
+                error={errors.amount_paid}
+                disabled={form.payment_method === "cash_on_delivery"}
               />
 
-              <MoneyField
-                label={t.labels.agentCommission}
-                value={formData.agent_commission}
-                error={errors.agent_commission}
-                placeholder={t.placeholders.agentCommission}
-                disabled={isSubmitting}
-                isArabic={isArabic}
-                onChange={(value) => updateField("agent_commission", value)}
-              />
-            </CardContent>
-          </Card>
+              <div className="md:col-span-2">
+                <TextInput
+                  label={t.fields.paymentReference}
+                  value={form.payment_reference}
+                  onChange={(value) => updateField("payment_reference", value)}
+                  placeholder="TRX / Gateway / Bank reference"
+                />
+              </div>
+            </div>
+          </FormPanel>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <CalendarDays className="h-4 w-4" />
-                {t.scheduleInfo}
+          <FormPanel
+            title={t.agentSection}
+            description={t.agentSectionDesc}
+            icon={<Users className="h-5 w-5 text-muted-foreground" />}
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              {canAssignAgent ? (
+                <SelectInput
+                  label={t.fields.agent}
+                  value={form.agent_id}
+                  onChange={(value) => updateField("agent_id", value)}
+                >
+                  <option value="">{t.select}</option>
+                  {agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.label}
+                      {agent.subtitle ? ` - ${agent.subtitle}` : ""}
+                    </option>
+                  ))}
+                </SelectInput>
+              ) : (
+                <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  {t.agentSectionDesc}
+                </div>
+              )}
+
+              <TextInput
+                label={t.fields.referralCode}
+                value={form.referral_code}
+                onChange={(value) => updateField("referral_code", value)}
+              />
+            </div>
+          </FormPanel>
+
+          <FormPanel
+            title={t.notesSection}
+            description={t.notesSectionDesc}
+            icon={<FileText className="h-5 w-5 text-muted-foreground" />}
+          >
+            <div className="grid gap-4">
+              <TextAreaInput
+                label={t.fields.customerNotes}
+                value={form.customer_notes}
+                onChange={(value) => updateField("customer_notes", value)}
+              />
+
+              <TextAreaInput
+                label={t.fields.deliveryNotes}
+                value={form.delivery_notes}
+                onChange={(value) => updateField("delivery_notes", value)}
+              />
+
+              <TextAreaInput
+                label={t.fields.internalNotes}
+                value={form.internal_notes}
+                onChange={(value) => updateField("internal_notes", value)}
+              />
+            </div>
+          </FormPanel>
+        </div>
+
+        <div className="space-y-4">
+          <Card className="sticky top-4 rounded-lg border bg-card shadow-none">
+            <CardHeader className="border-b px-4 py-4">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ShoppingCart className="h-5 w-5" />
+                {t.summary}
               </CardTitle>
-              <CardDescription>{t.scheduleDesc}</CardDescription>
+              <p className="text-sm text-muted-foreground">{t.liveSummary}</p>
             </CardHeader>
 
-            <CardContent className="grid gap-4">
-              <FieldBlock
-                label={t.labels.preferredDate}
-                error={errors.preferred_date}
-              >
-                <Input
-                  type="date"
-                  value={formData.preferred_date}
-                  disabled={isSubmitting}
-                  className="h-10 rounded-xl"
-                  onChange={(event) =>
-                    updateField("preferred_date", event.target.value)
+            <CardContent className="space-y-4 p-4">
+              <div className="rounded-lg border bg-muted/20 p-4">
+                <SummaryRow
+                  label={t.customer}
+                  value={
+                    selectedCustomer?.label ||
+                    form.customer_name ||
+                    "—"
                   }
                 />
-              </FieldBlock>
 
-              <FieldBlock label={t.labels.notes} error={errors.notes}>
-                <Textarea
-                  value={formData.notes}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.notes}
-                  className="min-h-28 rounded-xl"
-                  onChange={(event) => updateField("notes", event.target.value)}
-                />
-              </FieldBlock>
-
-              <FieldBlock
-                label={t.labels.internalNotes}
-                error={errors.internal_notes}
-              >
-                <Textarea
-                  value={formData.internal_notes}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.internalNotes}
-                  className="min-h-28 rounded-xl"
-                  onChange={(event) =>
-                    updateField("internal_notes", event.target.value)
+                <SummaryRow
+                  label={t.product}
+                  value={
+                    selectedProduct?.label ||
+                    "—"
                   }
                 />
-              </FieldBlock>
-            </CardContent>
-          </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <ShieldCheck className="h-4 w-4" />
-                {t.actionsInfo}
-              </CardTitle>
-              <CardDescription>{t.actionsDesc}</CardDescription>
-            </CardHeader>
+                <SummaryRow
+                  label={t.orderType}
+                  value={t.orderKind[form.order_kind]}
+                />
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <ToggleBox
-                checked={formData.create_invoice}
-                disabled={isSubmitting}
-                title={t.labels.createInvoice}
-                description={t.labels.createInvoice}
-                onChange={(value) => updateField("create_invoice", value)}
-              />
+                <SummaryRow
+                  label={t.method}
+                  value={t.paymentMethods[form.payment_method]}
+                />
 
-              <ToggleBox
-                checked={formData.notify_customer}
-                disabled={isSubmitting}
-                title={t.labels.notifyCustomer}
-                description={t.labels.notifyCustomer}
-                onChange={(value) => updateField("notify_customer", value)}
-              />
+                <SummaryRow
+                  label={t.quantity}
+                  value={formatMoney(quantity)}
+                />
+
+                <SummaryRow
+                  label={t.unitPrice}
+                  value={<SarAmount value={unitPrice} />}
+                />
+
+                <SummaryRow
+                  label={t.subtotal}
+                  value={<SarAmount value={subtotalAmount} />}
+                />
+
+                <SummaryRow
+                  label={t.discount}
+                  value={<SarAmount value={discountAmount} />}
+                />
+
+                <SummaryRow
+                  label={t.tax}
+                  value={<SarAmount value={taxAmount} />}
+                />
+
+                <SummaryRow
+                  label={t.total}
+                  value={<SarAmount value={totalAmount} />}
+                />
+
+                <SummaryRow
+                  label={t.paid}
+                  value={<SarAmount value={amountPaid} />}
+                />
+
+                <SummaryRow
+                  label={t.remaining}
+                  value={<SarAmount value={remainingAmount} />}
+                />
+
+                {canAssignAgent ? (
+                  <SummaryRow
+                    label={t.fields.agent}
+                    value={selectedAgent?.label || "—"}
+                  />
+                ) : null}
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-4 text-sm leading-6 text-muted-foreground">
+                <div className="flex gap-2">
+                  <Truck className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>{t.contractHint}</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border p-4">
+                <p className="text-sm font-semibold">{t.optionsSection}</p>
+
+                <label className="flex items-center gap-3 text-sm">
+                  <Checkbox
+                    checked={form.create_invoice}
+                    onCheckedChange={(checked) => updateField("create_invoice", Boolean(checked))}
+                  />
+                  <span>{t.fields.createInvoice}</span>
+                </label>
+
+                <label className="flex items-center gap-3 text-sm">
+                  <Checkbox
+                    checked={form.issue_invoice_immediately}
+                    onCheckedChange={(checked) =>
+                      updateField("issue_invoice_immediately", Boolean(checked))
+                    }
+                    disabled={!form.create_invoice}
+                  />
+                  <span>{t.fields.issueInvoice}</span>
+                </label>
+
+                <label className="flex items-center gap-3 text-sm">
+                  <Checkbox
+                    checked={form.notify_customer}
+                    onCheckedChange={(checked) => updateField("notify_customer", Boolean(checked))}
+                  />
+                  <span>{t.fields.notifyCustomer}</span>
+                </label>
+              </div>
+
+              <Button
+                type="button"
+                onClick={submitOrder}
+                disabled={isSaving}
+                className="h-10 w-full rounded-lg bg-black text-white hover:bg-black/90"
+              >
+                {isSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                {isSaving ? t.saving : t.save}
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => router.push("/system/orders")}
+                className="h-10 w-full rounded-lg"
+              >
+                {t.back}
+                <ChevronRight className="h-4 w-4" />
+              </Button>
             </CardContent>
           </Card>
         </div>
-
-        {/* Sidebar Summary */}
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <div className="rounded-xl border bg-background p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground">
-                      {t.completion}
-                    </p>
-                    <p className="mt-1 text-2xl font-bold">
-                      {formatNumber(progressPercent)}%
-                    </p>
-                  </div>
-
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
-                    <BadgeCheck className="h-5 w-5" />
-                  </div>
-                </div>
-
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-
-                <div className="mt-3">
-                  {isReadyToSave ? (
-                    <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      {t.ready}
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="rounded-full">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      {t.missingData}
-                    </Badge>
-                  )}
-                </div>
-              </div>
-
-              <SummaryItem
-                icon={ShoppingCart}
-                label={t.labels.orderNumber}
-                value={formData.order_number || generateOrderNumber()}
-              />
-
-              <SummaryItem
-                icon={UserRound}
-                label={t.labels.customer}
-                value={selectedCustomer?.label || "-"}
-              />
-
-              <SummaryItem
-                icon={Package}
-                label={t.labels.product}
-                value={selectedProduct?.label || "-"}
-              />
-
-              <SummaryItem
-                icon={Stethoscope}
-                label={t.labels.provider}
-                value={selectedProvider?.label || "-"}
-              />
-
-              <SummaryItem
-                icon={Users}
-                label={t.labels.agent}
-                value={selectedAgent?.label || "-"}
-              />
-
-              <SummaryItem
-                icon={FileText}
-                label={t.labels.contract}
-                value={selectedContract?.label || "-"}
-              />
-
-              <div className="rounded-xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">
-                  {t.calculatedTotal}
-                </p>
-                <p className="mt-1 text-lg font-bold">
-                  <SarAmount value={finalTotal} />
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t.labels.remainingAmount}: {formatMoney(remainingAmount)}
-                </p>
-              </div>
-
-              <div className="grid gap-2">
-                <Button
-                  type="button"
-                  className="h-10 rounded-xl"
-                  disabled={isSubmitting}
-                  onClick={submitForm}
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  {isSubmitting ? t.saving : t.create}
-                </Button>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 rounded-xl"
-                    disabled={isSubmitting}
-                    onClick={restoreDraft}
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    {t.restoreDraft}
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 rounded-xl"
-                    disabled={isSubmitting}
-                    onClick={clearForm}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {t.clearForm}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
-                {t.stepsTitle}
-              </CardTitle>
-              <CardDescription>{t.stepsDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              {t.quickNotes.map((item, index) => (
-                <div
-                  key={item}
-                  className="flex items-start gap-3 rounded-xl border bg-background p-3"
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                    {index + 1}
-                  </div>
-
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {item}
-                  </p>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </aside>
       </div>
     </div>
-  );
-}
-
-/* ============================================================
-   Small Components
-============================================================ */
-
-function MoneyField({
-  label,
-  value,
-  error,
-  placeholder,
-  disabled,
-  isArabic,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  error?: string;
-  placeholder: string;
-  disabled?: boolean;
-  isArabic: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <FieldBlock label={label} error={error}>
-      <div className="relative">
-        <Input
-          value={value}
-          disabled={disabled}
-          placeholder={placeholder}
-          className={`h-10 rounded-xl ${isArabic ? "pl-10" : "pr-10"}`}
-          onChange={(event) => onChange(event.target.value)}
-          onBlur={() => {
-            if (value.trim()) {
-              onChange(normalizeNumberString(value));
-            }
-          }}
-        />
-        <Image
-          src={SAR_ICON_PATH}
-          alt=""
-          width={16}
-          height={16}
-          className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 ${
-            isArabic ? "left-3" : "right-3"
-          }`}
-        />
-      </div>
-    </FieldBlock>
   );
 }

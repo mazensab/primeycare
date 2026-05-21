@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 api/payments/create.py
-# 🧠 Create Payment API — Primey Care V2
+# 🧠 Create Payment API — Primey Care V2.1
 # ------------------------------------------------------------
 # ✅ إنشاء دفعة مرتبطة بفاتورة / طلب / عميل
 # ✅ يستدعي payments.services.create_payment الرسمي فقط
@@ -8,6 +8,7 @@
 # ✅ عند التأكيد يستدعي payments.services.confirm_payment الرسمي
 # ✅ يدعم cash / bank_transfer / gateway / cards / wallets / Tamara / Tabby
 # ✅ متوافق مع Accounting + Treasury Backend الجديد
+# ✅ متوافق مع Customer Portal / OTP customer account fields
 # ✅ استجابة موحدة للواجهة: ok / success / data
 # ============================================================
 
@@ -24,6 +25,7 @@ from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 
+from customers.services import get_or_create_customer_from_phone
 from payments.models import PaymentMethod, PaymentProvider
 from payments.services import (
     PaymentServiceError,
@@ -148,6 +150,10 @@ def _clean_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _clean_email(value: Any) -> str:
+    return _clean_text(value).lower()
+
+
 def _iso_datetime(value: Any) -> str | None:
     if not value:
         return None
@@ -163,6 +169,10 @@ def _safe_attr(obj: Any, attr_name: str, default: Any = None) -> Any:
         return getattr(obj, attr_name, default)
     except Exception:
         return default
+
+
+def _safe_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _get_model(app_label: str, model_name: str):
@@ -236,6 +246,144 @@ def _resolve_invoice_due_amount(invoice) -> Decimal:
         ),
         field_name="amount",
     )
+
+
+# ============================================================
+# Customer Resolve Helpers
+# ============================================================
+
+def _resolve_customer_phone_from_body(body: dict[str, Any]) -> str:
+    customer_payload = _safe_dict(body.get("customer"))
+
+    return _clean_text(
+        _first_non_empty(
+            body.get("customer_phone"),
+            body.get("customer_phone_number"),
+            body.get("customer_mobile"),
+            body.get("customer_whatsapp"),
+            body.get("phone_number"),
+            body.get("mobile_number"),
+            body.get("whatsapp_number"),
+            body.get("phone"),
+            body.get("whatsapp"),
+            customer_payload.get("phone_number"),
+            customer_payload.get("whatsapp_number"),
+            customer_payload.get("phone"),
+            customer_payload.get("whatsapp"),
+            customer_payload.get("mobile_number"),
+            "",
+        )
+    )
+
+
+def _build_customer_payload_from_body(body: dict[str, Any]) -> dict[str, Any]:
+    customer_payload = _safe_dict(body.get("customer"))
+
+    full_name = _clean_text(
+        _first_non_empty(
+            body.get("customer_name"),
+            body.get("full_name"),
+            body.get("name"),
+            customer_payload.get("display_name"),
+            customer_payload.get("full_name"),
+            customer_payload.get("name"),
+            "",
+        )
+    )
+
+    phone_number = _resolve_customer_phone_from_body(body)
+
+    return {
+        "first_name": _clean_text(
+            _first_non_empty(
+                body.get("customer_first_name"),
+                body.get("first_name"),
+                customer_payload.get("first_name"),
+                "",
+            )
+        ),
+        "last_name": _clean_text(
+            _first_non_empty(
+                body.get("customer_last_name"),
+                body.get("last_name"),
+                customer_payload.get("last_name"),
+                "",
+            )
+        ),
+        "display_name": full_name,
+        "full_name": full_name,
+        "name": full_name,
+        "email": _clean_email(
+            _first_non_empty(
+                body.get("customer_email"),
+                body.get("email"),
+                customer_payload.get("email"),
+                "",
+            )
+        ),
+        "phone_number": phone_number,
+        "whatsapp_number": _clean_text(
+            _first_non_empty(
+                body.get("customer_whatsapp"),
+                body.get("whatsapp_number"),
+                body.get("whatsapp"),
+                customer_payload.get("whatsapp_number"),
+                customer_payload.get("whatsapp"),
+                phone_number,
+            )
+        ),
+        "city": _clean_text(
+            _first_non_empty(
+                body.get("customer_city"),
+                body.get("city"),
+                customer_payload.get("city"),
+                "",
+            )
+        ),
+        "district": _clean_text(
+            _first_non_empty(
+                body.get("customer_district"),
+                body.get("district"),
+                customer_payload.get("district"),
+                "",
+            )
+        ),
+        "street_address": _clean_text(
+            _first_non_empty(
+                body.get("customer_address"),
+                body.get("street_address"),
+                body.get("address"),
+                customer_payload.get("street_address"),
+                customer_payload.get("address"),
+                "",
+            )
+        ),
+        "national_address_text": _clean_text(
+            _first_non_empty(
+                body.get("national_address_text"),
+                customer_payload.get("national_address_text"),
+                "",
+            )
+        ),
+        "source": "website",
+    }
+
+
+def _resolve_customer_from_phone_if_needed(*, body: dict[str, Any], request) -> Any | None:
+    phone_number = _resolve_customer_phone_from_body(body)
+
+    if not phone_number:
+        return None
+
+    account_result = get_or_create_customer_from_phone(
+        phone_number=phone_number,
+        payload=_build_customer_payload_from_body(body),
+        source="website",
+        create_user=False,
+        created_by=request.user if request.user.is_authenticated else None,
+    )
+
+    return account_result.customer
 
 
 # ============================================================
@@ -331,6 +479,8 @@ def _serialize_invoice(invoice) -> dict[str, Any] | None:
         "total_amount": _safe_attr(invoice, "total_amount", None),
         "paid_amount": _safe_attr(invoice, "paid_amount", None),
         "due_amount": _safe_attr(invoice, "due_amount", None),
+        "customer_id": _safe_attr(invoice, "customer_id", None),
+        "order_id": _safe_attr(invoice, "order_id", None),
     }
 
 
@@ -346,7 +496,12 @@ def _serialize_order(order) -> dict[str, Any] | None:
             or _safe_attr(order, "code", "")
         ),
         "status": _safe_attr(order, "status", ""),
+        "payment_status": _safe_attr(order, "payment_status", ""),
+        "fulfillment_status": _safe_attr(order, "fulfillment_status", ""),
         "total_amount": _safe_attr(order, "total_amount", None),
+        "amount_paid": _safe_attr(order, "amount_paid", None),
+        "remaining_amount": _safe_attr(order, "remaining_amount", None),
+        "customer_id": _safe_attr(order, "customer_id", None),
     }
 
 
@@ -354,15 +509,45 @@ def _serialize_customer(customer) -> dict[str, Any] | None:
     if not customer:
         return None
 
+    full_name = (
+        _safe_attr(customer, "full_name", "")
+        or _safe_attr(customer, "name", "")
+        or _safe_attr(customer, "display_name", "")
+    )
+
+    phone_number = (
+        _safe_attr(customer, "phone_number", "")
+        or _safe_attr(customer, "phone", "")
+    )
+
+    whatsapp_number = _safe_attr(customer, "whatsapp_number", "")
+    user = _safe_attr(customer, "user", None)
+
     return {
         "id": _safe_attr(customer, "id", None),
-        "name": (
-            _safe_attr(customer, "full_name", "")
-            or _safe_attr(customer, "name", "")
-            or _safe_attr(customer, "display_name", "")
+        "customer_code": _safe_attr(customer, "customer_code", ""),
+        "name": full_name,
+        "display_name": _safe_attr(customer, "display_name", "") or full_name,
+        "full_name": full_name,
+        "status": _safe_attr(customer, "status", ""),
+        "phone": phone_number,
+        "phone_number": phone_number,
+        "whatsapp_number": whatsapp_number,
+        "primary_contact_number": (
+            whatsapp_number
+            or phone_number
+            or _safe_attr(customer, "alternative_phone_number", "")
         ),
-        "phone": _safe_attr(customer, "phone", ""),
         "email": _safe_attr(customer, "email", ""),
+        "normalized_phone": _safe_attr(customer, "normalized_phone", ""),
+        "user_id": _safe_attr(customer, "user_id", None),
+        "user_username": _safe_attr(user, "username", "") if user else "",
+        "has_customer_account": bool(_safe_attr(customer, "user_id", None)),
+        "is_phone_verified": bool(_safe_attr(customer, "phone_verified_at", None)),
+        "is_whatsapp_verified": bool(_safe_attr(customer, "whatsapp_verified_at", None)),
+        "phone_verified_at": _iso_datetime(_safe_attr(customer, "phone_verified_at", None)),
+        "whatsapp_verified_at": _iso_datetime(_safe_attr(customer, "whatsapp_verified_at", None)),
+        "last_login_at": _iso_datetime(_safe_attr(customer, "last_login_at", None)),
     }
 
 
@@ -435,6 +620,7 @@ def create_payment_api(request):
       "invoice_id": 1,
       "order_id": 1,
       "customer_id": 1,
+      "customer_phone": "05xxxxxxxx",
       "amount": "115.00",
       "payment_method": "cash",
       "provider": "internal",
@@ -463,7 +649,7 @@ def create_payment_api(request):
 
         if Invoice and invoice:
             invoice_queryset = _filter_by_company_if_supported(
-                Invoice.objects.filter(pk=invoice.pk),
+                Invoice.objects.select_related("customer", "customer__user", "order").filter(pk=invoice.pk),
                 Invoice,
                 request,
             )
@@ -471,7 +657,7 @@ def create_payment_api(request):
 
         if Order and order:
             order_queryset = _filter_by_company_if_supported(
-                Order.objects.filter(pk=order.pk),
+                Order.objects.select_related("customer", "customer__user").filter(pk=order.pk),
                 Order,
                 request,
             )
@@ -479,7 +665,7 @@ def create_payment_api(request):
 
         if Customer and customer:
             customer_queryset = _filter_by_company_if_supported(
-                Customer.objects.filter(pk=customer.pk),
+                Customer.objects.select_related("user").filter(pk=customer.pk),
                 Customer,
                 request,
             )
@@ -491,6 +677,12 @@ def create_payment_api(request):
 
         if order:
             customer = customer or _safe_attr(order, "customer", None)
+
+        if not customer:
+            customer = _resolve_customer_from_phone_if_needed(
+                body=body,
+                request=request,
+            )
 
         if not order:
             return _json_error(
@@ -598,6 +790,9 @@ def create_payment_api(request):
                 "created": bool(_safe_attr(result, "created", True)),
                 "confirmed": confirm_result is not None,
                 "confirmation": _serialize_confirm_result(confirm_result),
+                "customer": _serialize_customer(customer),
+                "order": _serialize_order(order),
+                "invoice": _serialize_invoice(invoice),
             },
             message="تم إنشاء الدفعة بنجاح.",
             status=201,

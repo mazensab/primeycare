@@ -9,16 +9,20 @@
 # ✅ إدارة إعدادات وقواعد التوجيه المحاسبي
 # ✅ إدارة القيود اليومية وأسطر القيود
 # ✅ إدارة الحركات الضريبية
-# ------------------------------------------------------------
-# ملاحظات:
-# - يمنع تعديل أسطر القيود المرحلة أو الملغية من خلال validation في models.py.
-# - إجماليات القيد تتحدث تلقائيًا من JournalEntryLine.save/delete.
-# - لوحة الإدارة هنا مخصصة للمراجعة والإدارة الداخلية.
+# ✅ يدعم توسعات:
+#    - عهدة المندوبين
+#    - عهدة الوسطاء
+#    - استحقاقات المندوبين
+#    - استحقاقات الوسطاء
+#    - قيمة التوصيل
+#    - تسويات الخزينة
 # ============================================================
+
+from __future__ import annotations
 
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
-from django.db.models import F
+from django.db import models
 from django.utils.html import format_html
 
 from .models import (
@@ -28,7 +32,6 @@ from .models import (
     AccountingPeriod,
     AccountingPeriodStatus,
     AccountingRoutingRule,
-    AccountingRoutingSource,
     AccountingSettings,
     CostCenter,
     CostCenterStatus,
@@ -60,8 +63,10 @@ class HasParentFilter(admin.SimpleListFilter):
     def queryset(self, request, queryset):
         if self.value() == "yes":
             return queryset.filter(parent__isnull=False)
+
         if self.value() == "no":
             return queryset.filter(parent__isnull=True)
+
         return queryset
 
 
@@ -71,150 +76,64 @@ class AccountPostingAvailabilityFilter(admin.SimpleListFilter):
 
     def lookups(self, request, model_admin):
         return (
-            ("yes", "قابل للترحيل"),
-            ("no", "غير قابل للترحيل"),
+            ("yes", "نعم"),
+            ("no", "لا"),
         )
 
     def queryset(self, request, queryset):
         if self.value() == "yes":
             return queryset.filter(is_active=True, is_group=False)
+
         if self.value() == "no":
             return queryset.exclude(is_active=True, is_group=False)
+
         return queryset
 
 
-class CostCenterPostingAvailabilityFilter(admin.SimpleListFilter):
-    title = "قابل للترحيل"
-    parameter_name = "can_post"
+class JournalEntryBalanceFilter(admin.SimpleListFilter):
+    title = "توازن القيد"
+    parameter_name = "balance_status"
 
     def lookups(self, request, model_admin):
         return (
-            ("yes", "قابل للترحيل"),
-            ("no", "غير قابل للترحيل"),
+            ("balanced", "متوازن"),
+            ("not_balanced", "غير متوازن"),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == "balanced":
+            return queryset.filter(total_debit=models.F("total_credit"))
+
+        if self.value() == "not_balanced":
+            return queryset.exclude(total_debit=models.F("total_credit"))
+
+        return queryset
+
+
+class HasTaxAccountFilter(admin.SimpleListFilter):
+    title = "له حساب ضريبي"
+    parameter_name = "has_tax_account"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("yes", "نعم"),
+            ("no", "لا"),
         )
 
     def queryset(self, request, queryset):
         if self.value() == "yes":
-            return queryset.filter(status=CostCenterStatus.ACTIVE, is_group=False)
-        if self.value() == "no":
-            return queryset.exclude(status=CostCenterStatus.ACTIVE, is_group=False)
-        return queryset
-
-
-class IsBalancedFilter(admin.SimpleListFilter):
-    title = "متوازن"
-    parameter_name = "is_balanced"
-
-    def lookups(self, request, model_admin):
-        return (
-            ("yes", "متوازن"),
-            ("no", "غير متوازن"),
-        )
-
-    def queryset(self, request, queryset):
-        if self.value() == "yes":
-            return queryset.filter(total_debit=F("total_credit"))
-        if self.value() == "no":
-            return queryset.exclude(total_debit=F("total_credit"))
-        return queryset
-
-
-class PeriodClosedFilter(admin.SimpleListFilter):
-    title = "حالة الإغلاق"
-    parameter_name = "period_closed"
-
-    def lookups(self, request, model_admin):
-        return (
-            ("open", "مفتوحة"),
-            ("closed", "مغلقة/مقفلة"),
-        )
-
-    def queryset(self, request, queryset):
-        if self.value() == "open":
-            return queryset.filter(status=AccountingPeriodStatus.OPEN)
-        if self.value() == "closed":
             return queryset.filter(
-                status__in=[
-                    AccountingPeriodStatus.CLOSED,
-                    AccountingPeriodStatus.LOCKED,
-                ]
+                models.Q(sales_account__isnull=False)
+                | models.Q(purchase_account__isnull=False)
             )
+
+        if self.value() == "no":
+            return queryset.filter(
+                sales_account__isnull=True,
+                purchase_account__isnull=True,
+            )
+
         return queryset
-
-
-# ============================================================
-# 🧾 JournalEntryLine Inline
-# ============================================================
-
-class JournalEntryLineInline(admin.TabularInline):
-    model = JournalEntryLine
-    extra = 0
-    min_num = 0
-    can_delete = True
-    show_change_link = True
-
-    fields = (
-        "sort_order",
-        "account",
-        "cost_center",
-        "description",
-        "debit_amount",
-        "credit_amount",
-        "tax_rate",
-        "tax_amount",
-        "party_type",
-        "party_id",
-        "line_type_display",
-        "created_at",
-        "updated_at",
-    )
-
-    readonly_fields = (
-        "line_type_display",
-        "created_at",
-        "updated_at",
-    )
-
-    autocomplete_fields = (
-        "account",
-        "cost_center",
-        "tax_rate",
-    )
-
-    ordering = (
-        "sort_order",
-        "id",
-    )
-
-    def line_type_display(self, obj):
-        if not obj or not obj.pk:
-            return "-"
-
-        if obj.debit_amount and obj.debit_amount > 0:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">مدين</span>'
-            )
-
-        if obj.credit_amount and obj.credit_amount > 0:
-            return format_html(
-                '<span style="color:#1d4ed8;font-weight:700;">دائن</span>'
-            )
-
-        return format_html(
-            '<span style="color:#991b1b;font-weight:700;">صفري</span>'
-        )
-
-    line_type_display.short_description = "نوع السطر"
-
-    def has_add_permission(self, request, obj=None):
-        if obj and not obj.can_edit_lines:
-            return False
-        return super().has_add_permission(request, obj)
-
-    def has_delete_permission(self, request, obj=None):
-        if obj and not obj.can_edit_lines:
-            return False
-        return super().has_delete_permission(request, obj)
 
 
 # ============================================================
@@ -230,27 +149,24 @@ class AccountAdmin(admin.ModelAdmin):
         "name_en",
         "account_type_badge",
         "nature_badge",
+        "purpose",
         "parent",
         "level",
         "is_group",
         "is_active",
         "allow_manual_posting",
-        "is_system",
         "currency",
-        "can_post_display",
-        "children_count",
         "created_at",
     )
 
     list_filter = (
         "account_type",
         "nature",
+        "purpose",
         "is_group",
         "is_active",
         "allow_manual_posting",
-        "is_system",
         "currency",
-        "level",
         HasParentFilter,
         AccountPostingAvailabilityFilter,
         "created_at",
@@ -266,16 +182,17 @@ class AccountAdmin(admin.ModelAdmin):
     )
 
     readonly_fields = (
-        "level",
-        "children_count",
-        "can_post_display",
         "created_at",
         "updated_at",
     )
 
+    autocomplete_fields = (
+        "parent",
+    )
+
     fieldsets = (
         (
-            "البيانات الأساسية",
+            "بيانات الحساب",
             {
                 "fields": (
                     "code",
@@ -283,39 +200,29 @@ class AccountAdmin(admin.ModelAdmin):
                     "name_en",
                     "account_type",
                     "nature",
-                    "currency",
-                    "description",
-                )
-            },
-        ),
-        (
-            "الهيكل الشجري",
-            {
-                "fields": (
+                    "purpose",
                     "parent",
                     "level",
-                    "is_group",
-                    "children_count",
+                    "currency",
                 )
             },
         ),
         (
-            "التشغيل والحالة",
+            "إعدادات الترحيل",
             {
                 "fields": (
+                    "is_group",
                     "is_active",
                     "allow_manual_posting",
-                    "is_system",
-                    "opening_balance",
-                    "can_post_display",
                 )
             },
         ),
         (
-            "بيانات إضافية",
+            "وصف وبيانات إضافية",
             {
                 "classes": ("collapse",),
                 "fields": (
+                    "description",
                     "metadata",
                 ),
             },
@@ -332,135 +239,35 @@ class AccountAdmin(admin.ModelAdmin):
         ),
     )
 
-    autocomplete_fields = (
-        "parent",
-    )
-
-    ordering = (
-        "code",
-    )
-
-    actions = (
-        "activate_accounts",
-        "deactivate_accounts",
-        "mark_as_system",
-        "unmark_as_system",
-    )
-
-    list_per_page = 50
+    ordering = ("code",)
+    list_per_page = 100
     save_on_top = True
 
-    def get_queryset(self, request):
-        return (
-            super()
-            .get_queryset(request)
-            .select_related("parent")
-            .prefetch_related("children")
-        )
-
+    @admin.display(description="نوع الحساب", ordering="account_type")
     def account_type_badge(self, obj):
         colors = {
             AccountType.ASSET: "#2563eb",
-            AccountType.LIABILITY: "#9333ea",
-            AccountType.EQUITY: "#0f766e",
+            AccountType.LIABILITY: "#7c2d12",
+            AccountType.EQUITY: "#6d28d9",
             AccountType.REVENUE: "#15803d",
             AccountType.EXPENSE: "#b45309",
         }
-
-        color = colors.get(obj.account_type, "#374151")
         return format_html(
             '<span style="color:{};font-weight:700;">{}</span>',
-            color,
+            colors.get(obj.account_type, "#374151"),
             obj.get_account_type_display(),
         )
 
-    account_type_badge.short_description = "نوع الحساب"
-    account_type_badge.admin_order_field = "account_type"
-
+    @admin.display(description="الطبيعة", ordering="nature")
     def nature_badge(self, obj):
         if obj.nature == AccountNature.DEBIT:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">مدين</span>'
-            )
+            return format_html('<span style="color:#2563eb;font-weight:700;">مدين</span>')
 
-        if obj.nature == AccountNature.CREDIT:
-            return format_html(
-                '<span style="color:#1d4ed8;font-weight:700;">دائن</span>'
-            )
-
-        return "-"
-
-    nature_badge.short_description = "الطبيعة"
-    nature_badge.admin_order_field = "nature"
-
-    def can_post_display(self, obj):
-        can_post = bool(obj.is_active and not obj.is_group)
-
-        if can_post:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">قابل للترحيل</span>'
-            )
-
-        return format_html(
-            '<span style="color:#991b1b;font-weight:700;">غير قابل للترحيل</span>'
-        )
-
-    can_post_display.short_description = "قابل للترحيل"
-
-    def children_count(self, obj):
-        if not obj or not obj.pk:
-            return 0
-        return obj.children.count()
-
-    children_count.short_description = "عدد الحسابات الفرعية"
-
-    @admin.action(description="تفعيل الحسابات المحددة")
-    def activate_accounts(self, request, queryset):
-        updated = queryset.update(is_active=True)
-        self.message_user(request, f"تم تفعيل {updated} حساب.")
-
-    @admin.action(description="تعطيل الحسابات المحددة")
-    def deactivate_accounts(self, request, queryset):
-        protected_codes = []
-        disabled_count = 0
-
-        for account in queryset:
-            if account.is_system:
-                protected_codes.append(f"{account.code} نظامي")
-                continue
-
-            if account.journal_lines.exists():
-                protected_codes.append(account.code)
-                continue
-
-            account.is_active = False
-            account.save(update_fields=["is_active", "updated_at"])
-            disabled_count += 1
-
-        if disabled_count:
-            self.message_user(request, f"تم تعطيل {disabled_count} حساب.")
-
-        if protected_codes:
-            self.message_user(
-                request,
-                "لم يتم تعطيل الحسابات المحمية أو المرتبطة بقيود: "
-                + ", ".join(protected_codes),
-                level=messages.WARNING,
-            )
-
-    @admin.action(description="تعليم الحسابات المحددة كحسابات نظامية")
-    def mark_as_system(self, request, queryset):
-        updated = queryset.update(is_system=True)
-        self.message_user(request, f"تم تعليم {updated} حساب كحساب نظامي.")
-
-    @admin.action(description="إلغاء تعليم الحسابات المحددة كحسابات نظامية")
-    def unmark_as_system(self, request, queryset):
-        updated = queryset.update(is_system=False)
-        self.message_user(request, f"تم إلغاء تعليم {updated} حساب كحساب نظامي.")
+        return format_html('<span style="color:#15803d;font-weight:700;">دائن</span>')
 
 
 # ============================================================
-# 🧩 CostCenter Admin
+# 🏷️ CostCenter Admin
 # ============================================================
 
 @admin.register(CostCenter)
@@ -469,81 +276,45 @@ class CostCenterAdmin(admin.ModelAdmin):
         "id",
         "code",
         "name",
-        "name_en",
         "parent",
-        "level",
-        "is_group",
         "status_badge",
-        "can_post_display",
-        "children_count",
         "created_at",
     )
 
     list_filter = (
         "status",
-        "is_group",
-        "level",
         HasParentFilter,
-        CostCenterPostingAvailabilityFilter,
         "created_at",
     )
 
     search_fields = (
         "code",
         "name",
-        "name_en",
         "description",
         "parent__code",
         "parent__name",
     )
 
     readonly_fields = (
-        "level",
-        "children_count",
-        "can_post_display",
         "created_at",
         "updated_at",
     )
 
+    autocomplete_fields = (
+        "parent",
+    )
+
     fieldsets = (
         (
-            "البيانات الأساسية",
+            "بيانات مركز التكلفة",
             {
                 "fields": (
                     "code",
                     "name",
-                    "name_en",
+                    "parent",
+                    "status",
                     "description",
                 )
-            },
-        ),
-        (
-            "الهيكل الشجري",
-            {
-                "fields": (
-                    "parent",
-                    "level",
-                    "is_group",
-                    "children_count",
-                )
-            },
-        ),
-        (
-            "الحالة",
-            {
-                "fields": (
-                    "status",
-                    "can_post_display",
-                )
-            },
-        ),
-        (
-            "بيانات إضافية",
-            {
-                "classes": ("collapse",),
-                "fields": (
-                    "metadata",
-                ),
             },
         ),
         (
@@ -558,53 +329,15 @@ class CostCenterAdmin(admin.ModelAdmin):
         ),
     )
 
-    autocomplete_fields = (
-        "parent",
-    )
-
     ordering = ("code",)
-    list_per_page = 50
-    save_on_top = True
+    list_per_page = 100
 
-    def get_queryset(self, request):
-        return (
-            super()
-            .get_queryset(request)
-            .select_related("parent")
-            .prefetch_related("children")
-        )
-
+    @admin.display(description="الحالة", ordering="status")
     def status_badge(self, obj):
         if obj.status == CostCenterStatus.ACTIVE:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">نشط</span>'
-            )
+            return format_html('<span style="color:#166534;font-weight:700;">نشط</span>')
 
-        return format_html(
-            '<span style="color:#991b1b;font-weight:700;">غير نشط</span>'
-        )
-
-    status_badge.short_description = "الحالة"
-    status_badge.admin_order_field = "status"
-
-    def can_post_display(self, obj):
-        if obj.can_post:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">قابل للترحيل</span>'
-            )
-
-        return format_html(
-            '<span style="color:#991b1b;font-weight:700;">غير قابل للترحيل</span>'
-        )
-
-    can_post_display.short_description = "قابل للترحيل"
-
-    def children_count(self, obj):
-        if not obj or not obj.pk:
-            return 0
-        return obj.children.count()
-
-    children_count.short_description = "عدد الفروع"
+        return format_html('<span style="color:#991b1b;font-weight:700;">غير نشط</span>')
 
 
 # ============================================================
@@ -619,14 +352,13 @@ class FiscalYearAdmin(admin.ModelAdmin):
         "start_date",
         "end_date",
         "status_badge",
-        "is_current",
-        "closed_at",
+        "is_default",
         "created_at",
     )
 
     list_filter = (
         "status",
-        "is_current",
+        "is_default",
         "start_date",
         "end_date",
         "created_at",
@@ -634,11 +366,10 @@ class FiscalYearAdmin(admin.ModelAdmin):
 
     search_fields = (
         "name",
-        "description",
+        "notes",
     )
 
     readonly_fields = (
-        "closed_at",
         "created_at",
         "updated_at",
     )
@@ -652,17 +383,16 @@ class FiscalYearAdmin(admin.ModelAdmin):
                     "start_date",
                     "end_date",
                     "status",
-                    "is_current",
-                    "description",
+                    "is_default",
+                    "notes",
                 )
             },
         ),
         (
-            "الإغلاق والتتبع",
+            "التتبع",
             {
                 "classes": ("collapse",),
                 "fields": (
-                    "closed_at",
                     "created_at",
                     "updated_at",
                 ),
@@ -671,27 +401,16 @@ class FiscalYearAdmin(admin.ModelAdmin):
     )
 
     ordering = ("-start_date",)
-    date_hierarchy = "start_date"
-    list_per_page = 50
-    save_on_top = True
 
+    @admin.display(description="الحالة", ordering="status")
     def status_badge(self, obj):
         if obj.status == FiscalYearStatus.OPEN:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">مفتوحة</span>'
-            )
+            return format_html('<span style="color:#166534;font-weight:700;">مفتوحة</span>')
 
         if obj.status == FiscalYearStatus.CLOSED:
-            return format_html(
-                '<span style="color:#991b1b;font-weight:700;">مغلقة</span>'
-            )
+            return format_html('<span style="color:#991b1b;font-weight:700;">مغلقة</span>')
 
-        return format_html(
-            '<span style="color:#4b5563;font-weight:700;">مؤرشفة</span>'
-        )
-
-    status_badge.short_description = "الحالة"
-    status_badge.admin_order_field = "status"
+        return format_html('<span style="color:#4b5563;font-weight:700;">مؤرشفة</span>')
 
 
 # ============================================================
@@ -702,21 +421,19 @@ class FiscalYearAdmin(admin.ModelAdmin):
 class AccountingPeriodAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "name",
         "fiscal_year",
+        "name",
         "start_date",
         "end_date",
         "status_badge",
         "is_adjustment_period",
-        "closed_at",
         "created_at",
     )
 
     list_filter = (
+        "fiscal_year",
         "status",
         "is_adjustment_period",
-        PeriodClosedFilter,
-        "fiscal_year",
         "start_date",
         "end_date",
         "created_at",
@@ -725,10 +442,10 @@ class AccountingPeriodAdmin(admin.ModelAdmin):
     search_fields = (
         "name",
         "fiscal_year__name",
+        "notes",
     )
 
     readonly_fields = (
-        "closed_at",
         "created_at",
         "updated_at",
     )
@@ -748,15 +465,15 @@ class AccountingPeriodAdmin(admin.ModelAdmin):
                     "end_date",
                     "status",
                     "is_adjustment_period",
+                    "notes",
                 )
             },
         ),
         (
-            "الإغلاق والتتبع",
+            "التتبع",
             {
                 "classes": ("collapse",),
                 "fields": (
-                    "closed_at",
                     "created_at",
                     "updated_at",
                 ),
@@ -764,31 +481,17 @@ class AccountingPeriodAdmin(admin.ModelAdmin):
         ),
     )
 
-    ordering = ("-fiscal_year__start_date", "start_date")
-    date_hierarchy = "start_date"
-    list_per_page = 50
-    save_on_top = True
+    ordering = ("fiscal_year", "start_date")
 
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related("fiscal_year")
-
+    @admin.display(description="الحالة", ordering="status")
     def status_badge(self, obj):
         if obj.status == AccountingPeriodStatus.OPEN:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">مفتوحة</span>'
-            )
+            return format_html('<span style="color:#166534;font-weight:700;">مفتوحة</span>')
 
         if obj.status == AccountingPeriodStatus.CLOSED:
-            return format_html(
-                '<span style="color:#991b1b;font-weight:700;">مغلقة</span>'
-            )
+            return format_html('<span style="color:#991b1b;font-weight:700;">مغلقة</span>')
 
-        return format_html(
-            '<span style="color:#7c2d12;font-weight:700;">مقفلة</span>'
-        )
-
-    status_badge.short_description = "الحالة"
-    status_badge.admin_order_field = "status"
+        return format_html('<span style="color:#92400e;font-weight:700;">مقفلة</span>')
 
 
 # ============================================================
@@ -802,6 +505,7 @@ class TaxRateAdmin(admin.ModelAdmin):
         "code",
         "name",
         "tax_type",
+        "direction",
         "rate",
         "sales_account",
         "purchase_account",
@@ -812,8 +516,10 @@ class TaxRateAdmin(admin.ModelAdmin):
 
     list_filter = (
         "tax_type",
+        "direction",
         "is_active",
         "is_default",
+        HasTaxAccountFilter,
         "created_at",
     )
 
@@ -827,14 +533,14 @@ class TaxRateAdmin(admin.ModelAdmin):
         "purchase_account__name",
     )
 
-    autocomplete_fields = (
-        "sales_account",
-        "purchase_account",
-    )
-
     readonly_fields = (
         "created_at",
         "updated_at",
+    )
+
+    autocomplete_fields = (
+        "sales_account",
+        "purchase_account",
     )
 
     fieldsets = (
@@ -845,6 +551,7 @@ class TaxRateAdmin(admin.ModelAdmin):
                     "code",
                     "name",
                     "tax_type",
+                    "direction",
                     "rate",
                     "is_active",
                     "is_default",
@@ -853,7 +560,7 @@ class TaxRateAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "الربط المحاسبي",
+            "الحسابات الضريبية",
             {
                 "fields": (
                     "sales_account",
@@ -874,8 +581,6 @@ class TaxRateAdmin(admin.ModelAdmin):
     )
 
     ordering = ("code",)
-    list_per_page = 50
-    save_on_top = True
 
 
 # ============================================================
@@ -891,8 +596,9 @@ class AccountingSettingsAdmin(admin.ModelAdmin):
         "auto_post_invoices",
         "auto_post_payments",
         "auto_post_treasury",
-        "require_period_for_posting",
-        "allow_posting_without_cost_center",
+        "auto_post_cod_custody",
+        "auto_post_agent_earnings",
+        "auto_post_broker_earnings",
         "updated_at",
     )
 
@@ -912,11 +618,13 @@ class AccountingSettingsAdmin(admin.ModelAdmin):
                 "fields": (
                     "default_currency",
                     "default_tax_rate",
+                    "require_period_for_posting",
+                    "allow_posting_without_cost_center",
                 )
             },
         ),
         (
-            "الترحيل الآلي",
+            "الترحيل التلقائي الأساسي",
             {
                 "fields": (
                     "auto_post_invoices",
@@ -926,11 +634,14 @@ class AccountingSettingsAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "سياسات الترحيل",
+            "الترحيل التلقائي للمندوبين والوسطاء",
             {
                 "fields": (
-                    "require_period_for_posting",
-                    "allow_posting_without_cost_center",
+                    "auto_post_cod_custody",
+                    "auto_post_agent_earnings",
+                    "auto_post_broker_earnings",
+                    "auto_post_agent_settlements",
+                    "auto_post_broker_settlements",
                 )
             },
         ),
@@ -956,9 +667,7 @@ class AccountingSettingsAdmin(admin.ModelAdmin):
     )
 
     def has_add_permission(self, request):
-        if AccountingSettings.objects.exists():
-            return False
-        return super().has_add_permission(request)
+        return not AccountingSettings.objects.exists()
 
     def has_delete_permission(self, request, obj=None):
         return False
@@ -972,7 +681,7 @@ class AccountingSettingsAdmin(admin.ModelAdmin):
 class AccountingRoutingRuleAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "source_badge",
+        "source",
         "purpose",
         "account",
         "tax_rate",
@@ -987,6 +696,8 @@ class AccountingRoutingRuleAdmin(admin.ModelAdmin):
         "purpose",
         "is_active",
         "priority",
+        "tax_rate",
+        "cost_center",
         "created_at",
     )
 
@@ -1002,15 +713,15 @@ class AccountingRoutingRuleAdmin(admin.ModelAdmin):
         "cost_center__name",
     )
 
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
+
     autocomplete_fields = (
         "account",
         "tax_rate",
         "cost_center",
-    )
-
-    readonly_fields = (
-        "created_at",
-        "updated_at",
     )
 
     fieldsets = (
@@ -1051,37 +762,49 @@ class AccountingRoutingRuleAdmin(admin.ModelAdmin):
     )
 
     ordering = ("source", "purpose", "priority")
-    list_per_page = 50
-    save_on_top = True
 
-    def get_queryset(self, request):
-        return (
-            super()
-            .get_queryset(request)
-            .select_related("account", "tax_rate", "cost_center")
-        )
 
-    def source_badge(self, obj):
-        colors = {
-            AccountingRoutingSource.SALES_INVOICE: "#2563eb",
-            AccountingRoutingSource.PAYMENT_RECEIPT: "#15803d",
-            AccountingRoutingSource.TREASURY_INCOME: "#0f766e",
-            AccountingRoutingSource.TREASURY_EXPENSE: "#b45309",
-            AccountingRoutingSource.TREASURY_TRANSFER: "#0369a1",
-            AccountingRoutingSource.AGENT_COMMISSION: "#7c2d12",
-            AccountingRoutingSource.TAX_SETTLEMENT: "#9333ea",
-            AccountingRoutingSource.OPENING_BALANCE: "#4b5563",
-        }
+# ============================================================
+# 🧾 JournalEntryLine Inline
+# ============================================================
 
-        color = colors.get(obj.source, "#374151")
-        return format_html(
-            '<span style="color:{};font-weight:700;">{}</span>',
-            color,
-            obj.get_source_display(),
-        )
+class JournalEntryLineInline(admin.TabularInline):
+    model = JournalEntryLine
+    extra = 0
+    autocomplete_fields = (
+        "account",
+        "cost_center",
+        "tax_rate",
+    )
+    fields = (
+        "sort_order",
+        "account",
+        "description",
+        "debit_amount",
+        "credit_amount",
+        "currency",
+        "cost_center",
+        "tax_rate",
+        "party_type",
+        "party_id",
+        "source_line_id",
+    )
+    readonly_fields = ()
 
-    source_badge.short_description = "مصدر العملية"
-    source_badge.admin_order_field = "source"
+    def has_change_permission(self, request, obj=None):
+        if obj and obj.status != JournalEntryStatus.DRAFT:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_add_permission(self, request, obj=None):
+        if obj and obj.status != JournalEntryStatus.DRAFT:
+            return False
+        return super().has_add_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.status != JournalEntryStatus.DRAFT:
+            return False
+        return super().has_delete_permission(request, obj)
 
 
 # ============================================================
@@ -1094,16 +817,14 @@ class JournalEntryAdmin(admin.ModelAdmin):
         "id",
         "entry_number",
         "entry_date",
-        "period",
         "posting_source_badge",
         "status_badge",
         "reference",
         "source_display",
-        "external_reference",
+        "currency",
         "total_debit",
         "total_credit",
-        "balance_status",
-        "currency",
+        "balance_badge",
         "is_auto_posted",
         "posted_at",
         "created_at",
@@ -1112,11 +833,11 @@ class JournalEntryAdmin(admin.ModelAdmin):
     list_filter = (
         "status",
         "posting_source",
-        "period",
         "entry_date",
         "currency",
         "is_auto_posted",
-        IsBalancedFilter,
+        "period",
+        JournalEntryBalanceFilter,
         "created_at",
     )
 
@@ -1129,28 +850,24 @@ class JournalEntryAdmin(admin.ModelAdmin):
         "source_number",
         "description",
         "notes",
-        "lines__account__code",
-        "lines__account__name",
     )
 
     readonly_fields = (
         "total_debit",
         "total_credit",
-        "balance_status",
         "posted_at",
         "cancelled_at",
-        "reversed_at",
         "created_at",
         "updated_at",
     )
 
     autocomplete_fields = (
         "period",
-        "reversal_of",
-        "reversed_entry",
-        "created_by",
         "posted_by",
         "cancelled_by",
+        "reversal_of",
+        "created_by",
+        "updated_by",
     )
 
     fieldsets = (
@@ -1169,7 +886,7 @@ class JournalEntryAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "المراجع التشغيلية",
+            "المصدر والمرجع",
             {
                 "fields": (
                     "reference",
@@ -1177,6 +894,16 @@ class JournalEntryAdmin(admin.ModelAdmin):
                     "source_type",
                     "source_id",
                     "source_number",
+                    "reversal_of",
+                )
+            },
+        ),
+        (
+            "الوصف",
+            {
+                "fields": (
+                    "description",
+                    "notes",
                 )
             },
         ),
@@ -1186,39 +913,18 @@ class JournalEntryAdmin(admin.ModelAdmin):
                 "fields": (
                     "total_debit",
                     "total_credit",
-                    "balance_status",
                 )
             },
         ),
         (
-            "عكس القيود",
-            {
-                "classes": ("collapse",),
-                "fields": (
-                    "reversal_of",
-                    "reversed_entry",
-                    "reversed_at",
-                ),
-            },
-        ),
-        (
-            "الوصف والملاحظات",
+            "الترحيل والإلغاء",
             {
                 "fields": (
-                    "description",
-                    "notes",
-                )
-            },
-        ),
-        (
-            "المستخدمون",
-            {
-                "classes": ("collapse",),
-                "fields": (
-                    "created_by",
+                    "posted_at",
                     "posted_by",
+                    "cancelled_at",
                     "cancelled_by",
-                ),
+                )
             },
         ),
         (
@@ -1235,8 +941,8 @@ class JournalEntryAdmin(admin.ModelAdmin):
             {
                 "classes": ("collapse",),
                 "fields": (
-                    "posted_at",
-                    "cancelled_at",
+                    "created_by",
+                    "updated_by",
                     "created_at",
                     "updated_at",
                 ),
@@ -1244,163 +950,139 @@ class JournalEntryAdmin(admin.ModelAdmin):
         ),
     )
 
-    ordering = (
-        "-entry_date",
-        "-id",
-    )
+    inlines = (JournalEntryLineInline,)
 
-    inlines = [
-        JournalEntryLineInline,
-    ]
-
-    actions = (
-        "mark_selected_as_posted",
-        "refresh_selected_totals",
-    )
-
-    list_per_page = 50
+    ordering = ("-entry_date", "-id")
     date_hierarchy = "entry_date"
+    list_per_page = 100
     save_on_top = True
 
-    def get_queryset(self, request):
-        return (
-            super()
-            .get_queryset(request)
-            .select_related(
-                "period",
-                "period__fiscal_year",
-                "reversal_of",
-                "reversed_entry",
-                "created_by",
-                "posted_by",
-                "cancelled_by",
-            )
-            .prefetch_related("lines", "lines__account")
-        )
+    actions = (
+        "post_entries",
+        "cancel_entries",
+    )
 
+    @admin.display(description="مصدر القيد", ordering="posting_source")
     def posting_source_badge(self, obj):
         colors = {
             PostingSource.MANUAL: "#374151",
-            PostingSource.OPENING_BALANCE: "#0f766e",
-            PostingSource.ORDER: "#7c3aed",
             PostingSource.INVOICE: "#2563eb",
             PostingSource.PAYMENT: "#15803d",
-            PostingSource.REFUND: "#dc2626",
-            PostingSource.AGENT_COMMISSION: "#b45309",
-            PostingSource.TREASURY: "#0369a1",
-            getattr(PostingSource, "TREASURY_TRANSFER", "TREASURY_TRANSFER"): "#0891b2",
-            getattr(PostingSource, "EXPENSE", "EXPENSE"): "#b45309",
-            getattr(PostingSource, "INCOME", "INCOME"): "#15803d",
-            getattr(PostingSource, "TAX", "TAX"): "#9333ea",
-            PostingSource.ADJUSTMENT: "#9333ea",
-            getattr(PostingSource, "SYSTEM", "SYSTEM"): "#4b5563",
-            PostingSource.OTHER: "#4b5563",
+            PostingSource.TREASURY: "#0f766e",
+            PostingSource.TREASURY_TRANSFER: "#0369a1",
+            PostingSource.TREASURY_RECEIPT: "#166534",
+            PostingSource.TREASURY_PAYMENT: "#b45309",
+            PostingSource.AGENT_COMMISSION: "#7c2d12",
+            PostingSource.AGENT_EARNING: "#92400e",
+            PostingSource.AGENT_DELIVERY_FEE: "#b45309",
+            PostingSource.AGENT_COD_CUSTODY: "#0f766e",
+            PostingSource.AGENT_SETTLEMENT: "#166534",
+            PostingSource.BROKER_COMMISSION: "#6d28d9",
+            PostingSource.BROKER_EARNING: "#7c3aed",
+            PostingSource.BROKER_COD_CUSTODY: "#0f766e",
+            PostingSource.BROKER_SETTLEMENT: "#047857",
+            PostingSource.TAX: "#dc2626",
+            PostingSource.SYSTEM: "#4b5563",
         }
 
-        color = colors.get(obj.posting_source, "#374151")
         return format_html(
             '<span style="color:{};font-weight:700;">{}</span>',
-            color,
+            colors.get(obj.posting_source, "#374151"),
             obj.get_posting_source_display(),
         )
 
-    posting_source_badge.short_description = "مصدر القيد"
-    posting_source_badge.admin_order_field = "posting_source"
-
+    @admin.display(description="الحالة", ordering="status")
     def status_badge(self, obj):
         if obj.status == JournalEntryStatus.POSTED:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">مرحل</span>'
-            )
+            return format_html('<span style="color:#166534;font-weight:700;">مرحل</span>')
 
         if obj.status == JournalEntryStatus.CANCELLED:
-            return format_html(
-                '<span style="color:#991b1b;font-weight:700;">ملغي</span>'
-            )
+            return format_html('<span style="color:#991b1b;font-weight:700;">ملغي</span>')
 
         if obj.status == JournalEntryStatus.REVERSED:
-            return format_html(
-                '<span style="color:#7c2d12;font-weight:700;">معكوس</span>'
-            )
+            return format_html('<span style="color:#7c2d12;font-weight:700;">معكوس</span>')
 
-        return format_html(
-            '<span style="color:#92400e;font-weight:700;">مسودة</span>'
-        )
+        return format_html('<span style="color:#92400e;font-weight:700;">مسودة</span>')
 
-    status_badge.short_description = "الحالة"
-    status_badge.admin_order_field = "status"
-
+    @admin.display(description="المصدر")
     def source_display(self, obj):
-        if obj.source_type or obj.source_id:
-            return f"{obj.source_type or '-'}:{obj.source_id or '-'}"
+        if obj.source_type or obj.source_id or obj.source_number:
+            return f"{obj.source_type or '-'}:{obj.source_id or '-'} / {obj.source_number or '-'}"
+
         return "-"
 
-    source_display.short_description = "المصدر"
-
-    def balance_status(self, obj):
-        if not obj or not obj.pk:
-            return "-"
-
+    @admin.display(description="التوازن")
+    def balance_badge(self, obj):
         if obj.total_debit == obj.total_credit and obj.total_debit > 0:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">متوازن</span>'
-            )
+            return format_html('<span style="color:#166534;font-weight:700;">متوازن</span>')
 
-        if obj.total_debit == obj.total_credit and obj.total_debit == 0:
-            return format_html(
-                '<span style="color:#92400e;font-weight:700;">صفري</span>'
-            )
+        if obj.total_debit == obj.total_credit:
+            return format_html('<span style="color:#6b7280;font-weight:700;">صفري</span>')
 
-        return format_html(
-            '<span style="color:#991b1b;font-weight:700;">غير متوازن</span>'
-        )
-
-    balance_status.short_description = "حالة التوازن"
-
-    def save_model(self, request, obj, form, change):
-        if obj.status == JournalEntryStatus.POSTED and not obj.pk:
-            raise ValidationError(
-                "أنشئ القيد كمسودة أولًا ثم أضف الأسطر وبعدها قم بالترحيل."
-            )
-
-        if not obj.pk and request.user and request.user.is_authenticated:
-            obj.created_by = request.user
-
-        super().save_model(request, obj, form, change)
-
-    @admin.action(description="تحديث إجماليات القيود المحددة")
-    def refresh_selected_totals(self, request, queryset):
-        updated = 0
-
-        for entry in queryset:
-            entry.refresh_totals(save=True)
-            updated += 1
-
-        self.message_user(request, f"تم تحديث إجماليات {updated} قيد.")
+        return format_html('<span style="color:#991b1b;font-weight:700;">غير متوازن</span>')
 
     @admin.action(description="ترحيل القيود المحددة")
-    def mark_selected_as_posted(self, request, queryset):
+    def post_entries(self, request, queryset):
         posted_count = 0
-        errors = []
 
         for entry in queryset:
             try:
-                entry.mark_as_posted(actor=request.user)
+                if entry.status == JournalEntryStatus.POSTED:
+                    continue
+
+                entry.post(actor=request.user)
                 posted_count += 1
+
+            except ValidationError as exc:
+                self.message_user(
+                    request,
+                    f"تعذر ترحيل القيد {entry.entry_number}: {exc}",
+                    level=messages.ERROR,
+                )
             except Exception as exc:
-                errors.append(f"{entry.entry_number}: {exc}")
+                self.message_user(
+                    request,
+                    f"خطأ غير متوقع أثناء ترحيل القيد {entry.entry_number}: {exc}",
+                    level=messages.ERROR,
+                )
 
         if posted_count:
-            self.message_user(request, f"تم ترحيل {posted_count} قيد.")
-
-        for error in errors[:5]:
-            self.message_user(request, error, level=messages.ERROR)
-
-        if len(errors) > 5:
             self.message_user(
                 request,
-                f"يوجد {len(errors) - 5} أخطاء إضافية لم يتم عرضها.",
-                level=messages.WARNING,
+                f"تم ترحيل {posted_count} قيد.",
+                level=messages.SUCCESS,
+            )
+
+    @admin.action(description="إلغاء القيود المرحلة المحددة")
+    def cancel_entries(self, request, queryset):
+        cancelled_count = 0
+
+        for entry in queryset:
+            try:
+                if entry.status != JournalEntryStatus.POSTED:
+                    continue
+
+                entry.cancel(actor=request.user)
+                cancelled_count += 1
+
+            except ValidationError as exc:
+                self.message_user(
+                    request,
+                    f"تعذر إلغاء القيد {entry.entry_number}: {exc}",
+                    level=messages.ERROR,
+                )
+            except Exception as exc:
+                self.message_user(
+                    request,
+                    f"خطأ غير متوقع أثناء إلغاء القيد {entry.entry_number}: {exc}",
+                    level=messages.ERROR,
+                )
+
+        if cancelled_count:
+            self.message_user(
+                request,
+                f"تم إلغاء {cancelled_count} قيد.",
+                level=messages.SUCCESS,
             )
 
 
@@ -1412,30 +1094,22 @@ class JournalEntryAdmin(admin.ModelAdmin):
 class JournalEntryLineAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "journal_entry_link",
-        "entry_date",
-        "entry_status",
-        "posting_source",
-        "account_code",
-        "account_name",
-        "cost_center",
-        "line_type_display",
+        "journal_entry",
+        "account",
         "debit_amount",
         "credit_amount",
+        "currency",
+        "cost_center",
         "tax_rate",
-        "tax_amount",
-        "party_type",
-        "party_id",
+        "party_display",
+        "source_line_id",
         "sort_order",
         "created_at",
     )
 
     list_filter = (
-        "journal_entry__status",
-        "journal_entry__posting_source",
-        "journal_entry__entry_date",
-        "account__account_type",
-        "account__nature",
+        "currency",
+        "account",
         "cost_center",
         "tax_rate",
         "party_type",
@@ -1444,14 +1118,8 @@ class JournalEntryLineAdmin(admin.ModelAdmin):
 
     search_fields = (
         "journal_entry__entry_number",
-        "journal_entry__reference",
-        "journal_entry__external_reference",
-        "journal_entry__source_type",
-        "journal_entry__source_id",
         "account__code",
         "account__name",
-        "cost_center__code",
-        "cost_center__name",
         "description",
         "party_type",
         "party_id",
@@ -1470,99 +1138,79 @@ class JournalEntryLineAdmin(admin.ModelAdmin):
         "tax_rate",
     )
 
-    ordering = (
-        "-journal_entry__entry_date",
-        "journal_entry",
-        "sort_order",
-        "id",
+    fieldsets = (
+        (
+            "بيانات السطر",
+            {
+                "fields": (
+                    "journal_entry",
+                    "account",
+                    "description",
+                    "debit_amount",
+                    "credit_amount",
+                    "currency",
+                    "sort_order",
+                )
+            },
+        ),
+        (
+            "مركز التكلفة والضريبة",
+            {
+                "fields": (
+                    "cost_center",
+                    "tax_rate",
+                )
+            },
+        ),
+        (
+            "الطرف والمصدر",
+            {
+                "fields": (
+                    "party_type",
+                    "party_id",
+                    "source_line_id",
+                )
+            },
+        ),
+        (
+            "بيانات إضافية",
+            {
+                "classes": ("collapse",),
+                "fields": (
+                    "metadata",
+                ),
+            },
+        ),
+        (
+            "التتبع",
+            {
+                "classes": ("collapse",),
+                "fields": (
+                    "created_at",
+                    "updated_at",
+                ),
+            },
+        ),
     )
 
+    ordering = ("-created_at", "-id")
     list_per_page = 100
-    date_hierarchy = "journal_entry__entry_date"
 
-    def get_queryset(self, request):
-        return (
-            super()
-            .get_queryset(request)
-            .select_related(
-                "journal_entry",
-                "account",
-                "cost_center",
-                "tax_rate",
-            )
-        )
+    def has_change_permission(self, request, obj=None):
+        if obj and obj.journal_entry.status != JournalEntryStatus.DRAFT:
+            return False
+        return super().has_change_permission(request, obj)
 
-    def journal_entry_link(self, obj):
-        return obj.journal_entry.entry_number
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.journal_entry.status != JournalEntryStatus.DRAFT:
+            return False
+        return super().has_delete_permission(request, obj)
 
-    journal_entry_link.short_description = "رقم القيد"
-    journal_entry_link.admin_order_field = "journal_entry__entry_number"
-
-    def entry_date(self, obj):
-        return obj.journal_entry.entry_date
-
-    entry_date.short_description = "تاريخ القيد"
-    entry_date.admin_order_field = "journal_entry__entry_date"
-
-    def entry_status(self, obj):
-        status = obj.journal_entry.status
-
-        if status == JournalEntryStatus.POSTED:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">مرحل</span>'
-            )
-
-        if status == JournalEntryStatus.CANCELLED:
-            return format_html(
-                '<span style="color:#991b1b;font-weight:700;">ملغي</span>'
-            )
-
-        if status == JournalEntryStatus.REVERSED:
-            return format_html(
-                '<span style="color:#7c2d12;font-weight:700;">معكوس</span>'
-            )
-
-        return format_html(
-            '<span style="color:#92400e;font-weight:700;">مسودة</span>'
-        )
-
-    entry_status.short_description = "حالة القيد"
-    entry_status.admin_order_field = "journal_entry__status"
-
-    def posting_source(self, obj):
-        return obj.journal_entry.get_posting_source_display()
-
-    posting_source.short_description = "مصدر القيد"
-    posting_source.admin_order_field = "journal_entry__posting_source"
-
-    def account_code(self, obj):
-        return obj.account.code
-
-    account_code.short_description = "كود الحساب"
-    account_code.admin_order_field = "account__code"
-
-    def account_name(self, obj):
-        return obj.account.name
-
-    account_name.short_description = "اسم الحساب"
-    account_name.admin_order_field = "account__name"
-
-    def line_type_display(self, obj):
-        if obj.debit_amount and obj.debit_amount > 0:
-            return format_html(
-                '<span style="color:#166534;font-weight:700;">مدين</span>'
-            )
-
-        if obj.credit_amount and obj.credit_amount > 0:
-            return format_html(
-                '<span style="color:#1d4ed8;font-weight:700;">دائن</span>'
-            )
-
-        return format_html(
-            '<span style="color:#991b1b;font-weight:700;">صفري</span>'
-        )
-
-    line_type_display.short_description = "نوع السطر"
+    @admin.display(description="الطرف")
+    def party_display(self, obj):
+        if obj.party_type or obj.party_id:
+            return f"{obj.party_type or '-'}:{obj.party_id or '-'}"
+        return "-"
 
 
 # ============================================================
@@ -1579,10 +1227,9 @@ class TaxTransactionAdmin(admin.ModelAdmin):
         "taxable_amount",
         "tax_amount",
         "currency",
-        "source_type",
-        "source_id",
-        "source_number",
+        "source_display",
         "journal_entry",
+        "journal_line",
         "created_at",
     )
 
@@ -1678,3 +1325,10 @@ class TaxTransactionAdmin(admin.ModelAdmin):
                 "journal_line",
             )
         )
+
+    @admin.display(description="المصدر")
+    def source_display(self, obj):
+        if obj.source_type or obj.source_id or obj.source_number:
+            return f"{obj.source_type or '-'}:{obj.source_id or '-'} / {obj.source_number or '-'}"
+
+        return "-"

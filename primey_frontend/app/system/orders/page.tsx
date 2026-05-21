@@ -2,61 +2,77 @@
 
 /* ============================================================
    📂 app/system/orders/page.tsx
-   🧠 Primey Care | Orders Overview
-
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ نفس النمط المعتمد
-   ✅ w-full space-y-4
-   ✅ بدون main / min-h-screen / max-w
-   ✅ أزرار انتقال للصفحات التي أزلناها من السايدر
-   ✅ Skeleton Loading
-   ✅ Error State مستقل
-   ✅ Empty State ذكي
-   ✅ Excel .xls HTML Workbook
-   ✅ Web PDF Print
+   🧠 Primey Care | System Orders
+   ------------------------------------------------------------
+   ✅ Golden Products/Customers operational pattern
+   ✅ Dashboard + list in one approved page
+   ✅ Real data from /api/orders/
+   ✅ Real KPIs from /api/orders/reports/
+   ✅ Date range filter inside table toolbar
+   ✅ City filter with searchable popover
+   ✅ Search row + filters row + columns selector
+   ✅ Unified internal UI table
+   ✅ Excel .xls HTML workbook
+   ✅ Web Print
+   ✅ SAR icon from /currency/sar.svg
    ✅ sonner
-   ✅ SAR icon من /currency/sar.svg
-   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
+   ✅ Arabic / English via primey-locale
+   ✅ English numerals
+   ✅ No fake rows
+   ✅ No localhost
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowUpRight,
-  BadgeCheck,
-  ClipboardList,
+  AlertTriangle,
+  ArrowUpDown,
+  BarChart3,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Columns,
   CreditCard,
   Download,
   Eye,
   FileText,
-  Loader2,
-  Package,
-  PlusCircle,
+  MapPin,
+  MoreHorizontal,
+  PackageCheck,
+  Plus,
   Printer,
-  RefreshCcw,
+  RefreshCw,
   Search,
-  ShieldCheck,
-  ShoppingCart,
-  TimerReset,
+  SlidersHorizontal,
   Truck,
-  UserRound,
-  WalletCards,
-  XCircle,
+  Wallet,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -66,514 +82,779 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type OrderStatus =
-  | "PENDING"
-  | "CONFIRMED"
-  | "PROCESSING"
-  | "COMPLETED"
-  | "CANCELLED"
-  | "REFUNDED"
-  | "UNKNOWN";
-
-type PaymentStatus =
-  | "UNPAID"
-  | "PARTIAL"
-  | "PAID"
-  | "REFUNDED"
-  | "CANCELLED"
-  | "UNKNOWN";
-
-type FulfillmentStatus =
-  | "NOT_STARTED"
-  | "IN_PROGRESS"
-  | "FULFILLED"
-  | "FAILED"
-  | "CANCELLED"
-  | "UNKNOWN";
-
-type OrderRow = {
-  id: string;
-  order_number: string;
-  customer_id: string;
-  customer_name: string;
-  customer_phone: string;
-  product_id: string;
-  product_name: string;
-  provider_id: string;
-  provider_name: string;
-  agent_id: string;
-  agent_name: string;
-  invoice_id: string;
-  invoice_number: string;
-  status: OrderStatus;
-  payment_status: PaymentStatus;
-  fulfillment_status: FulfillmentStatus;
-  total_amount: number;
-  paid_amount: number;
-  remaining_amount: number;
-  agent_commission: number;
-  created_at: string;
+type Pagination = {
+  count?: number;
+  total?: number;
+  total_items?: number;
+  page?: number;
+  page_size?: number;
+  total_pages?: number;
+  pages?: number;
 };
 
-type OrdersSummary = {
-  total_orders: number;
-  pending_orders: number;
-  confirmed_orders: number;
-  processing_orders: number;
-  completed_orders: number;
-  cancelled_orders: number;
-  refunded_orders: number;
-  paid_orders: number;
-  unpaid_orders: number;
-  partial_orders: number;
-  fulfilled_orders: number;
-  total_amount: number;
-  paid_amount: number;
-  remaining_amount: number;
-  agent_commission: number;
-};
-
-type ApiEnvelope<T> = {
+type ApiListResponse = {
   ok?: boolean;
   success?: boolean;
   message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
   results?: unknown[];
   items?: unknown[];
-  rows?: unknown[];
   orders?: unknown[];
-  summary?: Partial<OrdersSummary>;
-  stats?: Partial<OrdersSummary>;
+  data?:
+    | unknown[]
+    | {
+        results?: unknown[];
+        items?: unknown[];
+        orders?: unknown[];
+        pagination?: Pagination;
+      };
+  pagination?: Pagination;
+  count?: number;
+  total?: number;
+  summary?: Record<string, unknown>;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-
-const DEFAULT_SUMMARY: OrdersSummary = {
-  total_orders: 0,
-  pending_orders: 0,
-  confirmed_orders: 0,
-  processing_orders: 0,
-  completed_orders: 0,
-  cancelled_orders: 0,
-  refunded_orders: 0,
-  paid_orders: 0,
-  unpaid_orders: 0,
-  partial_orders: 0,
-  fulfilled_orders: 0,
-  total_amount: 0,
-  paid_amount: 0,
-  remaining_amount: 0,
-  agent_commission: 0,
+type WhoAmI = {
+  role?: string;
+  user_type?: string;
+  workspace?: string;
+  is_superuser?: boolean;
+  permission_codes?: string[];
+  permissions?: string[] | { codes?: string[] };
+  profile_permissions?: string[] | { codes?: string[] };
 };
 
-/* ============================================================
-   Locale / API
-============================================================ */
+type OrderRow = {
+  id: string;
+  number: string;
+  productName: string;
+  providerName: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string;
+  customerCity: string;
+  salesAgentName: string;
+  deliveryAgentName: string;
+  price: number;
+  remaining: number;
+  status: string;
+  paymentStatus: string;
+  fulfillmentStatus: string;
+  paymentMethod: string;
+  orderKind: string;
+  cashCollectedAmount: number;
+  isCod: boolean;
+  createdAt: string;
+};
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+type Summary = {
+  totalOrders: number;
+  pending: number;
+  processing: number;
+  ready: number;
+  assigned: number;
+  outForDelivery: number;
+  delivered: number;
+  completed: number;
+  cancelled: number;
+  codOrders: number;
+  cashCollected: number;
+  totalAmount: number;
+  remainingAmount: number;
+};
 
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+type ColumnKey =
+  | "select"
+  | "product"
+  | "price"
+  | "customer"
+  | "salesAgent"
+  | "date"
+  | "type"
+  | "payment"
+  | "delivery"
+  | "status"
+  | "actions";
 
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
+type SortKey = "created_desc" | "created_asc" | "price_desc" | "price_asc";
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
+type PersonOption = {
+  value: string;
+  ar: string;
+  en: string;
+};
+
+const SAR_ICON = "/currency/sar.svg";
+
+const TEXT = {
+  ar: {
+    title: "الطلبات",
+    subtitle: "إدارة الطلبات والتوصيل والتحصيل ومتابعة دورة التشغيل من شاشة واحدة.",
+    create: "إنشاء طلب",
+    refresh: "تحديث",
+    exportExcel: "تصدير Excel",
+    print: "طباعة",
+    search: "ابحث برقم الطلب، العميل، المدينة، المنتج، مقدم الخدمة، المندوب...",
+    searchAgent: "ابحث باسم المندوب...",
+    searchCity: "ابحث باسم المدينة...",
+    columns: "الأعمدة",
+    filters: "الفلاتر",
+    cityFilter: "المدينة",
+    salesAgentFilter: "مندوب الطلب",
+    deliveryAgentFilter: "مندوب التوصيل",
+    payment: "الدفع",
+    delivery: "التوصيل",
+    date: "التاريخ",
+    sort: "الترتيب",
+    from: "من",
+    to: "إلى",
+    reset: "إعادة ضبط",
+    previous: "السابق",
+    next: "التالي",
+    selected: "محدد",
+    of: "من",
+    row: "صف",
+    all: "الكل",
+    noResults: "لا توجد نتائج مطابقة للفلاتر الحالية.",
+    emptyTitle: "لا توجد طلبات بعد",
+    emptyBody: "عند إنشاء الطلبات ستظهر هنا بنفس الجدول الموحد.",
+    errorTitle: "تعذر تحميل الطلبات",
+    retry: "إعادة المحاولة",
+    details: "تفاصيل الطلب",
+    latestOrders: "قائمة الطلبات",
+    latestHint: "جدول تشغيلي موحد يعرض الطلبات حسب الفلاتر المحددة.",
+    page: "صفحة",
+    remaining: "متبقي",
+    noAgent: "بدون مندوب",
+    kpi: {
+      total: "إجمالي الطلبات",
+      pending: "قيد الانتظار",
+      processing: "قيد المعالجة",
+      ready: "جاهزة للتوصيل",
+      assigned: "مسندة",
+      out: "خارج للتوصيل",
+      delivered: "تم التسليم",
+      completed: "مكتملة",
+      cod: "طلبات COD",
+      collected: "الكاش المحصل",
+      amount: "إجمالي المبيعات",
+      remaining: "المتبقي",
+    },
+    table: {
+      product: "المنتج",
+      price: "المبلغ",
+      customer: "العميل",
+      salesAgent: "مندوب الطلب",
+      date: "التاريخ",
+      type: "النوع",
+      payment: "الدفع",
+      delivery: "التوصيل",
+      status: "الحالة",
+    },
+  },
+  en: {
+    title: "Orders",
+    subtitle: "Manage orders, delivery, collection, and operational lifecycle in one place.",
+    create: "Create Order",
+    refresh: "Refresh",
+    exportExcel: "Export Excel",
+    print: "Print",
+    search: "Search by order number, customer, city, product, provider, or agent...",
+    searchAgent: "Search agent...",
+    searchCity: "Search city...",
+    columns: "Columns",
+    filters: "Filters",
+    cityFilter: "City",
+    salesAgentFilter: "Sales Agent",
+    deliveryAgentFilter: "Delivery Agent",
+    payment: "Payment",
+    delivery: "Delivery",
+    date: "Date",
+    sort: "Sort",
+    from: "From",
+    to: "To",
+    reset: "Reset",
+    previous: "Previous",
+    next: "Next",
+    selected: "selected",
+    of: "of",
+    row: "row",
+    all: "All",
+    noResults: "No results match the current filters.",
+    emptyTitle: "No orders yet",
+    emptyBody: "Created orders will appear here in the unified table.",
+    errorTitle: "Unable to load orders",
+    retry: "Retry",
+    details: "Order Details",
+    latestOrders: "Orders List",
+    latestHint: "Unified operational table filtered by the selected criteria.",
+    page: "Page",
+    remaining: "Remaining",
+    noAgent: "No agent",
+    kpi: {
+      total: "Total Orders",
+      pending: "Pending",
+      processing: "Processing",
+      ready: "Ready for Delivery",
+      assigned: "Assigned",
+      out: "Out for Delivery",
+      delivered: "Delivered",
+      completed: "Completed",
+      cod: "COD Orders",
+      collected: "Cash Collected",
+      amount: "Sales Amount",
+      remaining: "Remaining",
+    },
+    table: {
+      product: "Product",
+      price: "Amount",
+      customer: "Customer",
+      salesAgent: "Sales Agent",
+      date: "Date",
+      type: "Type",
+      payment: "Payment",
+      delivery: "Delivery",
+      status: "Status",
+    },
+  },
+} as const;
+
+const STATUS_TABS = [
+  { value: "all", ar: "الكل", en: "All" },
+  { value: "pending", ar: "مبدئية", en: "Pending" },
+  { value: "confirmed", ar: "مؤكدة", en: "Confirmed" },
+  { value: "processing", ar: "قيد المعالجة", en: "Processing" },
+  { value: "card_ready", ar: "جاهزة", en: "Ready" },
+  { value: "assigned_for_delivery", ar: "مسندة", en: "Assigned" },
+  { value: "out_for_delivery", ar: "خارج للتوصيل", en: "Out" },
+  { value: "delivered", ar: "تم التسليم", en: "Delivered" },
+  { value: "completed", ar: "مكتملة", en: "Completed" },
+  { value: "cancelled", ar: "ملغية", en: "Cancelled" },
+  { value: "refunded", ar: "مسترجعة", en: "Refunded" },
+] as const;
+
+const PAYMENT_OPTIONS: PersonOption[] = [
+  { value: "all", ar: "كل حالات الدفع", en: "All payments" },
+  { value: "pending", ar: "بانتظار الدفع", en: "Pending" },
+  { value: "unpaid", ar: "غير مدفوع", en: "Unpaid" },
+  { value: "cod_pending", ar: "بانتظار تحصيل COD", en: "COD pending" },
+  { value: "partial", ar: "جزئي", en: "Partial" },
+  { value: "partially_paid", ar: "مدفوع جزئيًا", en: "Partially paid" },
+  { value: "paid", ar: "مدفوع", en: "Paid" },
+  { value: "refunded", ar: "مسترد", en: "Refunded" },
+];
+
+const DELIVERY_OPTIONS: PersonOption[] = [
+  { value: "all", ar: "كل حالات التوصيل", en: "All delivery" },
+  { value: "card_ready", ar: "جاهز للتوصيل", en: "Ready" },
+  { value: "assigned_for_delivery", ar: "مسند للتوصيل", en: "Assigned" },
+  { value: "out_for_delivery", ar: "خارج للتوصيل", en: "Out for delivery" },
+  { value: "delivered", ar: "تم التسليم", en: "Delivered" },
+];
+
+const SORT_OPTIONS: { value: SortKey; ar: string; en: string }[] = [
+  { value: "created_desc", ar: "الأحدث أولًا", en: "Newest first" },
+  { value: "created_asc", ar: "الأقدم أولًا", en: "Oldest first" },
+  { value: "price_desc", ar: "الأعلى مبلغًا", en: "Highest amount" },
+  { value: "price_asc", ar: "الأقل مبلغًا", en: "Lowest amount" },
+];
+
+const DEFAULT_COLUMNS: Record<ColumnKey, boolean> = {
+  select: true,
+  product: true,
+  price: true,
+  customer: true,
+  salesAgent: true,
+  date: true,
+  type: true,
+  payment: true,
+  delivery: true,
+  status: true,
+  actions: true,
+};
+
+const EMPTY_SUMMARY: Summary = {
+  totalOrders: 0,
+  pending: 0,
+  processing: 0,
+  ready: 0,
+  assigned: 0,
+  outForDelivery: 0,
+  delivered: 0,
+  completed: 0,
+  cancelled: 0,
+  codOrders: 0,
+  cashCollected: 0,
+  totalAmount: 0,
+  remainingAmount: 0,
+};
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function getLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+
+  const stored = window.localStorage.getItem("primey-locale");
+  return stored === "en" ? "en" : "ar";
+}
+
+function stringify(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function numberValue(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[^\d.-]/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
   }
+
+  return 0;
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+function boolValue(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value > 0;
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
+  if (typeof value === "string") {
+    return ["true", "1", "yes", "y"].includes(value.toLowerCase());
   }
+
+  return false;
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
+function read(obj: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
-    const value = source[key];
+    const parts = key.split(".");
+    let current: unknown = obj;
+    let found = true;
 
-    if (value && typeof value === "object") return value as Dict;
+    for (const part of parts) {
+      if (current && typeof current === "object" && part in current) {
+        current = (current as Record<string, unknown>)[part];
+      } else {
+        found = false;
+        break;
+      }
+    }
+
+    if (found && current !== null && current !== undefined && current !== "") return current;
+  }
+
+  return "";
+}
+
+function normalizeArray(payload: ApiListResponse | unknown[]): unknown[] {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.orders)) return payload.orders;
+  if (Array.isArray(payload.data)) return payload.data;
+
+  if (payload.data && typeof payload.data === "object") {
+    const data = payload.data as {
+      results?: unknown[];
+      items?: unknown[];
+      orders?: unknown[];
+    };
+
+    if (Array.isArray(data.results)) return data.results;
+    if (Array.isArray(data.items)) return data.items;
+    if (Array.isArray(data.orders)) return data.orders;
+  }
+
+  return [];
+}
+
+function getPagination(payload: ApiListResponse | unknown[]): Pagination {
+  if (Array.isArray(payload)) return {};
+
+  if (payload.pagination) return payload.pagination;
+
+  if (payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)) {
+    const data = payload.data as { pagination?: Pagination };
+    if (data.pagination) return data.pagination;
   }
 
   return {};
 }
 
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
+function normalizeOrder(item: unknown): OrderRow {
+  const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+  const id = stringify(read(row, ["id", "uuid", "pk"]));
+  const paymentMethod = stringify(read(row, ["payment_method", "payment.method", "method"]));
 
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
+  const salesAgentName = stringify(
+    read(row, [
+      "agent_name",
+      "sales_agent_name",
+      "created_by_name",
+      "created_by.full_name",
+      "created_by.name",
+      "created_by.username",
+      "created_by.email",
+      "agent.full_name",
+      "agent.name",
+      "agent.user.full_name",
+      "agent.user.name",
+      "agent.user.username",
+      "sales_agent.full_name",
+      "sales_agent.name",
+      "sales_agent.user.full_name",
+      "sales_agent.user.name",
+      "referral_agent_name",
+      "referral_agent.name",
+      "created_by_user.full_name",
+      "created_by_user.username",
+    ]),
   );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasAnyPermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "support"].includes(role),
-    );
-  }
-
-  return true;
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
 
   return {
-    title: isArabic ? "الطلبات" : "Orders",
-    subtitle: isArabic
-      ? "لوحة متابعة دورة الطلب من الإنشاء وحتى الدفع والتنفيذ."
-      : "Overview of the order lifecycle from creation to payment and fulfillment.",
-
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-    ordersList: isArabic ? "قائمة الطلبات" : "Orders List",
-    createOrder: isArabic ? "إنشاء طلب" : "Create Order",
-
-    totalOrders: isArabic ? "إجمالي الطلبات" : "Total Orders",
-    pendingOrders: isArabic ? "بانتظار التأكيد" : "Pending",
-    completedOrders: isArabic ? "طلبات مكتملة" : "Completed",
-    processingOrders: isArabic ? "قيد التنفيذ" : "Processing",
-    paidOrders: isArabic ? "طلبات مدفوعة" : "Paid Orders",
-    totalAmount: isArabic ? "إجمالي الطلبات" : "Total Amount",
-    paidAmount: isArabic ? "إجمالي المدفوع" : "Paid Amount",
-    remainingAmount: isArabic ? "المتبقي" : "Remaining",
-    agentCommission: isArabic ? "عمولات المندوبين" : "Agent Commissions",
-    cancelledOrders: isArabic ? "ملغاة" : "Cancelled",
-    fulfilledOrders: isArabic ? "منفذة" : "Fulfilled",
-
-    shortcutsTitle: isArabic ? "اختصارات الطلبات" : "Order Shortcuts",
-    shortcutsDesc: isArabic
-      ? "الوصول السريع لقائمة الطلبات أو إنشاء طلب بعد تنظيف السايدر."
-      : "Quick access to order list and create page after sidebar cleanup.",
-
-    latestTitle: isArabic ? "أحدث الطلبات" : "Latest Orders",
-    latestDesc: isArabic
-      ? "أحدث الطلبات مع العميل والمنتج والحالة والمبلغ."
-      : "Latest orders with customer, product, status, and amount.",
-
-    searchPlaceholder: isArabic
-      ? "ابحث برقم الطلب أو العميل أو المنتج أو مقدم الخدمة..."
-      : "Search by order number, customer, product, or provider...",
-
-    table: {
-      order: isArabic ? "الطلب" : "Order",
-      customer: isArabic ? "العميل" : "Customer",
-      product: isArabic ? "المنتج" : "Product",
-      provider: isArabic ? "مقدم الخدمة" : "Provider",
-      status: isArabic ? "حالة الطلب" : "Order Status",
-      payment: isArabic ? "الدفع" : "Payment",
-      fulfillment: isArabic ? "التنفيذ" : "Fulfillment",
-      total: isArabic ? "الإجمالي" : "Total",
-      paid: isArabic ? "المدفوع" : "Paid",
-      remaining: isArabic ? "المتبقي" : "Remaining",
-      createdAt: isArabic ? "تاريخ الإنشاء" : "Created At",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    pending: isArabic ? "بانتظار التأكيد" : "Pending",
-    confirmed: isArabic ? "مؤكد" : "Confirmed",
-    processing: isArabic ? "قيد التنفيذ" : "Processing",
-    completed: isArabic ? "مكتمل" : "Completed",
-    cancelled: isArabic ? "ملغى" : "Cancelled",
-    refunded: isArabic ? "مسترد" : "Refunded",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    unpaid: isArabic ? "غير مدفوع" : "Unpaid",
-    partial: isArabic ? "مدفوع جزئيًا" : "Partial",
-    paid: isArabic ? "مدفوع" : "Paid",
-
-    notStarted: isArabic ? "لم يبدأ" : "Not Started",
-    inProgress: isArabic ? "قيد التنفيذ" : "In Progress",
-    fulfilled: isArabic ? "منفذ" : "Fulfilled",
-    failed: isArabic ? "فشل" : "Failed",
-
-    view: isArabic ? "عرض" : "View",
-
-    emptyTitle: isArabic ? "لا توجد بيانات طلبات" : "No order data",
-    emptyText: isArabic
-      ? "ستظهر الطلبات هنا بعد إنشاء أول طلب."
-      : "Orders will appear here after creating the first order.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير كلمات البحث."
-      : "Try changing your search terms.",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الطلبات" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض الطلبات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view orders. Contact your system administrator if you need access.",
-
-    loadError: isArabic ? "تعذر تحميل بيانات الطلبات." : "Unable to load orders.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic ? "تم تحديث بيانات الطلبات." : "Orders refreshed.",
-
-    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
-    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
-
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
+    id,
+    number:
+      stringify(read(row, ["order_number", "number", "code", "reference", "order_code"])) ||
+      (id ? `#${id}` : "—"),
+    productName:
+      stringify(
+        read(row, [
+          "product_name",
+          "offer_title",
+          "contract_product.product.name_ar",
+          "contract_product.product.name_en",
+          "contract_product.product.name",
+          "product.name_ar",
+          "product.name_en",
+          "product.name",
+          "product.title",
+          "program_name",
+          "service_name",
+          "package_name",
+        ]),
+      ) || "—",
+    providerName: stringify(
+      read(row, [
+        "provider_name",
+        "provider.name_ar",
+        "provider.name_en",
+        "provider.name",
+        "center_name",
+        "center.name_ar",
+        "center.name",
+        "contract_product.contract.provider.name_ar",
+        "contract_product.contract.provider.name_en",
+        "contract_product.contract.provider.name",
+      ]),
+    ),
+    customerName:
+      stringify(
+        read(row, [
+          "customer_name",
+          "customer.full_name",
+          "customer.name",
+          "customer.display_name",
+          "customer.user.full_name",
+          "customer.user.name",
+        ]),
+      ) || "—",
+    customerPhone: stringify(
+      read(row, [
+        "customer_phone",
+        "phone",
+        "mobile",
+        "customer_phone_number",
+        "customer.normalized_phone",
+        "customer.phone",
+        "customer.mobile",
+        "customer.whatsapp_number",
+        "customer.user.phone",
+      ]),
+    ),
+    customerEmail: stringify(
+      read(row, ["customer_email", "customer.email", "customer.user.email", "email"]),
+    ),
+    customerCity: stringify(
+      read(row, [
+        "customer_city",
+        "city",
+        "delivery_city",
+        "address_city",
+        "customer.city",
+        "customer.address_city",
+        "customer.address.city",
+        "customer.profile.city",
+        "shipping_city",
+      ]),
+    ),
+    salesAgentName,
+    deliveryAgentName: stringify(
+      read(row, [
+        "delivery_agent_name",
+        "delivery_agent.full_name",
+        "delivery_agent.name",
+        "delivery_agent.user.full_name",
+        "delivery_agent.user.name",
+        "assigned_delivery_agent.name",
+      ]),
+    ),
+    price: numberValue(
+      read(row, [
+        "total_amount",
+        "grand_total",
+        "total",
+        "amount",
+        "unit_price",
+        "unit_price_after_discount",
+      ]),
+    ),
+    remaining: numberValue(read(row, ["remaining_amount", "remaining", "balance"])),
+    status: stringify(read(row, ["status", "order_status"])) || "pending",
+    paymentStatus: stringify(read(row, ["payment_status", "payment.status"])) || "pending",
+    fulfillmentStatus:
+      stringify(read(row, ["fulfillment_status", "execution_status", "fulfillment.status"])) ||
+      "pending",
+    paymentMethod,
+    orderKind: stringify(read(row, ["order_kind", "type", "kind"])) || "general",
+    cashCollectedAmount: numberValue(
+      read(row, ["cash_collected_amount", "collected_cash", "cod_collected_amount"]),
+    ),
+    isCod:
+      boolValue(read(row, ["is_cash_on_delivery", "is_cod"])) ||
+      paymentMethod === "cash_on_delivery",
+    createdAt: stringify(
+      read(row, ["created_at", "created", "date", "ordered_at", "created_on", "updated_at"]),
+    ),
   };
 }
 
-/* ============================================================
-   Helpers
-============================================================ */
+function getTotal(payload: ApiListResponse | unknown[], rowsLength: number) {
+  if (Array.isArray(payload)) return rowsLength;
 
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
+  const pagination = getPagination(payload);
+
+  const total =
+    numberValue(payload.count) ||
+    numberValue(payload.total) ||
+    numberValue(pagination.total_items) ||
+    numberValue(pagination.count) ||
+    numberValue(pagination.total);
+
+  return total > 0 ? total : rowsLength;
 }
 
-function formatNumber(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
+function buildQuery(params: Record<string, string | number | undefined>) {
+  const query = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === "" || value === "all") return;
+    query.set(key, String(value));
+  });
+
+  const text = query.toString();
+  return text ? `?${text}` : "";
 }
 
-function formatMoney(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(toNumber(value));
+function getApiBases() {
+  const envBase =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    "";
+
+  const bases: string[] = [];
+
+  if (envBase) bases.push(envBase.replace(/\/$/, ""));
+  bases.push("");
+
+  return Array.from(new Set(bases));
 }
 
-function formatDate(value: string, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+function buildApiUrl(base: string, path: string) {
+  if (!base) return path;
+  return `${base}${path}`;
+}
+
+async function fetchJsonFromCandidates<T>(paths: string[]): Promise<T> {
+  let lastError: unknown = null;
+
+  for (const base of getApiBases()) {
+    for (const path of paths) {
+      try {
+        const response = await fetch(buildApiUrl(base, path), {
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          cache: "no-store",
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        const payload = contentType.includes("application/json")
+          ? await response.json().catch(() => null)
+          : await response.text().catch(() => null);
+
+        if (!response.ok) {
+          const message =
+            payload && typeof payload === "object" && "message" in payload
+              ? String((payload as { message?: unknown }).message || "")
+              : payload && typeof payload === "object" && "detail" in payload
+                ? String((payload as { detail?: unknown }).detail || "")
+                : typeof payload === "string" && payload.length < 180
+                  ? payload
+                  : "";
+
+          throw new Error(message || `HTTP ${response.status}`);
+        }
+
+        if (!contentType.includes("application/json")) {
+          throw new Error("Response is not JSON.");
+        }
+
+        return payload as T;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Unable to fetch data.");
+}
+
+async function fetchWhoami(): Promise<WhoAmI> {
+  return fetchJsonFromCandidates<WhoAmI>(["/api/auth/whoami/", "/api/auth/whoami"]);
+}
+
+async function fetchOrders(query: string): Promise<ApiListResponse | unknown[]> {
+  const cleanQuery = query.startsWith("?") ? query : query ? `?${query}` : "";
+
+  return fetchJsonFromCandidates<ApiListResponse | unknown[]>([
+    `/api/orders/${cleanQuery}`,
+    `/api/orders${cleanQuery}`,
+  ]);
+}
+
+async function fetchOrdersReports(query: string): Promise<Record<string, unknown>> {
+  const cleanQuery = query.startsWith("?") ? query : query ? `?${query}` : "";
+
+  return fetchJsonFromCandidates<Record<string, unknown>>([
+    `/api/orders/reports/${cleanQuery}`,
+    `/api/orders/reports${cleanQuery}`,
+  ]);
+}
+
+function useDebounce(value: string, delay = 350) {
+  const [debounced, setDebounced] = React.useState(value);
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [value, delay]);
+
+  return debounced;
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(
+    Number.isFinite(value) ? value : 0,
+  );
+}
+
+function formatDate(value: string, locale: Locale) {
+  if (!value) return "—";
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(locale === "ar" ? "ar-SA-u-nu-latn" : "en-US", {
     year: "numeric",
     month: "short",
     day: "2-digit",
   }).format(date);
 }
 
-function escapeHtml(value: string | number) {
-  return String(value ?? "")
+function statusLabel(value: string, locale: Locale) {
+  const key = value || "pending";
+
+  const labels: Record<string, { ar: string; en: string }> = {
+    pending: { ar: "قيد الانتظار", en: "Pending" },
+    confirmed: { ar: "مؤكد", en: "Confirmed" },
+    processing: { ar: "قيد المعالجة", en: "Processing" },
+    card_ready: { ar: "جاهز للتوصيل", en: "Ready" },
+    assigned_for_delivery: { ar: "مسند", en: "Assigned" },
+    out_for_delivery: { ar: "خارج للتوصيل", en: "Out for delivery" },
+    delivered: { ar: "تم التسليم", en: "Delivered" },
+    completed: { ar: "مكتمل", en: "Completed" },
+    cancelled: { ar: "ملغي", en: "Canceled" },
+    canceled: { ar: "ملغي", en: "Canceled" },
+    refunded: { ar: "مسترجع", en: "Returned" },
+    unpaid: { ar: "غير مدفوع", en: "Unpaid" },
+    cod_pending: { ar: "بانتظار التحصيل", en: "COD pending" },
+    partial: { ar: "جزئي", en: "Partial" },
+    partially_paid: { ar: "مدفوع جزئيًا", en: "Partially paid" },
+    paid: { ar: "مدفوع", en: "Paid" },
+    cash_on_delivery: { ar: "عند الاستلام", en: "COD" },
+    bank_transfer: { ar: "تحويل بنكي", en: "Bank transfer" },
+    payment_gateway: { ar: "بوابة دفع", en: "Gateway" },
+    gateway: { ar: "بوابة دفع", en: "Gateway" },
+    tamara: { ar: "تمارا", en: "Tamara" },
+    tabby: { ar: "تابي", en: "Tabby" },
+    card: { ar: "بطاقة", en: "Card" },
+    program: { ar: "برنامج", en: "Program" },
+    service: { ar: "خدمة", en: "Service" },
+    medical_service: { ar: "خدمة طبية", en: "Medical service" },
+    subscription: { ar: "اشتراك", en: "Subscription" },
+    product: { ar: "منتج", en: "Product" },
+    general: { ar: "عام", en: "General" },
+    sale: { ar: "بيع", en: "Sale" },
+    not_started: { ar: "لم يبدأ", en: "Not started" },
+    in_progress: { ar: "قيد التنفيذ", en: "In progress" },
+    issued: { ar: "مصدر", en: "Issued" },
+    ready: { ar: "جاهز", en: "Ready" },
+    fulfilled: { ar: "منفذ", en: "Fulfilled" },
+  };
+
+  return labels[key]?.[locale] || key.replaceAll("_", " ");
+}
+
+function badgeClass(value: string) {
+  if (["completed", "paid", "delivered", "fulfilled"].includes(value)) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700";
+  }
+
+  if (["pending", "unpaid", "partial", "partially_paid", "cod_pending"].includes(value)) {
+    return "border-orange-500/30 bg-orange-50 text-orange-700";
+  }
+
+  if (["cancelled", "canceled", "refunded", "failed"].includes(value)) {
+    return "border-red-500/30 bg-red-50 text-red-700";
+  }
+
+  if (
+    ["processing", "confirmed", "card_ready", "assigned_for_delivery", "out_for_delivery"].includes(
+      value,
+    )
+  ) {
+    return "border-sky-500/30 bg-sky-50 text-sky-700";
+  }
+
+  return "border-muted bg-muted/40 text-muted-foreground";
+}
+
+function Money({ value }: { value: number }) {
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap font-medium tabular-nums">
+      <span>{formatNumber(value)}</span>
+      <img src={SAR_ICON} alt="SAR" className="h-3.5 w-3.5 opacity-80" />
+    </span>
+  );
+}
+
+function escapeHtml(value: unknown) {
+  return stringify(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -581,1310 +862,1606 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function hasPermission(whoami: WhoAmI | null, permission: string) {
+  if (!whoami) return true;
 
-    if (value !== undefined && value !== null && value !== "") return value;
+  const role = stringify(whoami.role || whoami.user_type).toLowerCase();
+  const workspace = stringify(whoami.workspace).toLowerCase();
+
+  if (whoami.is_superuser) return true;
+  if (["system_admin", "superuser", "admin", "owner"].includes(role)) return true;
+  if (workspace === "system" && role.includes("admin")) return true;
+
+  const permissions = new Set<string>();
+
+  if (Array.isArray(whoami.permission_codes)) {
+    whoami.permission_codes.forEach((item) => permissions.add(item));
   }
 
-  for (const container of [
-    "order",
-    "customer",
-    "client",
-    "product",
-    "provider",
-    "center",
-    "agent",
-    "invoice",
-    "data",
-  ]) {
-    const nested = obj[container];
-
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
-
-      if (value !== undefined && value !== null && value !== "") return value;
-    }
+  if (Array.isArray(whoami.permissions)) {
+    whoami.permissions.forEach((item) => permissions.add(item));
+  } else if (whoami.permissions?.codes) {
+    whoami.permissions.codes.forEach((item) => permissions.add(item));
   }
 
-  return undefined;
+  if (Array.isArray(whoami.profile_permissions)) {
+    whoami.profile_permissions.forEach((item) => permissions.add(item));
+  } else if (whoami.profile_permissions?.codes) {
+    whoami.profile_permissions.codes.forEach((item) => permissions.add(item));
+  }
+
+  return permissions.has(permission);
 }
 
-function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
-  if (!payload) return [];
+function normalizeSummary(payload: Record<string, unknown>, rows: OrderRow[]): Summary {
+  const data =
+    payload && typeof payload.data === "object" && !Array.isArray(payload.data)
+      ? (payload.data as Record<string, unknown>)
+      : payload;
 
-  const data = asDict(payload.data);
-  const directValue = (payload as Dict)[key];
+  const summary =
+    data && typeof data.summary === "object" && !Array.isArray(data.summary)
+      ? (data.summary as Record<string, unknown>)
+      : data;
 
-  if (Array.isArray(directValue)) return directValue;
-  if (Array.isArray(payload.results)) return payload.results;
-  if (Array.isArray(payload.items)) return payload.items;
-  if (Array.isArray(payload.rows)) return payload.rows;
-
-  if (Array.isArray(data[key])) return data[key] as unknown[];
-  if (Array.isArray(data.results)) return data.results as unknown[];
-  if (Array.isArray(data.items)) return data.items as unknown[];
-  if (Array.isArray(data.rows)) return data.rows as unknown[];
-
-  if (Array.isArray(payload.data)) return payload.data;
-
-  return [];
-}
-
-function extractSummary(payload: ApiEnvelope<unknown> | null) {
-  if (!payload) return {};
-
-  const data = asDict(payload.data);
-
-  return {
-    ...asDict(payload.summary),
-    ...asDict(payload.stats),
-    ...asDict(data.summary),
-    ...asDict(data.stats),
-    ...asDict(data.totals),
-    ...asDict(data),
-  } as Partial<OrdersSummary>;
-}
-
-function normalizeOrderStatus(value: unknown): OrderStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["PENDING", "DRAFT", "NEW"].includes(clean)) return "PENDING";
-  if (["CONFIRMED", "APPROVED"].includes(clean)) return "CONFIRMED";
-  if (["PROCESSING", "IN_PROGRESS"].includes(clean)) return "PROCESSING";
-  if (["COMPLETED", "DONE", "FINISHED"].includes(clean)) return "COMPLETED";
-  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
-  if (["REFUNDED", "RETURNED"].includes(clean)) return "REFUNDED";
-
-  return "UNKNOWN";
-}
-
-function normalizePaymentStatus(value: unknown): PaymentStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["UNPAID", "PENDING", "NOT_PAID"].includes(clean)) return "UNPAID";
-  if (["PARTIAL", "PARTIALLY_PAID"].includes(clean)) return "PARTIAL";
-  if (["PAID", "CONFIRMED", "SUCCESS"].includes(clean)) return "PAID";
-  if (["REFUNDED"].includes(clean)) return "REFUNDED";
-  if (["CANCELLED", "CANCELED"].includes(clean)) return "CANCELLED";
-
-  return "UNKNOWN";
-}
-
-function normalizeFulfillmentStatus(value: unknown): FulfillmentStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["NOT_STARTED", "NEW", "PENDING"].includes(clean)) return "NOT_STARTED";
-  if (["IN_PROGRESS", "PROCESSING"].includes(clean)) return "IN_PROGRESS";
-  if (["FULFILLED", "DONE", "COMPLETED"].includes(clean)) return "FULFILLED";
-  if (["FAILED"].includes(clean)) return "FAILED";
-  if (["CANCELLED", "CANCELED"].includes(clean)) return "CANCELLED";
-
-  return "UNKNOWN";
-}
-
-function normalizeOrder(item: unknown, index: number): OrderRow {
-  const obj = asDict(item);
-  const customerObj = asDict(obj.customer || obj.client);
-  const productObj = asDict(obj.product || obj.program || obj.service);
-  const providerObj = asDict(obj.provider || obj.center);
-  const agentObj = asDict(obj.agent);
-  const invoiceObj = asDict(obj.invoice);
-
-  const totalAmount = toNumber(
-    getNestedValue(obj, ["total_amount", "grand_total", "amount", "order_total"]),
-  );
-
-  const paidAmount = toNumber(
-    getNestedValue(obj, ["paid_amount", "total_paid", "payments_total"]),
-  );
-
-  const remainingValue = getNestedValue(obj, [
-    "remaining_amount",
-    "balance_due",
-    "outstanding_amount",
-  ]);
-
-  return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    order_number: String(
-      getNestedValue(obj, ["order_number", "number", "code", "reference"]) || "-",
-    ),
-    customer_id: String(customerObj.id || getNestedValue(obj, ["customer_id"]) || ""),
-    customer_name: String(
-      customerObj.name ||
-        customerObj.full_name ||
-        getNestedValue(obj, ["customer_name", "client_name"]) ||
-        "-",
-    ),
-    customer_phone: String(
-      customerObj.phone ||
-        customerObj.mobile ||
-        getNestedValue(obj, ["customer_phone", "phone", "mobile"]) ||
-        "",
-    ),
-    product_id: String(productObj.id || getNestedValue(obj, ["product_id"]) || ""),
-    product_name: String(
-      productObj.name ||
-        productObj.title ||
-        getNestedValue(obj, ["product_name", "program_name", "service_name"]) ||
-        "-",
-    ),
-    provider_id: String(
-      providerObj.id || getNestedValue(obj, ["provider_id", "center_id"]) || "",
-    ),
-    provider_name: String(
-      providerObj.name ||
-        providerObj.title ||
-        getNestedValue(obj, ["provider_name", "center_name"]) ||
-        "-",
-    ),
-    agent_id: String(agentObj.id || getNestedValue(obj, ["agent_id"]) || ""),
-    agent_name: String(
-      agentObj.name || getNestedValue(obj, ["agent_name"]) || "",
-    ),
-    invoice_id: String(invoiceObj.id || getNestedValue(obj, ["invoice_id"]) || ""),
-    invoice_number: String(
-      invoiceObj.invoice_number ||
-        invoiceObj.number ||
-        getNestedValue(obj, ["invoice_number"]) ||
-        "",
-    ),
-    status: normalizeOrderStatus(getNestedValue(obj, ["status", "state"])),
-    payment_status: normalizePaymentStatus(
-      getNestedValue(obj, ["payment_status", "payment_state"]),
-    ),
-    fulfillment_status: normalizeFulfillmentStatus(
-      getNestedValue(obj, ["fulfillment_status", "execution_status"]),
-    ),
-    total_amount: totalAmount,
-    paid_amount: paidAmount,
-    remaining_amount:
-      remainingValue !== undefined && remainingValue !== null
-        ? toNumber(remainingValue)
-        : Math.max(totalAmount - paidAmount, 0),
-    agent_commission: toNumber(
-      getNestedValue(obj, ["agent_commission", "commission_amount"]),
-    ),
-    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
-  };
-}
-
-function buildSummary(
-  rows: OrderRow[],
-  apiSummary?: Partial<OrdersSummary>,
-): OrdersSummary {
-  const fallback: OrdersSummary = {
-    total_orders: rows.length,
-    pending_orders: rows.filter((item) => item.status === "PENDING").length,
-    confirmed_orders: rows.filter((item) => item.status === "CONFIRMED").length,
-    processing_orders: rows.filter((item) => item.status === "PROCESSING").length,
-    completed_orders: rows.filter((item) => item.status === "COMPLETED").length,
-    cancelled_orders: rows.filter((item) => item.status === "CANCELLED").length,
-    refunded_orders: rows.filter((item) => item.status === "REFUNDED").length,
-    paid_orders: rows.filter((item) => item.payment_status === "PAID").length,
-    unpaid_orders: rows.filter((item) => item.payment_status === "UNPAID").length,
-    partial_orders: rows.filter((item) => item.payment_status === "PARTIAL").length,
-    fulfilled_orders: rows.filter((item) => item.fulfillment_status === "FULFILLED")
-      .length,
-    total_amount: rows.reduce((sum, item) => sum + item.total_amount, 0),
-    paid_amount: rows.reduce((sum, item) => sum + item.paid_amount, 0),
-    remaining_amount: rows.reduce((sum, item) => sum + item.remaining_amount, 0),
-    agent_commission: rows.reduce((sum, item) => sum + item.agent_commission, 0),
+  const fromApi: Summary = {
+    totalOrders:
+      numberValue(read(summary, ["total_orders", "orders_count", "count", "total"])) ||
+      rows.length,
+    pending: numberValue(read(summary, ["pending", "status_counts.pending"])),
+    processing: numberValue(read(summary, ["processing", "status_counts.processing"])),
+    ready:
+      numberValue(read(summary, ["card_ready", "ready", "status_counts.card_ready"])) ||
+      numberValue(read(summary, ["status_counts.ready"])),
+    assigned:
+      numberValue(
+        read(summary, [
+          "assigned_for_delivery",
+          "assigned",
+          "status_counts.assigned_for_delivery",
+        ]),
+      ) || numberValue(read(summary, ["status_counts.assigned"])),
+    outForDelivery:
+      numberValue(read(summary, ["out_for_delivery", "status_counts.out_for_delivery"])) ||
+      numberValue(read(summary, ["out"])),
+    delivered: numberValue(read(summary, ["delivered", "status_counts.delivered"])),
+    completed: numberValue(read(summary, ["completed", "status_counts.completed"])),
+    cancelled:
+      numberValue(read(summary, ["cancelled", "canceled", "status_counts.cancelled"])) ||
+      numberValue(read(summary, ["status_counts.canceled"])),
+    codOrders:
+      numberValue(read(summary, ["cod_orders", "cash_on_delivery_orders", "cod_count"])) ||
+      rows.filter((row) => row.isCod || row.paymentMethod === "cash_on_delivery").length,
+    cashCollected:
+      numberValue(read(summary, ["cash_collected", "cash_collected_amount", "collected_cash"])) ||
+      rows.reduce((sum, row) => sum + row.cashCollectedAmount, 0),
+    totalAmount:
+      numberValue(read(summary, ["total_amount", "sales_amount", "gross_amount", "revenue"])) ||
+      rows.reduce((sum, row) => sum + row.price, 0),
+    remainingAmount:
+      numberValue(read(summary, ["remaining_amount", "outstanding_amount", "balance"])) ||
+      rows.reduce((sum, row) => sum + row.remaining, 0),
   };
 
-  const api = asDict(apiSummary);
-
-  return {
-    total_orders:
-      toNumber(api.total_orders) || toNumber(api.orders_count) || fallback.total_orders,
-    pending_orders: toNumber(api.pending_orders) || fallback.pending_orders,
-    confirmed_orders: toNumber(api.confirmed_orders) || fallback.confirmed_orders,
-    processing_orders: toNumber(api.processing_orders) || fallback.processing_orders,
-    completed_orders: toNumber(api.completed_orders) || fallback.completed_orders,
-    cancelled_orders: toNumber(api.cancelled_orders) || fallback.cancelled_orders,
-    refunded_orders: toNumber(api.refunded_orders) || fallback.refunded_orders,
-    paid_orders: toNumber(api.paid_orders) || fallback.paid_orders,
-    unpaid_orders: toNumber(api.unpaid_orders) || fallback.unpaid_orders,
-    partial_orders: toNumber(api.partial_orders) || fallback.partial_orders,
-    fulfilled_orders: toNumber(api.fulfilled_orders) || fallback.fulfilled_orders,
-    total_amount: toNumber(api.total_amount) || fallback.total_amount,
-    paid_amount: toNumber(api.paid_amount) || fallback.paid_amount,
-    remaining_amount: toNumber(api.remaining_amount) || fallback.remaining_amount,
-    agent_commission: toNumber(api.agent_commission) || fallback.agent_commission,
-  };
-}
-
-function orderStatusLabel(status: OrderStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<OrderStatus, string> = {
-    PENDING: t.pending,
-    CONFIRMED: t.confirmed,
-    PROCESSING: t.processing,
-    COMPLETED: t.completed,
-    CANCELLED: t.cancelled,
-    REFUNDED: t.refunded,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function paymentStatusLabel(status: PaymentStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<PaymentStatus, string> = {
-    UNPAID: t.unpaid,
-    PARTIAL: t.partial,
-    PAID: t.paid,
-    REFUNDED: t.refunded,
-    CANCELLED: t.cancelled,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function fulfillmentStatusLabel(status: FulfillmentStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<FulfillmentStatus, string> = {
-    NOT_STARTED: t.notStarted,
-    IN_PROGRESS: t.inProgress,
-    FULFILLED: t.fulfilled,
-    FAILED: t.failed,
-    CANCELLED: t.cancelled,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function orderStatusBadge(status: OrderStatus, locale: AppLocale) {
-  const label = orderStatusLabel(status, locale);
-
-  if (status === "COMPLETED" || status === "CONFIRMED") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+  if (fromApi.pending === 0) {
+    fromApi.pending = rows.filter((row) => row.status === "pending").length;
   }
 
-  if (status === "PENDING" || status === "PROCESSING") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
+  if (fromApi.processing === 0) {
+    fromApi.processing = rows.filter((row) => row.status === "processing").length;
   }
 
-  if (status === "CANCELLED" || status === "REFUNDED") {
-    return (
-      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
-        {label}
-      </Badge>
-    );
+  if (fromApi.ready === 0) {
+    fromApi.ready = rows.filter((row) => row.status === "card_ready").length;
   }
 
-  return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
-  );
-}
-
-function paymentStatusBadge(status: PaymentStatus, locale: AppLocale) {
-  const label = paymentStatusLabel(status, locale);
-
-  if (status === "PAID") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+  if (fromApi.assigned === 0) {
+    fromApi.assigned = rows.filter((row) => row.status === "assigned_for_delivery").length;
   }
 
-  if (status === "PARTIAL" || status === "UNPAID") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
+  if (fromApi.outForDelivery === 0) {
+    fromApi.outForDelivery = rows.filter((row) => row.status === "out_for_delivery").length;
   }
 
-  if (status === "CANCELLED" || status === "REFUNDED") {
-    return (
-      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
-        {label}
-      </Badge>
-    );
+  if (fromApi.delivered === 0) {
+    fromApi.delivered = rows.filter((row) => row.status === "delivered").length;
   }
 
-  return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
-  );
+  if (fromApi.completed === 0) {
+    fromApi.completed = rows.filter((row) => row.status === "completed").length;
+  }
+
+  if (fromApi.cancelled === 0) {
+    fromApi.cancelled = rows.filter((row) => ["cancelled", "canceled"].includes(row.status)).length;
+  }
+
+  return fromApi;
 }
 
-function isValidId(value: unknown) {
-  const id = String(value || "").trim();
+function exportExcel(rows: OrderRow[], locale: Locale) {
+  const t = TEXT[locale];
 
-  return id && id !== "-" && id !== "undefined" && id !== "null";
-}
-
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
-  );
-}
-
-function MoneyText({ value }: { value: unknown }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function PageSkeleton() {
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <SkeletonLine className="h-8 w-28" />
-              <SkeletonLine className="mt-3 h-4 w-24" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="grid gap-3 p-5 md:grid-cols-2">
-          {Array.from({ length: 2 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-24 w-full rounded-2xl" />
-          ))}
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="space-y-3 p-5">
-          <SkeletonLine className="h-7 w-48" />
-          {Array.from({ length: 7 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
-          ))}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  title,
-  locale,
-  summary,
-  rows,
-}: {
-  filename: string;
-  title: string;
-  locale: AppLocale;
-  summary: OrdersSummary;
-  rows: OrderRow[];
-}) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const t = dictionary(locale);
-
-  const rowsHtml = rows
+  const body = rows
     .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.order_number)}</td>
-          <td>${escapeHtml(item.customer_name)}</td>
-          <td>${escapeHtml(item.customer_phone || "-")}</td>
-          <td>${escapeHtml(item.product_name || "-")}</td>
-          <td>${escapeHtml(item.provider_name || "-")}</td>
-          <td>${escapeHtml(orderStatusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(paymentStatusLabel(item.payment_status, locale))}</td>
-          <td>${escapeHtml(formatMoney(item.total_amount))}</td>
-          <td>${escapeHtml(formatMoney(item.paid_amount))}</td>
-          <td>${escapeHtml(formatMoney(item.remaining_amount))}</td>
-          <td>${escapeHtml(formatDate(item.created_at, locale))}</td>
-        </tr>`,
+      (row) => `
+      <tr>
+        <td>${escapeHtml(row.number)}</td>
+        <td>${escapeHtml(row.productName)}</td>
+        <td>${escapeHtml(row.providerName || "—")}</td>
+        <td>${escapeHtml(formatNumber(row.price))}</td>
+        <td>${escapeHtml(row.customerName)}</td>
+        <td>${escapeHtml(row.customerCity || "—")}</td>
+        <td>${escapeHtml(row.customerPhone || row.customerEmail || "—")}</td>
+        <td>${escapeHtml(row.salesAgentName || "—")}</td>
+        <td>${escapeHtml(row.deliveryAgentName || "—")}</td>
+        <td>${escapeHtml(formatDate(row.createdAt, locale))}</td>
+        <td>${escapeHtml(statusLabel(row.orderKind, locale))}</td>
+        <td>${escapeHtml(statusLabel(row.paymentStatus, locale))}</td>
+        <td>${escapeHtml(statusLabel(row.status, locale))}</td>
+      </tr>
+    `,
     )
     .join("");
 
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-        </style>
-      </head>
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="11">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="11"></td></tr>
-          <tr><td class="section" colspan="11">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalOrders)}</td><td colspan="10">${escapeHtml(formatNumber(summary.total_orders))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.completedOrders)}</td><td colspan="10">${escapeHtml(formatNumber(summary.completed_orders))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalAmount)}</td><td colspan="10">${escapeHtml(formatMoney(summary.total_amount))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.paidAmount)}</td><td colspan="10">${escapeHtml(formatMoney(summary.paid_amount))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.remainingAmount)}</td><td colspan="10">${escapeHtml(formatMoney(summary.remaining_amount))}</td></tr>
-
-          <tr><td colspan="11"></td></tr>
-          <tr>
-            <th>${escapeHtml(t.table.order)}</th>
-            <th>${escapeHtml(t.table.customer)}</th>
-            <th>${escapeHtml("Phone")}</th>
-            <th>${escapeHtml(t.table.product)}</th>
-            <th>${escapeHtml(t.table.provider)}</th>
-            <th>${escapeHtml(t.table.status)}</th>
-            <th>${escapeHtml(t.table.payment)}</th>
-            <th>${escapeHtml(t.table.total)}</th>
-            <th>${escapeHtml(t.table.paid)}</th>
-            <th>${escapeHtml(t.table.remaining)}</th>
-            <th>${escapeHtml(t.table.createdAt)}</th>
-          </tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  summary,
-  rows,
-}: {
-  locale: AppLocale;
-  title: string;
-  summary: OrdersSummary;
-  rows: OrderRow[];
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-
-  const tableRows = rows
-    .slice(0, 40)
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.order_number)}</td>
-          <td>${escapeHtml(item.customer_name)}</td>
-          <td>${escapeHtml(item.product_name)}</td>
-          <td>${escapeHtml(orderStatusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(paymentStatusLabel(item.payment_status, locale))}</td>
-          <td>${escapeHtml(formatMoney(item.total_amount))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 5px 12px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          .grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .box {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .box span { color: #6b7280; display: block; font-size: 11px; }
-          .box strong { display: block; margin-top: 6px; font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-          th { background: #f3f4f6; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
-          </div>
-          <div class="badge">Primey Care</div>
-        </div>
-
-        <div class="grid">
-          <div class="box"><span>${escapeHtml(t.totalOrders)}</span><strong>${escapeHtml(formatNumber(summary.total_orders))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.completedOrders)}</span><strong>${escapeHtml(formatNumber(summary.completed_orders))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.paidAmount)}</span><strong>${escapeHtml(formatMoney(summary.paid_amount))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.remainingAmount)}</span><strong>${escapeHtml(formatMoney(summary.remaining_amount))}</strong></div>
-        </div>
-
-        <table>
+  const html = `
+    <html>
+      <head><meta charset="UTF-8" /></head>
+      <body dir="${locale === "ar" ? "rtl" : "ltr"}">
+        <table border="1">
           <thead>
             <tr>
-              <th>${escapeHtml(t.table.order)}</th>
-              <th>${escapeHtml(t.table.customer)}</th>
+              <th>#</th>
               <th>${escapeHtml(t.table.product)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
+              <th>${locale === "ar" ? "مقدم الخدمة" : "Provider"}</th>
+              <th>${escapeHtml(t.table.price)}</th>
+              <th>${escapeHtml(t.table.customer)}</th>
+              <th>${escapeHtml(t.cityFilter)}</th>
+              <th>${locale === "ar" ? "بيانات العميل" : "Customer info"}</th>
+              <th>${escapeHtml(t.table.salesAgent)}</th>
+              <th>${escapeHtml(t.table.delivery)}</th>
+              <th>${escapeHtml(t.table.date)}</th>
+              <th>${escapeHtml(t.table.type)}</th>
               <th>${escapeHtml(t.table.payment)}</th>
-              <th>${escapeHtml(t.table.total)}</th>
+              <th>${escapeHtml(t.table.status)}</th>
             </tr>
           </thead>
-          <tbody>${tableRows || `<tr><td colspan="6">${escapeHtml(t.emptyTitle)}</td></tr>`}</tbody>
+          <tbody>${body}</tbody>
         </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
       </body>
     </html>
   `;
+
+  const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = `primey-orders-${new Date().toISOString().slice(0, 10)}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function printRows(rows: OrderRow[], locale: Locale) {
+  const t = TEXT[locale];
 
-export default function SystemOrdersPage() {
-  const auth = useAuth() as unknown;
+  const body = rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(row.number)}</td>
+        <td>${escapeHtml(row.productName)}</td>
+        <td>${escapeHtml(row.providerName || "—")}</td>
+        <td>${escapeHtml(formatNumber(row.price))}</td>
+        <td>${escapeHtml(row.customerName)}</td>
+        <td>${escapeHtml(row.customerCity || "—")}</td>
+        <td>${escapeHtml(row.salesAgentName || "—")}</td>
+        <td>${escapeHtml(row.deliveryAgentName || "—")}</td>
+        <td>${escapeHtml(formatDate(row.createdAt, locale))}</td>
+        <td>${escapeHtml(statusLabel(row.paymentStatus, locale))}</td>
+        <td>${escapeHtml(statusLabel(row.status, locale))}</td>
+      </tr>
+    `,
+    )
+    .join("");
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [rows, setRows] = useState<OrderRow[]>([]);
-  const [summary, setSummary] = useState<OrdersSummary>(DEFAULT_SUMMARY);
-  const [query, setQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const html = `
+    <!doctype html>
+    <html lang="${locale}" dir="${locale === "ar" ? "rtl" : "ltr"}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(t.title)}</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+          h1 { font-size: 22px; margin: 0 0 18px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; direction: ${locale === "ar" ? "rtl" : "ltr"}; }
+          th, td { border: 1px solid #e5e7eb; padding: 10px; text-align: ${locale === "ar" ? "right" : "left"}; }
+          th { background: #f9fafb; }
+        </style>
+      </head>
+      <body>
+        <h1>${escapeHtml(t.title)}</h1>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>${escapeHtml(t.table.product)}</th>
+              <th>${locale === "ar" ? "مقدم الخدمة" : "Provider"}</th>
+              <th>${escapeHtml(t.table.price)}</th>
+              <th>${escapeHtml(t.table.customer)}</th>
+              <th>${escapeHtml(t.cityFilter)}</th>
+              <th>${escapeHtml(t.table.salesAgent)}</th>
+              <th>${escapeHtml(t.table.delivery)}</th>
+              <th>${escapeHtml(t.table.date)}</th>
+              <th>${escapeHtml(t.table.payment)}</th>
+              <th>${escapeHtml(t.table.status)}</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </body>
+    </html>
+  `;
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const win = window.open("", "_blank", "width=1200,height=800");
 
-  const canView = hasAnyPermission(auth, ["orders.view", "orders.list"], "view");
-  const canCreate = hasAnyPermission(auth, ["orders.create"], "action");
-  const canExport = hasAnyPermission(
-    auth,
-    ["orders.export", "reports.export"],
-    "action",
-  );
-  const canPrint = hasAnyPermission(
-    auth,
-    ["orders.print", "reports.print"],
-    "action",
-  );
-  const canViewDetails = hasAnyPermission(auth, ["orders.view"], "view");
-
-  const filteredRows = useMemo(() => {
-    const clean = query.trim().toLowerCase();
-
-    const sorted = [...rows].sort((a, b) =>
-      String(b.created_at).localeCompare(String(a.created_at)),
-    );
-
-    if (!clean) return sorted.slice(0, 12);
-
-    return sorted
-      .filter((item) =>
-        [
-          item.order_number,
-          item.customer_name,
-          item.customer_phone,
-          item.product_name,
-          item.provider_name,
-          item.agent_name,
-          item.invoice_number,
-          orderStatusLabel(item.status, locale),
-          paymentStatusLabel(item.payment_status, locale),
-          fulfillmentStatusLabel(item.fulfillment_status, locale),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(clean),
-      )
-      .slice(0, 12);
-  }, [locale, query, rows]);
-
-  const activeSummary = useMemo(
-    () => buildSummary(filteredRows),
-    [filteredRows],
-  );
-
-  const displaySummary = query.trim() ? activeSummary : summary;
-  const hasData = rows.length > 0;
-  const hasSearch = query.trim().length > 0;
-
-  const loadOrders = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setRows([]);
-        setSummary(DEFAULT_SUMMARY);
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        setIsLoading(true);
-        setErrorMessage("");
-
-        const payload = await loadFirstAvailable([
-          "/api/orders/list/?page_size=500",
-          "/api/orders/?page_size=500",
-        ]);
-
-        if (!payload) {
-          throw new Error(t.loadError);
-        }
-
-        const normalizedRows = extractRows(payload, "orders")
-          .map(normalizeOrder)
-          .filter((item) => item.id || item.order_number);
-
-        setRows(normalizedRows);
-        setSummary(buildSummary(normalizedRows, extractSummary(payload)));
-
-        if (showToast) toast.success(t.loadSuccess);
-      } catch (error) {
-        console.error("Orders overview load error:", error);
-        setRows([]);
-        setSummary(DEFAULT_SUMMARY);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [canView, t.loadError, t.loadSuccess],
-  );
-
-  function exportExcel() {
-    if (!canExport) return;
-
-    if (!hasData) {
-      toast.error(t.exportEmpty);
-      return;
-    }
-
-    downloadExcel({
-      filename: `primey-care-orders-${new Date().toISOString().slice(0, 10)}.xls`,
-      title: t.title,
-      locale,
-      summary: displaySummary,
-      rows: hasSearch ? filteredRows : rows,
-    });
-
-    toast.success(t.exportSuccess);
+  if (!win) {
+    toast.error(locale === "ar" ? "تعذر فتح نافذة الطباعة" : "Unable to open print window");
+    return;
   }
 
-  function printPage() {
-    if (!canPrint) return;
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  win.print();
+}
 
-    if (!hasData) {
-      toast.error(t.exportEmpty);
-      return;
-    }
+function buildPersonOptions(rows: OrderRow[], key: "salesAgentName" | "deliveryAgentName") {
+  const names = Array.from(
+    new Set(
+      rows
+        .map((row) => row[key].trim())
+        .filter((name) => name && name !== "—"),
+    ),
+  );
 
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
+  return [
+    { value: "all", ar: "الكل", en: "All" },
+    ...names.map((name) => ({
+      value: name,
+      ar: name,
+      en: name,
+    })),
+  ];
+}
 
-    if (!printWindow) {
-      toast.error(t.printError);
-      return;
-    }
+function buildCityOptions(rows: OrderRow[]) {
+  const names = Array.from(
+    new Set(
+      rows
+        .map((row) => row.customerCity.trim())
+        .filter((name) => name && name !== "—"),
+    ),
+  );
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        summary: displaySummary,
-        rows: hasSearch ? filteredRows : rows,
-      }),
+  return [
+    { value: "all", ar: "الكل", en: "All" },
+    ...names.map((name) => ({
+      value: name,
+      ar: name,
+      en: name,
+    })),
+  ];
+}
+
+function SearchablePersonFilter({
+  label,
+  value,
+  onChange,
+  options,
+  locale,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: PersonOption[];
+  locale: Locale;
+  placeholder?: string;
+}) {
+  const [query, setQuery] = React.useState("");
+  const isRtl = locale === "ar";
+  const t = TEXT[locale];
+
+  const filteredOptions = React.useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    if (!normalizedQuery) return options;
+
+    return options.filter((option) =>
+      [option.value, option.ar, option.en].join(" ").toLowerCase().includes(normalizedQuery),
     );
-    printWindow.document.close();
-
-    toast.success(t.printSuccess);
-  }
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadOrders(false);
-  }, [authResolving, loadOrders]);
-
-  if (!authResolving && !canView) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  }, [options, query]);
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {t.title}
-          </h1>
+    <div className="space-y-3">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
 
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadOrders(true)}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            <span>{t.refresh}</span>
-          </Button>
-
-          {canExport ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={isLoading || !hasData || Boolean(errorMessage)}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
-
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={isLoading || !hasData || Boolean(errorMessage)}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
-        </div>
+      <div className="relative">
+        <Search
+          className={cn(
+            "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+            isRtl ? "right-3" : "left-3",
+          )}
+        />
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={placeholder || t.searchAgent}
+          className={cn("h-9", isRtl ? "pr-9 text-right" : "pl-9 text-left")}
+          dir={isRtl ? "rtl" : "ltr"}
+        />
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-1">
+        {filteredOptions.length ? (
+          filteredOptions.map((option) => {
+            const active = option.value === value;
 
-              <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadOrders(true)}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {isLoading ? (
-        <PageSkeleton />
-      ) : (
-        <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <KpiCard
-              title={t.totalOrders}
-              value={formatNumber(displaySummary.total_orders)}
-              icon={<ShoppingCart className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.completedOrders}
-              value={formatNumber(displaySummary.completed_orders)}
-              icon={<BadgeCheck className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.paidAmount}
-              value={<MoneyText value={displaySummary.paid_amount} />}
-              icon={<WalletCards className="h-5 w-5" />}
-            />
-            <KpiCard
-              title={t.remainingAmount}
-              value={<MoneyText value={displaySummary.remaining_amount} />}
-              icon={<TimerReset className="h-5 w-5" />}
-            />
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onChange(option.value)}
+                className={cn(
+                  "flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-sm transition hover:bg-muted",
+                  active && "bg-muted font-medium",
+                  isRtl ? "text-right" : "text-left",
+                )}
+              >
+                <span className="truncate">{option[locale]}</span>
+                {active && <span className="text-xs text-primary">✓</span>}
+              </button>
+            );
+          })
+        ) : (
+          <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+            {t.noResults}
           </div>
-
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MiniStat title={t.pendingOrders} value={displaySummary.pending_orders} />
-            <MiniStat
-              title={t.processingOrders}
-              value={displaySummary.processing_orders}
-            />
-            <MiniStat title={t.paidOrders} value={displaySummary.paid_orders} />
-            <MiniStat title={t.fulfilledOrders} value={displaySummary.fulfilled_orders} />
-          </div>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-base font-bold">
-                {t.shortcutsTitle}
-              </CardTitle>
-              <CardDescription>{t.shortcutsDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <div className="grid gap-3 md:grid-cols-2">
-                <Link href="/system/orders/list">
-                  <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
-                    <CardContent className="flex h-full items-start gap-3 p-4">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                        <FileText className="h-5 w-5" />
-                      </div>
-
-                      <div className="min-w-0">
-                        <p className="font-semibold">{t.ordersList}</p>
-                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                          {isArabic
-                            ? "عرض الطلبات مع البحث والفلاتر والإجراءات."
-                            : "Open orders with search, filters, and actions."}
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-
-                {canCreate ? (
-                  <Link href="/system/orders/create">
-                    <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
-                      <CardContent className="flex h-full items-start gap-3 p-4">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                          <PlusCircle className="h-5 w-5" />
-                        </div>
-
-                        <div className="min-w-0">
-                          <p className="font-semibold">{t.createOrder}</p>
-                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                            {isArabic
-                              ? "إنشاء طلب جديد وربطه بالعميل والمنتج."
-                              : "Create a new order and link it to customer and product."}
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-4">
-              <div className="relative w-full">
-                <Search
-                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                    isArabic ? "right-3" : "left-3"
-                  }`}
-                />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder={t.searchPlaceholder}
-                  className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          {!hasData ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-                <ShoppingCart className="h-12 w-12 text-muted-foreground/40" />
-                <p className="text-lg font-semibold">{t.emptyTitle}</p>
-                <p className="max-w-md text-sm text-muted-foreground">
-                  {t.emptyText}
-                </p>
-
-                {canCreate ? (
-                  <Link href="/system/orders/create">
-                    <Button className="mt-2 rounded-xl">
-                      <PlusCircle className="h-4 w-4" />
-                      {t.createOrder}
-                    </Button>
-                  </Link>
-                ) : null}
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {hasData && hasSearch && filteredRows.length === 0 ? (
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-                <Search className="h-12 w-12 text-muted-foreground/40" />
-                <p className="text-lg font-semibold">{t.noResultsTitle}</p>
-                <p className="max-w-md text-sm text-muted-foreground">
-                  {t.noResultsText}
-                </p>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle className="text-base font-bold">
-                    {t.latestTitle}
-                  </CardTitle>
-                  <CardDescription>{t.latestDesc}</CardDescription>
-                </div>
-
-                <Link href="/system/orders/list">
-                  <Button variant="outline" className="h-10 rounded-xl">
-                    <ArrowUpRight className="h-4 w-4" />
-                    {t.ordersList}
-                  </Button>
-                </Link>
-              </div>
-            </CardHeader>
-
-            <CardContent>
-              <div className="overflow-hidden rounded-xl border">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="min-w-[150px]">
-                          {t.table.order}
-                        </TableHead>
-                        <TableHead className="min-w-[220px]">
-                          {t.table.customer}
-                        </TableHead>
-                        <TableHead className="min-w-[180px]">
-                          {t.table.product}
-                        </TableHead>
-                        <TableHead className="min-w-[160px]">
-                          {t.table.provider}
-                        </TableHead>
-                        <TableHead className="min-w-[130px]">
-                          {t.table.status}
-                        </TableHead>
-                        <TableHead className="min-w-[120px]">
-                          {t.table.payment}
-                        </TableHead>
-                        <TableHead className="min-w-[130px]">
-                          {t.table.fulfillment}
-                        </TableHead>
-                        <TableHead className="min-w-[130px]">
-                          {t.table.total}
-                        </TableHead>
-                        <TableHead className="min-w-[120px]">
-                          {t.table.createdAt}
-                        </TableHead>
-                        {canViewDetails ? (
-                          <TableHead className="min-w-[90px]">
-                            {t.table.action}
-                          </TableHead>
-                        ) : null}
-                      </TableRow>
-                    </TableHeader>
-
-                    <TableBody>
-                      {filteredRows.length > 0 ? (
-                        filteredRows.map((item) => (
-                          <TableRow key={`${item.id}-${item.order_number}`}>
-                            <TableCell className="font-semibold" dir="ltr">
-                              {item.order_number}
-                            </TableCell>
-
-                            <TableCell>
-                              <div className="min-w-[200px]">
-                                <p className="font-semibold">{item.customer_name}</p>
-                                <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                                  {item.customer_phone || "-"}
-                                </p>
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              <div className="min-w-[160px]">
-                                <p className="font-medium">{item.product_name}</p>
-                                {item.invoice_number ? (
-                                  <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
-                                    {item.invoice_number}
-                                  </p>
-                                ) : null}
-                              </div>
-                            </TableCell>
-
-                            <TableCell>{item.provider_name || "-"}</TableCell>
-                            <TableCell>{orderStatusBadge(item.status, locale)}</TableCell>
-                            <TableCell>{paymentStatusBadge(item.payment_status, locale)}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className="rounded-full">
-                                {fulfillmentStatusLabel(item.fulfillment_status, locale)}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <MoneyText value={item.total_amount} />
-                            </TableCell>
-                            <TableCell>
-                              {formatDate(item.created_at, locale)}
-                            </TableCell>
-
-                            {canViewDetails ? (
-                              <TableCell>
-                                {isValidId(item.id) ? (
-                                  <Link href={`/system/orders/${item.id}`}>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 rounded-lg"
-                                    >
-                                      <Eye className="h-4 w-4" />
-                                      <span className="sr-only">{t.view}</span>
-                                    </Button>
-                                  </Link>
-                                ) : (
-                                  <span className="text-sm text-muted-foreground">
-                                    -
-                                  </span>
-                                )}
-                              </TableCell>
-                            ) : null}
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell
-                            colSpan={canViewDetails ? 10 : 9}
-                            className="h-32 text-center"
-                          >
-                            <p className="text-sm text-muted-foreground">
-                              {hasSearch ? t.noResultsText : t.emptyText}
-                            </p>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }
 
-/* ============================================================
-   Small Components
-============================================================ */
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+  locale,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: PersonOption[];
+  locale: Locale;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <Select value={value} onValueChange={onChange} dir={locale === "ar" ? "rtl" : "ltr"}>
+        <SelectTrigger className="h-9 rounded-md">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option[locale]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
 
-async function loadFirstAvailable(endpoints: string[]) {
-  let lastError = "";
+function DateRangeFilter({
+  locale,
+  dateFrom,
+  dateTo,
+  onDateFrom,
+  onDateTo,
+}: {
+  locale: Locale;
+  dateFrom: string;
+  dateTo: string;
+  onDateFrom: (value: string) => void;
+  onDateTo: (value: string) => void;
+}) {
+  const t = TEXT[locale];
+  const isRtl = locale === "ar";
 
-  for (const endpoint of endpoints) {
-    const response = await fetch(apiUrl(endpoint), {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-      headers: { Accept: "application/json" },
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className="h-10 gap-2 rounded-lg">
+          <CalendarDays className="h-4 w-4" />
+          <span>{t.date}</span>
+          {(dateFrom || dateTo) && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+              {dateFrom || "…"} - {dateTo || "…"}
+            </span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align={isRtl ? "start" : "end"}
+        className="w-72 space-y-4"
+        dir={isRtl ? "rtl" : "ltr"}
+      >
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">{t.from}</div>
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(event) => onDateFrom(event.target.value)}
+            className="h-9"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">{t.to}</div>
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(event) => onDateTo(event.target.value)}
+            className="h-9"
+          />
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function TableSkeleton({ colSpan }: { colSpan: number }) {
+  return (
+    <>
+      {Array.from({ length: 8 }).map((_, index) => (
+        <TableRow key={index} className="h-[62px]">
+          <TableCell colSpan={colSpan}>
+            <div className="h-7 w-full animate-pulse rounded-md bg-muted" />
+          </TableCell>
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
+function applyLocalFilters({
+  rows,
+  search,
+  statusTab,
+  payment,
+  delivery,
+  cityFilter,
+  salesAgentFilter,
+  deliveryAgentFilter,
+  dateFrom,
+  dateTo,
+  sort,
+}: {
+  rows: OrderRow[];
+  search: string;
+  statusTab: string;
+  payment: string;
+  delivery: string;
+  cityFilter: string;
+  salesAgentFilter: string;
+  deliveryAgentFilter: string;
+  dateFrom: string;
+  dateTo: string;
+  sort: SortKey;
+}) {
+  let output = [...rows];
+
+  const localSearch = search.trim().toLowerCase();
+
+  if (localSearch) {
+    output = output.filter((row) => {
+      const haystack = [
+        row.number,
+        row.productName,
+        row.providerName,
+        row.customerName,
+        row.customerPhone,
+        row.customerEmail,
+        row.customerCity,
+        row.salesAgentName,
+        row.deliveryAgentName,
+        row.status,
+        row.paymentStatus,
+        row.fulfillmentStatus,
+        row.paymentMethod,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(localSearch);
     });
-
-    const payload = (await response.json().catch(() => null)) as
-      | ApiEnvelope<unknown>
-      | null;
-
-    if (response.ok && payload?.ok !== false && payload?.success !== false) {
-      return payload;
-    }
-
-    lastError =
-      payload?.message ||
-      payload?.detail ||
-      payload?.error ||
-      `HTTP ${response.status}`;
   }
 
-  console.warn("Orders endpoint fallback failed:", lastError);
-  return null;
+  if (statusTab !== "all") output = output.filter((row) => row.status === statusTab);
+  if (payment !== "all") output = output.filter((row) => row.paymentStatus === payment);
+
+  if (delivery !== "all") {
+    output = output.filter((row) => row.status === delivery || row.fulfillmentStatus === delivery);
+  }
+
+  if (cityFilter !== "all") {
+    output = output.filter((row) => row.customerCity === cityFilter);
+  }
+
+  if (salesAgentFilter !== "all") {
+    output = output.filter((row) => row.salesAgentName === salesAgentFilter);
+  }
+
+  if (deliveryAgentFilter !== "all") {
+    output = output.filter((row) => row.deliveryAgentName === deliveryAgentFilter);
+  }
+
+  if (dateFrom || dateTo) {
+    output = output.filter((row) => {
+      if (!row.createdAt) return true;
+
+      const rowDate = new Date(row.createdAt);
+      if (Number.isNaN(rowDate.getTime())) return true;
+
+      if (dateFrom) {
+        const from = new Date(`${dateFrom}T00:00:00`);
+        if (rowDate < from) return false;
+      }
+
+      if (dateTo) {
+        const to = new Date(`${dateTo}T23:59:59`);
+        if (rowDate > to) return false;
+      }
+
+      return true;
+    });
+  }
+
+  output.sort((a, b) => {
+    if (sort === "created_asc") {
+      return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+    }
+
+    if (sort === "created_desc") {
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    }
+
+    if (sort === "price_asc") return a.price - b.price;
+    if (sort === "price_desc") return b.price - a.price;
+
+    return 0;
+  });
+
+  return output;
+}
+
+function ColumnCell({
+  enabled,
+  children,
+  className,
+}: {
+  enabled: boolean;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  if (!enabled) return null;
+  return <TableCell className={className}>{children}</TableCell>;
+}
+
+function HeaderCell({
+  enabled,
+  children,
+  className,
+}: {
+  enabled: boolean;
+  children?: React.ReactNode;
+  className?: string;
+}) {
+  if (!enabled) return null;
+  return <TableHead className={className}>{children}</TableHead>;
+}
+
+function HeaderSortButton({
+  children,
+  onClick,
+  isRtl,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  isRtl: boolean;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className={cn("h-8 px-2 text-xs font-semibold", isRtl ? "-mr-2" : "-ml-2")}
+      onClick={onClick}
+    >
+      {children}
+      <ArrowUpDown className="h-3.5 w-3.5" />
+    </Button>
+  );
 }
 
 function KpiCard({
   title,
   value,
   icon,
+  money,
+  loading,
 }: {
   title: string;
-  value: ReactNode;
-  icon: ReactNode;
+  value: number;
+  icon: React.ReactNode;
+  money?: boolean;
+  loading?: boolean;
 }) {
   return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-2xl font-bold">{value}</div>
-            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
-          </div>
-
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            {icon}
-          </div>
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardContent className="flex items-center justify-between gap-3 p-4">
+        <div className="min-w-0 space-y-2">
+          <p className="truncate text-sm text-muted-foreground">{title}</p>
+          {loading ? (
+            <div className="h-7 w-24 animate-pulse rounded-md bg-muted" />
+          ) : money ? (
+            <div className="text-2xl font-bold">
+              <Money value={value} />
+            </div>
+          ) : (
+            <div className="text-2xl font-bold tabular-nums">{formatNumber(value)}</div>
+          )}
+        </div>
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+          {icon}
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function MiniStat({ title, value }: { title: string; value: number }) {
+export default function SystemOrdersDashboardPage() {
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [whoami, setWhoami] = React.useState<WhoAmI | null>(null);
+
+  const [baseRows, setBaseRows] = React.useState<OrderRow[]>([]);
+  const [rows, setRows] = React.useState<OrderRow[]>([]);
+  const [summary, setSummary] = React.useState<Summary>(EMPTY_SUMMARY);
+  const [totalRows, setTotalRows] = React.useState(0);
+  const [selectedRows, setSelectedRows] = React.useState<Record<string, boolean>>({});
+
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const [statusTab, setStatusTab] = React.useState("all");
+  const [search, setSearch] = React.useState("");
+  const debouncedSearch = useDebounce(search);
+
+  const [payment, setPayment] = React.useState("all");
+  const [delivery, setDelivery] = React.useState("all");
+  const [cityFilter, setCityFilter] = React.useState("all");
+  const [salesAgentFilter, setSalesAgentFilter] = React.useState("all");
+  const [deliveryAgentFilter, setDeliveryAgentFilter] = React.useState("all");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
+  const [sort, setSort] = React.useState<SortKey>("created_desc");
+
+  const [page, setPage] = React.useState(1);
+  const [pageSize] = React.useState(8);
+  const [columns, setColumns] = React.useState<Record<ColumnKey, boolean>>(DEFAULT_COLUMNS);
+
+  const t = TEXT[locale];
+  const isRtl = locale === "ar";
+
+  const canView = hasPermission(whoami, "orders.view");
+  const canCreate = hasPermission(whoami, "orders.create");
+  const canExport = hasPermission(whoami, "orders.export");
+  const canPrint = hasPermission(whoami, "orders.print");
+
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const selectedCount = Object.values(selectedRows).filter(Boolean).length;
+  const visibleColSpan = Math.max(1, Object.values(columns).filter(Boolean).length);
+
+  const allVisibleSelected =
+    rows.length > 0 && rows.every((row) => selectedRows[row.id || row.number]);
+
+  const cityOptions = React.useMemo(() => buildCityOptions(baseRows), [baseRows]);
+
+  const salesAgentOptions = React.useMemo(
+    () => buildPersonOptions(baseRows, "salesAgentName"),
+    [baseRows],
+  );
+
+  const deliveryAgentOptions = React.useMemo(
+    () => buildPersonOptions(baseRows, "deliveryAgentName"),
+    [baseRows],
+  );
+
+  React.useEffect(() => {
+    const syncLocale = () => {
+      const nextLocale = getLocale();
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
+
+    syncLocale();
+
+    window.addEventListener("storage", syncLocale);
+    window.addEventListener("primey-locale-changed", syncLocale);
+
+    return () => {
+      window.removeEventListener("storage", syncLocale);
+      window.removeEventListener("primey-locale-changed", syncLocale);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    let mounted = true;
+
+    fetchWhoami()
+      .then((data) => {
+        if (mounted) setWhoami(data);
+      })
+      .catch(() => {
+        if (mounted) setWhoami(null);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const loadOrders = React.useCallback(
+    async (mode: "normal" | "refresh" = "normal") => {
+      if (!canView) {
+        setLoading(false);
+        setBaseRows([]);
+        setRows([]);
+        setSummary(EMPTY_SUMMARY);
+        setTotalRows(0);
+        return;
+      }
+
+      if (mode === "refresh") setRefreshing(true);
+      else setLoading(true);
+
+      setError(null);
+
+      try {
+        const rowQuery = buildQuery({
+          page,
+          page_size: pageSize,
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+        });
+
+        let payload = await fetchOrders(rowQuery);
+        let normalized = normalizeArray(payload).map(normalizeOrder);
+
+        if ((dateFrom || dateTo) && normalized.length === 0) {
+          const fallbackQuery = buildQuery({
+            page,
+            page_size: pageSize,
+          });
+
+          payload = await fetchOrders(fallbackQuery);
+          normalized = normalizeArray(payload).map(normalizeOrder);
+        }
+
+        const reportQuery = buildQuery({
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+        });
+
+        let reportPayload: Record<string, unknown> = {};
+
+        try {
+          reportPayload = await fetchOrdersReports(reportQuery);
+        } catch {
+          reportPayload = {};
+        }
+
+        const filteredRows = applyLocalFilters({
+          rows: normalized,
+          search: debouncedSearch,
+          statusTab,
+          payment,
+          delivery,
+          cityFilter,
+          salesAgentFilter,
+          deliveryAgentFilter,
+          dateFrom,
+          dateTo,
+          sort,
+        });
+
+        setBaseRows(normalized);
+        setRows(filteredRows);
+        setSummary(normalizeSummary(reportPayload, normalized));
+        setTotalRows(getTotal(payload, normalized.length) || filteredRows.length);
+        setSelectedRows({});
+      } catch (err) {
+        console.error(err);
+        setBaseRows([]);
+        setRows([]);
+        setSummary(EMPTY_SUMMARY);
+        setTotalRows(0);
+        setError(locale === "ar" ? "حدث خطأ أثناء تحميل الطلبات." : "Failed to load orders.");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [
+      canView,
+      cityFilter,
+      dateFrom,
+      dateTo,
+      debouncedSearch,
+      delivery,
+      deliveryAgentFilter,
+      locale,
+      page,
+      pageSize,
+      payment,
+      salesAgentFilter,
+      sort,
+      statusTab,
+    ],
+  );
+
+  React.useEffect(() => {
+    loadOrders("normal");
+  }, [loadOrders]);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [
+    debouncedSearch,
+    statusTab,
+    payment,
+    delivery,
+    cityFilter,
+    salesAgentFilter,
+    deliveryAgentFilter,
+    dateFrom,
+    dateTo,
+    sort,
+  ]);
+
+  const resetFilters = () => {
+    setSearch("");
+    setStatusTab("all");
+    setPayment("all");
+    setDelivery("all");
+    setCityFilter("all");
+    setSalesAgentFilter("all");
+    setDeliveryAgentFilter("all");
+    setDateFrom("");
+    setDateTo("");
+    setSort("created_desc");
+    setPage(1);
+  };
+
+  const toggleAllRows = (checked: boolean) => {
+    if (!checked) {
+      setSelectedRows({});
+      return;
+    }
+
+    const next: Record<string, boolean> = {};
+    rows.forEach((row) => {
+      next[row.id || row.number] = true;
+    });
+    setSelectedRows(next);
+  };
+
+  const toggleRow = (key: string, checked: boolean) => {
+    setSelectedRows((current) => ({
+      ...current,
+      [key]: checked,
+    }));
+  };
+
+  const handleExport = () => {
+    if (!rows.length) {
+      toast.warning(locale === "ar" ? "لا توجد بيانات للتصدير" : "No rows to export");
+      return;
+    }
+
+    exportExcel(rows, locale);
+    toast.success(locale === "ar" ? "تم تصدير الطلبات" : "Orders exported");
+  };
+
+  const handlePrint = () => {
+    if (!rows.length) {
+      toast.warning(locale === "ar" ? "لا توجد بيانات للطباعة" : "No rows to print");
+      return;
+    }
+
+    printRows(rows, locale);
+  };
+
+  const columnLabels: Record<ColumnKey, string> = {
+    select: "",
+    product: t.table.product,
+    price: t.table.price,
+    customer: t.table.customer,
+    salesAgent: t.table.salesAgent,
+    date: t.table.date,
+    type: t.table.type,
+    payment: t.table.payment,
+    delivery: t.table.delivery,
+    status: t.table.status,
+    actions: "",
+  };
+
   return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-muted-foreground">{title}</span>
-          <span className="text-lg font-bold">{formatNumber(value)}</span>
+    <div className="w-full space-y-4" dir={isRtl ? "rtl" : "ltr"}>
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+        <div className="space-y-1">
+          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">{t.title}</h1>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
-      </CardContent>
-    </Card>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9 gap-2 rounded-lg px-3"
+            onClick={() => loadOrders("refresh")}
+            disabled={loading || refreshing}
+          >
+            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+            {t.refresh}
+          </Button>
+
+          {canPrint && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 gap-2 rounded-lg px-3"
+              onClick={handlePrint}
+              disabled={loading || !rows.length}
+            >
+              <Printer className="h-4 w-4" />
+              {t.print}
+            </Button>
+          )}
+
+          {canExport && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 gap-2 rounded-lg px-3"
+              onClick={handleExport}
+              disabled={loading || !rows.length}
+            >
+              <Download className="h-4 w-4" />
+              {t.exportExcel}
+            </Button>
+          )}
+
+          {canCreate && (
+            <Button asChild className="h-9 gap-2 rounded-lg bg-black px-3 text-white hover:bg-black/90">
+              <Link href="/system/orders/create">
+                <Plus className="h-4 w-4" />
+                {t.create}
+              </Link>
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.kpi.total}
+          value={summary.totalOrders}
+          icon={<FileText className="h-5 w-5" />}
+          loading={loading}
+        />
+        <KpiCard
+          title={t.kpi.processing}
+          value={summary.processing}
+          icon={<RefreshCw className="h-5 w-5" />}
+          loading={loading}
+        />
+        <KpiCard
+          title={t.kpi.ready}
+          value={summary.ready}
+          icon={<PackageCheck className="h-5 w-5" />}
+          loading={loading}
+        />
+        <KpiCard
+          title={t.kpi.completed}
+          value={summary.completed}
+          icon={<CheckCircle2 className="h-5 w-5" />}
+          loading={loading}
+        />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.kpi.cod}
+          value={summary.codOrders}
+          icon={<Wallet className="h-5 w-5" />}
+          loading={loading}
+        />
+        <KpiCard
+          title={t.kpi.collected}
+          value={summary.cashCollected}
+          money
+          icon={<CreditCard className="h-5 w-5" />}
+          loading={loading}
+        />
+        <KpiCard
+          title={t.kpi.amount}
+          value={summary.totalAmount}
+          money
+          icon={<BarChart3 className="h-5 w-5" />}
+          loading={loading}
+        />
+        <KpiCard
+          title={t.kpi.remaining}
+          value={summary.remainingAmount}
+          money
+          icon={<AlertTriangle className="h-5 w-5" />}
+          loading={loading}
+        />
+      </div>
+
+      <Card className="rounded-lg border bg-card shadow-none">
+        <CardHeader className="space-y-1 border-b px-4 py-4">
+          <CardTitle className="text-base">{t.latestOrders}</CardTitle>
+          <p className="text-sm text-muted-foreground">{t.latestHint}</p>
+        </CardHeader>
+
+        <CardContent className="space-y-4 p-4">
+          <div className="w-full overflow-x-auto pb-1">
+            <div className="flex min-w-max flex-wrap items-center gap-1">
+              {STATUS_TABS.map((item) => (
+                <Button
+                  key={item.value}
+                  type="button"
+                  variant={statusTab === item.value ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusTab(item.value)}
+                  className={cn(
+                    "h-8 rounded-lg px-3 text-xs",
+                    statusTab === item.value && "bg-black text-white hover:bg-black/90",
+                  )}
+                >
+                  {item[locale]}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="relative w-full">
+            <Search
+              className={cn(
+                "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                isRtl ? "right-3" : "left-3",
+              )}
+            />
+            <Input
+              placeholder={t.search}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className={cn("h-10 rounded-lg", isRtl ? "pr-9 text-right" : "pl-9 text-left")}
+              dir={isRtl ? "rtl" : "ltr"}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <DateRangeFilter
+                locale={locale}
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                onDateFrom={setDateFrom}
+                onDateTo={setDateTo}
+              />
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-10 gap-2 rounded-lg">
+                    <MapPin className="h-4 w-4" />
+                    {t.cityFilter}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align={isRtl ? "start" : "end"}
+                  className="w-80"
+                  dir={isRtl ? "rtl" : "ltr"}
+                >
+                  <SearchablePersonFilter
+                    label={t.cityFilter}
+                    value={cityFilter}
+                    onChange={setCityFilter}
+                    options={cityOptions}
+                    locale={locale}
+                    placeholder={t.searchCity}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-10 gap-2 rounded-lg">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    {t.salesAgentFilter}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align={isRtl ? "start" : "end"}
+                  className="w-80"
+                  dir={isRtl ? "rtl" : "ltr"}
+                >
+                  <SearchablePersonFilter
+                    label={t.salesAgentFilter}
+                    value={salesAgentFilter}
+                    onChange={setSalesAgentFilter}
+                    options={salesAgentOptions}
+                    locale={locale}
+                    placeholder={t.searchAgent}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-10 gap-2 rounded-lg">
+                    <Truck className="h-4 w-4" />
+                    {t.deliveryAgentFilter}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align={isRtl ? "start" : "end"}
+                  className="w-80"
+                  dir={isRtl ? "rtl" : "ltr"}
+                >
+                  <SearchablePersonFilter
+                    label={t.deliveryAgentFilter}
+                    value={deliveryAgentFilter}
+                    onChange={setDeliveryAgentFilter}
+                    options={deliveryAgentOptions}
+                    locale={locale}
+                    placeholder={t.searchAgent}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-10 gap-2 rounded-lg">
+                    <CreditCard className="h-4 w-4" />
+                    {t.payment}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align={isRtl ? "start" : "end"}
+                  className="w-64"
+                  dir={isRtl ? "rtl" : "ltr"}
+                >
+                  <FilterSelect
+                    label={t.payment}
+                    value={payment}
+                    onChange={setPayment}
+                    options={PAYMENT_OPTIONS}
+                    locale={locale}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-10 gap-2 rounded-lg">
+                    <Truck className="h-4 w-4" />
+                    {t.delivery}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align={isRtl ? "start" : "end"}
+                  className="w-64"
+                  dir={isRtl ? "rtl" : "ltr"}
+                >
+                  <FilterSelect
+                    label={t.delivery}
+                    value={delivery}
+                    onChange={setDelivery}
+                    options={DELIVERY_OPTIONS}
+                    locale={locale}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-10 gap-2 rounded-lg">
+                    <ArrowUpDown className="h-4 w-4" />
+                    {t.sort}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align={isRtl ? "start" : "end"}
+                  className="w-64"
+                  dir={isRtl ? "rtl" : "ltr"}
+                >
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground">{t.sort}</div>
+                    <Select
+                      value={sort}
+                      onValueChange={(value) => setSort(value as SortKey)}
+                      dir={isRtl ? "rtl" : "ltr"}
+                    >
+                      <SelectTrigger className="h-9 rounded-md">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SORT_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option[locale]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              <Button variant="ghost" className="h-10 gap-2 rounded-lg" onClick={resetFilters}>
+                <X className="h-4 w-4" />
+                {t.reset}
+              </Button>
+            </div>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="h-10 gap-2 rounded-lg">
+                  <span>{t.columns}</span>
+                  <Columns className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align={isRtl ? "start" : "end"} className="w-52">
+                <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {Object.keys(DEFAULT_COLUMNS).map((key) => {
+                  const columnKey = key as ColumnKey;
+
+                  if (columnKey === "select" || columnKey === "actions") return null;
+
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={columnKey}
+                      checked={columns[columnKey]}
+                      onCheckedChange={(checked) =>
+                        setColumns((current) => ({
+                          ...current,
+                          [columnKey]: Boolean(checked),
+                        }))
+                      }
+                    >
+                      {columnLabels[columnKey]}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="w-full overflow-x-auto">
+              <Table
+                dir={isRtl ? "rtl" : "ltr"}
+                className={cn(
+                  "min-w-[1280px]",
+                  isRtl
+                    ? "[&_td]:text-right [&_th]:text-right"
+                    : "[&_td]:text-left [&_th]:text-left",
+                )}
+              >
+                <TableHeader>
+                  <TableRow className="h-11 hover:bg-transparent">
+                    <HeaderCell enabled={columns.select} className="w-12">
+                      <Checkbox
+                        checked={allVisibleSelected}
+                        onCheckedChange={(checked) => toggleAllRows(Boolean(checked))}
+                        aria-label="Select all"
+                      />
+                    </HeaderCell>
+
+                    <HeaderCell enabled={columns.product} className="min-w-[280px]">
+                      {t.table.product}
+                    </HeaderCell>
+
+                    <HeaderCell enabled={columns.price} className="min-w-[140px]">
+                      <HeaderSortButton
+                        isRtl={isRtl}
+                        onClick={() => setSort(sort === "price_asc" ? "price_desc" : "price_asc")}
+                      >
+                        {t.table.price}
+                      </HeaderSortButton>
+                    </HeaderCell>
+
+                    <HeaderCell enabled={columns.customer} className="min-w-[220px]">
+                      {t.table.customer}
+                    </HeaderCell>
+
+                    <HeaderCell enabled={columns.salesAgent} className="min-w-[170px]">
+                      {t.table.salesAgent}
+                    </HeaderCell>
+
+                    <HeaderCell enabled={columns.date} className="min-w-[150px]">
+                      <HeaderSortButton
+                        isRtl={isRtl}
+                        onClick={() =>
+                          setSort(sort === "created_asc" ? "created_desc" : "created_asc")
+                        }
+                      >
+                        {t.table.date}
+                      </HeaderSortButton>
+                    </HeaderCell>
+
+                    <HeaderCell enabled={columns.type} className="min-w-[120px]">
+                      {t.table.type}
+                    </HeaderCell>
+
+                    <HeaderCell enabled={columns.payment} className="min-w-[140px]">
+                      {t.table.payment}
+                    </HeaderCell>
+
+                    <HeaderCell enabled={columns.delivery} className="min-w-[180px]">
+                      {t.table.delivery}
+                    </HeaderCell>
+
+                    <HeaderCell enabled={columns.status} className="min-w-[140px]">
+                      {t.table.status}
+                    </HeaderCell>
+
+                    <HeaderCell enabled={columns.actions} className="w-14 text-end" />
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {loading ? (
+                    <TableSkeleton colSpan={visibleColSpan} />
+                  ) : error ? (
+                    <TableRow>
+                      <TableCell colSpan={visibleColSpan} className="h-40 text-center">
+                        <div className="mx-auto max-w-md space-y-3">
+                          <div className="font-medium">{t.errorTitle}</div>
+                          <div className="text-sm text-muted-foreground">{error}</div>
+                          <Button variant="outline" onClick={() => loadOrders("refresh")}>
+                            <RefreshCw className="h-4 w-4" />
+                            {t.retry}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : rows.length ? (
+                    rows.map((row) => {
+                      const key = row.id || row.number;
+
+                      return (
+                        <TableRow
+                          key={key}
+                          className="h-[62px]"
+                          data-state={selectedRows[key] && "selected"}
+                        >
+                          <ColumnCell enabled={columns.select} className="w-12">
+                            <Checkbox
+                              checked={Boolean(selectedRows[key])}
+                              onCheckedChange={(checked) => toggleRow(key, Boolean(checked))}
+                              aria-label="Select row"
+                            />
+                          </ColumnCell>
+
+                          <ColumnCell enabled={columns.product} className="min-w-[280px]">
+                            <div className="min-w-0 space-y-1">
+                              <div className="truncate font-medium">
+                                {row.id ? (
+                                  <Link
+                                    href={`/system/orders/${row.id}`}
+                                    className="hover:underline"
+                                  >
+                                    {row.productName}
+                                  </Link>
+                                ) : (
+                                  row.productName
+                                )}
+                              </div>
+                              <div className="truncate text-xs text-muted-foreground">
+                                {row.providerName || statusLabel(row.orderKind, locale)}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {row.number.startsWith("#") || row.number.startsWith("ORD")
+                                  ? row.number
+                                  : `#${row.number}`}
+                              </div>
+                            </div>
+                          </ColumnCell>
+
+                          <ColumnCell enabled={columns.price} className="min-w-[140px]">
+                            <Money value={row.price} />
+                            {row.remaining > 0 && (
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {t.remaining} {formatNumber(row.remaining)}
+                              </div>
+                            )}
+                          </ColumnCell>
+
+                          <ColumnCell enabled={columns.customer} className="min-w-[220px]">
+                            <div className="space-y-1">
+                              <div className="font-semibold">{row.customerName}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {row.customerPhone || row.customerEmail || "—"}
+                              </div>
+                              {row.customerCity ? (
+                                <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                  <MapPin className="h-3.5 w-3.5" />
+                                  <span>{row.customerCity}</span>
+                                </div>
+                              ) : null}
+                            </div>
+                          </ColumnCell>
+
+                          <ColumnCell enabled={columns.salesAgent} className="min-w-[170px]">
+                            <div className="font-medium">{row.salesAgentName || t.noAgent}</div>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            enabled={columns.date}
+                            className="min-w-[150px] text-muted-foreground"
+                          >
+                            {formatDate(row.createdAt, locale)}
+                          </ColumnCell>
+
+                          <ColumnCell enabled={columns.type} className="min-w-[120px]">
+                            <div className="capitalize">
+                              {row.isCod
+                                ? statusLabel("cash_on_delivery", locale)
+                                : statusLabel(row.orderKind, locale)}
+                            </div>
+                          </ColumnCell>
+
+                          <ColumnCell enabled={columns.payment} className="min-w-[140px]">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "rounded-full px-2.5 py-1 capitalize",
+                                badgeClass(row.paymentStatus),
+                              )}
+                            >
+                              {statusLabel(row.paymentStatus, locale)}
+                            </Badge>
+                          </ColumnCell>
+
+                          <ColumnCell enabled={columns.delivery} className="min-w-[180px]">
+                            <div className="font-medium">{row.deliveryAgentName || "—"}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {row.cashCollectedAmount > 0 ? (
+                                <Money value={row.cashCollectedAmount} />
+                              ) : (
+                                statusLabel(row.fulfillmentStatus, locale)
+                              )}
+                            </div>
+                          </ColumnCell>
+
+                          <ColumnCell enabled={columns.status} className="min-w-[140px]">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "rounded-full px-2.5 py-1 capitalize",
+                                badgeClass(row.status),
+                              )}
+                            >
+                              {statusLabel(row.status, locale)}
+                            </Badge>
+                          </ColumnCell>
+
+                          <ColumnCell enabled={columns.actions} className="w-14 text-end">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <span className="sr-only">{t.details}</span>
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align={isRtl ? "start" : "end"}>
+                                <DropdownMenuLabel>{t.details}</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/system/orders/${row.id}`}>
+                                    <Eye className="h-4 w-4" />
+                                    {t.details}
+                                  </Link>
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </ColumnCell>
+                        </TableRow>
+                      );
+                    })
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={visibleColSpan} className="h-44 text-center">
+                        <div className="mx-auto max-w-md space-y-2">
+                          <div className="font-medium">
+                            {baseRows.length ? t.noResults : t.emptyTitle}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {baseRows.length ? t.noResults : t.emptyBody}
+                          </div>
+                          {canCreate && !baseRows.length && (
+                            <Button asChild className="mt-2 bg-black text-white hover:bg-black/90">
+                              <Link href="/system/orders/create">
+                                <Plus className="h-4 w-4" />
+                                {t.create}
+                              </Link>
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-muted-foreground">
+              {selectedCount} {t.of} {rows.length} {t.row} {t.selected}.
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="hidden text-sm text-muted-foreground sm:inline">
+                {t.page} {formatNumber(page)} {t.of} {formatNumber(totalPages)}
+              </span>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+              >
+                {isRtl ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+                {t.previous}
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || loading}
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              >
+                {t.next}
+                {isRtl ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

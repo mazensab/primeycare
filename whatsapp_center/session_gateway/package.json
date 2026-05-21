@@ -1,0 +1,24 @@
+{
+  "name": "primeycare-whatsapp-session-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Primey Care WhatsApp Web Session Gateway using Baileys",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "latest",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.18.3",
+    "pino": "^9.0.0",
+    "qrcode": "^1.5.4"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}

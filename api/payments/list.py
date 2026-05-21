@@ -1,15 +1,17 @@
 # ============================================================
 # 📂 api/payments/list.py
-# 🧠 Payments API List — Primey Care V2
+# 🧠 Payments API List — Primey Care V2.1
 # ------------------------------------------------------------
 # ✅ قائمة المدفوعات
 # ✅ فلترة حسب الحالة / الطريقة / المزود / الفاتورة / الطلب / العميل
 # ✅ فلترة حسب الترحيل للخزينة والمحاسبة
 # ✅ بحث برقم الدفعة / المرجع الخارجي / العملية / العميل
+# ✅ يدعم البحث برقم العميل الموحد normalized_phone
 # ✅ Summary مالي مناسب للواجهة
 # ✅ Pagination بنمط page/page_size مع دعم limit/offset القديم
 # ✅ Unified response: ok / success / data / results
 # ✅ Compatible with Accounting / Treasury / Gateways flow
+# ✅ Compatible with Customer Portal / OTP customer account fields
 # ============================================================
 
 from __future__ import annotations
@@ -24,6 +26,8 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
+
+from customers.models import normalize_customer_phone
 
 
 logger = logging.getLogger(__name__)
@@ -130,6 +134,10 @@ def _clean_str(value: Any, default: str = "") -> str:
 
     cleaned = str(value).strip()
     return cleaned if cleaned else default
+
+
+def _clean_upper(value: Any, default: str = "") -> str:
+    return _clean_str(value, default).upper()
 
 
 def _to_int(value: Any, default: int) -> int:
@@ -254,9 +262,11 @@ def _serialize_invoice(invoice) -> dict[str, Any] | None:
         "id": _safe_attr(invoice, "id", None),
         "invoice_number": _safe_attr(invoice, "invoice_number", ""),
         "status": _safe_attr(invoice, "status", ""),
-        "total_amount": _safe_attr(invoice, "total_amount", None),
-        "paid_amount": _safe_attr(invoice, "paid_amount", None),
-        "due_amount": _safe_attr(invoice, "due_amount", None),
+        "total_amount": _money(_safe_attr(invoice, "total_amount", None)),
+        "paid_amount": _money(_safe_attr(invoice, "paid_amount", None)),
+        "due_amount": _money(_safe_attr(invoice, "due_amount", None)),
+        "customer_id": _safe_attr(invoice, "customer_id", None),
+        "order_id": _safe_attr(invoice, "order_id", None),
         "accounting_entry_reference": _safe_attr(invoice, "accounting_entry_reference", ""),
         "is_accounting_posted": bool(_safe_attr(invoice, "is_accounting_posted", False)),
     }
@@ -275,9 +285,11 @@ def _serialize_order(order) -> dict[str, Any] | None:
         ),
         "status": _safe_attr(order, "status", ""),
         "payment_status": _safe_attr(order, "payment_status", ""),
-        "total_amount": _safe_attr(order, "total_amount", None),
-        "amount_paid": _safe_attr(order, "amount_paid", None),
-        "remaining_amount": _safe_attr(order, "remaining_amount", None),
+        "fulfillment_status": _safe_attr(order, "fulfillment_status", ""),
+        "total_amount": _money(_safe_attr(order, "total_amount", None)),
+        "amount_paid": _money(_safe_attr(order, "amount_paid", None)),
+        "remaining_amount": _money(_safe_attr(order, "remaining_amount", None)),
+        "customer_id": _safe_attr(order, "customer_id", None),
     }
 
 
@@ -285,20 +297,46 @@ def _serialize_customer(customer) -> dict[str, Any] | None:
     if not customer:
         return None
 
+    full_name = (
+        _safe_attr(customer, "display_name", "")
+        or _safe_attr(customer, "full_name", "")
+        or _safe_attr(customer, "name", "")
+    )
+
+    phone_number = (
+        _safe_attr(customer, "phone_number", "")
+        or _safe_attr(customer, "phone", "")
+        or _safe_attr(customer, "mobile", "")
+    )
+
+    whatsapp_number = _safe_attr(customer, "whatsapp_number", "")
+    user = _safe_attr(customer, "user", None)
+
     return {
         "id": _safe_attr(customer, "id", None),
         "customer_code": _safe_attr(customer, "customer_code", ""),
-        "name": (
-            _safe_attr(customer, "display_name", "")
-            or _safe_attr(customer, "full_name", "")
-            or _safe_attr(customer, "name", "")
-        ),
-        "phone": (
-            _safe_attr(customer, "phone_number", "")
-            or _safe_attr(customer, "phone", "")
-            or _safe_attr(customer, "mobile", "")
+        "name": full_name,
+        "display_name": full_name,
+        "full_name": _safe_attr(customer, "full_name", "") or full_name,
+        "status": _safe_attr(customer, "status", ""),
+        "phone": phone_number,
+        "phone_number": phone_number,
+        "whatsapp_number": whatsapp_number,
+        "primary_contact_number": (
+            whatsapp_number
+            or phone_number
+            or _safe_attr(customer, "alternative_phone_number", "")
         ),
         "email": _safe_attr(customer, "email", ""),
+        "normalized_phone": _safe_attr(customer, "normalized_phone", ""),
+        "user_id": _safe_attr(customer, "user_id", None),
+        "user_username": _safe_attr(user, "username", "") if user else "",
+        "has_customer_account": bool(_safe_attr(customer, "user_id", None)),
+        "is_phone_verified": bool(_safe_attr(customer, "phone_verified_at", None)),
+        "is_whatsapp_verified": bool(_safe_attr(customer, "whatsapp_verified_at", None)),
+        "phone_verified_at": _iso_datetime(_safe_attr(customer, "phone_verified_at", None)),
+        "whatsapp_verified_at": _iso_datetime(_safe_attr(customer, "whatsapp_verified_at", None)),
+        "last_login_at": _iso_datetime(_safe_attr(customer, "last_login_at", None)),
     }
 
 
@@ -365,6 +403,7 @@ def _payment_queryset(Payment, request):
             "invoice",
             "order",
             "customer",
+            "customer__user",
         )
         .all()
         .order_by("-created_at", "-id")
@@ -380,9 +419,9 @@ def _payment_queryset(Payment, request):
 
 
 def _apply_filters(queryset, request):
-    status_filter = _clean_str(request.GET.get("status"))
-    method_filter = _clean_str(request.GET.get("payment_method") or request.GET.get("method"))
-    provider_filter = _clean_str(request.GET.get("provider"))
+    status_filter = _clean_upper(request.GET.get("status"))
+    method_filter = _clean_upper(request.GET.get("payment_method") or request.GET.get("method"))
+    provider_filter = _clean_upper(request.GET.get("provider"))
 
     invoice_id = _clean_str(request.GET.get("invoice_id"))
     order_id = _clean_str(request.GET.get("order_id"))
@@ -452,7 +491,9 @@ def _apply_filters(queryset, request):
         queryset = queryset.filter(paid_at__date__lte=paid_to)
 
     if search:
-        queryset = queryset.filter(
+        normalized_phone = normalize_customer_phone(search)
+
+        search_filter = (
             Q(payment_number__icontains=search)
             | Q(external_reference__icontains=search)
             | Q(transaction_id__icontains=search)
@@ -462,12 +503,19 @@ def _apply_filters(queryset, request):
             | Q(accounting_entry_reference__icontains=search)
             | Q(customer__customer_code__icontains=search)
             | Q(customer__display_name__icontains=search)
-            | Q(customer__full_name__icontains=search)
-            | Q(customer__name__icontains=search)
-            | Q(customer__phone__icontains=search)
             | Q(customer__phone_number__icontains=search)
+            | Q(customer__whatsapp_number__icontains=search)
+            | Q(customer__normalized_phone__icontains=search)
             | Q(customer__email__icontains=search)
+            | Q(customer__user__username__icontains=search)
+            | Q(order__order_number__icontains=search)
+            | Q(invoice__invoice_number__icontains=search)
         )
+
+        if normalized_phone:
+            search_filter |= Q(customer__normalized_phone__icontains=normalized_phone)
+
+        queryset = queryset.filter(search_filter)
 
     return queryset
 
@@ -610,17 +658,18 @@ def payment_list_api(request):
 
         items = [_serialize_payment(item) for item in paginated["items"]]
         pagination = paginated["pagination"]
+        summary = _build_summary(queryset)
 
         return _json_success(
             {
                 "items": items,
                 "results": items,
-                "summary": _build_summary(queryset),
+                "summary": summary,
                 "totals": {
-                    "amount": _build_summary(queryset)["total_amount"],
-                    "paid_amount": _build_summary(queryset)["total_paid_amount"],
-                    "refunded_amount": _build_summary(queryset)["total_refunded_amount"],
-                    "net_collected_amount": _build_summary(queryset)["net_collected_amount"],
+                    "amount": summary["total_amount"],
+                    "paid_amount": summary["total_paid_amount"],
+                    "refunded_amount": summary["total_refunded_amount"],
+                    "net_collected_amount": summary["net_collected_amount"],
                 },
                 "pagination": pagination,
                 "filters": _filters_payload(request),

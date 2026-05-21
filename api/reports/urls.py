@@ -1,15 +1,27 @@
 # ============================================================
 # 📂 api/reports/urls.py
-# 🧠 Primey Care | Reports API Router V2
+# 🧠 Primey Care | Reports API Router V2.5
 # ------------------------------------------------------------
 # ✅ Reports overview
 # ✅ Customers report
 # ✅ Providers report
 # ✅ Orders report
+#    - Order lifecycle
+#    - Delivery lifecycle
+#    - Cash on delivery
+#    - Cash collection
+#    - Sales agent / delivery agent breakdown
 # ✅ Invoices report
 # ✅ Payments report
 # ✅ Accounting report
-# ✅ Compatible with rebuilt Accounting / Treasury / Payments flow
+# ✅ Compatible with rebuilt Orders / Accounting / Treasury / Payments flow
+# ------------------------------------------------------------
+# ملاحظات:
+# - تقرير الطلبات المركزي:
+#   GET /api/reports/orders/
+# - تقرير الطلبات الخاص بموديول الطلبات:
+#   GET /api/orders/reports/
+# - كلاهما مفيد، لكن /api/reports/orders/ مخصص للتقارير المركزية.
 # ============================================================
 
 from django.urls import path
@@ -62,7 +74,7 @@ urlpatterns = [
     ),
 
     # ========================================================
-    # 📦 Operations
+    # 📦 Operations Reports
     # --------------------------------------------------------
     # GET /api/reports/orders/
     # GET /api/reports/invoices/
@@ -85,7 +97,7 @@ urlpatterns = [
     ),
 
     # ========================================================
-    # 🧾 Accounting
+    # 🧾 Accounting Reports
     # --------------------------------------------------------
     # GET /api/reports/accounting/
     # ========================================================

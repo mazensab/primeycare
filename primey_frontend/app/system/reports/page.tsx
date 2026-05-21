@@ -3,21 +3,6 @@
 /* ============================================================
    📂 app/system/reports/page.tsx
    🧠 Primey Care | Central Reports Overview
-
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ نفس النمط المعتمد
-   ✅ w-full space-y-4
-   ✅ بدون main / min-h-screen / max-w
-   ✅ أزرار انتقال لكل صفحات التقارير المركزية الحالية
-   ✅ تمت إضافة تقرير الخزينة
-   ✅ Skeleton Loading
-   ✅ Error State مستقل
-   ✅ Empty State ذكي
-   ✅ Excel .xls HTML Workbook
-   ✅ Web PDF Print
-   ✅ sonner
-   ✅ SAR icon من /currency/sar.svg
-   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
 ============================================================ */
 
 import Image from "next/image";
@@ -30,7 +15,6 @@ import {
   CreditCard,
   Download,
   FileBarChart,
-  FileText,
   Landmark,
   Loader2,
   Printer,
@@ -39,6 +23,7 @@ import {
   Search,
   ShoppingCart,
   Stethoscope,
+  Truck,
   Users,
   WalletCards,
   XCircle,
@@ -79,18 +64,36 @@ type ReportsSummary = {
   total_orders: number;
   total_invoices: number;
   total_payments: number;
+
   total_revenue: number;
   total_paid: number;
   total_outstanding: number;
+
   accounting_entries: number;
   posted_entries: number;
+
   pending_invoices: number;
   confirmed_payments: number;
+
   treasury_accounts: number;
   treasury_transactions: number;
   treasury_balance: number;
   treasury_cash_balance: number;
   treasury_bank_balance: number;
+
+  total_order_items: number;
+  confirmed_orders: number;
+  card_ready_orders: number;
+  assigned_for_delivery_orders: number;
+  out_for_delivery_orders: number;
+  delivered_orders: number;
+  completed_orders: number;
+
+  cod_orders: number;
+  cod_collected_orders: number;
+  cod_pending_orders: number;
+  cash_collected_amount: number;
+  cash_pending_collection_amount: number;
 };
 
 type ReportCard = {
@@ -103,6 +106,7 @@ type ReportCard = {
   descriptionAr: string;
   descriptionEn: string;
   metricKey: keyof ReportsSummary;
+  money?: boolean;
 };
 
 type ApiEnvelope<T> = {
@@ -115,6 +119,7 @@ type ApiEnvelope<T> = {
   summary?: Partial<ReportsSummary>;
   stats?: Partial<ReportsSummary>;
   totals?: Partial<ReportsSummary>;
+  results?: unknown;
 };
 
 const SAR_ICON_PATH = "/currency/sar.svg";
@@ -125,18 +130,36 @@ const DEFAULT_SUMMARY: ReportsSummary = {
   total_orders: 0,
   total_invoices: 0,
   total_payments: 0,
+
   total_revenue: 0,
   total_paid: 0,
   total_outstanding: 0,
+
   accounting_entries: 0,
   posted_entries: 0,
+
   pending_invoices: 0,
   confirmed_payments: 0,
+
   treasury_accounts: 0,
   treasury_transactions: 0,
   treasury_balance: 0,
   treasury_cash_balance: 0,
   treasury_bank_balance: 0,
+
+  total_order_items: 0,
+  confirmed_orders: 0,
+  card_ready_orders: 0,
+  assigned_for_delivery_orders: 0,
+  out_for_delivery_orders: 0,
+  delivered_orders: 0,
+  completed_orders: 0,
+
+  cod_orders: 0,
+  cod_collected_orders: 0,
+  cod_pending_orders: 0,
+  cash_collected_amount: 0,
+  cash_pending_collection_amount: 0,
 };
 
 /* ============================================================
@@ -377,12 +400,21 @@ function hasAnyPermission(
           "accountant",
           "support",
           "viewer",
+          "order_manager",
+          "orders_manager",
         ].includes(role),
       );
     }
 
     return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
+      [
+        "system_admin",
+        "superuser",
+        "super_admin",
+        "accountant",
+        "order_manager",
+        "orders_manager",
+      ].includes(role),
     );
   }
 
@@ -416,15 +448,38 @@ function dictionary(locale: AppLocale) {
     totalProviders: isArabic ? "مقدمو الخدمة" : "Providers",
     totalInvoices: isArabic ? "الفواتير" : "Invoices",
     totalPayments: isArabic ? "المدفوعات" : "Payments",
+
     accountingEntries: isArabic ? "القيود المحاسبية" : "Accounting Entries",
     postedEntries: isArabic ? "قيود مرحلة" : "Posted Entries",
+
     pendingInvoices: isArabic ? "فواتير معلقة" : "Pending Invoices",
     confirmedPayments: isArabic ? "مدفوعات مؤكدة" : "Confirmed Payments",
+
     treasuryAccounts: isArabic ? "حسابات الخزينة" : "Treasury Accounts",
     treasuryTransactions: isArabic ? "حركات الخزينة" : "Treasury Transactions",
     treasuryBalance: isArabic ? "رصيد الخزينة" : "Treasury Balance",
     cashBalance: isArabic ? "رصيد الصناديق" : "Cash Balance",
     bankBalance: isArabic ? "رصيد البنوك" : "Bank Balance",
+
+    orderOperations: isArabic ? "تشغيل الطلبات والتوصيل" : "Order Operations",
+    totalOrderItems: isArabic ? "بنود الطلبات" : "Order Items",
+    confirmedOrders: isArabic ? "طلبات مؤكدة" : "Confirmed Orders",
+    cardReadyOrders: isArabic ? "بطاقات جاهزة للتوصيل" : "Cards Ready",
+    assignedForDelivery: isArabic ? "مسندة للتوصيل" : "Assigned for Delivery",
+    outForDelivery: isArabic ? "خارج للتوصيل" : "Out for Delivery",
+    deliveredOrders: isArabic ? "تم التسليم" : "Delivered",
+    completedOrders: isArabic ? "مكتملة" : "Completed",
+
+    codOrders: isArabic ? "طلبات الدفع عند الاستلام" : "COD Orders",
+    codCollectedOrders: isArabic ? "طلبات COD محصلة" : "Collected COD Orders",
+    codPendingOrders: isArabic ? "طلبات COD بانتظار التحصيل" : "Pending COD Orders",
+    cashCollected: isArabic ? "الكاش المحصل" : "Cash Collected",
+    cashPendingCollection: isArabic
+      ? "الكاش بانتظار التحصيل"
+      : "Cash Pending Collection",
+    custodyHint: isArabic
+      ? "مبالغ الدفع عند الاستلام تعتبر عهدة على مندوب التوصيل حتى تتم التسوية المالية."
+      : "Cash on delivery amounts remain as delivery agent custody until financial settlement.",
 
     reportsTitle: isArabic ? "تقارير النظام" : "System Reports",
     reportsDesc: isArabic
@@ -469,6 +524,10 @@ function dictionary(locale: AppLocale) {
     generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
     printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
     available: isArabic ? "متاح" : "Available",
+
+    excelReport: isArabic ? "التقرير" : "Report",
+    excelDescription: isArabic ? "الوصف" : "Description",
+    excelMetric: isArabic ? "المؤشر" : "Metric",
   };
 }
 
@@ -477,8 +536,24 @@ function dictionary(locale: AppLocale) {
 ============================================================ */
 
 function toNumber(value: unknown): number {
+  if (typeof value === "string") {
+    const cleaned = value.replaceAll(",", "").trim();
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function pickNumber(source: Dict, keys: string[]): number {
+  for (const key of keys) {
+    const value = toNumber(source[key]);
+
+    if (value !== 0) return value;
+  }
+
+  return 0;
 }
 
 function formatNumber(value: unknown): string {
@@ -503,78 +578,194 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function extractSummary(payload: ApiEnvelope<unknown> | null): Partial<ReportsSummary> {
+function extractSummary(payload: ApiEnvelope<unknown> | null): Dict {
   if (!payload) return {};
 
   const data = asDict(payload.data);
+  const results = asDict(payload.results);
 
   return {
     ...asDict(payload.summary),
     ...asDict(payload.stats),
     ...asDict(payload.totals),
+
     ...asDict(data.summary),
     ...asDict(data.stats),
     ...asDict(data.totals),
-    ...asDict(data),
-  } as Partial<ReportsSummary>;
+    ...asDict(data.overview),
+    ...asDict(data.orders),
+    ...asDict(data.financials),
+    ...asDict(data.treasury),
+    ...asDict(data.accounting),
+    ...data,
+
+    ...asDict(results.summary),
+    ...asDict(results.stats),
+    ...asDict(results.totals),
+  };
 }
 
-function buildSummary(apiSummary?: Partial<ReportsSummary>): ReportsSummary {
+function buildSummary(apiSummary?: Dict): ReportsSummary {
   const api = asDict(apiSummary);
 
+  const cashCollectedAmount = pickNumber(api, [
+    "cash_collected_amount",
+    "cod_collected_amount",
+    "total_cash_collected",
+    "total_cod_collected",
+    "collected_cod_amount",
+    "collected_cash_amount",
+  ]);
+
+  const cashPendingCollectionAmount = pickNumber(api, [
+    "cash_pending_collection_amount",
+    "cod_pending_collection_amount",
+    "pending_cash_collection_amount",
+    "pending_cod_amount",
+    "uncollected_cod_amount",
+  ]);
+
+  const codOrders = pickNumber(api, [
+    "cod_orders",
+    "cash_on_delivery_orders",
+    "cash_on_delivery_orders_count",
+    "cod_orders_count",
+  ]);
+
+  const codCollectedOrders = pickNumber(api, [
+    "cod_collected_orders",
+    "cash_collected_orders",
+    "collected_cod_orders",
+    "cod_paid_orders",
+  ]);
+
+  const codPendingOrders =
+    pickNumber(api, [
+      "cod_pending_orders",
+      "cash_pending_orders",
+      "pending_cod_orders",
+      "pending_cash_collection_orders",
+      "cod_uncollected_orders",
+    ]) || Math.max(codOrders - codCollectedOrders, 0);
+
   return {
-    total_customers:
-      toNumber(api.total_customers) || toNumber(api.customers_count),
-    total_providers:
-      toNumber(api.total_providers) ||
-      toNumber(api.providers_count) ||
-      toNumber(api.centers_count),
-    total_orders: toNumber(api.total_orders) || toNumber(api.orders_count),
-    total_invoices:
-      toNumber(api.total_invoices) || toNumber(api.invoices_count),
-    total_payments:
-      toNumber(api.total_payments) || toNumber(api.payments_count),
-    total_revenue:
-      toNumber(api.total_revenue) ||
-      toNumber(api.revenue_total) ||
-      toNumber(api.total_amount),
-    total_paid:
-      toNumber(api.total_paid) ||
-      toNumber(api.paid_amount) ||
-      toNumber(api.total_paid_amount),
-    total_outstanding:
-      toNumber(api.total_outstanding) ||
-      toNumber(api.outstanding_amount) ||
-      toNumber(api.remaining_amount),
-    accounting_entries:
-      toNumber(api.accounting_entries) || toNumber(api.journal_entries_count),
-    posted_entries:
-      toNumber(api.posted_entries) || toNumber(api.posted_entries_count),
-    pending_invoices:
-      toNumber(api.pending_invoices) || toNumber(api.pending_invoices_count),
-    confirmed_payments:
-      toNumber(api.confirmed_payments) ||
-      toNumber(api.confirmed_payments_count),
-    treasury_accounts:
-      toNumber(api.treasury_accounts) ||
-      toNumber(api.treasury_accounts_count) ||
-      toNumber(api.cashboxes_count) + toNumber(api.banks_count),
-    treasury_transactions:
-      toNumber(api.treasury_transactions) ||
-      toNumber(api.treasury_transactions_count) ||
-      toNumber(api.transactions_count),
-    treasury_balance:
-      toNumber(api.treasury_balance) ||
-      toNumber(api.total_treasury_balance) ||
-      toNumber(api.total_balance),
-    treasury_cash_balance:
-      toNumber(api.treasury_cash_balance) ||
-      toNumber(api.cash_balance) ||
-      toNumber(api.total_cash_balance),
-    treasury_bank_balance:
-      toNumber(api.treasury_bank_balance) ||
-      toNumber(api.bank_balance) ||
-      toNumber(api.total_bank_balance),
+    total_customers: pickNumber(api, ["total_customers", "customers_count"]),
+    total_providers: pickNumber(api, [
+      "total_providers",
+      "providers_count",
+      "centers_count",
+      "service_network_count",
+    ]),
+    total_orders: pickNumber(api, ["total_orders", "orders_count"]),
+    total_invoices: pickNumber(api, ["total_invoices", "invoices_count"]),
+    total_payments: pickNumber(api, ["total_payments", "payments_count"]),
+
+    total_revenue: pickNumber(api, [
+      "total_revenue",
+      "revenue_total",
+      "total_amount",
+      "orders_total_amount",
+      "invoices_total_amount",
+    ]),
+    total_paid: pickNumber(api, [
+      "total_paid",
+      "paid_amount",
+      "total_paid_amount",
+      "payments_total_amount",
+    ]),
+    total_outstanding: pickNumber(api, [
+      "total_outstanding",
+      "outstanding_amount",
+      "remaining_amount",
+      "total_remaining_amount",
+    ]),
+
+    accounting_entries: pickNumber(api, [
+      "accounting_entries",
+      "journal_entries_count",
+      "entries_count",
+    ]),
+    posted_entries: pickNumber(api, [
+      "posted_entries",
+      "posted_entries_count",
+      "posted_journal_entries_count",
+    ]),
+
+    pending_invoices: pickNumber(api, [
+      "pending_invoices",
+      "pending_invoices_count",
+      "draft_invoices_count",
+    ]),
+    confirmed_payments: pickNumber(api, [
+      "confirmed_payments",
+      "confirmed_payments_count",
+      "paid_payments_count",
+    ]),
+
+    treasury_accounts: pickNumber(api, [
+      "treasury_accounts",
+      "treasury_accounts_count",
+    ]) || pickNumber(api, ["cashboxes_count"]) + pickNumber(api, ["banks_count"]),
+    treasury_transactions: pickNumber(api, [
+      "treasury_transactions",
+      "treasury_transactions_count",
+      "transactions_count",
+    ]),
+    treasury_balance: pickNumber(api, [
+      "treasury_balance",
+      "total_treasury_balance",
+      "total_balance",
+    ]),
+    treasury_cash_balance: pickNumber(api, [
+      "treasury_cash_balance",
+      "cash_balance",
+      "total_cash_balance",
+    ]),
+    treasury_bank_balance: pickNumber(api, [
+      "treasury_bank_balance",
+      "bank_balance",
+      "total_bank_balance",
+    ]),
+
+    total_order_items: pickNumber(api, [
+      "total_order_items",
+      "order_items_count",
+      "items_count",
+    ]),
+    confirmed_orders: pickNumber(api, [
+      "confirmed_orders",
+      "confirmed_orders_count",
+    ]),
+    card_ready_orders: pickNumber(api, [
+      "card_ready_orders",
+      "card_ready_orders_count",
+      "ready_for_delivery_orders",
+      "ready_for_delivery_orders_count",
+    ]),
+    assigned_for_delivery_orders: pickNumber(api, [
+      "assigned_for_delivery_orders",
+      "assigned_for_delivery_orders_count",
+      "delivery_assigned_orders",
+      "delivery_assigned_orders_count",
+    ]),
+    out_for_delivery_orders: pickNumber(api, [
+      "out_for_delivery_orders",
+      "out_for_delivery_orders_count",
+    ]),
+    delivered_orders: pickNumber(api, [
+      "delivered_orders",
+      "delivered_orders_count",
+    ]),
+    completed_orders: pickNumber(api, [
+      "completed_orders",
+      "completed_orders_count",
+    ]),
+
+    cod_orders: codOrders,
+    cod_collected_orders: codCollectedOrders,
+    cod_pending_orders: codPendingOrders,
+    cash_collected_amount: cashCollectedAmount,
+    cash_pending_collection_amount: cashPendingCollectionAmount,
   };
 }
 
@@ -659,15 +850,17 @@ function downloadExcel({
   const t = dictionary(locale);
 
   const rowsHtml = reports
-    .map(
-      (report) => `
+    .map((report) => {
+      const value = summary[report.metricKey];
+      const formatted = report.money ? formatMoney(value) : formatNumber(value);
+
+      return `
         <tr>
           <td>${escapeHtml(reportTitle(report, locale))}</td>
           <td>${escapeHtml(reportDescription(report, locale))}</td>
-          <td>${escapeHtml(formatNumber(summary[report.metricKey]))}</td>
-          <td>${escapeHtml(report.href)}</td>
-        </tr>`,
-    )
+          <td>${escapeHtml(formatted)}</td>
+        </tr>`;
+    })
     .join("");
 
   const workbook = `
@@ -689,26 +882,28 @@ function downloadExcel({
           th { background: #d8ecfb; font-weight: 700; }
           .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
           .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
+          .summary-label { font-weight: 700; background: #f8fafc; width: 260px; }
         </style>
       </head>
       <body dir="${dir}">
         <table>
-          <tr><td class="title" colspan="4">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="4"></td></tr>
-          <tr><td class="section" colspan="4">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalRevenue)}</td><td colspan="3">${escapeHtml(formatMoney(summary.total_revenue))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalPaid)}</td><td colspan="3">${escapeHtml(formatMoney(summary.total_paid))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.treasuryBalance)}</td><td colspan="3">${escapeHtml(formatMoney(summary.treasury_balance))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalOrders)}</td><td colspan="3">${escapeHtml(formatNumber(summary.total_orders))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalInvoices)}</td><td colspan="3">${escapeHtml(formatNumber(summary.total_invoices))}</td></tr>
+          <tr><td class="title" colspan="3">${escapeHtml(title)}</td></tr>
+          <tr><td colspan="3"></td></tr>
+          <tr><td class="section" colspan="3">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
 
-          <tr><td colspan="4"></td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalRevenue)}</td><td colspan="2">${escapeHtml(formatMoney(summary.total_revenue))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalPaid)}</td><td colspan="2">${escapeHtml(formatMoney(summary.total_paid))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.treasuryBalance)}</td><td colspan="2">${escapeHtml(formatMoney(summary.treasury_balance))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.totalOrders)}</td><td colspan="2">${escapeHtml(formatNumber(summary.total_orders))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.deliveredOrders)}</td><td colspan="2">${escapeHtml(formatNumber(summary.delivered_orders))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.cashCollected)}</td><td colspan="2">${escapeHtml(formatMoney(summary.cash_collected_amount))}</td></tr>
+          <tr><td class="summary-label">${escapeHtml(t.cashPendingCollection)}</td><td colspan="2">${escapeHtml(formatMoney(summary.cash_pending_collection_amount))}</td></tr>
+
+          <tr><td colspan="3"></td></tr>
           <tr>
-            <th>${escapeHtml(t.reportsTitle)}</th>
-            <th>${escapeHtml("Description")}</th>
-            <th>${escapeHtml("Metric")}</th>
-            <th>${escapeHtml("Page")}</th>
+            <th>${escapeHtml(t.excelReport)}</th>
+            <th>${escapeHtml(t.excelDescription)}</th>
+            <th>${escapeHtml(t.excelMetric)}</th>
           </tr>
           ${rowsHtml}
         </table>
@@ -744,14 +939,17 @@ function buildPrintHtml({
   const t = dictionary(locale);
 
   const rows = reports
-    .map(
-      (report) => `
+    .map((report) => {
+      const value = summary[report.metricKey];
+      const formatted = report.money ? formatMoney(value) : formatNumber(value);
+
+      return `
         <tr>
           <td>${escapeHtml(reportTitle(report, locale))}</td>
           <td>${escapeHtml(reportDescription(report, locale))}</td>
-          <td>${escapeHtml(formatNumber(summary[report.metricKey]))}</td>
-        </tr>`,
-    )
+          <td>${escapeHtml(formatted)}</td>
+        </tr>`;
+    })
     .join("");
 
   return `
@@ -824,16 +1022,16 @@ function buildPrintHtml({
         <div class="grid">
           <div class="box"><span>${escapeHtml(t.totalRevenue)}</span><strong>${escapeHtml(formatMoney(summary.total_revenue))}</strong></div>
           <div class="box"><span>${escapeHtml(t.totalPaid)}</span><strong>${escapeHtml(formatMoney(summary.total_paid))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.treasuryBalance)}</span><strong>${escapeHtml(formatMoney(summary.treasury_balance))}</strong></div>
+          <div class="box"><span>${escapeHtml(t.cashCollected)}</span><strong>${escapeHtml(formatMoney(summary.cash_collected_amount))}</strong></div>
           <div class="box"><span>${escapeHtml(t.totalOrders)}</span><strong>${escapeHtml(formatNumber(summary.total_orders))}</strong></div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th>${escapeHtml(t.reportsTitle)}</th>
-              <th>${escapeHtml("Description")}</th>
-              <th>${escapeHtml("Metric")}</th>
+              <th>${escapeHtml(t.excelReport)}</th>
+              <th>${escapeHtml(t.excelDescription)}</th>
+              <th>${escapeHtml(t.excelMetric)}</th>
             </tr>
           </thead>
           <tbody>${rows || `<tr><td colspan="3">${escapeHtml(t.noReportsTitle)}</td></tr>`}</tbody>
@@ -857,19 +1055,15 @@ function buildPrintHtml({
 function getReportCards(): ReportCard[] {
   return [
     {
-      key: "accounting",
-      href: "/system/reports/accounting",
-      icon: <Calculator className="h-5 w-5" />,
-      permissionCodes: [
-        "reports.view",
-        "reports.accounting.view",
-        "accounting.view",
-      ],
-      titleAr: "تقرير المحاسبة",
-      titleEn: "Accounting Report",
-      descriptionAr: "ملخص القيود والترحيل والأثر المالي.",
-      descriptionEn: "Journal entries, posting, and financial impact.",
-      metricKey: "accounting_entries",
+      key: "orders",
+      href: "/system/reports/orders",
+      icon: <ShoppingCart className="h-5 w-5" />,
+      permissionCodes: ["reports.view", "reports.orders.view", "orders.view"],
+      titleAr: "تقرير الطلبات",
+      titleEn: "Orders Report",
+      descriptionAr: "متابعة دورة الطلب والحالات والتوصيل والتحصيل.",
+      descriptionEn: "Order lifecycle, statuses, delivery, and collection.",
+      metricKey: "total_orders",
     },
     {
       key: "customers",
@@ -881,39 +1075,6 @@ function getReportCards(): ReportCard[] {
       descriptionAr: "تحليل العملاء والنشاط والطلبات والمدفوعات.",
       descriptionEn: "Customer activity, orders, and payments analysis.",
       metricKey: "total_customers",
-    },
-    {
-      key: "invoices",
-      href: "/system/reports/invoices",
-      icon: <ReceiptText className="h-5 w-5" />,
-      permissionCodes: ["reports.view", "reports.invoices.view", "invoices.view"],
-      titleAr: "تقرير الفواتير",
-      titleEn: "Invoices Report",
-      descriptionAr: "تحليل الفواتير والإصدار والمستحقات.",
-      descriptionEn: "Invoice issuance and outstanding analysis.",
-      metricKey: "total_invoices",
-    },
-    {
-      key: "orders",
-      href: "/system/reports/orders",
-      icon: <ShoppingCart className="h-5 w-5" />,
-      permissionCodes: ["reports.view", "reports.orders.view", "orders.view"],
-      titleAr: "تقرير الطلبات",
-      titleEn: "Orders Report",
-      descriptionAr: "متابعة دورة الطلب والحالات والتنفيذ.",
-      descriptionEn: "Order lifecycle, statuses, and fulfillment.",
-      metricKey: "total_orders",
-    },
-    {
-      key: "payments",
-      href: "/system/reports/payments",
-      icon: <CreditCard className="h-5 w-5" />,
-      permissionCodes: ["reports.view", "reports.payments.view", "payments.view"],
-      titleAr: "تقرير المدفوعات",
-      titleEn: "Payments Report",
-      descriptionAr: "تحليل الدفعات وطرق الدفع والتأكيد.",
-      descriptionEn: "Payments, methods, and confirmations analysis.",
-      metricKey: "total_payments",
     },
     {
       key: "providers",
@@ -932,6 +1093,28 @@ function getReportCards(): ReportCard[] {
       metricKey: "total_providers",
     },
     {
+      key: "invoices",
+      href: "/system/reports/invoices",
+      icon: <ReceiptText className="h-5 w-5" />,
+      permissionCodes: ["reports.view", "reports.invoices.view", "invoices.view"],
+      titleAr: "تقرير الفواتير",
+      titleEn: "Invoices Report",
+      descriptionAr: "تحليل الفواتير والإصدار والمستحقات.",
+      descriptionEn: "Invoice issuance and outstanding analysis.",
+      metricKey: "total_invoices",
+    },
+    {
+      key: "payments",
+      href: "/system/reports/payments",
+      icon: <CreditCard className="h-5 w-5" />,
+      permissionCodes: ["reports.view", "reports.payments.view", "payments.view"],
+      titleAr: "تقرير المدفوعات",
+      titleEn: "Payments Report",
+      descriptionAr: "تحليل الدفعات وطرق الدفع والتأكيد.",
+      descriptionEn: "Payments, methods, and confirmations analysis.",
+      metricKey: "total_payments",
+    },
+    {
       key: "treasury",
       href: "/system/reports/treasury",
       icon: <Landmark className="h-5 w-5" />,
@@ -946,6 +1129,22 @@ function getReportCards(): ReportCard[] {
       descriptionAr: "ملخص الصناديق والبنوك والحركات المالية والأرصدة.",
       descriptionEn: "Cashboxes, banks, transactions, and treasury balances.",
       metricKey: "treasury_balance",
+      money: true,
+    },
+    {
+      key: "accounting",
+      href: "/system/reports/accounting",
+      icon: <Calculator className="h-5 w-5" />,
+      permissionCodes: [
+        "reports.view",
+        "reports.accounting.view",
+        "accounting.view",
+      ],
+      titleAr: "تقرير المحاسبة",
+      titleEn: "Accounting Report",
+      descriptionAr: "ملخص القيود والترحيل والأثر المالي.",
+      descriptionEn: "Journal entries, posting, and financial impact.",
+      metricKey: "accounting_entries",
     },
   ];
 }
@@ -967,7 +1166,18 @@ export default function SystemReportsPage() {
   const isArabic = locale === "ar";
   const authResolving = isAuthResolving(auth);
 
-  const canView = hasAnyPermission(auth, ["reports.view"], "view");
+  const allReports = useMemo(() => getReportCards(), []);
+
+  const permittedReports = useMemo(
+    () =>
+      allReports.filter((report) =>
+        hasAnyPermission(auth, report.permissionCodes, "view"),
+      ),
+    [allReports, auth],
+  );
+
+  const canView =
+    hasAnyPermission(auth, ["reports.view"], "view") || permittedReports.length > 0;
 
   const canExport = hasAnyPermission(
     auth,
@@ -979,16 +1189,6 @@ export default function SystemReportsPage() {
     auth,
     ["reports.print", "reports.view"],
     "action",
-  );
-
-  const allReports = useMemo(() => getReportCards(), []);
-
-  const permittedReports = useMemo(
-    () =>
-      allReports.filter((report) =>
-        hasAnyPermission(auth, report.permissionCodes, "view"),
-      ),
-    [allReports, auth],
   );
 
   const filteredReports = useMemo(() => {
@@ -1245,9 +1445,9 @@ export default function SystemReportsPage() {
               icon={<WalletCards className="h-5 w-5" />}
             />
             <KpiCard
-              title={t.treasuryBalance}
-              value={<MoneyText value={summary.treasury_balance} />}
-              icon={<Landmark className="h-5 w-5" />}
+              title={t.cashCollected}
+              value={<MoneyText value={summary.cash_collected_amount} />}
+              icon={<WalletCards className="h-5 w-5" />}
             />
             <KpiCard
               title={t.totalOrders}
@@ -1327,7 +1527,7 @@ export default function SystemReportsPage() {
                               {t.openReport}
                             </span>
                             <span className="font-bold">
-                              {report.metricKey === "treasury_balance" ? (
+                              {report.money ? (
                                 <MoneyText value={summary[report.metricKey]} />
                               ) : (
                                 formatNumber(summary[report.metricKey])
@@ -1351,6 +1551,53 @@ export default function SystemReportsPage() {
             </CardContent>
           </Card>
 
+          <Card className="rounded-2xl border bg-card shadow-sm">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base font-bold">
+                    {t.orderOperations}
+                  </CardTitle>
+                  <CardDescription>{t.custodyHint}</CardDescription>
+                </div>
+
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <Truck className="h-5 w-5" />
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <MiniStat title={t.confirmedOrders} value={summary.confirmed_orders} />
+              <MiniStat title={t.cardReadyOrders} value={summary.card_ready_orders} />
+              <MiniStat
+                title={t.assignedForDelivery}
+                value={summary.assigned_for_delivery_orders}
+              />
+              <MiniStat
+                title={t.outForDelivery}
+                value={summary.out_for_delivery_orders}
+              />
+              <MiniStat title={t.deliveredOrders} value={summary.delivered_orders} />
+              <MiniStat title={t.completedOrders} value={summary.completed_orders} />
+              <MiniStat title={t.totalOrderItems} value={summary.total_order_items} />
+              <MiniStat title={t.codOrders} value={summary.cod_orders} />
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MiniStat title={t.codCollectedOrders} value={summary.cod_collected_orders} />
+            <MiniStat title={t.codPendingOrders} value={summary.cod_pending_orders} />
+            <MiniMoneyStat
+              title={t.cashCollected}
+              value={summary.cash_collected_amount}
+            />
+            <MiniMoneyStat
+              title={t.cashPendingCollection}
+              value={summary.cash_pending_collection_amount}
+            />
+          </div>
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MiniStat title={t.accountingEntries} value={summary.accounting_entries} />
             <MiniStat title={t.postedEntries} value={summary.posted_entries} />
@@ -1365,13 +1612,10 @@ export default function SystemReportsPage() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MiniMoneyStat title={t.treasuryBalance} value={summary.treasury_balance} />
             <MiniMoneyStat title={t.cashBalance} value={summary.treasury_cash_balance} />
             <MiniMoneyStat title={t.bankBalance} value={summary.treasury_bank_balance} />
             <MiniStat title={t.pendingInvoices} value={summary.pending_invoices} />
-            <MiniStat
-              title={t.confirmedPayments}
-              value={summary.confirmed_payments}
-            />
           </div>
         </>
       )}

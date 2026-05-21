@@ -1,61 +1,89 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/products/page.tsx
-   🧠 Primey Care | Products Overview
+   📂 primey_frontend/app/system/products/page.tsx
+   🧭 Primey Care — Products Catalog
    ------------------------------------------------------------
-   ✅ لوحة المنتجات والبرامج والعروض الطبية
-   ✅ KPIs خفيفة من Server Pagination
-   ✅ دعم مقدم الخدمة + الصور + الهبوط + التطبيق + العروض
-   ✅ Excel .xls HTML Workbook
-   ✅ Web PDF Print
-   ✅ Centers/Customers Pattern + Phase 2 Permissions
-============================================================ */
+   ✅ Product = fixed catalog item
+   ✅ Provider-specific offers/prices = /api/offers/
+   ✅ Premium paid product list style
+   ✅ Internal UI components only
+   ✅ No @tanstack/react-table dependency
+   ✅ Local sorting/filtering/pagination/columns
+   ✅ Real API only: /api/products/ + /api/offers/
+   ✅ No /system/products/list
+   ✅ No localhost
+   ✅ RTL/LTR + Arabic/English
+   ✅ Excel .xls + Web print
+   ✅ SAR icon from /currency/sar.svg
+   ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import type { ComponentType } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import {
-  AlertTriangle,
-  ArrowUpRight,
-  BadgeCheck,
-  Boxes,
+  ArrowUpDown,
+  BadgePercent,
   CheckCircle2,
-  CircleDollarSign,
-  CreditCard,
+  ColumnsIcon,
+  Copy,
+  Download,
   Eye,
-  FileImage,
-  FileSpreadsheet,
-  Globe2,
-  ImageIcon,
+  FilterIcon,
   Layers3,
   Loader2,
+  MoreHorizontal,
   Package,
   Plus,
+  PlusCircle,
   Printer,
-  RefreshCcw,
+  RefreshCw,
+  RotateCcw,
   Search,
-  ShieldCheck,
-  Smartphone,
+  ShoppingCart,
   Sparkles,
-  Stethoscope,
-  Tag,
-  XCircle,
+  TriangleAlert,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -65,682 +93,429 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
 
-type AppLocale = "ar" | "en";
-type AuthRecord = Record<string, unknown>;
-
-type ProductStatus = "draft" | "active" | "inactive" | "archived" | "UNKNOWN";
-type ProductType = "membership" | "card" | "program" | "service" | "other" | "UNKNOWN";
-
-type ProviderSummary = {
-  id?: string | number | null;
-  code?: string | null;
-  name?: string | null;
-  name_ar?: string | null;
-  name_en?: string | null;
-  city?: string | null;
-  region?: string | null;
-  logo_url?: string | null;
+type NamedEntity = {
+  id?: number | string;
+  name?: string;
+  name_ar?: string;
+  name_en?: string;
+  title?: string;
 };
 
-type ProductRow = {
-  id: string | number;
-  code: string;
-  name: string;
-  productType: ProductType;
-  categoryName: string;
-  provider: ProviderSummary | null;
-  status: ProductStatus;
-  shortDescription: string;
-  price: number;
-  salePrice: number;
-  effectivePrice: number;
-  isOffer: boolean;
-  offerTitle: string;
-  offerStartDate: string;
-  offerEndDate: string;
-  showOnLanding: boolean;
-  showOnMobile: boolean;
-  showOnOffers: boolean;
-  isPublic: boolean;
-  isFeatured: boolean;
-  canBeOrdered: boolean;
-  canBeUsedInContracts: boolean;
-  thumbnailImageUrl: string;
-  marketingImageUrl: string;
-  hasMarketingImage: boolean;
-  createdAt: string;
-  updatedAt: string;
+type ProductRecord = {
+  id: number | string;
+  name?: string;
+  name_ar?: string;
+  name_en?: string;
+  title?: string;
+  code?: string;
+  sku?: string;
+  slug?: string;
+  description?: string;
+  product_type?: string;
+  type?: string;
+  status?: string;
+  category?: string | NamedEntity | null;
+  category_name?: string;
+  price?: string | number | null;
+  sale_price?: string | number | null;
+  final_price?: string | number | null;
+  base_price?: string | number | null;
+  discount_percentage?: string | number | null;
+  highest_discount_percent?: string | number | null;
+  highest_product_discount_percent?: string | number | null;
+  active_contracts_count?: number;
+  contracted_products_count?: number;
+  provider_offers_count?: number;
+  offers_count?: number;
+  active_offers_count?: number;
+  orders_count?: number;
+  order_count?: number;
+  total_orders?: number;
+  sales_count?: number;
+  sold_count?: number;
+  total_sales?: number;
+  is_public?: boolean;
+  is_featured?: boolean;
+  is_offer?: boolean;
+  show_on_landing?: boolean;
+  show_on_mobile?: boolean;
+  show_on_offers?: boolean;
+  thumbnail_image_url?: string;
+  marketing_image_url?: string;
+  image_url?: string;
+  image?: string;
+  created_at?: string;
 };
 
-type Pagination = {
-  page: number;
-  page_size: number;
-  total_pages: number;
-  total_items: number;
-  has_next: boolean;
-  has_previous: boolean;
+type ProductsSummary = {
+  total_products?: number;
+  active_products?: number;
+  offer_products?: number;
+  contracted_products?: number;
+  products_with_active_contracts?: number;
 };
 
 type ProductsApiResponse = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
-  results?: unknown[];
-  data?: unknown[] | { results?: unknown[]; items?: unknown[] };
-  items?: unknown[];
-  pagination?: Partial<Pagination>;
+  detail?: string;
+  error?: string;
+  results?: ProductRecord[];
+  items?: ProductRecord[];
+  data?:
+    | ProductRecord[]
+    | {
+        results?: ProductRecord[];
+        items?: ProductRecord[];
+        data?: ProductRecord[];
+      };
+  pagination?: {
+    total?: number;
+  };
+  summary?: ProductsSummary;
 };
 
-type SummaryState = {
-  total: number;
-  active: number;
-  offers: number;
-  landing: number;
-  mobile: number;
-  marketingImages: number;
+type OfferRecord = {
+  id?: number | string;
+  offer_id?: number | string;
+  contract_product_id?: number | string;
+  product_id?: number | string;
+  product?: number | string | NamedEntity | null;
+  product_name?: string;
+  product_title?: string;
+  provider?: string | NamedEntity | null;
+  provider_id?: number | string;
+  provider_name?: string;
+  title?: string;
+  offer_title?: string;
+  badge?: string;
+  offer_badge?: string;
+  status?: string;
+  is_active?: boolean;
+  price_before_discount?: string | number | null;
+  unit_price_before_discount?: string | number | null;
+  old_price?: string | number | null;
+  original_price?: string | number | null;
+  price_after_discount?: string | number | null;
+  unit_price?: string | number | null;
+  final_price?: string | number | null;
+  sale_price?: string | number | null;
+  price?: string | number | null;
+  discount_percentage?: string | number | null;
+  unit_discount_percentage?: string | number | null;
+  discount_percent?: string | number | null;
+  checkout_payload?: Record<string, unknown>;
+  order_payload?: Record<string, unknown>;
+  order_item_payload?: Record<string, unknown>;
+  checkout_source?: string;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-const PAGE_SIZE = 12;
-
-const DEFAULT_SUMMARY: SummaryState = {
-  total: 0,
-  active: 0,
-  offers: 0,
-  landing: 0,
-  mobile: 0,
-  marketingImages: 0,
+type OffersApiResponse = {
+  ok?: boolean;
+  success?: boolean;
+  message?: string;
+  detail?: string;
+  error?: string;
+  results?: OfferRecord[];
+  items?: OfferRecord[];
+  data?:
+    | OfferRecord[]
+    | {
+        results?: OfferRecord[];
+        items?: OfferRecord[];
+        data?: OfferRecord[];
+      };
+  pagination?: {
+    total?: number;
+  };
 };
 
-/* ============================================================
-   Locale Helpers
-============================================================ */
+type ProductStatusFilter = "all" | "active" | "draft" | "inactive" | "archived";
+type ProductTypeFilter = "all" | "card" | "program" | "service" | "membership";
+type OfferFilter = "all" | "with_offers" | "without_offers";
+type SortKey =
+  | "created_at"
+  | "name"
+  | "price"
+  | "category"
+  | "type"
+  | "provider_offers"
+  | "orders"
+  | "status";
+type SortDirection = "asc" | "desc";
+type SortFilter =
+  | "newest"
+  | "oldest"
+  | "name"
+  | "best_selling"
+  | "most_offers"
+  | "highest_price"
+  | "lowest_price"
+  | "highest_discount";
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+type FiltersState = {
+  search: string;
+  status: ProductStatusFilter;
+  type: ProductTypeFilter;
+  category: string;
+  offer: OfferFilter;
+  sort: SortFilter;
+};
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+type ColumnKey =
+  | "select"
+  | "product"
+  | "price"
+  | "category"
+  | "type"
+  | "providerOffers"
+  | "orders"
+  | "status"
+  | "actions";
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+type FilterOption = {
+  value: string;
+  label: string;
+};
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
-    return "ar";
-  }
+type ColumnConfig = {
+  key: ColumnKey;
+  label: string;
+  canHide?: boolean;
+};
+
+const SAR_ICON = "/currency/sar.svg";
+
+const PAGE_SIZE_OPTIONS = [10, 20, 30, 50];
+
+const translations = {
+  ar: {
+    title: "كتالوج المنتجات",
+    subtitle:
+      "إدارة المنتجات الثابتة مع فصل أسعار وخصومات مقدمي الخدمة داخل عروض مستقلة.",
+    fixedCatalog: "كتالوج ثابت",
+    addProduct: "إضافة منتج",
+    refresh: "تحديث",
+    exportExcel: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    columns: "الأعمدة",
+    actions: "الإجراءات",
+    totalProducts: "إجمالي المنتجات",
+    activeProducts: "المنتجات النشطة",
+    productsWithOffers: "لديها عروض مقدمي خدمة",
+    offerProducts: "عروض عامة على المنتج",
+    fixedCatalogHint: "كتالوج ثابت",
+    activeHint: "نشط",
+    providerOffersHint: "عروض من مقدمي الخدمة",
+    publicOffersHint: "عروض عامة",
+    searchPlaceholder: "بحث في المنتجات...",
+    all: "الكل",
+    active: "نشط",
+    draft: "مسودة",
+    inactive: "غير نشط",
+    archived: "مؤرشف",
+    card: "بطاقة",
+    program: "برنامج",
+    service: "خدمة",
+    membership: "عضوية",
+    withOffers: "لديه عروض",
+    withoutOffers: "بدون عروض",
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    name: "الاسم",
+    highestPrice: "أعلى سعر",
+    lowestPrice: "أقل سعر",
+    highestDiscountSort: "أعلى خصم",
+    bestSelling: "الأكثر طلبًا",
+    mostOffers: "الأكثر عروضًا",
+    product: "المنتج",
+    productName: "اسم المنتج",
+    catalogPrice: "السعر",
+    category: "التصنيف",
+    type: "النوع",
+    providerOffers: "عروض مقدمي الخدمة",
+    orders: "الطلبات",
+    status: "الحالة",
+    noCategory: "بدون تصنيف",
+    noCode: "بدون كود",
+    view: "عرض التفاصيل",
+    viewOffers: "عرض العروض",
+    closeOffers: "إغلاق العروض",
+    copyId: "نسخ الرقم",
+    copied: "تم نسخ الرقم",
+    noProducts: "لا توجد منتجات",
+    noProductsDesc: "لم يتم العثور على منتجات حسب الفلاتر الحالية.",
+    noProviderOffers: "لا توجد عروض لهذا المنتج",
+    noProviderOffersDesc:
+      "يمكن إضافة عروض المنتج داخل عقد مقدم الخدمة ليظهر السعر والخصم حسب مقدم الخدمة.",
+    selectedProductOffers: "عروض المنتج حسب مقدم الخدمة",
+    provider: "مقدم الخدمة",
+    beforeDiscount: "قبل الخصم",
+    afterDiscount: "بعد الخصم",
+    discount: "الخصم",
+    checkoutReady: "جاهز للطلب",
+    offerId: "رقم العرض",
+    errorTitle: "تعذر تحميل المنتجات",
+    offersErrorTitle: "تعذر تحميل عروض المنتج",
+    retry: "إعادة المحاولة",
+    loaded: "تم تحديث بيانات المنتجات",
+    offersLoaded: "تم تحميل عروض المنتج",
+    exportDone: "تم تجهيز ملف Excel",
+    printReady: "تم تجهيز صفحة الطباعة",
+    selected: "محدد",
+    selectedRows: "صفوف محددة",
+    of: "من",
+    previous: "السابق",
+    next: "التالي",
+    page: "صفحة",
+    rowsPerPage: "عدد الصفوف",
+    chooseStatus: "الحالة",
+    chooseCategory: "التصنيف",
+    chooseType: "النوع",
+    chooseOffer: "العروض",
+    noOptions: "لا توجد نتائج",
+    mobileFilters: "الفلاتر",
+    sort: "الترتيب",
+    id: "الرقم",
+  },
+  en: {
+    title: "Products",
+    subtitle:
+      "Manage fixed catalog products while provider pricing and discounts stay in separate offers.",
+    fixedCatalog: "Fixed catalog",
+    addProduct: "Add Product",
+    refresh: "Refresh",
+    exportExcel: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    columns: "Columns",
+    actions: "Actions",
+    totalProducts: "Total Products",
+    activeProducts: "Active Products",
+    productsWithOffers: "With Provider Offers",
+    offerProducts: "General Product Offers",
+    fixedCatalogHint: "Fixed catalog",
+    activeHint: "Active",
+    providerOffersHint: "Provider offers",
+    publicOffersHint: "General offers",
+    searchPlaceholder: "Search products...",
+    all: "All",
+    active: "Active",
+    draft: "Draft",
+    inactive: "Inactive",
+    archived: "Archived",
+    card: "Card",
+    program: "Program",
+    service: "Service",
+    membership: "Membership",
+    withOffers: "With offers",
+    withoutOffers: "Without offers",
+    newest: "Newest",
+    oldest: "Oldest",
+    name: "Name",
+    highestPrice: "Highest price",
+    lowestPrice: "Lowest price",
+    highestDiscountSort: "Highest discount",
+    bestSelling: "Most ordered",
+    mostOffers: "Most offers",
+    product: "Product",
+    productName: "Product Name",
+    catalogPrice: "Price",
+    category: "Category",
+    type: "Type",
+    providerOffers: "Provider Offers",
+    orders: "Orders",
+    status: "Status",
+    noCategory: "No category",
+    noCode: "No code",
+    view: "View details",
+    viewOffers: "View offers",
+    closeOffers: "Close offers",
+    copyId: "Copy ID",
+    copied: "ID copied",
+    noProducts: "No products",
+    noProductsDesc: "No products were found for the current filters.",
+    noProviderOffers: "No offers for this product",
+    noProviderOffersDesc:
+      "Add product offers inside provider contracts to show pricing and discounts per provider.",
+    selectedProductOffers: "Product offers by provider",
+    provider: "Provider",
+    beforeDiscount: "Before discount",
+    afterDiscount: "After discount",
+    discount: "Discount",
+    checkoutReady: "Checkout ready",
+    offerId: "Offer ID",
+    errorTitle: "Unable to load products",
+    offersErrorTitle: "Unable to load product offers",
+    retry: "Retry",
+    loaded: "Products refreshed",
+    offersLoaded: "Product offers loaded",
+    exportDone: "Excel file prepared",
+    printReady: "Print page prepared",
+    selected: "Selected",
+    selectedRows: "selected rows",
+    of: "of",
+    previous: "Previous",
+    next: "Next",
+    page: "Page",
+    rowsPerPage: "Rows",
+    chooseStatus: "Status",
+    chooseCategory: "Category",
+    chooseType: "Type",
+    chooseOffer: "Offers",
+    noOptions: "No results",
+    mobileFilters: "Filters",
+    sort: "Sort",
+    id: "ID",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
-/* ============================================================
-   API Helpers
-============================================================ */
+function toEnglishDigits(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "";
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+  return String(value)
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
 }
 
-function extractRows(payload: ProductsApiResponse | null): unknown[] {
-  if (!payload) return [];
-
-  if (Array.isArray(payload.results)) return payload.results;
-  if (Array.isArray(payload.items)) return payload.items;
-  if (Array.isArray(payload.data)) return payload.data;
-
-  if (payload.data && typeof payload.data === "object") {
-    if (Array.isArray(payload.data.results)) return payload.data.results;
-    if (Array.isArray(payload.data.items)) return payload.data.items;
-  }
-
-  return [];
+function toNumber(value: string | number | null | undefined) {
+  const cleaned = toEnglishDigits(value ?? 0).replace(/[^\d.-]/g, "");
+  const numeric = Number(cleaned);
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function extractTotal(payload: ProductsApiResponse | null) {
-  return Number(payload?.pagination?.total_items || extractRows(payload).length || 0);
-}
-
-/* ============================================================
-   Permissions
-============================================================ */
-
-function asRecord(value: unknown): AuthRecord {
-  return value && typeof value === "object" ? (value as AuthRecord) : {};
-}
-
-function getNestedRecord(source: AuthRecord, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as AuthRecord;
-    }
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as AuthRecord;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as AuthRecord;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown): AuthRecord {
-  const auth = asRecord(authValue);
-
-  return getNestedRecord(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asRecord(auth.permissions);
-  const userPermissions = asRecord(user.permissions);
-  const authProfilePermissions = asRecord(auth.profile_permissions);
-  const userProfilePermissions = asRecord(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asRecord(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasKnownPermissionSignal(authValue: unknown) {
-  return (
-    getAuthRoles(authValue).length > 0 ||
-    getAuthPermissionCodes(authValue).length > 0
-  );
-}
-
-function hasPermissionCode(authValue: unknown, codes: string[]) {
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length === 0) return undefined;
-
-  return codes.some((code) => permissions.includes(code));
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const explicitPermission = hasPermissionCode(authValue, codes);
-
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "support",
-          "accountant",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin"].includes(role),
-    );
-  }
-
-  if (!hasKnownPermissionSignal(authValue)) {
-    return true;
-  }
-
-  return mode === "view";
-}
-
-/* ============================================================
-   Normalizers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-
-  const parsed = Number(
-    String(value ?? "")
-      .replace(/,/g, "")
-      .replace(/[^\d.-]/g, ""),
-  );
-
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function getValue(obj: Record<string, unknown>, key: string): unknown {
-  const direct = obj[key];
-
-  if (direct !== undefined && direct !== null && direct !== "") {
-    return direct;
-  }
-
-  const containers = ["product", "pricing", "summary", "stats"];
-
-  for (const container of containers) {
-    const nested = obj[container];
-
-    if (nested && typeof nested === "object") {
-      const value = (nested as Record<string, unknown>)[key];
-
-      if (value !== undefined && value !== null && value !== "") {
-        return value;
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function normalizeStatus(value: unknown): ProductStatus {
-  const status = String(value || "").toLowerCase();
-
-  if (status === "draft") return "draft";
-  if (status === "active") return "active";
-  if (status === "inactive") return "inactive";
-  if (status === "archived") return "archived";
-
-  if (value === true) return "active";
-  if (value === false) return "inactive";
-
-  return "UNKNOWN";
-}
-
-function normalizeType(value: unknown): ProductType {
-  const type = String(value || "").toLowerCase();
-
-  if (type === "membership") return "membership";
-  if (type === "card") return "card";
-  if (type === "program") return "program";
-  if (type === "service") return "service";
-  if (type === "other") return "other";
-
-  return "UNKNOWN";
-}
-
-function normalizeProvider(value: unknown): ProviderSummary | null {
-  if (!value || typeof value !== "object") return null;
-
-  const obj = value as Record<string, unknown>;
-
-  return {
-    id: (obj.id as string | number | null) || null,
-    code: String(obj.code || ""),
-    name: String(obj.name || ""),
-    name_ar: String(obj.name_ar || ""),
-    name_en: String(obj.name_en || ""),
-    city: String(obj.city || ""),
-    region: String(obj.region || ""),
-    logo_url: String(obj.logo_url || ""),
-  };
-}
-
-function normalizeProduct(item: unknown): ProductRow {
-  const obj = (item || {}) as Record<string, unknown>;
-  const category = obj.category as Record<string, unknown> | null | undefined;
-  const provider = normalizeProvider(obj.provider);
-
-  const id = getValue(obj, "id") ?? "";
-  const price = toNumber(getValue(obj, "price"));
-  const salePrice = toNumber(getValue(obj, "sale_price"));
-  const effectivePrice = toNumber(getValue(obj, "effective_price") || salePrice || price);
-
-  const thumbnailImageUrl = String(
-    getValue(obj, "thumbnail_image_url") ||
-      getValue(obj, "thumbnail_image_drive_view_url") ||
-      "",
-  );
-
-  const marketingImageUrl = String(
-    getValue(obj, "marketing_image_url") ||
-      getValue(obj, "marketing_image_drive_view_url") ||
-      "",
-  );
-
-  return {
-    id: id as string | number,
-    code: String(getValue(obj, "code") || "-"),
-    name: String(getValue(obj, "name") || getValue(obj, "title") || "-"),
-    productType: normalizeType(getValue(obj, "product_type")),
-    categoryName: String(category?.name || getValue(obj, "category_name") || ""),
-    provider,
-    status: normalizeStatus(getValue(obj, "status")),
-    shortDescription: String(getValue(obj, "short_description") || ""),
-    price,
-    salePrice,
-    effectivePrice,
-    isOffer: Boolean(getValue(obj, "is_offer")),
-    offerTitle: String(getValue(obj, "offer_title") || ""),
-    offerStartDate: String(getValue(obj, "offer_start_date") || ""),
-    offerEndDate: String(getValue(obj, "offer_end_date") || ""),
-    showOnLanding: Boolean(getValue(obj, "show_on_landing")),
-    showOnMobile: Boolean(getValue(obj, "show_on_mobile")),
-    showOnOffers: Boolean(getValue(obj, "show_on_offers")),
-    isPublic: Boolean(getValue(obj, "is_public")),
-    isFeatured: Boolean(getValue(obj, "is_featured")),
-    canBeOrdered: Boolean(getValue(obj, "can_be_ordered")),
-    canBeUsedInContracts: Boolean(getValue(obj, "can_be_used_in_contracts")),
-    thumbnailImageUrl,
-    marketingImageUrl,
-    hasMarketingImage: Boolean(getValue(obj, "has_marketing_image") || marketingImageUrl),
-    createdAt: String(getValue(obj, "created_at") || ""),
-    updatedAt: String(getValue(obj, "updated_at") || getValue(obj, "created_at") || ""),
-  };
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "المنتجات والبرامج" : "Products & Programs",
-    subtitle: isArabic
-      ? "لوحة متابعة المنتجات والبرامج والعروض الطبية والصور التسويقية."
-      : "Overview for products, programs, medical offers, and marketing images.",
-
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-    productsList: isArabic ? "قائمة المنتجات" : "Products List",
-    createProduct: isArabic ? "إنشاء منتج" : "Create Product",
-    view: isArabic ? "عرض" : "View",
-
-    totalProducts: isArabic ? "إجمالي المنتجات" : "Total Products",
-    activeProducts: isArabic ? "المنتجات النشطة" : "Active Products",
-    offersProducts: isArabic ? "العروض الطبية" : "Medical Offers",
-    landingProducts: isArabic ? "تظهر في الهبوط" : "Landing Visible",
-    mobileProducts: isArabic ? "تظهر في التطبيق" : "Mobile Visible",
-    marketingImages: isArabic ? "لديها صورة تسويقية" : "Marketing Images",
-
-    shortcutsTitle: isArabic ? "اختصارات المنتجات" : "Product Shortcuts",
-    shortcutsDesc: isArabic
-      ? "انتقل لقائمة المنتجات أو أضف منتجًا أو عرضًا طبيًا جديدًا."
-      : "Open the products list or add a new product or medical offer.",
-
-    latestTitle: isArabic ? "أحدث المنتجات والعروض" : "Latest Products & Offers",
-    latestDesc: isArabic
-      ? "آخر المنتجات والبرامج والعروض مع مقدم الخدمة والصورة التسويقية."
-      : "Latest products, programs, and offers with provider and marketing image.",
-
-    searchPlaceholder: isArabic
-      ? "ابحث باسم المنتج أو الكود أو مقدم الخدمة..."
-      : "Search by product, code, or provider...",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض المنتجات" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض المنتجات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view products. Contact your system administrator if you need access.",
-
-    loadError: isArabic ? "تعذر تحميل بيانات المنتجات." : "Unable to load products.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic ? "تم تحديث بيانات المنتجات." : "Products refreshed.",
-
-    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
-    exportEmpty: isArabic ? "لا توجد بيانات قابلة للتصدير." : "No data available to export.",
-    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
-    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
-
-    emptyTitle: isArabic ? "لا توجد منتجات بعد" : "No products yet",
-    emptyText: isArabic
-      ? "ابدأ بإنشاء منتج أو برنامج أو عرض طبي جديد."
-      : "Start by creating a product, program, or medical offer.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "غيّر كلمات البحث لعرض نتائج أخرى."
-      : "Change your search terms to see other results.",
-
-    noProvider: isArabic ? "بدون مقدم خدمة" : "No Provider",
-    yes: isArabic ? "نعم" : "Yes",
-    no: isArabic ? "لا" : "No",
-
-    table: {
-      image: isArabic ? "الصورة" : "Image",
-      product: isArabic ? "المنتج" : "Product",
-      code: isArabic ? "الكود" : "Code",
-      provider: isArabic ? "مقدم الخدمة" : "Provider",
-      type: isArabic ? "النوع" : "Type",
-      category: isArabic ? "التصنيف" : "Category",
-      price: isArabic ? "السعر" : "Price",
-      offer: isArabic ? "العرض" : "Offer",
-      visibility: isArabic ? "الظهور" : "Visibility",
-      status: isArabic ? "الحالة" : "Status",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    status: {
-      active: isArabic ? "نشط" : "Active",
-      draft: isArabic ? "مسودة" : "Draft",
-      inactive: isArabic ? "غير نشط" : "Inactive",
-      archived: isArabic ? "مؤرشف" : "Archived",
-      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
-    },
-
-    type: {
-      membership: isArabic ? "عضوية" : "Membership",
-      card: isArabic ? "بطاقة" : "Card",
-      program: isArabic ? "برنامج" : "Program",
-      service: isArabic ? "خدمة" : "Service",
-      other: isArabic ? "أخرى" : "Other",
-      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
-    },
-
-    flags: {
-      public: isArabic ? "عام" : "Public",
-      featured: isArabic ? "مميز" : "Featured",
-      order: isArabic ? "طلب" : "Order",
-      contract: isArabic ? "عقود" : "Contracts",
-      landing: isArabic ? "هبوط" : "Landing",
-      mobile: isArabic ? "تطبيق" : "Mobile",
-      offers: isArabic ? "عروض" : "Offers",
-      image: isArabic ? "صورة" : "Image",
-    },
-
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-  };
-}
-
-/* ============================================================
-   UI Helpers
-============================================================ */
-
-function formatNumber(value: unknown): string {
-  const number = Number(value);
-
-  if (!Number.isFinite(number)) return "0";
-
-  return number.toLocaleString("en-US", {
+function formatNumber(value: string | number | null | undefined) {
+  return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  });
+  }).format(toNumber(value));
 }
 
-function formatMoney(value: unknown): string {
-  const number = Number(value);
-
-  if (!Number.isFinite(number)) return "0.00";
-
-  return number.toLocaleString("en-US", {
+function formatMoney(value: string | number | null | undefined) {
+  return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  });
+  }).format(toNumber(value));
 }
 
-function formatDate(value: string): string {
-  if (!value) return "-";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return "-";
-
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
+function formatPercent(value: string | number | null | undefined) {
+  return `${new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+  }).format(toNumber(value))}%`;
 }
 
-function escapeHtml(value: string | number) {
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -749,996 +524,1968 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function productTypeIcon(type: ProductType): ComponentType<{ className?: string }> {
-  if (type === "card") return CreditCard;
-  if (type === "membership") return BadgeCheck;
-  if (type === "program") return Boxes;
-  if (type === "service") return Stethoscope;
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
 
-  return Package;
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
+  }
+
+  return envBase;
 }
 
-function statusBadge(status: ProductStatus, t: ReturnType<typeof dictionary>) {
-  if (status === "active") {
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const base = getApiBaseUrl();
+  const query = params?.toString();
+
+  return `${base}${path}${query ? `?${query}` : ""}`;
+}
+
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
+}
+
+function extractProducts(payload: ProductsApiResponse) {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.data)) return payload.data;
+
+  if (payload.data && typeof payload.data === "object") {
+    if (Array.isArray(payload.data.results)) return payload.data.results;
+    if (Array.isArray(payload.data.items)) return payload.data.items;
+    if (Array.isArray(payload.data.data)) return payload.data.data;
+  }
+
+  return [];
+}
+
+function extractOffers(payload: OffersApiResponse) {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.data)) return payload.data;
+
+  if (payload.data && typeof payload.data === "object") {
+    if (Array.isArray(payload.data.results)) return payload.data.results;
+    if (Array.isArray(payload.data.items)) return payload.data.items;
+    if (Array.isArray(payload.data.data)) return payload.data.data;
+  }
+
+  return [];
+}
+
+function getEntityName(
+  entity: string | NamedEntity | null | undefined,
+  locale: Locale,
+  fallback: string,
+) {
+  if (typeof entity === "string") return entity;
+
+  if (entity && typeof entity === "object") {
     return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
-        {t.status.active}
-      </Badge>
+      (locale === "ar"
+        ? entity.name_ar || entity.name || entity.title || entity.name_en
+        : entity.name_en || entity.name || entity.title || entity.name_ar) ||
+      fallback
     );
   }
 
-  if (status === "draft") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50">
-        {t.status.draft}
-      </Badge>
-    );
-  }
+  return fallback;
+}
 
-  if (status === "archived") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-50">
-        {t.status.archived}
-      </Badge>
-    );
-  }
-
-  if (status === "inactive") {
-    return (
-      <Badge variant="outline" className="rounded-full">
-        {t.status.inactive}
-      </Badge>
-    );
-  }
-
+function getProductName(product: ProductRecord, locale: Locale) {
   return (
-    <Badge variant="secondary" className="rounded-full">
-      {t.status.UNKNOWN}
-    </Badge>
+    (locale === "ar"
+      ? product.name_ar || product.name || product.title || product.name_en
+      : product.name_en || product.name || product.title || product.name_ar) ||
+    `#${product.id}`
   );
 }
 
-function SarAmount({ value }: { value: number | string }) {
+function getCategoryName(product: ProductRecord, locale: Locale, fallback: string) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    product.category_name ||
+    getEntityName(product.category, locale, fallback) ||
+    fallback
+  );
+}
+
+function getProductType(product: ProductRecord) {
+  return normalizeText(product.product_type || product.type || "service");
+}
+
+function getProductImage(product: ProductRecord) {
+  return (
+    product.thumbnail_image_url ||
+    product.marketing_image_url ||
+    product.image_url ||
+    product.image ||
+    ""
+  );
+}
+
+function getProductStatus(product: ProductRecord) {
+  return normalizeText(product.status || "active");
+}
+
+function getCatalogPrice(product: ProductRecord) {
+  return (
+    product.final_price ??
+    product.sale_price ??
+    product.price ??
+    product.base_price ??
+    0
+  );
+}
+
+function getProviderOffersCount(product: ProductRecord) {
+  return Math.max(
+    toNumber(product.provider_offers_count),
+    toNumber(product.active_contracts_count),
+    toNumber(product.contracted_products_count),
+    toNumber(product.active_offers_count),
+    0,
+  );
+}
+
+function getGeneralOffersCount(product: ProductRecord) {
+  return Math.max(toNumber(product.offers_count), product.is_offer ? 1 : 0);
+}
+
+function getProductSalesCount(product: ProductRecord) {
+  return Math.max(
+    toNumber(product.orders_count),
+    toNumber(product.order_count),
+    toNumber(product.total_orders),
+    toNumber(product.sales_count),
+    toNumber(product.sold_count),
+    toNumber(product.total_sales),
+    0,
+  );
+}
+
+function getDiscountPercent(product: ProductRecord) {
+  return Math.max(
+    toNumber(product.highest_discount_percent),
+    toNumber(product.highest_product_discount_percent),
+    toNumber(product.discount_percentage),
+    0,
+  );
+}
+
+function getOfferId(offer: OfferRecord) {
+  return offer.offer_id || offer.contract_product_id || offer.id || "";
+}
+
+function getOfferTitle(offer: OfferRecord, locale: Locale) {
+  const productName = getEntityName(offer.product as NamedEntity, locale, "");
+
+  return (
+    offer.offer_title ||
+    offer.title ||
+    offer.product_title ||
+    offer.product_name ||
+    productName ||
+    `#${getOfferId(offer)}`
+  );
+}
+
+function getOfferProviderName(offer: OfferRecord, locale: Locale, fallback: string) {
+  return (
+    offer.provider_name ||
+    getEntityName(offer.provider as NamedEntity, locale, fallback) ||
+    fallback
+  );
+}
+
+function getOfferBeforePrice(offer: OfferRecord) {
+  return (
+    offer.price_before_discount ??
+    offer.unit_price_before_discount ??
+    offer.old_price ??
+    offer.original_price ??
+    offer.price ??
+    0
+  );
+}
+
+function getOfferAfterPrice(offer: OfferRecord) {
+  return (
+    offer.price_after_discount ??
+    offer.unit_price ??
+    offer.final_price ??
+    offer.sale_price ??
+    offer.price ??
+    0
+  );
+}
+
+function getOfferDiscount(offer: OfferRecord) {
+  return (
+    offer.discount_percentage ??
+    offer.unit_discount_percentage ??
+    offer.discount_percent ??
+    0
+  );
+}
+
+function isOfferCheckoutReady(offer: OfferRecord) {
+  return Boolean(
+    offer.checkout_payload ||
+      offer.order_payload ||
+      offer.order_item_payload ||
+      offer.checkout_source === "offers",
+  );
+}
+
+function getSortValue(product: ProductRecord, key: SortKey, locale: Locale) {
+  if (key === "name") return getProductName(product, locale);
+  if (key === "price") return toNumber(getCatalogPrice(product));
+  if (key === "category") return getCategoryName(product, locale, "");
+  if (key === "type") return getProductType(product);
+  if (key === "provider_offers") return getProviderOffersCount(product);
+  if (key === "orders") return getProductSalesCount(product);
+  if (key === "status") return getProductStatus(product);
+
+  return new Date(product.created_at || 0).getTime();
+}
+
+function compareValues(a: unknown, b: unknown, direction: SortDirection) {
+  const multiplier = direction === "asc" ? 1 : -1;
+
+  if (typeof a === "number" && typeof b === "number") {
+    return (a - b) * multiplier;
+  }
+
+  return String(a ?? "").localeCompare(String(b ?? "")) * multiplier;
+}
+
+function filterBySearch(product: ProductRecord, search: string, locale: Locale) {
+  const query = normalizeText(search);
+  if (!query) return true;
+
+  const values = [
+    getProductName(product, locale),
+    product.name,
+    product.name_ar,
+    product.name_en,
+    product.title,
+    product.code,
+    product.sku,
+    product.slug,
+    product.description,
+    getCategoryName(product, locale, ""),
+  ];
+
+  return values.some((value) => normalizeText(value).includes(query));
+}
+
+function productMatchesFilters(
+  product: ProductRecord,
+  filters: FiltersState,
+  locale: Locale,
+) {
+  const status = getProductStatus(product);
+  const type = getProductType(product);
+  const categoryName = normalizeText(getCategoryName(product, locale, ""));
+  const providerOffersCount = getProviderOffersCount(product);
+
+  if (!filterBySearch(product, filters.search, locale)) return false;
+  if (filters.status !== "all" && status !== filters.status) return false;
+  if (filters.type !== "all" && type !== filters.type) return false;
+
+  if (filters.category !== "all" && categoryName !== normalizeText(filters.category)) {
+    return false;
+  }
+
+  if (filters.offer === "with_offers" && providerOffersCount <= 0) return false;
+  if (filters.offer === "without_offers" && providerOffersCount > 0) return false;
+
+  return true;
+}
+
+function applySortPreset(
+  products: ProductRecord[],
+  sort: SortFilter,
+  locale: Locale,
+) {
+  const copy = [...products];
+
+  copy.sort((a, b) => {
+    if (sort === "oldest") {
+      return (
+        new Date(a.created_at || 0).getTime() -
+        new Date(b.created_at || 0).getTime()
+      );
+    }
+
+    if (sort === "name") {
+      return getProductName(a, locale).localeCompare(getProductName(b, locale));
+    }
+
+    if (sort === "best_selling") {
+      return getProductSalesCount(b) - getProductSalesCount(a);
+    }
+
+    if (sort === "most_offers") {
+      return getProviderOffersCount(b) - getProviderOffersCount(a);
+    }
+
+    if (sort === "highest_price") {
+      return toNumber(getCatalogPrice(b)) - toNumber(getCatalogPrice(a));
+    }
+
+    if (sort === "lowest_price") {
+      return toNumber(getCatalogPrice(a)) - toNumber(getCatalogPrice(b));
+    }
+
+    if (sort === "highest_discount") {
+      return getDiscountPercent(b) - getDiscountPercent(a);
+    }
+
+    return (
+      new Date(b.created_at || 0).getTime() -
+      new Date(a.created_at || 0).getTime()
+    );
+  });
+
+  return copy;
+}
+
+function SarIcon({ className }: { className?: string }) {
+  return (
+    <Image
+      src={SAR_ICON}
+      alt="SAR"
+      width={14}
+      height={14}
+      className={cn("inline-block h-3.5 w-3.5 object-contain", className)}
+      unoptimized
+    />
+  );
+}
+
+function MoneyValue({ value }: { value: string | number | null | undefined }) {
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap font-medium tabular-nums text-foreground">
       <span>{formatMoney(value)}</span>
-      <Image
-        src={SAR_ICON_PATH}
-        alt=""
-        width={14}
-        height={14}
-        className="h-3.5 w-3.5"
-      />
+      <SarIcon />
     </span>
   );
 }
 
-function providerLabel(provider: ProviderSummary | null, locale: AppLocale) {
-  if (!provider) return "";
+function KpiCard({
+  title,
+  value,
+  trend,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+}) {
+  return (
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-  const primary =
-    locale === "ar"
-      ? provider.name_ar || provider.name || provider.name_en
-      : provider.name_en || provider.name || provider.name_ar;
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
 
-  const code = provider.code ? ` - ${provider.code}` : "";
-
-  return `${primary || provider.id || ""}${code}`;
+        <CardAction>
+          <Badge
+            variant="outline"
+            className="rounded-full border px-2.5 py-1 text-xs font-semibold"
+          >
+            <span className="text-emerald-600">{trend}</span>
+          </Badge>
+        </CardAction>
+      </CardHeader>
+    </Card>
+  );
 }
 
-function flagBadge(active: boolean, label: string) {
+function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
+  const t = translations[locale];
+  const normalized = normalizeText(status);
+
+  if (normalized === "active") {
+    return (
+      <Badge
+        variant="outline"
+        className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 dark:bg-emerald-950/30 dark:text-emerald-300"
+      >
+        {t.active}
+      </Badge>
+    );
+  }
+
+  if (normalized === "inactive") {
+    return (
+      <Badge
+        variant="outline"
+        className="rounded-full border-amber-500/30 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300"
+      >
+        {t.inactive}
+      </Badge>
+    );
+  }
+
+  if (normalized === "archived") {
+    return (
+      <Badge
+        variant="outline"
+        className="rounded-full border-red-500/30 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 dark:bg-red-950/30 dark:text-red-300"
+      >
+        {t.archived}
+      </Badge>
+    );
+  }
+
   return (
-    <Badge variant={active ? "secondary" : "outline"} className="rounded-full">
-      {active ? (
-        <CheckCircle2 className="h-3.5 w-3.5" />
-      ) : (
-        <XCircle className="h-3.5 w-3.5" />
-      )}
+    <Badge
+      variant="outline"
+      className="rounded-full border-slate-300 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+    >
+      {t.draft}
+    </Badge>
+  );
+}
+
+function TypeBadge({ type, locale }: { type: string; locale: Locale }) {
+  const t = translations[locale];
+  const normalized = normalizeText(type);
+
+  const label =
+    normalized === "card"
+      ? t.card
+      : normalized === "program"
+        ? t.program
+        : normalized === "membership"
+          ? t.membership
+          : t.service;
+
+  return (
+    <Badge
+      variant="outline"
+      className="rounded-full border-border bg-background px-2.5 py-1 text-xs font-medium"
+    >
       {label}
     </Badge>
   );
 }
 
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function PageSkeleton() {
+function ProductsSkeleton() {
   return (
-    <div className="w-full space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, index) => (
-          <Card key={index}>
-            <CardContent className="p-4">
-              <SkeletonLine className="h-7 w-16" />
-              <SkeletonLine className="mt-3 h-4 w-28" />
+    <div className="space-y-7">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-lg border shadow-none">
+            <CardContent className="space-y-4 p-6">
+              <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+              <div className="h-9 w-24 animate-pulse rounded bg-muted" />
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <Card>
-        <CardContent className="p-5">
-          <SkeletonLine className="h-10 w-full rounded-xl" />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="space-y-3 p-5">
-          {Array.from({ length: 8 }).map((_, index) => (
-            <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
-          ))}
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        <div className="h-10 w-full max-w-sm animate-pulse rounded-md bg-muted" />
+        <div className="h-[520px] w-full animate-pulse rounded-lg border bg-muted/40" />
+      </div>
     </div>
   );
 }
 
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  title,
+function ProductImage({
+  product,
   locale,
-  summary,
-  rows,
 }: {
-  filename: string;
-  title: string;
-  locale: AppLocale;
-  summary: SummaryState;
-  rows: ProductRow[];
+  product: ProductRecord;
+  locale: Locale;
 }) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const t = dictionary(locale);
+  const image = getProductImage(product);
+  const name = getProductName(product, locale);
 
-  const rowsHtml = rows
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.code)}</td>
-          <td>${escapeHtml(item.name)}</td>
-          <td>${escapeHtml(providerLabel(item.provider, locale) || t.noProvider)}</td>
-          <td>${escapeHtml(t.type[item.productType])}</td>
-          <td>${escapeHtml(item.categoryName || "-")}</td>
-          <td>${escapeHtml(formatMoney(item.effectivePrice))}</td>
-          <td>${escapeHtml(item.isOffer ? t.yes : t.no)}</td>
-          <td>${escapeHtml(item.showOnLanding ? t.yes : t.no)}</td>
-          <td>${escapeHtml(item.showOnMobile ? t.yes : t.no)}</td>
-          <td>${escapeHtml(item.showOnOffers ? t.yes : t.no)}</td>
-          <td>${escapeHtml(t.status[item.status])}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <style>
-          body { direction: ${dir}; font-family: Arial, Tahoma, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-        </style>
-      </head>
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="11">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="11"></td></tr>
-          <tr><td class="section" colspan="11">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalProducts)}</td><td colspan="10">${escapeHtml(formatNumber(summary.total))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.activeProducts)}</td><td colspan="10">${escapeHtml(formatNumber(summary.active))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.offersProducts)}</td><td colspan="10">${escapeHtml(formatNumber(summary.offers))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.landingProducts)}</td><td colspan="10">${escapeHtml(formatNumber(summary.landing))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.mobileProducts)}</td><td colspan="10">${escapeHtml(formatNumber(summary.mobile))}</td></tr>
-
-          <tr><td colspan="11"></td></tr>
-          <tr>
-            <th>${escapeHtml(t.table.code)}</th>
-            <th>${escapeHtml(t.table.product)}</th>
-            <th>${escapeHtml(t.table.provider)}</th>
-            <th>${escapeHtml(t.table.type)}</th>
-            <th>${escapeHtml(t.table.category)}</th>
-            <th>${escapeHtml(t.table.price)}</th>
-            <th>${escapeHtml(t.table.offer)}</th>
-            <th>${escapeHtml(t.flags.landing)}</th>
-            <th>${escapeHtml(t.flags.mobile)}</th>
-            <th>${escapeHtml(t.flags.offers)}</th>
-            <th>${escapeHtml(t.table.status)}</th>
-          </tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob(["\ufeff", workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  summary,
-  rows,
-}: {
-  locale: AppLocale;
-  title: string;
-  summary: SummaryState;
-  rows: ProductRow[];
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-
-  const tableRows = rows
-    .slice(0, 40)
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.code)}</td>
-          <td>${escapeHtml(item.name)}</td>
-          <td>${escapeHtml(providerLabel(item.provider, locale) || t.noProvider)}</td>
-          <td>${escapeHtml(t.type[item.productType])}</td>
-          <td>${escapeHtml(formatMoney(item.effectivePrice))}</td>
-          <td>${escapeHtml(item.isOffer ? t.yes : t.no)}</td>
-          <td>${escapeHtml(t.status[item.status])}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 5px 12px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          .grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .box {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .box span { color: #6b7280; display: block; font-size: 11px; }
-          .box strong { display: block; margin-top: 6px; font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-          th { background: #f3f4f6; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
-          </div>
-          <div class="badge">Primey Care</div>
-        </div>
-
-        <div class="grid">
-          <div class="box"><span>${escapeHtml(t.totalProducts)}</span><strong>${escapeHtml(formatNumber(summary.total))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.activeProducts)}</span><strong>${escapeHtml(formatNumber(summary.active))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.offersProducts)}</span><strong>${escapeHtml(formatNumber(summary.offers))}</strong></div>
-          <div class="box"><span>${escapeHtml(t.marketingImages)}</span><strong>${escapeHtml(formatNumber(summary.marketingImages))}</strong></div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>${escapeHtml(t.table.code)}</th>
-              <th>${escapeHtml(t.table.product)}</th>
-              <th>${escapeHtml(t.table.provider)}</th>
-              <th>${escapeHtml(t.table.type)}</th>
-              <th>${escapeHtml(t.table.price)}</th>
-              <th>${escapeHtml(t.table.offer)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-            </tr>
-          </thead>
-          <tbody>${tableRows || `<tr><td colspan="7">${escapeHtml(t.emptyTitle)}</td></tr>`}</tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
-}
-
-/* ============================================================
-   Page
-============================================================ */
-
-export default function SystemProductsPage() {
-  const auth = useAuth() as unknown;
-
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [rows, setRows] = useState<ProductRow[]>([]);
-  const [summary, setSummary] = useState<SummaryState>(DEFAULT_SUMMARY);
-  const [query, setQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
-
-  const canView = hasSafePermission(
-    auth,
-    ["products.view", "products.list"],
-    "view",
-  );
-
-  const canCreate = hasSafePermission(auth, ["products.create"], "action");
-
-  const canExport = hasSafePermission(
-    auth,
-    ["products.export", "reports.export"],
-    "action",
-  );
-
-  const canPrint = hasSafePermission(
-    auth,
-    ["products.print", "reports.print"],
-    "action",
-  );
-
-  const canViewDetails = hasSafePermission(
-    auth,
-    ["products.view", "products.detail"],
-    "view",
-  );
-
-  const filteredRows = useMemo(() => {
-    const clean = query.trim().toLowerCase();
-
-    const sorted = [...rows].sort((a, b) =>
-      String(b.createdAt || b.updatedAt).localeCompare(String(a.createdAt || a.updatedAt)),
-    );
-
-    if (!clean) return sorted;
-
-    return sorted.filter((item) =>
-      [
-        item.code,
-        item.name,
-        item.categoryName,
-        providerLabel(item.provider, locale),
-        item.offerTitle,
-        item.shortDescription,
-        t.type[item.productType],
-        t.status[item.status],
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(clean),
-    );
-  }, [locale, query, rows, t]);
-
-  const displayRows = filteredRows.slice(0, PAGE_SIZE);
-  const hasData = rows.length > 0;
-  const hasSearch = query.trim().length > 0;
-
-  const loadCount = useCallback(async (params: string) => {
-    const response = await fetch(
-      apiUrl(`/api/products/?page=1&page_size=1&include_children=false${params}`),
-      {
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-        },
-      },
-    );
-
-    const payload = (await response.json().catch(() => null)) as ProductsApiResponse | null;
-
-    if (!response.ok || payload?.ok === false) {
-      return 0;
-    }
-
-    return extractTotal(payload);
-  }, []);
-
-  const loadProducts = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setRows([]);
-        setSummary(DEFAULT_SUMMARY);
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        setIsLoading(true);
-        setErrorMessage("");
-
-        const [
-          productsResponse,
-          totalCount,
-          activeCount,
-          offersCount,
-          landingCount,
-          mobileCount,
-          marketingCount,
-        ] = await Promise.all([
-          fetch(
-            apiUrl(
-              `/api/products/?page=1&page_size=${PAGE_SIZE}&include_children=false&ordering=-created_at`,
-            ),
-            {
-              credentials: "include",
-              headers: {
-                Accept: "application/json",
-              },
-            },
-          ),
-          loadCount(""),
-          loadCount("&status=active"),
-          loadCount("&is_offer=true"),
-          loadCount("&show_on_landing=true"),
-          loadCount("&show_on_mobile=true"),
-          loadCount("&has_marketing_image=true"),
-        ]);
-
-        const productsPayload =
-          (await productsResponse.json().catch(() => null)) as ProductsApiResponse | null;
-
-        if (!productsResponse.ok || productsPayload?.ok === false) {
-          throw new Error(productsPayload?.message || `HTTP ${productsResponse.status}`);
-        }
-
-        const normalizedRows = extractRows(productsPayload)
-          .map(normalizeProduct)
-          .filter((item) => item.id || item.name);
-
-        setRows(normalizedRows);
-        setSummary({
-          total: totalCount,
-          active: activeCount,
-          offers: offersCount,
-          landing: landingCount,
-          mobile: mobileCount,
-          marketingImages: marketingCount,
-        });
-
-        if (showToast) {
-          toast.success(t.loadSuccess);
-        }
-      } catch (error) {
-        console.error("Products overview load error:", error);
-        setRows([]);
-        setSummary(DEFAULT_SUMMARY);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [canView, loadCount, t.loadError, t.loadSuccess],
-  );
-
-  function exportExcel() {
-    if (!canExport) return;
-
-    if (!hasData) {
-      toast.error(t.exportEmpty);
-      return;
-    }
-
-    const generatedAt = new Date();
-
-    downloadExcel({
-      filename: `primey-care-products-overview-${generatedAt.toISOString().slice(0, 10)}.xls`,
-      title: t.title,
-      locale,
-      summary,
-      rows: filteredRows,
-    });
-
-    toast.success(t.exportSuccess);
-  }
-
-  function printReport() {
-    if (!canPrint) return;
-
-    if (!hasData) {
-      toast.error(t.exportEmpty);
-      return;
-    }
-
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
-
-    if (!printWindow) {
-      toast.error(t.printError);
-      return;
-    }
-
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        summary,
-        rows: filteredRows,
-      }),
-    );
-    printWindow.document.close();
-
-    toast.success(t.printSuccess);
-  }
-
-  useEffect(() => {
-    const nextLocale = readLocale();
-
-    setLocale(nextLocale);
-    applyDocumentLocale(nextLocale);
-  }, []);
-
-  useEffect(() => {
-    loadProducts();
-  }, [loadProducts]);
-
-  if (authResolving || isLoading) {
-    return <PageSkeleton />;
-  }
-
-  if (!canView) {
+  if (image) {
     return (
-      <div className="w-full space-y-4">
-        <Card className="border-destructive/20">
-          <CardContent className="flex flex-col items-center justify-center gap-4 p-10 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
-              <ShieldCheck className="h-7 w-7 text-destructive" />
-            </div>
-
-            <div>
-              <h2 className="text-lg font-semibold">{t.accessDeniedTitle}</h2>
-              <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <figure className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-background">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={image} alt={name} className="h-full w-full object-cover" />
+      </figure>
     );
   }
-
-  const statCards = [
-    {
-      label: t.totalProducts,
-      value: summary.total,
-      icon: Package,
-    },
-    {
-      label: t.activeProducts,
-      value: summary.active,
-      icon: CheckCircle2,
-    },
-    {
-      label: t.offersProducts,
-      value: summary.offers,
-      icon: Sparkles,
-    },
-    {
-      label: t.landingProducts,
-      value: summary.landing,
-      icon: Globe2,
-    },
-    {
-      label: t.mobileProducts,
-      value: summary.mobile,
-      icon: Smartphone,
-    },
-    {
-      label: t.marketingImages,
-      value: summary.marketingImages,
-      icon: FileImage,
-    },
-  ];
-
-  const shortcuts = [
-    {
-      title: t.productsList,
-      description: t.latestDesc,
-      href: "/system/products/list",
-      icon: Layers3,
-      show: canView,
-    },
-    {
-      title: t.createProduct,
-      description: t.subtitle,
-      href: "/system/products/create",
-      icon: Plus,
-      show: canCreate,
-    },
-  ];
 
   return (
-    <div className="w-full space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="rounded-full">
-              <Package className="me-1 h-3.5 w-3.5" />
-              {t.title}
-            </Badge>
+    <figure className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border bg-muted/50 text-muted-foreground">
+      <Package className="h-5 w-5" />
+    </figure>
+  );
+}
 
-            <Badge variant="outline" className="rounded-full">
-              <Sparkles className="me-1 h-3.5 w-3.5" />
-              {t.offersProducts}
+function HeaderSortButton({
+  label,
+  sortKey,
+  activeSortKey,
+  sortDirection,
+  onSort,
+  className,
+}: {
+  label: string;
+  sortKey: SortKey;
+  activeSortKey: SortKey;
+  sortDirection: SortDirection;
+  onSort: (key: SortKey) => void;
+  className?: string;
+}) {
+  const isActive = activeSortKey === sortKey;
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className={cn(
+        "h-8 px-2 text-xs font-medium text-foreground hover:bg-muted",
+        className,
+      )}
+      onClick={() => onSort(sortKey)}
+    >
+      {label}
+      <ArrowUpDown
+        className={cn(
+          "h-3.5 w-3.5",
+          isActive && sortDirection === "asc" ? "rotate-180" : "",
+        )}
+      />
+    </Button>
+  );
+}
+
+function FilterPopover({
+  label,
+  value,
+  options,
+  onChange,
+  emptyLabel,
+}: {
+  label: string;
+  value: string;
+  options: FilterOption[];
+  onChange: (value: string) => void;
+  emptyLabel: string;
+}) {
+  const selected = options.find((option) => option.value === value);
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 rounded-md border bg-background px-3 text-sm font-medium shadow-none"
+        >
+          <PlusCircle className="h-4 w-4" />
+          <span>{label}</span>
+          {selected && selected.value !== "all" ? (
+            <Badge
+              variant="secondary"
+              className="ms-1 rounded-full px-2 py-0 text-[11px]"
+            >
+              {selected.label}
             </Badge>
+          ) : null}
+        </Button>
+      </PopoverTrigger>
+
+      <PopoverContent className="w-56 p-0" align="start">
+        <Command>
+          <CommandInput placeholder={label} className="h-9" />
+          <CommandList>
+            <CommandEmpty>{emptyLabel}</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => (
+                <CommandItem
+                  key={option.value}
+                  value={`${option.label}-${option.value}`}
+                  onSelect={() => onChange(option.value)}
+                >
+                  <div className="flex w-full items-center gap-3 py-1">
+                    <Checkbox checked={value === option.value} />
+                    <span className="text-sm">{option.label}</span>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ProductTableEmpty({
+  columnsCount,
+  title,
+  description,
+}: {
+  columnsCount: number;
+  title: string;
+  description: string;
+}) {
+  return (
+    <TableRow>
+      <TableCell colSpan={columnsCount} className="h-52 text-center">
+        <div className="flex flex-col items-center justify-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <Package className="h-6 w-6" />
           </div>
+          <p className="mt-4 font-semibold text-foreground">{title}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
 
-          <h1 className="mt-3 text-2xl font-bold tracking-tight">{t.title}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t.subtitle}</p>
+export default function ProductsPage() {
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [products, setProducts] = React.useState<ProductRecord[]>([]);
+  const [summary, setSummary] = React.useState<ProductsSummary>({});
+  const [totalFromApi, setTotalFromApi] = React.useState(0);
+
+  const [selectedProduct, setSelectedProduct] =
+    React.useState<ProductRecord | null>(null);
+  const [selectedOffers, setSelectedOffers] = React.useState<OfferRecord[]>([]);
+  const [offersLoading, setOffersLoading] = React.useState(false);
+  const [offersError, setOffersError] = React.useState("");
+
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  const [filters, setFilters] = React.useState<FiltersState>({
+    search: "",
+    status: "all",
+    type: "all",
+    category: "all",
+    offer: "all",
+    sort: "newest",
+  });
+
+  const [sortKey, setSortKey] = React.useState<SortKey>("created_at");
+  const [sortDirection, setSortDirection] = React.useState<SortDirection>("desc");
+  const [visibleColumns, setVisibleColumns] = React.useState<
+    Record<ColumnKey, boolean>
+  >({
+    select: true,
+    product: true,
+    price: true,
+    category: true,
+    type: true,
+    providerOffers: true,
+    orders: true,
+    status: true,
+    actions: true,
+  });
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [pageIndex, setPageIndex] = React.useState(0);
+  const [pageSize, setPageSize] = React.useState(10);
+
+  const didLoadRef = React.useRef(false);
+
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const textAlign = locale === "ar" ? "text-right" : "text-left";
+  const startNegative = locale === "ar" ? "-me-2" : "-ms-2";
+
+  const loadProducts = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
+
+      try {
+        if (!silent) {
+          setLoading(true);
+        }
+
+        setRefreshing(true);
+        setError("");
+
+        const params = new URLSearchParams({
+          page: "1",
+          page_size: "500",
+          ordering: "-created_at",
+        });
+
+        const payload = await fetchJson<ProductsApiResponse>(
+          makeApiUrl("/api/products/", params),
+          controller.signal,
+        );
+
+        const nextProducts = extractProducts(payload);
+
+        setProducts(nextProducts);
+        setSummary(payload.summary || {});
+        setTotalFromApi(
+          Number(
+            payload.pagination?.total ??
+              payload.summary?.total_products ??
+              nextProducts.length,
+          ),
+        );
+
+        if (silent) {
+          toast.success(translations[locale].loaded);
+        }
+      } catch (fetchError) {
+        const message =
+          fetchError instanceof Error
+            ? fetchError.message
+            : "Unable to load products.";
+
+        setError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+
+      return () => controller.abort();
+    },
+    [locale],
+  );
+
+  React.useEffect(() => {
+    if (didLoadRef.current) return;
+
+    didLoadRef.current = true;
+    void loadProducts();
+  }, [loadProducts]);
+
+  React.useEffect(() => {
+    const readLocale = () => {
+      try {
+        const saved = window.localStorage.getItem("primey-locale");
+        const nextLocale: Locale = saved === "en" ? "en" : "ar";
+
+        setLocale(nextLocale);
+        document.documentElement.lang = nextLocale;
+        document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+        document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      } catch {
+        setLocale("ar");
+      }
+    };
+
+    readLocale();
+
+    window.addEventListener("primey-locale-changed", readLocale);
+    window.addEventListener("storage", readLocale);
+
+    return () => {
+      window.removeEventListener("primey-locale-changed", readLocale);
+      window.removeEventListener("storage", readLocale);
+    };
+  }, []);
+
+  const columns = React.useMemo<ColumnConfig[]>(
+    () => [
+      { key: "select", label: t.selected, canHide: false },
+      { key: "product", label: t.productName, canHide: false },
+      { key: "price", label: t.catalogPrice, canHide: true },
+      { key: "category", label: t.category, canHide: true },
+      { key: "type", label: t.type, canHide: true },
+      { key: "providerOffers", label: t.providerOffers, canHide: true },
+      { key: "orders", label: t.orders, canHide: true },
+      { key: "status", label: t.status, canHide: true },
+      { key: "actions", label: t.actions, canHide: false },
+    ],
+    [t],
+  );
+
+  const visibleColumnsCount = React.useMemo(() => {
+    return columns.filter((column) => visibleColumns[column.key]).length;
+  }, [columns, visibleColumns]);
+
+  const categoryOptions = React.useMemo<FilterOption[]>(() => {
+    const map = new Map<string, string>();
+
+    products.forEach((product) => {
+      const label = getCategoryName(product, locale, "");
+      if (!label) return;
+
+      map.set(normalizeText(label), label);
+    });
+
+    return [
+      { value: "all", label: t.all },
+      ...Array.from(map.entries()).map(([value, label]) => ({
+        value,
+        label,
+      })),
+    ];
+  }, [locale, products, t.all]);
+
+  const filteredProducts = React.useMemo(() => {
+    const filtered = products.filter((product) =>
+      productMatchesFilters(product, filters, locale),
+    );
+
+    const presetSorted = applySortPreset(filtered, filters.sort, locale);
+
+    return [...presetSorted].sort((a, b) =>
+      compareValues(
+        getSortValue(a, sortKey, locale),
+        getSortValue(b, sortKey, locale),
+        sortDirection,
+      ),
+    );
+  }, [filters, locale, products, sortDirection, sortKey]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
+  const safePageIndex = Math.min(pageIndex, pageCount - 1);
+  const startRow = safePageIndex * pageSize;
+  const pagedProducts = filteredProducts.slice(startRow, startRow + pageSize);
+
+  const allPageIds = React.useMemo(
+    () => pagedProducts.map((product) => String(product.id)),
+    [pagedProducts],
+  );
+
+  const allPageSelected =
+    allPageIds.length > 0 && allPageIds.every((id) => selectedIds.has(id));
+  const somePageSelected =
+    allPageIds.some((id) => selectedIds.has(id)) && !allPageSelected;
+
+  const localSummary = React.useMemo(() => {
+    const total = totalFromApi || summary.total_products || products.length;
+    const active =
+      summary.active_products ??
+      products.filter((product) => getProductStatus(product) === "active").length;
+    const withProviderOffers =
+      summary.contracted_products ??
+      summary.products_with_active_contracts ??
+      products.filter((product) => getProviderOffersCount(product) > 0).length;
+    const generalOffers =
+      summary.offer_products ??
+      products.filter((product) => getGeneralOffersCount(product) > 0).length;
+
+    return {
+      total,
+      active,
+      withProviderOffers,
+      generalOffers,
+    };
+  }, [products, summary, totalFromApi]);
+
+  React.useEffect(() => {
+    setPageIndex(0);
+  }, [filters, pageSize, sortDirection, sortKey]);
+
+  React.useEffect(() => {
+    if (pageIndex > pageCount - 1) {
+      setPageIndex(Math.max(0, pageCount - 1));
+    }
+  }, [pageCount, pageIndex]);
+
+  const updateFilter = <K extends keyof FiltersState>(
+    key: K,
+    value: FiltersState[K],
+  ) => {
+    setFilters((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  };
+
+  const resetFilters = () => {
+    setFilters({
+      search: "",
+      status: "all",
+      type: "all",
+      category: "all",
+      offer: "all",
+      sort: "newest",
+    });
+    setSortKey("created_at");
+    setSortDirection("desc");
+    setSelectedIds(new Set());
+  };
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+
+    setSortKey(key);
+    setSortDirection(key === "created_at" ? "desc" : "asc");
+  };
+
+  const toggleAllPageSelection = (checked: boolean) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+
+      allPageIds.forEach((id) => {
+        if (checked) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+      });
+
+      return next;
+    });
+  };
+
+  const toggleRowSelection = (id: string, checked: boolean) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+
+      return next;
+    });
+  };
+
+  const loadProductOffers = async (product: ProductRecord) => {
+    setSelectedProduct(product);
+    setSelectedOffers([]);
+    setOffersError("");
+    setOffersLoading(true);
+
+    try {
+      const params = new URLSearchParams({
+        product_id: String(product.id),
+        page: "1",
+        page_size: "100",
+      });
+
+      const payload = await fetchJson<OffersApiResponse>(
+        makeApiUrl("/api/offers/", params),
+      );
+
+      setSelectedOffers(extractOffers(payload));
+      toast.success(t.offersLoaded);
+    } catch (offersFetchError) {
+      const message =
+        offersFetchError instanceof Error
+          ? offersFetchError.message
+          : t.offersErrorTitle;
+
+      setOffersError(message);
+    } finally {
+      setOffersLoading(false);
+    }
+  };
+
+  const copyProductId = async (product: ProductRecord) => {
+    try {
+      await navigator.clipboard.writeText(String(product.id));
+      toast.success(t.copied);
+    } catch {
+      toast.error(String(product.id));
+    }
+  };
+
+  const statusOptions: FilterOption[] = [
+    { value: "all", label: t.all },
+    { value: "active", label: t.active },
+    { value: "draft", label: t.draft },
+    { value: "inactive", label: t.inactive },
+    { value: "archived", label: t.archived },
+  ];
+
+  const typeOptions: FilterOption[] = [
+    { value: "all", label: t.all },
+    { value: "card", label: t.card },
+    { value: "program", label: t.program },
+    { value: "service", label: t.service },
+    { value: "membership", label: t.membership },
+  ];
+
+  const offerOptions: FilterOption[] = [
+    { value: "all", label: t.all },
+    { value: "with_offers", label: t.withOffers },
+    { value: "without_offers", label: t.withoutOffers },
+  ];
+
+  const exportExcel = () => {
+    const rows = filteredProducts
+      .map((product) => {
+        const productName = getProductName(product, locale);
+        const categoryName = getCategoryName(product, locale, t.noCategory);
+        const type = getProductType(product);
+        const status = getProductStatus(product);
+
+        return `
+          <tr>
+            <td>${escapeHtml(productName)}</td>
+            <td>${escapeHtml(product.code || product.sku || "")}</td>
+            <td>${escapeHtml(formatMoney(getCatalogPrice(product)))}</td>
+            <td>${escapeHtml(categoryName)}</td>
+            <td>${escapeHtml(type)}</td>
+            <td>${escapeHtml(String(getProviderOffersCount(product)))}</td>
+            <td>${escapeHtml(String(getProductSalesCount(product)))}</td>
+            <td>${escapeHtml(status)}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+        </head>
+        <body>
+          <table border="1">
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.product)}</th>
+                <th>${escapeHtml(t.noCode)}</th>
+                <th>${escapeHtml(t.catalogPrice)}</th>
+                <th>${escapeHtml(t.category)}</th>
+                <th>${escapeHtml(t.type)}</th>
+                <th>${escapeHtml(t.providerOffers)}</th>
+                <th>${escapeHtml(t.orders)}</th>
+                <th>${escapeHtml(t.status)}</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = `primey-products-${new Date().toISOString().slice(0, 10)}.xls`;
+    anchor.click();
+
+    URL.revokeObjectURL(url);
+    toast.success(t.exportDone);
+  };
+
+  const printProducts = () => {
+    const rows = filteredProducts
+      .map((product) => {
+        const productName = getProductName(product, locale);
+        const categoryName = getCategoryName(product, locale, t.noCategory);
+
+        return `
+          <tr>
+            <td>${escapeHtml(productName)}</td>
+            <td>${escapeHtml(formatMoney(getCatalogPrice(product)))}</td>
+            <td>${escapeHtml(categoryName)}</td>
+            <td>${escapeHtml(String(getProviderOffersCount(product)))}</td>
+            <td>${escapeHtml(String(getProductSalesCount(product)))}</td>
+            <td>${escapeHtml(getProductStatus(product))}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <html dir="${dir}">
+        <head>
+          <title>${escapeHtml(t.title)}</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              padding: 24px;
+              color: #111827;
+            }
+            h1 {
+              margin: 0 0 16px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 16px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 10px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              font-size: 13px;
+            }
+            th {
+              background: #f8fafc;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(t.title)}</h1>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.product)}</th>
+                <th>${escapeHtml(t.catalogPrice)}</th>
+                <th>${escapeHtml(t.category)}</th>
+                <th>${escapeHtml(t.providerOffers)}</th>
+                <th>${escapeHtml(t.orders)}</th>
+                <th>${escapeHtml(t.status)}</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <script>
+            window.onload = function() {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    toast.success(t.printReady);
+  };
+
+  const renderFilters = () => (
+    <>
+      <FilterPopover
+        label={t.chooseStatus}
+        value={filters.status}
+        options={statusOptions}
+        onChange={(value) => updateFilter("status", value as ProductStatusFilter)}
+        emptyLabel={t.noOptions}
+      />
+
+      <FilterPopover
+        label={t.chooseCategory}
+        value={filters.category}
+        options={categoryOptions}
+        onChange={(value) => updateFilter("category", value)}
+        emptyLabel={t.noOptions}
+      />
+
+      <FilterPopover
+        label={t.chooseType}
+        value={filters.type}
+        options={typeOptions}
+        onChange={(value) => updateFilter("type", value as ProductTypeFilter)}
+        emptyLabel={t.noOptions}
+      />
+
+      <FilterPopover
+        label={t.chooseOffer}
+        value={filters.offer}
+        options={offerOptions}
+        onChange={(value) => updateFilter("offer", value as OfferFilter)}
+        emptyLabel={t.noOptions}
+      />
+    </>
+  );
+
+  return (
+    <div dir={dir} className="w-full space-y-7">
+      <div className="flex items-center justify-between gap-4">
+        <div className={cn("space-y-1", textAlign)}>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            {t.title}
+          </h1>
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+            {t.subtitle}
+          </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" onClick={() => loadProducts(true)}>
-            <RefreshCcw className="me-2 h-4 w-4" />
-            {t.refresh}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 rounded-md shadow-none"
+            onClick={() => void loadProducts({ silent: true })}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">{t.refresh}</span>
           </Button>
 
-          {canExport ? (
-            <Button type="button" variant="outline" onClick={exportExcel}>
-              <FileSpreadsheet className="me-2 h-4 w-4" />
-              {t.exportExcel}
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 rounded-md shadow-none"
+            onClick={exportExcel}
+          >
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">{t.exportExcel}</span>
+          </Button>
 
-          {canPrint ? (
-            <Button type="button" variant="outline" onClick={printReport}>
-              <Printer className="me-2 h-4 w-4" />
-              {t.print}
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 rounded-md shadow-none"
+            onClick={printProducts}
+          >
+            <Printer className="h-4 w-4" />
+            <span className="hidden sm:inline">{t.print}</span>
+          </Button>
 
-          {canCreate ? (
-            <Button asChild>
-              <Link href="/system/products/create">
-                <Plus className="me-2 h-4 w-4" />
-                {t.createProduct}
-              </Link>
-            </Button>
-          ) : null}
+          <Button asChild className="h-10 rounded-md bg-black text-white hover:bg-black/90">
+            <Link href="/system/products/create">
+              <Plus className="h-4 w-4" />
+              {t.addProduct}
+            </Link>
+          </Button>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        {statCards.map((card) => {
-          const Icon = card.icon;
+      {loading ? (
+        <ProductsSkeleton />
+      ) : error ? (
+        <Card className="rounded-lg border-rose-200 bg-rose-50 shadow-none dark:border-rose-900 dark:bg-rose-950/20">
+          <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-300">
+                <TriangleAlert className="h-5 w-5" />
+              </div>
 
-          return (
-            <Card key={card.label}>
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-2xl font-bold">{formatNumber(card.value)}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{card.label}</p>
-                  </div>
-
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-                    <Icon className="h-5 w-5" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Layers3 className="h-5 w-5" />
-            {t.shortcutsTitle}
-          </CardTitle>
-          <CardDescription>{t.shortcutsDesc}</CardDescription>
-        </CardHeader>
-
-        <CardContent className="grid gap-4 md:grid-cols-2">
-          {shortcuts
-            .filter((item) => item.show)
-            .map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="group rounded-2xl border bg-background p-4 transition hover:bg-muted/50"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-                        <Icon className="h-5 w-5" />
-                      </div>
-
-                      <div>
-                        <p className="font-semibold">{item.title}</p>
-                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                          {item.description}
-                        </p>
-                      </div>
-                    </div>
-
-                    <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:text-foreground" />
-                  </div>
-                </Link>
-              );
-            })}
-        </CardContent>
-      </Card>
-
-      {errorMessage ? (
-        <Card className="border-destructive/20">
-          <CardContent className="flex flex-col items-center justify-center gap-4 p-10 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
-              <AlertTriangle className="h-7 w-7 text-destructive" />
+              <div>
+                <p className="font-semibold text-rose-700 dark:text-rose-200">
+                  {t.errorTitle}
+                </p>
+                <p className="text-sm text-rose-600 dark:text-rose-300">
+                  {error}
+                </p>
+              </div>
             </div>
 
-            <div>
-              <h2 className="text-lg font-semibold">{errorMessage}</h2>
-              <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-                {t.loadErrorHint}
-              </p>
-            </div>
-
-            <Button type="button" onClick={() => loadProducts(true)}>
-              <RefreshCcw className="me-2 h-4 w-4" />
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-md border-rose-200 bg-white text-rose-600 hover:bg-rose-50"
+              onClick={() => void loadProducts()}
+            >
+              <RefreshCw className="h-4 w-4" />
               {t.retry}
             </Button>
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <CardHeader>
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5" />
-                  {t.latestTitle}
-                </CardTitle>
-                <CardDescription>{t.latestDesc}</CardDescription>
+        <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <KpiCard
+              title={t.totalProducts}
+              value={formatNumber(localSummary.total)}
+              trend="+100%"
+            />
+
+            <KpiCard
+              title={t.activeProducts}
+              value={formatNumber(localSummary.active)}
+              trend={`+${formatNumber(localSummary.active)}`}
+            />
+
+            <KpiCard
+              title={t.productsWithOffers}
+              value={formatNumber(localSummary.withProviderOffers)}
+              trend={`+${formatNumber(localSummary.withProviderOffers)}`}
+            />
+
+            <KpiCard
+              title={t.offerProducts}
+              value={formatNumber(localSummary.generalOffers)}
+              trend={`+${formatNumber(localSummary.generalOffers)}`}
+            />
+          </div>
+
+          <div className="space-y-4 pt-1">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+              <div className="flex flex-1 flex-col gap-2 md:flex-row md:items-center">
+                <div className="relative w-full md:max-w-sm">
+                  <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={filters.search}
+                    onChange={(event) => updateFilter("search", event.target.value)}
+                    placeholder={t.searchPlaceholder}
+                    className="h-10 rounded-md border bg-background pe-10 shadow-none"
+                  />
+                </div>
+
+                <div className="hidden flex-wrap items-center gap-2 md:flex">
+                  {renderFilters()}
+                </div>
+
+                <div className="md:hidden">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 rounded-md shadow-none"
+                      >
+                        <FilterIcon className="h-4 w-4" />
+                        {t.mobileFilters}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72 space-y-2 p-3" align="start">
+                      {renderFilters()}
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
 
-              <div className="relative w-full lg:w-[360px]">
-                <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={query}
-                  placeholder={t.searchPlaceholder}
-                  className="ps-10"
-                  onChange={(event) => setQuery(event.target.value)}
-                />
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Select
+                  value={filters.sort}
+                  onValueChange={(value) =>
+                    updateFilter("sort", value as SortFilter)
+                  }
+                >
+                  <SelectTrigger className="h-10 w-[180px] rounded-md border bg-background shadow-none">
+                    <span className="text-sm text-muted-foreground">{t.sort}:</span>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="newest">{t.newest}</SelectItem>
+                    <SelectItem value="oldest">{t.oldest}</SelectItem>
+                    <SelectItem value="name">{t.name}</SelectItem>
+                    <SelectItem value="best_selling">{t.bestSelling}</SelectItem>
+                    <SelectItem value="most_offers">{t.mostOffers}</SelectItem>
+                    <SelectItem value="highest_price">{t.highestPrice}</SelectItem>
+                    <SelectItem value="lowest_price">{t.lowestPrice}</SelectItem>
+                    <SelectItem value="highest_discount">
+                      {t.highestDiscountSort}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 rounded-md shadow-none"
+                  onClick={resetFilters}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  <span className="hidden lg:inline">{t.reset}</span>
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-10 rounded-md shadow-none"
+                    >
+                      <span className="hidden lg:inline">{t.columns}</span>
+                      <ColumnsIcon className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+
+                    {columns
+                      .filter((column) => column.canHide)
+                      .map((column) => (
+                        <DropdownMenuCheckboxItem
+                          key={column.key}
+                          checked={visibleColumns[column.key]}
+                          onCheckedChange={(checked) =>
+                            setVisibleColumns((current) => ({
+                              ...current,
+                              [column.key]: checked,
+                            }))
+                          }
+                        >
+                          {column.label}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
-          </CardHeader>
 
-          <CardContent className="p-0">
-            {displayRows.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-4 p-10 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-                  <Package className="h-7 w-7 text-muted-foreground" />
-                </div>
-
-                <div>
-                  <h2 className="text-lg font-semibold">
-                    {hasSearch ? t.noResultsTitle : t.emptyTitle}
-                  </h2>
-                  <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-                    {hasSearch ? t.noResultsText : t.emptyText}
-                  </p>
-                </div>
-
-                {canCreate && !hasSearch ? (
-                  <Button asChild>
-                    <Link href="/system/products/create">
-                      <Plus className="me-2 h-4 w-4" />
-                      {t.createProduct}
-                    </Link>
-                  </Button>
-                ) : null}
-              </div>
-            ) : (
+            <div className="overflow-hidden rounded-lg border bg-background">
               <div className="overflow-x-auto">
-                <Table>
+                <Table className="min-w-[1160px]">
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>{t.table.image}</TableHead>
-                      <TableHead>{t.table.product}</TableHead>
-                      <TableHead>{t.table.provider}</TableHead>
-                      <TableHead>{t.table.type}</TableHead>
-                      <TableHead>{t.table.price}</TableHead>
-                      <TableHead>{t.table.offer}</TableHead>
-                      <TableHead>{t.table.visibility}</TableHead>
-                      <TableHead>{t.table.status}</TableHead>
-                      {canViewDetails ? <TableHead>{t.table.action}</TableHead> : null}
+                    <TableRow className="h-11 bg-background hover:bg-background">
+                      {visibleColumns.select ? (
+                        <TableHead className="w-[44px] px-3">
+                          <Checkbox
+                            checked={
+                              allPageSelected
+                                ? true
+                                : somePageSelected
+                                  ? "indeterminate"
+                                  : false
+                            }
+                            onCheckedChange={(checked) =>
+                              toggleAllPageSelection(Boolean(checked))
+                            }
+                            aria-label={t.selected}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.product ? (
+                        <TableHead className={cn("min-w-[360px] px-4", textAlign)}>
+                          <HeaderSortButton
+                            label={t.productName}
+                            sortKey="name"
+                            activeSortKey={sortKey}
+                            sortDirection={sortDirection}
+                            onSort={handleSort}
+                            className={startNegative}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.price ? (
+                        <TableHead className={cn("min-w-[130px] px-4", textAlign)}>
+                          <HeaderSortButton
+                            label={t.catalogPrice}
+                            sortKey="price"
+                            activeSortKey={sortKey}
+                            sortDirection={sortDirection}
+                            onSort={handleSort}
+                            className={startNegative}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.category ? (
+                        <TableHead className={cn("min-w-[150px] px-4", textAlign)}>
+                          <HeaderSortButton
+                            label={t.category}
+                            sortKey="category"
+                            activeSortKey={sortKey}
+                            sortDirection={sortDirection}
+                            onSort={handleSort}
+                            className={startNegative}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.type ? (
+                        <TableHead className={cn("min-w-[120px] px-4", textAlign)}>
+                          <HeaderSortButton
+                            label={t.type}
+                            sortKey="type"
+                            activeSortKey={sortKey}
+                            sortDirection={sortDirection}
+                            onSort={handleSort}
+                            className={startNegative}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.providerOffers ? (
+                        <TableHead className={cn("min-w-[150px] px-4", textAlign)}>
+                          <HeaderSortButton
+                            label={t.providerOffers}
+                            sortKey="provider_offers"
+                            activeSortKey={sortKey}
+                            sortDirection={sortDirection}
+                            onSort={handleSort}
+                            className={startNegative}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.orders ? (
+                        <TableHead className={cn("min-w-[120px] px-4", textAlign)}>
+                          <HeaderSortButton
+                            label={t.orders}
+                            sortKey="orders"
+                            activeSortKey={sortKey}
+                            sortDirection={sortDirection}
+                            onSort={handleSort}
+                            className={startNegative}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.status ? (
+                        <TableHead className={cn("min-w-[120px] px-4", textAlign)}>
+                          <HeaderSortButton
+                            label={t.status}
+                            sortKey="status"
+                            activeSortKey={sortKey}
+                            sortDirection={sortDirection}
+                            onSort={handleSort}
+                            className={startNegative}
+                          />
+                        </TableHead>
+                      ) : null}
+
+                      {visibleColumns.actions ? (
+                        <TableHead className="w-[70px] px-4 text-center">
+                          <span className="text-xs font-medium text-foreground">
+                            {t.actions}
+                          </span>
+                        </TableHead>
+                      ) : null}
                     </TableRow>
                   </TableHeader>
 
                   <TableBody>
-                    {displayRows.map((product) => {
-                      const Icon = productTypeIcon(product.productType);
-                      const imageSrc = product.thumbnailImageUrl || product.marketingImageUrl;
+                    {pagedProducts.length ? (
+                      pagedProducts.map((product) => {
+                        const productId = String(product.id);
+                        const productName = getProductName(product, locale);
 
-                      return (
-                        <TableRow key={product.id}>
-                          <TableCell>
-                            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border bg-muted">
-                              {imageSrc ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={imageSrc}
-                                  alt={product.name}
-                                  className="h-full w-full object-cover"
+                        return (
+                          <TableRow
+                            key={productId}
+                            data-state={selectedIds.has(productId) && "selected"}
+                            className="h-[62px] border-b bg-background hover:bg-muted/40 data-[state=selected]:bg-muted"
+                          >
+                            {visibleColumns.select ? (
+                              <TableCell className="px-3">
+                                <Checkbox
+                                  checked={selectedIds.has(productId)}
+                                  onCheckedChange={(checked) =>
+                                    toggleRowSelection(productId, Boolean(checked))
+                                  }
+                                  aria-label={t.selected}
                                 />
-                              ) : (
-                                <ImageIcon className="h-5 w-5 text-muted-foreground" />
-                              )}
-                            </div>
-                          </TableCell>
+                              </TableCell>
+                            ) : null}
 
-                          <TableCell>
-                            <div className="min-w-[220px]">
-                              <div className="flex items-center gap-2">
-                                <Icon className="h-4 w-4 text-muted-foreground" />
-                                <span className="font-semibold">{product.name}</span>
-                              </div>
+                            {visibleColumns.product ? (
+                              <TableCell className="px-4">
+                                <div className="flex items-center gap-4">
+                                  <ProductImage product={product} locale={locale} />
 
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                <Badge variant="outline" className="rounded-full">
-                                  {product.code}
-                                </Badge>
+                                  <div className={cn("min-w-0", textAlign)}>
+                                    <Link
+                                      href={`/system/products/${product.id}`}
+                                      className="line-clamp-1 text-sm font-semibold text-foreground transition hover:text-primary"
+                                    >
+                                      {productName}
+                                    </Link>
 
-                                {product.isFeatured ? (
-                                  <Badge variant="secondary" className="rounded-full">
-                                    {t.flags.featured}
-                                  </Badge>
-                                ) : null}
-                              </div>
+                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                      <span className="font-mono">
+                                        {product.code || product.sku || t.noCode}
+                                      </span>
 
-                              {product.shortDescription ? (
-                                <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
-                                  {product.shortDescription}
-                                </p>
-                              ) : null}
-                            </div>
-                          </TableCell>
+                                      {product.is_featured ? (
+                                        <Badge
+                                          variant="outline"
+                                          className="rounded-full px-2 py-0 text-[11px]"
+                                        >
+                                          <Sparkles className="h-3 w-3" />
+                                          {t.offerProducts}
+                                        </Badge>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </div>
+                              </TableCell>
+                            ) : null}
 
-                          <TableCell>
-                            <span className="text-sm">
-                              {providerLabel(product.provider, locale) || t.noProvider}
-                            </span>
-                          </TableCell>
+                            {visibleColumns.price ? (
+                              <TableCell className={cn("px-4 text-sm", textAlign)}>
+                                <MoneyValue value={getCatalogPrice(product)} />
+                              </TableCell>
+                            ) : null}
 
-                          <TableCell>
-                            <Badge variant="secondary" className="rounded-full">
-                              {t.type[product.productType]}
-                            </Badge>
-                          </TableCell>
+                            {visibleColumns.category ? (
+                              <TableCell
+                                className={cn(
+                                  "px-4 text-sm font-medium text-foreground",
+                                  textAlign,
+                                )}
+                              >
+                                {getCategoryName(product, locale, t.noCategory)}
+                              </TableCell>
+                            ) : null}
 
-                          <TableCell>
-                            <div className="space-y-1">
-                              <p className="font-semibold">
-                                <SarAmount value={product.effectivePrice} />
-                              </p>
+                            {visibleColumns.type ? (
+                              <TableCell className={cn("px-4", textAlign)}>
+                                <TypeBadge
+                                  type={getProductType(product)}
+                                  locale={locale}
+                                />
+                              </TableCell>
+                            ) : null}
 
-                              {product.salePrice > 0 ? (
-                                <p className="text-xs text-muted-foreground">
-                                  <SarAmount value={product.price} />
-                                </p>
-                              ) : null}
-                            </div>
-                          </TableCell>
+                            {visibleColumns.providerOffers ? (
+                              <TableCell className={cn("px-4", textAlign)}>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 rounded-full border-[#8c9cdc]/30 bg-[#432a58]/10 px-3 text-xs font-bold text-[#432a58] shadow-none transition hover:border-[#8c9cdc]/60 hover:bg-[#432a58]/15 dark:border-[#8c9cdc]/25 dark:bg-[#8c9cdc]/10 dark:text-[#8c9cdc] dark:hover:bg-[#8c9cdc]/20"
+                                  onClick={() => void loadProductOffers(product)}
+                                >
+                                  <Layers3 className="h-3.5 w-3.5 text-[#432a58] dark:text-[#8c9cdc]" />
+                                  {formatNumber(getProviderOffersCount(product))}
+                                </Button>
+                              </TableCell>
+                            ) : null}
 
-                          <TableCell>
-                            <div className="space-y-1">
-                              {flagBadge(product.isOffer, t.table.offer)}
-
-                              {product.offerTitle ? (
-                                <p className="line-clamp-1 text-xs text-muted-foreground">
-                                  {product.offerTitle}
-                                </p>
-                              ) : null}
-                            </div>
-                          </TableCell>
-
-                          <TableCell>
-                            <div className="flex flex-wrap gap-1">
-                              {flagBadge(product.showOnLanding, t.flags.landing)}
-                              {flagBadge(product.showOnMobile, t.flags.mobile)}
-                              {flagBadge(product.showOnOffers, t.flags.offers)}
-                              {flagBadge(product.hasMarketingImage, t.flags.image)}
-                            </div>
-                          </TableCell>
-
-                          <TableCell>{statusBadge(product.status, t)}</TableCell>
-
-                          {canViewDetails ? (
-                            <TableCell>
-                              <Button asChild variant="outline" size="sm">
-                                <Link href={`/system/products/${product.id}`}>
-                                  <Eye className="me-2 h-4 w-4" />
-                                  {t.view}
+                            {visibleColumns.orders ? (
+                              <TableCell className={cn("px-4", textAlign)}>
+                                <Link
+                                  href={`/system/orders?product=${encodeURIComponent(
+                                    String(product.id),
+                                  )}`}
+                                  className="inline-flex h-8 items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-50 px-3 text-xs font-bold text-emerald-700 shadow-none transition hover:border-emerald-500/45 hover:bg-emerald-100 dark:border-emerald-400/20 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50"
+                                >
+                                  <ShoppingCart className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />
+                                  {formatNumber(getProductSalesCount(product))}
                                 </Link>
-                              </Button>
-                            </TableCell>
-                          ) : null}
-                        </TableRow>
-                      );
-                    })}
+                              </TableCell>
+                            ) : null}
+
+                            {visibleColumns.status ? (
+                              <TableCell className={cn("px-4", textAlign)}>
+                                <StatusBadge
+                                  status={getProductStatus(product)}
+                                  locale={locale}
+                                />
+                              </TableCell>
+                            ) : null}
+
+                            {visibleColumns.actions ? (
+                              <TableCell className="px-4 text-center">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      className="h-8 w-8 rounded-md p-0"
+                                    >
+                                      <span className="sr-only">{t.actions}</span>
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+
+                                  <DropdownMenuContent align="end" className="w-48">
+                                    <DropdownMenuLabel>{t.actions}</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+
+                                    <DropdownMenuItem asChild>
+                                      <Link href={`/system/products/${product.id}`}>
+                                        <Eye className="h-4 w-4" />
+                                        {t.view}
+                                      </Link>
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuItem
+                                      onClick={() => void loadProductOffers(product)}
+                                    >
+                                      <Layers3 className="h-4 w-4" />
+                                      {t.viewOffers}
+                                    </DropdownMenuItem>
+
+                                    <DropdownMenuItem
+                                      onClick={() => void copyProductId(product)}
+                                    >
+                                      <Copy className="h-4 w-4" />
+                                      {t.copyId}
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
+                            ) : null}
+                          </TableRow>
+                        );
+                      })
+                    ) : (
+                      <ProductTableEmpty
+                        columnsCount={visibleColumnsCount}
+                        title={t.noProducts}
+                        description={t.noProductsDesc}
+                      />
+                    )}
                   </TableBody>
                 </Table>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </div>
+
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="text-sm text-muted-foreground">
+                {formatNumber(selectedIds.size)} {t.of}{" "}
+                {formatNumber(filteredProducts.length)} {t.selectedRows}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(value) => {
+                    setPageSize(Number(value));
+                    setPageIndex(0);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-[120px] rounded-md shadow-none">
+                    <span className="text-sm text-muted-foreground">
+                      {t.rowsPerPage}
+                    </span>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((option) => (
+                      <SelectItem key={option} value={String(option)}>
+                        {formatNumber(option)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <div className="px-2 text-sm font-medium text-muted-foreground">
+                  {t.page} {formatNumber(safePageIndex + 1)} {t.of}{" "}
+                  {formatNumber(pageCount)}
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 rounded-md shadow-none"
+                  onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
+                  disabled={safePageIndex === 0}
+                >
+                  {t.previous}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 rounded-md shadow-none"
+                  onClick={() =>
+                    setPageIndex((current) =>
+                      Math.min(pageCount - 1, current + 1),
+                    )
+                  }
+                  disabled={safePageIndex >= pageCount - 1}
+                >
+                  {t.next}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {selectedProduct ? (
+            <Card className="rounded-lg border bg-background shadow-none">
+              <CardContent className="p-5">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className={textAlign}>
+                    <h2 className="text-xl font-bold text-foreground">
+                      {t.selectedProductOffers}
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {getProductName(selectedProduct, locale)}
+                    </p>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 rounded-md shadow-none"
+                    onClick={() => {
+                      setSelectedProduct(null);
+                      setSelectedOffers([]);
+                      setOffersError("");
+                    }}
+                  >
+                    <X className="h-4 w-4" />
+                    {t.closeOffers}
+                  </Button>
+                </div>
+
+                {offersLoading ? (
+                  <div className="mt-5 space-y-3">
+                    {Array.from({ length: 4 }).map((_, index) => (
+                      <div
+                        key={index}
+                        className="h-14 animate-pulse rounded-lg bg-muted"
+                      />
+                    ))}
+                  </div>
+                ) : offersError ? (
+                  <div className="mt-5 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-200">
+                    <p className="font-semibold">{t.offersErrorTitle}</p>
+                    <p className="mt-1">{offersError}</p>
+                  </div>
+                ) : selectedOffers.length === 0 ? (
+                  <div className="mt-5 flex flex-col items-center justify-center rounded-lg border border-dashed bg-background p-10 text-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                      <Layers3 className="h-6 w-6" />
+                    </div>
+                    <p className="mt-4 font-semibold text-foreground">
+                      {t.noProviderOffers}
+                    </p>
+                    <p className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">
+                      {t.noProviderOffersDesc}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-5 overflow-x-auto rounded-lg border bg-background">
+                    <Table className="min-w-[920px]">
+                      <TableHeader>
+                        <TableRow className="h-11 bg-background hover:bg-background">
+                          <TableHead className={cn("min-w-[240px]", textAlign)}>
+                            {t.product}
+                          </TableHead>
+                          <TableHead className={cn("min-w-[170px]", textAlign)}>
+                            {t.provider}
+                          </TableHead>
+                          <TableHead className={cn("min-w-[140px]", textAlign)}>
+                            {t.beforeDiscount}
+                          </TableHead>
+                          <TableHead className={cn("min-w-[140px]", textAlign)}>
+                            {t.afterDiscount}
+                          </TableHead>
+                          <TableHead className={cn("min-w-[110px]", textAlign)}>
+                            {t.discount}
+                          </TableHead>
+                          <TableHead className={cn("min-w-[130px]", textAlign)}>
+                            {t.offerId}
+                          </TableHead>
+                          <TableHead className={cn("min-w-[130px]", textAlign)}>
+                            {t.status}
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+
+                      <TableBody>
+                        {selectedOffers.map((offer, index) => {
+                          const offerId = getOfferId(offer) || String(index + 1);
+                          const checkoutReady = isOfferCheckoutReady(offer);
+
+                          return (
+                            <TableRow key={`${offerId}-${index}`} className="h-14">
+                              <TableCell className={textAlign}>
+                                <div>
+                                  <p className="text-sm font-semibold text-foreground">
+                                    {getOfferTitle(offer, locale)}
+                                  </p>
+
+                                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                                    {offer.offer_badge || offer.badge ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="rounded-full px-2 py-0 text-[11px]"
+                                      >
+                                        {offer.offer_badge || offer.badge}
+                                      </Badge>
+                                    ) : null}
+
+                                    {checkoutReady ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="rounded-full border-emerald-500/30 bg-emerald-50 px-2 py-0 text-[11px] text-emerald-700"
+                                      >
+                                        {t.checkoutReady}
+                                      </Badge>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className={textAlign}>
+                                {getOfferProviderName(offer, locale, "—")}
+                              </TableCell>
+
+                              <TableCell className={textAlign}>
+                                <MoneyValue value={getOfferBeforePrice(offer)} />
+                              </TableCell>
+
+                              <TableCell className={textAlign}>
+                                <MoneyValue value={getOfferAfterPrice(offer)} />
+                              </TableCell>
+
+                              <TableCell className={textAlign}>
+                                {formatPercent(getOfferDiscount(offer))}
+                              </TableCell>
+
+                              <TableCell className={textAlign}>
+                                <span className="font-mono text-xs text-muted-foreground">
+                                  {offerId}
+                                </span>
+                              </TableCell>
+
+                              <TableCell className={textAlign}>
+                                <StatusBadge
+                                  status={
+                                    offer.is_active === false
+                                      ? "inactive"
+                                      : offer.status || "active"
+                                  }
+                                  locale={locale}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
+        </>
       )}
     </div>
   );

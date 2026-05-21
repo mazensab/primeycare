@@ -1,1738 +1,1498 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/users/create/page.tsx
-   🧠 Primey Care | Create System User
+   📂 primey_frontend/app/system/users/create/page.tsx
+   👤 Primey Care — Create Login Account V2
    ------------------------------------------------------------
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ مبني بنفس نمط إنشاء المراكز/العملاء المعتمد
-   ✅ Full Width Layout
-   ✅ Main Form + Sidebar Summary
-   ✅ حماية زر الإنشاء وطلبات الحفظ حسب الصلاحيات
-   ✅ fallback آمن لـ system_admin / superadmin
-   ✅ Error Alert داخلي
-   ✅ Field-level validation
-   ✅ beforeunload protection
-   ✅ حفظ واستعادة مسودة محلية
-   ✅ تعطيل الحقول أثناء الحفظ
-   ✅ تنظيف البيانات قبل الإرسال
-   ✅ إرسال رابط كلمة المرور عند الإنشاء عند اختيار ذلك
-   ✅ استخدام toast من sonner
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ بدون localhost hardcoded
-   ✅ لا توجد روابط تقارير داخل الوحدة
-   ✅ لا توجد نصوص تقنية ظاهرة في الواجهة
-   ✅ الأرقام بالإنجليزية
+   ✅ إنشاء حساب دخول فقط
+   ✅ لا ينشئ بيانات تشغيلية للعميل / مقدم الخدمة / المندوب / الوسيط
+   ✅ يدعم ربط اختياري بكيان موجود entity_type/entity_id
+   ✅ يدعم actor_type/actor_id للتوافق مع auth_center
+   ✅ UserType مطابق للباكند:
+      SUPER_ADMIN / SYSTEM / STAFF / ACCOUNTANT / PROVIDER / CENTER / CUSTOMER / AGENT / BROKER / OTHER
+   ✅ لا يحوّل تلقائيًا بعد الإنشاء حتى يظهر رابط كلمة المرور
+   ✅ Fallback من /api/users/create/ إلى /api/users/
+   ✅ Same approved Products / Customers / Agents create pattern
+   ✅ Internal UI components only
+   ✅ No localhost
+   ✅ No fake operational records
+   ✅ sonner toast
+   ✅ RTL/LTR via primey-locale
 ============================================================ */
 
-import { useRouter } from "next/navigation";
-import type { ComponentType, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import * as React from "react";
+import Link from "next/link";
 import {
-  AlertTriangle,
   ArrowLeft,
-  BadgeCheck,
+  ArrowRight,
+  Building2,
   CheckCircle2,
-  ClipboardList,
+  Copy,
+  Eye,
   KeyRound,
   Loader2,
-  Mail,
-  Phone,
-  RefreshCcw,
+  LockKeyhole,
+  RefreshCw,
+  RotateCcw,
   Save,
-  Send,
   ShieldCheck,
-  Trash2,
+  TriangleAlert,
   UserCog,
-  UserRound,
+  UserPlus,
   Users,
-  XCircle,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type AuthRecord = Record<string, unknown>;
+type UserType =
+  | "SUPER_ADMIN"
+  | "SYSTEM"
+  | "STAFF"
+  | "ACCOUNTANT"
+  | "PROVIDER"
+  | "CENTER"
+  | "CUSTOMER"
+  | "AGENT"
+  | "BROKER"
+  | "OTHER";
 
 type UserRole =
   | "system_admin"
   | "provider_admin"
   | "customer_user"
   | "agent_user"
+  | "broker_user"
   | "accountant"
   | "support"
   | "viewer";
 
-type UserWorkspace = "system" | "provider" | "customer" | "agent";
+type EntityType =
+  | "none"
+  | "system"
+  | "provider"
+  | "center"
+  | "customer"
+  | "agent"
+  | "broker";
 
-type UserFormData = {
-  first_name: string;
-  last_name: string;
-  full_name: string;
+type FormState = {
   username: string;
   email: string;
-  phone: string;
-  role: UserRole;
-  user_type: UserRole;
-  workspace: UserWorkspace;
+  first_name: string;
+  last_name: string;
+  display_name: string;
+  phone_number: string;
+  whatsapp_number: string;
+  alternate_email: string;
   password: string;
-  confirm_password: string;
-  permission_codes: string;
-  notes: string;
+  send_password_link: boolean;
+
+  user_type: UserType;
+  role: UserRole;
   is_active: boolean;
   is_staff: boolean;
   is_superuser: boolean;
-  send_password_link: boolean;
+
+  preferred_language: Locale;
+  timezone: string;
+  notes: string;
+  tags: string;
+
+  entity_type: EntityType;
+  entity_id: string;
+  actor_name: string;
+  actor_code: string;
 };
 
-type UserFormErrors = Partial<Record<keyof UserFormData, string>>;
-
-type CreateUserApiResponse = {
-  ok?: boolean;
-  message?: string;
-  errors?: Record<string, string[] | string>;
+type CreatedUser = {
   id?: number | string;
-  user?: {
-    id?: number | string;
-  };
-  data?: {
-    id?: number | string;
-    user?: {
-      id?: number | string;
-    };
+  username?: string;
+  email?: string;
+  reset?: {
+    reset_url?: string;
+    reset_path?: string;
+    uid?: string;
+    token?: string;
   };
 };
 
-const DRAFT_STORAGE_KEY = "primey-care-system-user-create-draft";
+type ApiResponse = {
+  ok?: boolean;
+  success?: boolean;
+  message?: string;
+  detail?: string;
+  error?: string;
+  errors?: unknown;
+  user?: CreatedUser;
+  item?: CreatedUser;
+  data?: CreatedUser | { user?: CreatedUser; item?: CreatedUser; reset?: CreatedUser["reset"] };
+  reset?: CreatedUser["reset"];
+};
 
-/* ============================================================
-   Locale Helpers
-============================================================ */
+const translations = {
+  ar: {
+    title: "إنشاء حساب دخول",
+    subtitle:
+      "إنشاء حساب دخول فقط وربطه اختياريًا بكيان موجود. بيانات العميل أو مقدم الخدمة أو المندوب أو الوسيط تدار من صفحاتهم التشغيلية.",
+    users: "حسابات الدخول",
+    back: "رجوع",
+    save: "إنشاء الحساب",
+    saving: "جاري الإنشاء...",
+    reset: "إعادة ضبط",
+    copy: "نسخ",
+    copied: "تم النسخ",
+    openUser: "فتح الحساب",
+    createAnother: "إنشاء حساب آخر",
+    created: "تم إنشاء حساب الدخول بنجاح",
+    passwordLinkCreated: "تم إنشاء رابط كلمة المرور",
+    noPermission: "لا تملك صلاحية إنشاء حسابات الدخول",
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+    accountSection: "بيانات حساب الدخول",
+    accountSectionDesc: "اسم المستخدم، البريد، الاسم، ورقم الجوال.",
+    roleSection: "الدور والصلاحيات",
+    roleSectionDesc: "نوع الحساب، الدور، وحالة الحساب.",
+    linkSection: "الربط بكيان موجود",
+    linkSectionDesc:
+      "اختياري: اربط حساب الدخول بعميل أو مقدم خدمة أو مندوب أو وسيط موجود مسبقًا.",
+    securitySection: "الأمان ورابط كلمة المرور",
+    securitySectionDesc: "كلمة مرور اختيارية أو رابط إعداد كلمة المرور.",
+    summarySection: "ملخص الحساب",
+    summarySectionDesc: "مراجعة سريعة قبل الحفظ.",
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+    username: "اسم المستخدم",
+    email: "البريد الإلكتروني",
+    firstName: "الاسم الأول",
+    lastName: "اسم العائلة",
+    displayName: "اسم العرض",
+    phone: "الجوال",
+    whatsapp: "واتساب",
+    alternateEmail: "بريد بديل",
+    password: "كلمة المرور",
+    passwordHint: "اتركها فارغة إذا سيتم إرسال رابط إعداد كلمة المرور.",
+    sendPasswordLink: "توليد رابط إعداد كلمة المرور بعد الإنشاء",
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+    userType: "نوع الحساب",
+    role: "الدور",
+    active: "نشط",
+    staff: "موظف",
+    superuser: "سوبر أدمن",
+    preferredLanguage: "اللغة المفضلة",
+    timezone: "المنطقة الزمنية",
+    tags: "الوسوم",
+    notes: "الملاحظات",
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
-    return "ar";
+    entityType: "نوع الكيان",
+    entityId: "معرّف الكيان",
+    actorName: "اسم الكيان",
+    actorCode: "كود الكيان",
+    entityNone: "بدون ربط",
+    entitySystem: "النظام",
+    entityProvider: "مقدم خدمة",
+    entityCenter: "مركز",
+    entityCustomer: "عميل",
+    entityAgent: "مندوب",
+    entityBroker: "وسيط",
+
+    superAdmin: "سوبر أدمن",
+    system: "النظام",
+    staffUser: "موظف نظام",
+    accountant: "محاسب",
+    provider: "مقدم خدمة",
+    center: "مركز",
+    customer: "عميل",
+    agent: "مندوب",
+    broker: "وسيط",
+    other: "أخرى",
+
+    systemAdmin: "مدير النظام",
+    providerAdmin: "مدير مقدم خدمة",
+    customerUser: "مستخدم عميل",
+    agentUser: "مستخدم مندوب",
+    brokerUser: "مستخدم وسيط",
+    support: "الدعم",
+    viewer: "مشاهد",
+
+    requiredIdentifier: "اسم المستخدم أو البريد أو الجوال مطلوب.",
+    invalidEmail: "صيغة البريد الإلكتروني غير صحيحة.",
+    invalidAlternateEmail: "صيغة البريد البديل غير صحيحة.",
+    shortPassword: "كلمة المرور يجب ألا تقل عن 8 أحرف.",
+    invalidEntityId: "معرّف الكيان يجب أن يكون رقمًا صحيحًا.",
+    submitError: "تعذر إنشاء الحساب",
+    unknownError: "حدث خطأ غير متوقع.",
+    yes: "نعم",
+    no: "لا",
+    optional: "اختياري",
+    required: "مطلوب",
+    readOnlyLinkNote:
+      "هذا الربط لا ينشئ أو يعدل بيانات تشغيلية. يتم إرسال IDs فقط للباكند لربط حساب الدخول بكيان موجود.",
+    afterCreateNote:
+      "بعد الإنشاء سيظهر رابط كلمة المرور هنا ولن يتم تحويلك تلقائيًا حتى تنسخه أو تفتحه.",
+    resetUrl: "رابط إعداد كلمة المرور",
+    createdUser: "الحساب المنشأ",
+  },
+  en: {
+    title: "Create Login Account",
+    subtitle:
+      "Create login account only and optionally link it to an existing actor. Customer, provider, agent, and broker operational data stays in their own pages.",
+    users: "Login Accounts",
+    back: "Back",
+    save: "Create Account",
+    saving: "Creating...",
+    reset: "Reset",
+    copy: "Copy",
+    copied: "Copied",
+    openUser: "Open account",
+    createAnother: "Create another",
+    created: "Login account created successfully",
+    passwordLinkCreated: "Password setup link created",
+    noPermission: "You do not have permission to create login accounts",
+
+    accountSection: "Login Account Data",
+    accountSectionDesc: "Username, email, name, and mobile number.",
+    roleSection: "Role & Permissions",
+    roleSectionDesc: "Account type, role, and account status.",
+    linkSection: "Link to Existing Actor",
+    linkSectionDesc:
+      "Optional: link the login account to an existing customer, provider, agent, or broker.",
+    securitySection: "Security & Password Link",
+    securitySectionDesc: "Optional password or password setup link.",
+    summarySection: "Account Summary",
+    summarySectionDesc: "Quick review before saving.",
+
+    username: "Username",
+    email: "Email",
+    firstName: "First name",
+    lastName: "Last name",
+    displayName: "Display name",
+    phone: "Phone",
+    whatsapp: "WhatsApp",
+    alternateEmail: "Alternate email",
+    password: "Password",
+    passwordHint: "Leave empty if a password setup link will be generated.",
+    sendPasswordLink: "Generate password setup link after creation",
+
+    userType: "Account type",
+    role: "Role",
+    active: "Active",
+    staff: "Staff",
+    superuser: "Superuser",
+    preferredLanguage: "Preferred language",
+    timezone: "Timezone",
+    tags: "Tags",
+    notes: "Notes",
+
+    entityType: "Actor type",
+    entityId: "Actor ID",
+    actorName: "Actor name",
+    actorCode: "Actor code",
+    entityNone: "No link",
+    entitySystem: "System",
+    entityProvider: "Provider",
+    entityCenter: "Center",
+    entityCustomer: "Customer",
+    entityAgent: "Agent",
+    entityBroker: "Broker",
+
+    superAdmin: "Super admin",
+    system: "System",
+    staffUser: "System staff",
+    accountant: "Accountant",
+    provider: "Provider",
+    center: "Center",
+    customer: "Customer",
+    agent: "Agent",
+    broker: "Broker",
+    other: "Other",
+
+    systemAdmin: "System admin",
+    providerAdmin: "Provider admin",
+    customerUser: "Customer user",
+    agentUser: "Agent user",
+    brokerUser: "Broker user",
+    support: "Support",
+    viewer: "Viewer",
+
+    requiredIdentifier: "Username, email, or phone is required.",
+    invalidEmail: "Email format is invalid.",
+    invalidAlternateEmail: "Alternate email format is invalid.",
+    shortPassword: "Password must be at least 8 characters.",
+    invalidEntityId: "Actor ID must be a valid number.",
+    submitError: "Unable to create account",
+    unknownError: "Unexpected error occurred.",
+    yes: "Yes",
+    no: "No",
+    optional: "Optional",
+    required: "Required",
+    readOnlyLinkNote:
+      "This link does not create or update operational data. It only sends IDs to the backend to link the login account to an existing actor.",
+    afterCreateNote:
+      "After creation, the password setup link will appear here and you will not be redirected automatically until you copy or open it.",
+    resetUrl: "Password setup link",
+    createdUser: "Created account",
+  },
+} as const;
+
+const initialForm: FormState = {
+  username: "",
+  email: "",
+  first_name: "",
+  last_name: "",
+  display_name: "",
+  phone_number: "",
+  whatsapp_number: "",
+  alternate_email: "",
+  password: "",
+  send_password_link: true,
+
+  user_type: "STAFF",
+  role: "viewer",
+  is_active: true,
+  is_staff: false,
+  is_superuser: false,
+
+  preferred_language: "ar",
+  timezone: "Asia/Riyadh",
+  notes: "",
+  tags: "",
+
+  entity_type: "none",
+  entity_id: "",
+  actor_name: "",
+  actor_code: "",
+};
+
+const draftKey = "primey-care-system-users-create-draft-v2";
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
+}
+
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
+
+  return fallback;
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+function isValidEmail(value: string) {
+  if (!value.trim()) return true;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
+function stringifyApiError(value: unknown): string {
+  if (!value) return "";
+
+  if (typeof value === "string") return value;
+
+  if (Array.isArray(value)) {
+    return value.map((item) => stringifyApiError(item)).filter(Boolean).join("، ");
   }
+
+  if (isRecord(value)) {
+    return Object.entries(value)
+      .map(([key, item]) => {
+        const message = stringifyApiError(item);
+        return message ? `${key}: ${message}` : "";
+      })
+      .filter(Boolean)
+      .join(" | ");
+  }
+
+  return String(value);
 }
 
-/* ============================================================
-   API Helpers
-============================================================ */
-
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-function readCookie(name: string) {
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
+  }
+
+  return envBase;
+}
+
+function makeApiUrl(path: string) {
+  return `${getApiBaseUrl()}${path}`;
+}
+
+function getCookie(name: string) {
   if (typeof document === "undefined") return "";
 
-  const match = document.cookie
-    .split("; ")
+  const found = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
     .find((cookie) => cookie.startsWith(`${name}=`));
 
-  return match ? decodeURIComponent(match.split("=")[1] || "") : "";
+  return found ? decodeURIComponent(found.split("=").slice(1).join("=")) : "";
 }
 
-/* ============================================================
-   Permission Helpers
-============================================================ */
+async function fetchJson<T>(
+  path: string,
+  options?: {
+    method?: "GET" | "POST";
+    body?: unknown;
+  },
+): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
 
-function asRecord(value: unknown): AuthRecord {
-  return value && typeof value === "object" ? (value as AuthRecord) : {};
-}
+  const response = await fetch(makeApiUrl(path), {
+    method: options?.method || "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options?.method && options.method !== "GET"
+        ? { "Content-Type": "application/json" }
+        : {}),
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body:
+      options?.method && options.method !== "GET"
+        ? JSON.stringify(options.body || {})
+        : undefined,
+  });
 
-function getNestedRecord(source: AuthRecord, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
 
-    if (value && typeof value === "object") {
-      return value as AuthRecord;
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
+
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      stringifyApiError(payload?.errors) ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
+}
+
+function userTypeLabel(value: UserType, locale: Locale) {
+  const t = translations[locale];
+
+  const labels: Record<UserType, string> = {
+    SUPER_ADMIN: t.superAdmin,
+    SYSTEM: t.system,
+    STAFF: t.staffUser,
+    ACCOUNTANT: t.accountant,
+    PROVIDER: t.provider,
+    CENTER: t.center,
+    CUSTOMER: t.customer,
+    AGENT: t.agent,
+    BROKER: t.broker,
+    OTHER: t.other,
+  };
+
+  return labels[value] || t.other;
+}
+
+function roleLabel(value: UserRole, locale: Locale) {
+  const t = translations[locale];
+
+  const labels: Record<UserRole, string> = {
+    system_admin: t.systemAdmin,
+    provider_admin: t.providerAdmin,
+    customer_user: t.customerUser,
+    agent_user: t.agentUser,
+    broker_user: t.brokerUser,
+    accountant: t.accountant,
+    support: t.support,
+    viewer: t.viewer,
+  };
+
+  return labels[value] || t.viewer;
+}
+
+function entityLabel(value: EntityType, locale: Locale) {
+  const t = translations[locale];
+
+  const labels: Record<EntityType, string> = {
+    none: t.entityNone,
+    system: t.entitySystem,
+    provider: t.entityProvider,
+    center: t.entityCenter,
+    customer: t.entityCustomer,
+    agent: t.entityAgent,
+    broker: t.entityBroker,
+  };
+
+  return labels[value] || t.entityNone;
+}
+
+function getCreatedUser(payload: ApiResponse): CreatedUser {
+  const data = asRecord(payload.data);
+
+  if (payload.user) return payload.user;
+  if (payload.item) return payload.item;
+  if (data.user && isRecord(data.user)) return data.user as CreatedUser;
+  if (data.item && isRecord(data.item)) return data.item as CreatedUser;
+  if (data.id || data.username || data.email) return data as CreatedUser;
 
   return {};
 }
 
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
+function getResetUrl(payload: ApiResponse) {
+  const data = asRecord(payload.data);
+  const user = getCreatedUser(payload);
+  const reset = asRecord(payload.reset || data.reset || user.reset);
 
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as AuthRecord;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as AuthRecord;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
+  return normalizeText(reset.reset_url || reset.reset_path);
 }
 
-function getAuthUser(authValue: unknown): AuthRecord {
-  const auth = asRecord(authValue);
+function validateForm(form: FormState, locale: Locale) {
+  const t = translations[locale];
 
-  return getNestedRecord(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asRecord(auth.permissions);
-  const userPermissions = asRecord(user.permissions);
-  const authProfilePermissions = asRecord(auth.profile_permissions);
-  const userProfilePermissions = asRecord(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asRecord(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasKnownPermissionSignal(authValue: unknown) {
-  return (
-    getAuthRoles(authValue).length > 0 ||
-    getAuthPermissionCodes(authValue).length > 0
-  );
-}
-
-function hasPermissionCode(authValue: unknown, codes: string[]) {
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length === 0) return undefined;
-
-  return codes.some((code) => permissions.includes(code));
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const explicitPermission = hasPermissionCode(authValue, codes);
-
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
+  if (!form.username.trim() && !form.email.trim() && !form.phone_number.trim()) {
+    return t.requiredIdentifier;
   }
 
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "support",
-          "accountant",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin"].includes(role),
-    );
+  if (form.email.trim() && !isValidEmail(form.email)) {
+    return t.invalidEmail;
   }
 
-  if (!hasKnownPermissionSignal(authValue)) {
-    return true;
+  if (form.alternate_email.trim() && !isValidEmail(form.alternate_email)) {
+    return t.invalidAlternateEmail;
   }
 
-  return mode === "view";
+  if (form.password.trim() && form.password.trim().length < 8) {
+    return t.shortPassword;
+  }
+
+  if (form.entity_type !== "none" && form.entity_type !== "system") {
+    const id = toNumber(form.entity_id);
+    if (!id || id <= 0) return t.invalidEntityId;
+  }
+
+  return "";
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
+function buildPayload(form: FormState) {
+  const tags = form.tags
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "إضافة مستخدم جديد" : "Create New User",
-    subtitle: isArabic
-      ? "إنشاء حساب مستخدم وربطه بالدور ومساحة العمل والصلاحيات المناسبة."
-      : "Create a user account and assign the proper role, workspace, and permissions.",
-
-    back: isArabic ? "العودة للمستخدمين" : "Back to Users",
-    usersList: isArabic ? "قائمة المستخدمين" : "Users List",
-    create: isArabic ? "إنشاء المستخدم" : "Create User",
-    saving: isArabic ? "جاري الحفظ..." : "Saving...",
-    saveDraft: isArabic ? "حفظ كمسودة محلية" : "Save Local Draft",
-    restoreDraft: isArabic ? "استعادة المسودة" : "Restore Draft",
-    clearForm: isArabic ? "تفريغ النموذج" : "Clear Form",
-
-    identityInfo: isArabic ? "بيانات المستخدم" : "User Information",
-    identityDesc: isArabic
-      ? "الاسم واسم المستخدم والبريد ورقم التواصل."
-      : "Name, username, email, and contact number.",
-
-    accessInfo: isArabic ? "الدور ومساحة العمل" : "Role & Workspace",
-    accessDesc: isArabic
-      ? "تحديد دور المستخدم ومساحة العمل المرتبطة به."
-      : "Assign the user role and related workspace.",
-
-    securityInfo: isArabic ? "الأمان وكلمة المرور" : "Security & Password",
-    securityDesc: isArabic
-      ? "إعداد كلمة مرور أولية أو إرسال رابط تعيين كلمة المرور."
-      : "Set an initial password or send a password setup link.",
-
-    permissionsInfo: isArabic ? "الصلاحيات والملاحظات" : "Permissions & Notes",
-    permissionsDesc: isArabic
-      ? "إضافة صلاحيات مخصصة أو ملاحظات داخلية عند الحاجة."
-      : "Add custom permission codes or internal notes when needed.",
-
-    optionsInfo: isArabic ? "إعدادات الحساب" : "Account Options",
-    optionsDesc: isArabic
-      ? "تحديد حالة الحساب ومؤشرات الوصول."
-      : "Configure account status and access flags.",
-
-    summaryTitle: isArabic ? "ملخص المستخدم" : "User Summary",
-    summaryDesc: isArabic
-      ? "مراجعة سريعة قبل إنشاء الحساب."
-      : "Quick review before creating the account.",
-
-    stepsTitle: isArabic ? "إرشادات قبل الحفظ" : "Before Saving",
-    formErrorTitle: isArabic ? "تعذر حفظ البيانات" : "Unable to save data",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بإضافة مستخدم" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية إنشاء مستخدمي النظام. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to create system users. Contact your system administrator if you need access.",
-
-    labels: {
-      firstName: isArabic ? "الاسم الأول" : "First Name",
-      lastName: isArabic ? "اسم العائلة" : "Last Name",
-      fullName: isArabic ? "الاسم الكامل" : "Full Name",
-      username: isArabic ? "اسم المستخدم" : "Username",
-      email: isArabic ? "البريد الإلكتروني" : "Email",
-      phone: isArabic ? "الجوال" : "Phone",
-      role: isArabic ? "الدور" : "Role",
-      userType: isArabic ? "نوع المستخدم" : "User Type",
-      workspace: isArabic ? "مساحة العمل" : "Workspace",
-      password: isArabic ? "كلمة المرور" : "Password",
-      confirmPassword: isArabic ? "تأكيد كلمة المرور" : "Confirm Password",
-      permissionCodes: isArabic ? "أكواد الصلاحيات" : "Permission Codes",
-      notes: isArabic ? "الملاحظات" : "Notes",
-      isActive: isArabic ? "تفعيل الحساب مباشرة" : "Activate account immediately",
-      isStaff: isArabic ? "مستخدم إداري" : "Staff user",
-      isSuperuser: isArabic ? "صلاحية عليا" : "Superuser",
-      sendPasswordLink: isArabic
-        ? "إرسال رابط تعيين كلمة المرور"
-        : "Send password setup link",
-    },
-
-    placeholders: {
-      firstName: isArabic ? "مثال: مازن" : "Example: Mazen",
-      lastName: isArabic ? "مثال: الأحمدي" : "Example: Alahmadi",
-      fullName: isArabic ? "يتم توليده تلقائيًا عند تركه فارغًا" : "Auto-generated if left empty",
-      username: isArabic ? "مثال: mazen.admin" : "Example: mazen.admin",
-      email: "user@example.com",
-      phone: "05xxxxxxxx",
-      password: isArabic ? "اختياري عند إرسال رابط كلمة المرور" : "Optional when sending password link",
-      confirmPassword: isArabic ? "أعد كتابة كلمة المرور" : "Repeat password",
-      permissionCodes: isArabic
-        ? "مثال: users.view, users.create, invoices.view"
-        : "Example: users.view, users.create, invoices.view",
-      notes: isArabic
-        ? "ملاحظات داخلية عن المستخدم..."
-        : "Internal notes about this user...",
-    },
-
-    roles: {
-      system_admin: isArabic ? "مدير النظام" : "System Admin",
-      provider_admin: isArabic ? "مدير مقدم خدمة" : "Provider Admin",
-      customer_user: isArabic ? "مستخدم عميل" : "Customer User",
-      agent_user: isArabic ? "مندوب" : "Agent User",
-      accountant: isArabic ? "محاسب" : "Accountant",
-      support: isArabic ? "دعم" : "Support",
-      viewer: isArabic ? "مشاهد" : "Viewer",
-    } satisfies Record<UserRole, string>,
-
-    workspaces: {
-      system: isArabic ? "النظام" : "System",
-      provider: isArabic ? "مقدم الخدمة" : "Provider",
-      customer: isArabic ? "العميل" : "Customer",
-      agent: isArabic ? "المندوب" : "Agent",
-    } satisfies Record<UserWorkspace, string>,
-
-    validation: {
-      firstName: isArabic ? "الاسم الأول مطلوب." : "First name is required.",
-      username: isArabic ? "اسم المستخدم مطلوب." : "Username is required.",
-      usernameInvalid: isArabic
-        ? "اسم المستخدم يجب أن يحتوي حروفًا أو أرقامًا أو نقاطًا أو شرطات فقط."
-        : "Username can contain letters, numbers, dots, underscores, or hyphens only.",
-      email: isArabic ? "البريد الإلكتروني مطلوب." : "Email is required.",
-      emailInvalid: isArabic ? "صيغة البريد غير صحيحة." : "Invalid email format.",
-      phoneInvalid: isArabic ? "رقم الجوال غير صحيح." : "Invalid phone number.",
-      passwordRequired: isArabic
-        ? "كلمة المرور مطلوبة إذا لم يتم اختيار إرسال رابط كلمة المرور."
-        : "Password is required when password link is not selected.",
-      passwordMin: isArabic
-        ? "كلمة المرور يجب ألا تقل عن 8 أحرف."
-        : "Password must be at least 8 characters.",
-      passwordMatch: isArabic
-        ? "تأكيد كلمة المرور غير مطابق."
-        : "Password confirmation does not match.",
-    },
-
-    success: isArabic ? "تم إنشاء المستخدم بنجاح." : "User created successfully.",
-    draftSaved: isArabic ? "تم حفظ المسودة محليًا." : "Draft saved locally.",
-    draftRestored: isArabic ? "تمت استعادة المسودة." : "Draft restored.",
-    noDraft: isArabic ? "لا توجد مسودة محفوظة." : "No saved draft found.",
-    formCleared: isArabic ? "تم تفريغ النموذج." : "Form cleared.",
-    apiError: isArabic
-      ? "تعذر إنشاء المستخدم. تحقق من البيانات وحاول مرة أخرى."
-      : "Unable to create user. Please check the data and try again.",
-    validationToast: isArabic
-      ? "يرجى تصحيح الحقول المطلوبة قبل المتابعة."
-      : "Please fix the required fields before continuing.",
-    confirmLeave: isArabic
-      ? "لديك بيانات غير محفوظة. هل تريد المغادرة؟"
-      : "You have unsaved changes. Do you want to leave?",
-    confirmClear: isArabic
-      ? "سيتم تفريغ النموذج الحالي. هل تريد المتابعة؟"
-      : "The current form will be cleared. Do you want to continue?",
-
-    completion: isArabic ? "نسبة الاكتمال" : "Completion",
-    ready: isArabic ? "جاهز للحفظ" : "Ready to save",
-    missingData: isArabic ? "ينقصه بيانات أساسية" : "Missing required data",
-
-    quickNotes: [
-      isArabic
-        ? "اختر الدور الصحيح لأن صلاحيات المستخدم تعتمد عليه."
-        : "Choose the correct role because user access depends on it.",
-      isArabic
-        ? "استخدم رابط كلمة المرور إذا كنت لا تريد إدخال كلمة مرور أولية."
-        : "Use the password link option if you do not want to set an initial password.",
-      isArabic
-        ? "الصلاحيات المخصصة تكتب مفصولة بفواصل عند الحاجة فقط."
-        : "Custom permission codes are comma-separated and only used when needed.",
-      isArabic
-        ? "لا يتم عرض أزرار غير مصرح بها داخل الواجهة."
-        : "Unauthorized actions are not displayed in the interface.",
-    ],
+  const payload: ApiRecord = {
+    username: form.username.trim(),
+    email: form.email.trim().toLowerCase(),
+    first_name: form.first_name.trim(),
+    last_name: form.last_name.trim(),
+    display_name: form.display_name.trim(),
+    phone_number: form.phone_number.trim(),
+    phone: form.phone_number.trim(),
+    mobile: form.phone_number.trim(),
+    whatsapp_number: form.whatsapp_number.trim(),
+    alternate_email: form.alternate_email.trim().toLowerCase(),
+    user_type: form.user_type,
+    role: form.role,
+    is_active: form.is_active,
+    status: form.is_active ? "ACTIVE" : "INACTIVE",
+    is_staff: form.is_staff,
+    is_superuser: form.is_superuser,
+    preferred_language: form.preferred_language,
+    timezone: form.timezone.trim() || "Asia/Riyadh",
+    notes: form.notes.trim(),
+    tags,
+    send_password_link: form.send_password_link,
   };
+
+  if (form.password.trim()) {
+    payload.password = form.password.trim();
+  }
+
+  if (form.entity_type !== "none") {
+    const actorType = form.entity_type === "system" ? "system" : form.entity_type;
+    const actorId = form.entity_type === "system" ? null : toNumber(form.entity_id);
+
+    payload.entity_type = actorType;
+    payload.entity_id = actorId;
+    payload.actor_type = actorType;
+    payload.actor_id = actorId;
+
+    if (form.actor_name.trim()) payload.actor_name = form.actor_name.trim();
+    if (form.actor_code.trim()) payload.actor_code = form.actor_code.trim();
+
+    if (actorType === "provider") payload.provider_id = actorId;
+    if (actorType === "center") payload.center_id = actorId;
+    if (actorType === "customer") payload.customer_id = actorId;
+    if (actorType === "agent") payload.agent_id = actorId;
+    if (actorType === "broker") payload.broker_id = actorId;
+  }
+
+  return payload;
 }
 
-/* ============================================================
-   Defaults
-============================================================ */
-
-const initialFormData: UserFormData = {
-  first_name: "",
-  last_name: "",
-  full_name: "",
-  username: "",
-  email: "",
-  phone: "",
-  role: "viewer",
-  user_type: "viewer",
-  workspace: "system",
-  password: "",
-  confirm_password: "",
-  permission_codes: "",
-  notes: "",
-  is_active: true,
-  is_staff: false,
-  is_superuser: false,
-  send_password_link: true,
-};
-
-/* ============================================================
-   Data Helpers
-============================================================ */
-
-function normalizeName(value: string) {
-  return value.trim().replace(/\s+/g, " ");
+function defaultRoleForUserType(userType: UserType): UserRole {
+  if (userType === "SUPER_ADMIN" || userType === "SYSTEM") return "system_admin";
+  if (userType === "PROVIDER" || userType === "CENTER") return "provider_admin";
+  if (userType === "CUSTOMER") return "customer_user";
+  if (userType === "AGENT") return "agent_user";
+  if (userType === "BROKER") return "broker_user";
+  if (userType === "ACCOUNTANT") return "accountant";
+  if (userType === "STAFF") return "support";
+  return "viewer";
 }
 
-function normalizeUsername(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, ".");
+function defaultEntityForUserType(userType: UserType): EntityType {
+  if (userType === "PROVIDER") return "provider";
+  if (userType === "CENTER") return "center";
+  if (userType === "CUSTOMER") return "customer";
+  if (userType === "AGENT") return "agent";
+  if (userType === "BROKER") return "broker";
+  if (userType === "SUPER_ADMIN" || userType === "SYSTEM" || userType === "STAFF" || userType === "ACCOUNTANT") {
+    return "system";
+  }
+
+  return "none";
 }
 
-function normalizePhone(value: string) {
-  return value.replace(/[^\d+]/g, "").trim();
+function createEndpoints() {
+  return ["/api/users/create/", "/api/users/"];
 }
 
-function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function isValidPhone(value: string) {
-  if (!value.trim()) return true;
-
-  const normalized = normalizePhone(value);
-
-  return /^(\+9665|9665|05|5)\d{8}$/.test(normalized);
-}
-
-function isValidUsername(value: string) {
-  return /^[a-zA-Z0-9._-]+$/.test(value.trim());
-}
-
-function parsePermissionCodes(value: string) {
-  return Array.from(
-    new Set(
-      value
-        .split(/[,،\n]/)
-        .map((item) => item.trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function hasFormChanges(formData: UserFormData) {
-  return JSON.stringify(formData) !== JSON.stringify(initialFormData);
-}
-
-function roleToWorkspace(role: UserRole): UserWorkspace {
-  if (role === "provider_admin") return "provider";
-  if (role === "customer_user") return "customer";
-  if (role === "agent_user") return "agent";
-
-  return "system";
-}
-
-function normalizePayload(formData: UserFormData) {
-  const fullName =
-    normalizeName(formData.full_name) ||
-    normalizeName(`${formData.first_name} ${formData.last_name}`);
-
-  return {
-    first_name: normalizeName(formData.first_name),
-    last_name: normalizeName(formData.last_name),
-    full_name: fullName,
-    name: fullName,
-    username: normalizeUsername(formData.username),
-    email: formData.email.trim().toLowerCase(),
-    phone: normalizePhone(formData.phone),
-    mobile: normalizePhone(formData.phone),
-    role: formData.role,
-    user_role: formData.role,
-    user_type: formData.user_type,
-    workspace: formData.workspace,
-    password: formData.send_password_link ? undefined : formData.password,
-    permission_codes: parsePermissionCodes(formData.permission_codes),
-    notes: formData.notes.trim(),
-    is_active: formData.is_active,
-    is_staff: formData.is_staff,
-    is_superuser: formData.is_superuser,
-    send_password_link: formData.send_password_link,
-  };
-}
-
-function resolveCreatedId(result: CreateUserApiResponse) {
-  return (
-    result.user?.id ||
-    result.data?.user?.id ||
-    result.data?.id ||
-    result.id ||
-    null
-  );
-}
-
-function mapApiFieldErrors(errors: CreateUserApiResponse["errors"]) {
-  const nextErrors: UserFormErrors = {};
-
-  if (!errors) return nextErrors;
-
-  Object.entries(errors).forEach(([key, value]) => {
-    const message = Array.isArray(value) ? value[0] : value;
-
-    if (!message) return;
-
-    if (key in initialFormData) {
-      nextErrors[key as keyof UserFormData] = String(message);
-    }
-  });
-
-  return nextErrors;
-}
-
-/* ============================================================
-   UI Helpers
-============================================================ */
-
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0";
-
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(numericValue);
-}
-
-function FieldBlock({
-  label,
-  error,
-  required,
-  children,
-}: {
-  label: string;
-  error?: string;
-  required?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <Label className="text-sm font-medium">
-        {label}
-        {required ? <span className="ms-1 text-destructive">*</span> : null}
-      </Label>
-
-      {children}
-
-      {error ? (
-        <p className="text-xs font-medium text-destructive">{error}</p>
-      ) : null}
-    </div>
-  );
-}
-
-function SummaryItem({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  value: ReactNode;
-}) {
-  return (
-    <div className="flex items-start gap-3 rounded-xl border bg-background p-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <Icon className="h-4 w-4" />
-      </div>
-
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <div className="mt-1 truncate text-sm font-semibold">{value || "-"}</div>
-      </div>
-    </div>
-  );
-}
-
-function ToggleBox({
-  icon: Icon,
-  checked,
-  disabled,
+function MetricCard({
   title,
-  description,
-  onChange,
+  value,
+  icon: Icon,
 }: {
-  icon: ComponentType<{ className?: string }>;
-  checked: boolean;
-  disabled?: boolean;
   title: string;
-  description: string;
-  onChange: (value: boolean) => void;
+  value: React.ReactNode;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-2xl border bg-background p-4">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-        <Icon className="h-4 w-4" />
-      </div>
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[104px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold">{title}</p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              {description}
-            </p>
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
           </div>
+        </CardAction>
+      </CardHeader>
+    </Card>
+  );
+}
 
-          <Checkbox
-            checked={checked}
-            disabled={disabled}
-            onCheckedChange={(value) => onChange(Boolean(value))}
-          />
-        </div>
-      </div>
+function FieldLabel({
+  children,
+  required,
+}: {
+  children: React.ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <label className="text-sm font-medium text-foreground">
+      {children}
+      {required ? <span className="mx-1 text-red-500">*</span> : null}
     </label>
   );
 }
 
-/* ============================================================
-   Page
-============================================================ */
-
-export default function SystemCreateUserPage() {
-  const router = useRouter();
-  const auth = useAuth() as unknown;
-
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [formData, setFormData] = useState<UserFormData>(initialFormData);
-  const [errors, setErrors] = useState<UserFormErrors>({});
-  const [submitError, setSubmitError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
-
-  const canCreateUsers = hasSafePermission(
-    auth,
-    ["users.create", "system.users.create"],
-    "action",
+function InfoLine({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b py-3 last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="min-w-0 text-left text-sm font-medium text-foreground">
+        {value || "—"}
+      </div>
+    </div>
   );
+}
 
-  const canViewUsers = hasSafePermission(
-    auth,
-    ["users.view", "users.list", "system.users.view"],
-    "view",
-  );
+export default function CreateSystemUserPage() {
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [form, setForm] = React.useState<FormState>(initialForm);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [createdUser, setCreatedUser] = React.useState<CreatedUser | null>(null);
+  const [resetUrl, setResetUrl] = React.useState("");
+  const [hasDraft, setHasDraft] = React.useState(false);
 
-  const isDirty = useMemo(() => hasFormChanges(formData), [formData]);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const fullNamePreview =
-    normalizeName(formData.full_name) ||
-    normalizeName(`${formData.first_name} ${formData.last_name}`) ||
-    "-";
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const permissionCodes = useMemo(
-    () => parsePermissionCodes(formData.permission_codes),
-    [formData.permission_codes],
-  );
-
-  const completedFields = useMemo(() => {
-    const keys: Array<keyof UserFormData> = [
-      "first_name",
-      "username",
-      "email",
-      "role",
-      "workspace",
-    ];
-
-    const baseCount = keys.filter((key) =>
-      String(formData[key] || "").trim(),
-    ).length;
-
-    const passwordReady =
-      formData.send_password_link ||
-      (formData.password.length >= 8 &&
-        formData.password === formData.confirm_password);
-
-    return baseCount + (passwordReady ? 1 : 0);
-  }, [formData]);
-
-  const progressPercent = Math.round((completedFields / 6) * 100);
-
-  const isReadyToSave =
-    normalizeName(formData.first_name).length > 0 &&
-    normalizeUsername(formData.username).length > 0 &&
-    isValidUsername(formData.username) &&
-    isValidEmail(formData.email) &&
-    (formData.send_password_link ||
-      (formData.password.length >= 8 &&
-        formData.password === formData.confirm_password));
-
-  function updateField<K extends keyof UserFormData>(
-    key: K,
-    value: UserFormData[K],
-  ) {
-    setFormData((current) => ({
-      ...current,
-      [key]: value,
-    }));
-
-    setErrors((current) => ({
-      ...current,
-      [key]: undefined,
-    }));
-
-    if (submitError) {
-      setSubmitError("");
-    }
-  }
-
-  function updateRole(role: UserRole) {
-    setFormData((current) => ({
-      ...current,
-      role,
-      user_type: role,
-      workspace: roleToWorkspace(role),
-      is_staff:
-        role === "system_admin" ||
-        role === "provider_admin" ||
-        role === "accountant" ||
-        role === "support",
-      is_superuser: role === "system_admin" ? current.is_superuser : false,
-    }));
-
-    setErrors((current) => ({
-      ...current,
-      role: undefined,
-      user_type: undefined,
-      workspace: undefined,
-    }));
-  }
-
-  function validateForm() {
-    const nextErrors: UserFormErrors = {};
-
-    if (!normalizeName(formData.first_name)) {
-      nextErrors.first_name = t.validation.firstName;
-    }
-
-    if (!normalizeUsername(formData.username)) {
-      nextErrors.username = t.validation.username;
-    } else if (!isValidUsername(formData.username)) {
-      nextErrors.username = t.validation.usernameInvalid;
-    }
-
-    if (!formData.email.trim()) {
-      nextErrors.email = t.validation.email;
-    } else if (!isValidEmail(formData.email)) {
-      nextErrors.email = t.validation.emailInvalid;
-    }
-
-    if (!isValidPhone(formData.phone)) {
-      nextErrors.phone = t.validation.phoneInvalid;
-    }
-
-    if (!formData.send_password_link) {
-      if (!formData.password) {
-        nextErrors.password = t.validation.passwordRequired;
-      } else if (formData.password.length < 8) {
-        nextErrors.password = t.validation.passwordMin;
-      }
-
-      if (formData.password !== formData.confirm_password) {
-        nextErrors.confirm_password = t.validation.passwordMatch;
-      }
-    }
-
-    setErrors(nextErrors);
-
-    return Object.keys(nextErrors).length === 0;
-  }
-
-  async function postUser(payload: Record<string, unknown>) {
-    const csrfToken = readCookie("csrftoken");
-    const endpoints = ["/api/users/create/", "/api/users/"];
-
-    let lastResult: CreateUserApiResponse | null = null;
-
-    for (const endpoint of endpoints) {
-      const response = await fetch(apiUrl(endpoint), {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const result = (await response.json().catch(() => null)) as
-        | CreateUserApiResponse
-        | null;
-
-      lastResult = result;
-
-      if (response.status === 404 || response.status === 405) {
-        continue;
-      }
-
-      if (!response.ok || result?.ok === false) {
-        throw result || { message: `HTTP ${response.status}` };
-      }
-
-      return result || {};
-    }
-
-    throw lastResult || { message: t.apiError };
-  }
-
-  async function submitForm() {
-    setSubmitError("");
-
-    if (!validateForm()) {
-      toast.error(t.validationToast);
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-
-      const result = await postUser(normalizePayload(formData));
-      const createdId = resolveCreatedId(result);
-
-      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
-      toast.success(t.success);
-
-      if (createdId) {
-        router.push(`/system/users/${createdId}`);
-        return;
-      }
-
-      router.push("/system/users");
-    } catch (error) {
-      const result = error as CreateUserApiResponse;
-      const apiErrors = mapApiFieldErrors(result?.errors);
-      const message = result?.message || t.apiError;
-
-      console.error("Create system user error:", error);
-
-      setErrors((current) => ({
-        ...current,
-        ...apiErrors,
-      }));
-
-      setSubmitError(message);
-      toast.error(message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  function saveDraft() {
-    try {
-      const draft: UserFormData = {
-        ...formData,
-        password: "",
-        confirm_password: "",
-      };
-
-      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
-      toast.success(t.draftSaved);
-    } catch (error) {
-      console.error("Save user draft error:", error);
-      toast.error(t.apiError);
-    }
-  }
-
-  function restoreDraft() {
-    try {
-      const rawDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
-
-      if (!rawDraft) {
-        toast.error(t.noDraft);
-        return;
-      }
-
-      const parsed = JSON.parse(rawDraft) as UserFormData;
-
-      setFormData({
-        ...initialFormData,
-        ...parsed,
-        password: "",
-        confirm_password: "",
-      });
-
-      setErrors({});
-      setSubmitError("");
-      toast.success(t.draftRestored);
-    } catch (error) {
-      console.error("Restore user draft error:", error);
-      toast.error(t.apiError);
-    }
-  }
-
-  function clearForm() {
-    if (isDirty && !window.confirm(t.confirmClear)) return;
-
-    setFormData(initialFormData);
-    setErrors({});
-    setSubmitError("");
-    toast.success(t.formCleared);
-  }
-
-  const confirmNavigate = useCallback(
-    (path: string) => {
-      if (isSubmitting) return;
-
-      if (isDirty && !window.confirm(t.confirmLeave)) {
-        return;
-      }
-
-      router.push(path);
-    },
-    [isDirty, isSubmitting, router, t.confirmLeave],
-  );
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
       setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
     };
 
-    const syncAfterPaint = () => {
-      syncLocale();
+    applyLocale();
 
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+    setHasDraft(Boolean(window.localStorage.getItem(draftKey)));
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
     };
   }, []);
 
-  useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!isDirty || isSubmitting) return;
-
-      event.preventDefault();
-      event.returnValue = t.confirmLeave;
+  React.useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!saving && JSON.stringify(form) !== JSON.stringify(initialForm) && !createdUser) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
     };
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("beforeunload", onBeforeUnload);
 
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, [isDirty, isSubmitting, t.confirmLeave]);
+  }, [createdUser, form, saving]);
 
-  if (!authResolving && !canCreateUsers) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
+  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((current) => ({ ...current, [key]: value }));
+    setError("");
   }
 
+  function updateUserType(value: UserType) {
+    setForm((current) => {
+      const nextRole = defaultRoleForUserType(value);
+      const nextEntity = defaultEntityForUserType(value);
+
+      return {
+        ...current,
+        user_type: value,
+        role: nextRole,
+        entity_type: nextEntity,
+        entity_id: nextEntity === "system" || nextEntity === "none" ? "" : current.entity_id,
+      };
+    });
+
+    setError("");
+  }
+
+  function saveDraft() {
+    window.localStorage.setItem(draftKey, JSON.stringify(form));
+    setHasDraft(true);
+    toast.success(locale === "ar" ? "تم حفظ المسودة." : "Draft saved.");
+  }
+
+  function restoreDraft() {
+    const raw = window.localStorage.getItem(draftKey);
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<FormState>;
+      setForm({ ...initialForm, ...parsed });
+      setHasDraft(true);
+      toast.success(locale === "ar" ? "تم استعادة المسودة." : "Draft restored.");
+    } catch {
+      window.localStorage.removeItem(draftKey);
+      setHasDraft(false);
+    }
+  }
+
+  function clearDraft() {
+    window.localStorage.removeItem(draftKey);
+    setHasDraft(false);
+    toast.success(locale === "ar" ? "تم حذف المسودة." : "Draft deleted.");
+  }
+
+  function resetForm() {
+    if (JSON.stringify(form) !== JSON.stringify(initialForm)) {
+      const confirmed = window.confirm(locale === "ar" ? "هل تريد مسح بيانات النموذج؟" : "Clear form data?");
+      if (!confirmed) return;
+    }
+
+    setForm(initialForm);
+    setError("");
+    setCreatedUser(null);
+    setResetUrl("");
+  }
+
+  async function copyText(value: string) {
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t.copied);
+    } catch {
+      toast.error(t.unknownError);
+    }
+  }
+
+  async function submitForm() {
+    const validationError = validateForm(form, locale);
+
+    if (validationError) {
+      setError(validationError);
+      toast.error(validationError);
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setCreatedUser(null);
+    setResetUrl("");
+
+    const payload = buildPayload(form);
+    let lastError = "";
+
+    try {
+      for (const endpoint of createEndpoints()) {
+        try {
+          const response = await fetchJson<ApiResponse>(endpoint, {
+            method: "POST",
+            body: payload,
+          });
+
+          const nextCreatedUser = getCreatedUser(response);
+          const nextResetUrl = getResetUrl(response);
+
+          setCreatedUser(nextCreatedUser);
+          setResetUrl(nextResetUrl);
+
+          window.localStorage.removeItem(draftKey);
+          setHasDraft(false);
+
+          toast.success(t.created);
+
+          if (nextResetUrl) {
+            toast.success(t.passwordLinkCreated);
+          }
+
+          return;
+        } catch (caughtError) {
+          lastError =
+            caughtError instanceof Error && caughtError.message
+              ? caughtError.message
+              : t.unknownError;
+
+          if (!endpoint.includes("/create/")) {
+            throw caughtError;
+          }
+        }
+      }
+    } catch {
+      setError(lastError || t.submitError);
+      toast.error(lastError || t.submitError);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const createdId = createdUser?.id ? String(createdUser.id) : "";
+  const hasEntityLink = form.entity_type !== "none";
+  const showEntityId = form.entity_type !== "none" && form.entity_type !== "system";
+
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="max-w-3xl text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={() => confirmNavigate("/system/users")}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            <span>{t.back}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/users">
+              <BackIcon className="h-4 w-4" />
+              {t.users}
+            </Link>
           </Button>
 
-          {canViewUsers ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-              disabled={isSubmitting}
-              onClick={() => confirmNavigate("/system/users")}
-            >
-              <ClipboardList className="h-4 w-4" />
-              <span>{t.usersList}</span>
-            </Button>
+          <Button variant="outline" className="h-9 rounded-lg" onClick={saveDraft} disabled={saving}>
+            <Save className="h-4 w-4" />
+            {locale === "ar" ? "حفظ مسودة" : "Save draft"}
+          </Button>
+
+          {hasDraft ? (
+            <>
+              <Button variant="outline" className="h-9 rounded-lg" onClick={restoreDraft} disabled={saving}>
+                <RefreshCw className="h-4 w-4" />
+                {locale === "ar" ? "استعادة" : "Restore"}
+              </Button>
+
+              <Button variant="outline" className="h-9 rounded-lg" onClick={clearDraft} disabled={saving}>
+                <X className="h-4 w-4" />
+                {locale === "ar" ? "حذف المسودة" : "Delete draft"}
+              </Button>
+            </>
           ) : null}
 
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={saveDraft}
-          >
-            <Save className="h-4 w-4" />
-            <span>{t.saveDraft}</span>
+          <Button variant="outline" className="h-9 rounded-lg" onClick={resetForm} disabled={saving}>
+            <RotateCcw className="h-4 w-4" />
+            {t.reset}
           </Button>
 
           <Button
-            type="button"
-            className="h-10 w-full rounded-xl sm:w-auto"
-            disabled={isSubmitting}
-            onClick={submitForm}
+            className="h-9 rounded-lg bg-black text-white hover:bg-black/90"
+            onClick={() => void submitForm()}
+            disabled={saving}
           >
-            {isSubmitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            <span>{isSubmitting ? t.saving : t.create}</span>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+            {saving ? t.saving : t.save}
           </Button>
         </div>
       </div>
 
-      {submitError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5 text-destructive">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-            <div>
-              <p className="font-semibold">{t.formErrorTitle}</p>
-              <p className="mt-1 text-sm">{submitError}</p>
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4">
+            <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+            <div className="space-y-1 text-right">
+              <p className="font-semibold text-red-900">{t.submitError}</p>
+              <p className="text-sm text-red-700">{error}</p>
             </div>
           </CardContent>
         </Card>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        {/* Main Form */}
-        <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <UserRound className="h-4 w-4" />
-                {t.identityInfo}
-              </CardTitle>
-              <CardDescription>{t.identityDesc}</CardDescription>
-            </CardHeader>
+      {createdUser ? (
+        <Card className="rounded-lg border border-emerald-200 bg-emerald-50 shadow-none">
+          <CardContent className="space-y-4 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div className="space-y-1 text-right">
+                <p className="font-semibold text-emerald-900">{t.created}</p>
+                <p className="text-sm text-emerald-700">
+                  {t.createdUser}: {createdUser.username || createdUser.email || createdId || "—"}
+                </p>
+              </div>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock
-                label={t.labels.firstName}
-                error={errors.first_name}
-                required
-              >
-                <Input
-                  value={formData.first_name}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.firstName}
-                  className="h-10 rounded-xl"
-                  onChange={(event) =>
-                    updateField("first_name", event.target.value)
-                  }
-                  onBlur={() =>
-                    updateField("first_name", normalizeName(formData.first_name))
-                  }
-                />
-              </FieldBlock>
+              <div className="flex flex-wrap items-center gap-2">
+                {createdId ? (
+                  <Button asChild variant="outline" className="h-9 rounded-lg bg-white">
+                    <Link href={`/system/users/${createdId}`}>
+                      <Eye className="h-4 w-4" />
+                      {t.openUser}
+                    </Link>
+                  </Button>
+                ) : null}
 
-              <FieldBlock label={t.labels.lastName} error={errors.last_name}>
-                <Input
-                  value={formData.last_name}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.lastName}
-                  className="h-10 rounded-xl"
-                  onChange={(event) =>
-                    updateField("last_name", event.target.value)
-                  }
-                  onBlur={() =>
-                    updateField("last_name", normalizeName(formData.last_name))
-                  }
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.labels.fullName} error={errors.full_name}>
-                <Input
-                  value={formData.full_name}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.fullName}
-                  className="h-10 rounded-xl"
-                  onChange={(event) =>
-                    updateField("full_name", event.target.value)
-                  }
-                  onBlur={() =>
-                    updateField("full_name", normalizeName(formData.full_name))
-                  }
-                />
-              </FieldBlock>
-
-              <FieldBlock
-                label={t.labels.username}
-                error={errors.username}
-                required
-              >
-                <Input
-                  value={formData.username}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.username}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
-                  onChange={(event) =>
-                    updateField("username", event.target.value)
-                  }
-                  onBlur={() =>
-                    updateField("username", normalizeUsername(formData.username))
-                  }
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.labels.email} error={errors.email} required>
-                <Input
-                  value={formData.email}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.email}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
-                  onChange={(event) => updateField("email", event.target.value)}
-                  onBlur={() =>
-                    updateField("email", formData.email.trim().toLowerCase())
-                  }
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.labels.phone} error={errors.phone}>
-                <Input
-                  value={formData.phone}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.phone}
-                  className="h-10 rounded-xl"
-                  dir="ltr"
-                  onChange={(event) => updateField("phone", event.target.value)}
-                  onBlur={() =>
-                    updateField("phone", normalizePhone(formData.phone))
-                  }
-                />
-              </FieldBlock>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <ShieldCheck className="h-4 w-4" />
-                {t.accessInfo}
-              </CardTitle>
-              <CardDescription>{t.accessDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-3">
-              <FieldBlock label={t.labels.role} error={errors.role} required>
-                <select
-                  value={formData.role}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  onChange={(event) => updateRole(event.target.value as UserRole)}
-                >
-                  {Object.entries(t.roles).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-
-              <FieldBlock label={t.labels.userType} error={errors.user_type}>
-                <select
-                  value={formData.user_type}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  onChange={(event) =>
-                    updateField("user_type", event.target.value as UserRole)
-                  }
-                >
-                  {Object.entries(t.roles).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-
-              <FieldBlock label={t.labels.workspace} error={errors.workspace}>
-                <select
-                  value={formData.workspace}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  onChange={(event) =>
-                    updateField(
-                      "workspace",
-                      event.target.value as UserWorkspace,
-                    )
-                  }
-                >
-                  {Object.entries(t.workspaces).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <KeyRound className="h-4 w-4" />
-                {t.securityInfo}
-              </CardTitle>
-              <CardDescription>{t.securityDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <FieldBlock label={t.labels.password} error={errors.password}>
-                <Input
-                  type="password"
-                  value={formData.password}
-                  disabled={isSubmitting || formData.send_password_link}
-                  placeholder={t.placeholders.password}
-                  className="h-10 rounded-xl"
-                  onChange={(event) =>
-                    updateField("password", event.target.value)
-                  }
-                />
-              </FieldBlock>
-
-              <FieldBlock
-                label={t.labels.confirmPassword}
-                error={errors.confirm_password}
-              >
-                <Input
-                  type="password"
-                  value={formData.confirm_password}
-                  disabled={isSubmitting || formData.send_password_link}
-                  placeholder={t.placeholders.confirmPassword}
-                  className="h-10 rounded-xl"
-                  onChange={(event) =>
-                    updateField("confirm_password", event.target.value)
-                  }
-                />
-              </FieldBlock>
-
-              <div className="md:col-span-2">
-                <ToggleBox
-                  icon={Send}
-                  checked={formData.send_password_link}
-                  disabled={isSubmitting}
-                  title={t.labels.sendPasswordLink}
-                  description={t.labels.sendPasswordLink}
-                  onChange={(value) => {
-                    setFormData((current) => ({
-                      ...current,
-                      send_password_link: value,
-                      password: value ? "" : current.password,
-                      confirm_password: value ? "" : current.confirm_password,
-                    }));
-                    setErrors((current) => ({
-                      ...current,
-                      password: undefined,
-                      confirm_password: undefined,
-                    }));
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg bg-white"
+                  onClick={() => {
+                    setCreatedUser(null);
+                    setResetUrl("");
+                    setForm(initialForm);
                   }}
+                >
+                  <UserPlus className="h-4 w-4" />
+                  {t.createAnother}
+                </Button>
+              </div>
+            </div>
+
+            {resetUrl ? (
+              <div className="rounded-lg border border-emerald-200 bg-white p-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-emerald-900">{t.resetUrl}</p>
+                  <Button variant="outline" size="sm" onClick={() => void copyText(resetUrl)}>
+                    <Copy className="h-4 w-4" />
+                    {t.copy}
+                  </Button>
+                </div>
+                <p className="break-all text-sm text-emerald-700" dir="ltr">
+                  {resetUrl}
+                </p>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-4">
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <UserCog className="h-4 w-4 text-muted-foreground" />
+                {t.accountSection}
+              </CardTitle>
+              <CardDescription>{t.accountSectionDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-4 px-6 pb-6 md:grid-cols-2">
+              <div className="space-y-2">
+                <FieldLabel>{t.username}</FieldLabel>
+                <Input
+                  value={form.username}
+                  onChange={(event) => updateForm("username", event.target.value)}
+                  className="h-10 rounded-lg bg-background"
+                  autoComplete="username"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.email}</FieldLabel>
+                <Input
+                  value={form.email}
+                  onChange={(event) => updateForm("email", event.target.value)}
+                  className="h-10 rounded-lg bg-background"
+                  autoComplete="email"
+                  dir="ltr"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.firstName}</FieldLabel>
+                <Input
+                  value={form.first_name}
+                  onChange={(event) => updateForm("first_name", event.target.value)}
+                  className="h-10 rounded-lg bg-background"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.lastName}</FieldLabel>
+                <Input
+                  value={form.last_name}
+                  onChange={(event) => updateForm("last_name", event.target.value)}
+                  className="h-10 rounded-lg bg-background"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.displayName}</FieldLabel>
+                <Input
+                  value={form.display_name}
+                  onChange={(event) => updateForm("display_name", event.target.value)}
+                  className="h-10 rounded-lg bg-background"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.phone}</FieldLabel>
+                <Input
+                  value={form.phone_number}
+                  onChange={(event) => updateForm("phone_number", event.target.value)}
+                  className="h-10 rounded-lg bg-background text-right tabular-nums"
+                  dir="ltr"
+                  inputMode="tel"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.whatsapp}</FieldLabel>
+                <Input
+                  value={form.whatsapp_number}
+                  onChange={(event) => updateForm("whatsapp_number", event.target.value)}
+                  className="h-10 rounded-lg bg-background text-right tabular-nums"
+                  dir="ltr"
+                  inputMode="tel"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.alternateEmail}</FieldLabel>
+                <Input
+                  value={form.alternate_email}
+                  onChange={(event) => updateForm("alternate_email", event.target.value)}
+                  className="h-10 rounded-lg bg-background"
+                  dir="ltr"
                 />
               </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <BadgeCheck className="h-4 w-4" />
-                {t.optionsInfo}
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                {t.roleSection}
               </CardTitle>
-              <CardDescription>{t.optionsDesc}</CardDescription>
+              <CardDescription>{t.roleSectionDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="grid gap-4 md:grid-cols-3">
-              <ToggleBox
-                icon={CheckCircle2}
-                checked={formData.is_active}
-                disabled={isSubmitting}
-                title={t.labels.isActive}
-                description={t.labels.isActive}
-                onChange={(value) => updateField("is_active", value)}
-              />
+            <CardContent className="grid gap-4 px-6 pb-6 md:grid-cols-2">
+              <div className="space-y-2">
+                <FieldLabel required>{t.userType}</FieldLabel>
+                <Select value={form.user_type} onValueChange={(value) => updateUserType(value as UserType)}>
+                  <SelectTrigger className="h-10 rounded-lg bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="SUPER_ADMIN">{t.superAdmin}</SelectItem>
+                    <SelectItem value="SYSTEM">{t.system}</SelectItem>
+                    <SelectItem value="STAFF">{t.staffUser}</SelectItem>
+                    <SelectItem value="ACCOUNTANT">{t.accountant}</SelectItem>
+                    <SelectItem value="PROVIDER">{t.provider}</SelectItem>
+                    <SelectItem value="CENTER">{t.center}</SelectItem>
+                    <SelectItem value="CUSTOMER">{t.customer}</SelectItem>
+                    <SelectItem value="AGENT">{t.agent}</SelectItem>
+                    <SelectItem value="BROKER">{t.broker}</SelectItem>
+                    <SelectItem value="OTHER">{t.other}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-              <ToggleBox
-                icon={UserCog}
-                checked={formData.is_staff}
-                disabled={isSubmitting}
-                title={t.labels.isStaff}
-                description={t.labels.isStaff}
-                onChange={(value) => updateField("is_staff", value)}
-              />
+              <div className="space-y-2">
+                <FieldLabel required>{t.role}</FieldLabel>
+                <Select value={form.role} onValueChange={(value) => updateForm("role", value as UserRole)}>
+                  <SelectTrigger className="h-10 rounded-lg bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="system_admin">{t.systemAdmin}</SelectItem>
+                    <SelectItem value="provider_admin">{t.providerAdmin}</SelectItem>
+                    <SelectItem value="customer_user">{t.customerUser}</SelectItem>
+                    <SelectItem value="agent_user">{t.agentUser}</SelectItem>
+                    <SelectItem value="broker_user">{t.brokerUser}</SelectItem>
+                    <SelectItem value="accountant">{t.accountant}</SelectItem>
+                    <SelectItem value="support">{t.support}</SelectItem>
+                    <SelectItem value="viewer">{t.viewer}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-              <ToggleBox
-                icon={ShieldCheck}
-                checked={formData.is_superuser}
-                disabled={isSubmitting || formData.role !== "system_admin"}
-                title={t.labels.isSuperuser}
-                description={t.labels.isSuperuser}
-                onChange={(value) => updateField("is_superuser", value)}
-              />
+              <div className="flex items-center justify-between gap-3 rounded-lg border bg-background p-3">
+                <div className="space-y-1 text-right">
+                  <p className="text-sm font-medium">{t.active}</p>
+                  <p className="text-xs text-muted-foreground">{form.is_active ? t.yes : t.no}</p>
+                </div>
+                <Checkbox
+                  checked={form.is_active}
+                  onCheckedChange={(value) => updateForm("is_active", Boolean(value))}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-lg border bg-background p-3">
+                <div className="space-y-1 text-right">
+                  <p className="text-sm font-medium">{t.staff}</p>
+                  <p className="text-xs text-muted-foreground">{form.is_staff ? t.yes : t.no}</p>
+                </div>
+                <Checkbox
+                  checked={form.is_staff}
+                  onCheckedChange={(value) => updateForm("is_staff", Boolean(value))}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-lg border bg-background p-3">
+                <div className="space-y-1 text-right">
+                  <p className="text-sm font-medium">{t.superuser}</p>
+                  <p className="text-xs text-muted-foreground">{form.is_superuser ? t.yes : t.no}</p>
+                </div>
+                <Checkbox
+                  checked={form.is_superuser}
+                  onCheckedChange={(value) => updateForm("is_superuser", Boolean(value))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.preferredLanguage}</FieldLabel>
+                <Select value={form.preferred_language} onValueChange={(value) => updateForm("preferred_language", value as Locale)}>
+                  <SelectTrigger className="h-10 rounded-lg bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ar">العربية</SelectItem>
+                    <SelectItem value="en">English</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.timezone}</FieldLabel>
+                <Input
+                  value={form.timezone}
+                  onChange={(event) => updateForm("timezone", event.target.value)}
+                  className="h-10 rounded-lg bg-background"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.tags}</FieldLabel>
+                <Input
+                  value={form.tags}
+                  onChange={(event) => updateForm("tags", event.target.value)}
+                  className="h-10 rounded-lg bg-background"
+                  placeholder={locale === "ar" ? "وسم 1, وسم 2" : "tag 1, tag 2"}
+                />
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <ClipboardList className="h-4 w-4" />
-                {t.permissionsInfo}
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+                {t.linkSection}
               </CardTitle>
-              <CardDescription>{t.permissionsDesc}</CardDescription>
+              <CardDescription>{t.linkSectionDesc}</CardDescription>
             </CardHeader>
 
-            <CardContent className="grid gap-4">
-              <FieldBlock
-                label={t.labels.permissionCodes}
-                error={errors.permission_codes}
-              >
-                <Textarea
-                  value={formData.permission_codes}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.permissionCodes}
-                  className="min-h-24 rounded-xl"
-                  dir="ltr"
-                  onChange={(event) =>
-                    updateField("permission_codes", event.target.value)
-                  }
-                />
-              </FieldBlock>
+            <CardContent className="space-y-4 px-6 pb-6">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                {t.readOnlyLinkNote}
+              </div>
 
-              <FieldBlock label={t.labels.notes} error={errors.notes}>
-                <Textarea
-                  value={formData.notes}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.notes}
-                  className="min-h-28 rounded-xl"
-                  onChange={(event) => updateField("notes", event.target.value)}
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <FieldLabel>{t.entityType}</FieldLabel>
+                  <Select
+                    value={form.entity_type}
+                    onValueChange={(value) => {
+                      const nextEntity = value as EntityType;
+                      setForm((current) => ({
+                        ...current,
+                        entity_type: nextEntity,
+                        entity_id: nextEntity === "none" || nextEntity === "system" ? "" : current.entity_id,
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">{t.entityNone}</SelectItem>
+                      <SelectItem value="system">{t.entitySystem}</SelectItem>
+                      <SelectItem value="provider">{t.entityProvider}</SelectItem>
+                      <SelectItem value="center">{t.entityCenter}</SelectItem>
+                      <SelectItem value="customer">{t.entityCustomer}</SelectItem>
+                      <SelectItem value="agent">{t.entityAgent}</SelectItem>
+                      <SelectItem value="broker">{t.entityBroker}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {showEntityId ? (
+                  <div className="space-y-2">
+                    <FieldLabel required>{t.entityId}</FieldLabel>
+                    <Input
+                      value={form.entity_id}
+                      onChange={(event) => updateForm("entity_id", event.target.value.replace(/[^\d]/g, ""))}
+                      className="h-10 rounded-lg bg-background tabular-nums"
+                      dir="ltr"
+                      inputMode="numeric"
+                    />
+                  </div>
+                ) : null}
+
+                {hasEntityLink ? (
+                  <>
+                    <div className="space-y-2">
+                      <FieldLabel>{t.actorName}</FieldLabel>
+                      <Input
+                        value={form.actor_name}
+                        onChange={(event) => updateForm("actor_name", event.target.value)}
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <FieldLabel>{t.actorCode}</FieldLabel>
+                      <Input
+                        value={form.actor_code}
+                        onChange={(event) => updateForm("actor_code", event.target.value)}
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="px-6 py-5">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <LockKeyhole className="h-4 w-4 text-muted-foreground" />
+                {t.securitySection}
+              </CardTitle>
+              <CardDescription>{t.securitySectionDesc}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-4 px-6 pb-6">
+              <div className="space-y-2">
+                <FieldLabel>{t.password}</FieldLabel>
+                <Input
+                  type="password"
+                  value={form.password}
+                  onChange={(event) => updateForm("password", event.target.value)}
+                  className="h-10 rounded-lg bg-background"
+                  placeholder={t.passwordHint}
+                  autoComplete="new-password"
                 />
-              </FieldBlock>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-lg border bg-background p-3">
+                <div className="space-y-1 text-right">
+                  <p className="text-sm font-medium">{t.sendPasswordLink}</p>
+                  <p className="text-xs text-muted-foreground">{t.afterCreateNote}</p>
+                </div>
+                <Checkbox
+                  checked={form.send_password_link}
+                  onCheckedChange={(value) => updateForm("send_password_link", Boolean(value))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <FieldLabel>{t.notes}</FieldLabel>
+                <textarea
+                  value={form.notes}
+                  onChange={(event) => updateForm("notes", event.target.value)}
+                  className="min-h-[120px] w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                />
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Sidebar Summary */}
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <div className="rounded-xl border bg-background p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground">
-                      {t.completion}
-                    </p>
-                    <p className="mt-1 text-2xl font-bold">
-                      {formatNumber(progressPercent)}%
-                    </p>
-                  </div>
-
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
-                    <BadgeCheck className="h-5 w-5" />
-                  </div>
-                </div>
-
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-
-                <div className="mt-3">
-                  {isReadyToSave ? (
-                    <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      {t.ready}
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="rounded-full">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      {t.missingData}
-                    </Badge>
-                  )}
-                </div>
-              </div>
-
-              <SummaryItem
-                icon={UserRound}
-                label={t.labels.fullName}
-                value={fullNamePreview}
+        <div className="space-y-4">
+          <div className="sticky top-20 space-y-4">
+            <div className="grid gap-3">
+              <MetricCard
+                title={t.userType}
+                value={userTypeLabel(form.user_type, locale)}
+                icon={UserCog}
               />
-
-              <SummaryItem
-                icon={Mail}
-                label={t.labels.email}
-                value={formData.email || "-"}
-              />
-
-              <SummaryItem
-                icon={Phone}
-                label={t.labels.phone}
-                value={formData.phone || "-"}
-              />
-
-              <SummaryItem
+              <MetricCard
+                title={t.role}
+                value={roleLabel(form.role, locale)}
                 icon={ShieldCheck}
-                label={t.labels.role}
-                value={t.roles[formData.role]}
               />
-
-              <SummaryItem
-                icon={Users}
-                label={t.labels.workspace}
-                value={t.workspaces[formData.workspace]}
+              <MetricCard
+                title={t.entityType}
+                value={entityLabel(form.entity_type, locale)}
+                icon={Building2}
               />
+            </div>
 
-              <SummaryItem
-                icon={KeyRound}
-                label={t.labels.permissionCodes}
-                value={formatNumber(permissionCodes.length)}
-              />
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-5 py-4">
+                <CardTitle className="text-base">{t.summarySection}</CardTitle>
+                <CardDescription>{t.summarySectionDesc}</CardDescription>
+              </CardHeader>
 
-              <div className="grid gap-2">
-                <Button
-                  type="button"
-                  className="h-10 rounded-xl"
-                  disabled={isSubmitting}
-                  onClick={submitForm}
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  {isSubmitting ? t.saving : t.create}
-                </Button>
+              <CardContent className="px-5 pb-5">
+                <InfoLine label={t.username} value={form.username || "—"} />
+                <InfoLine label={t.email} value={form.email || "—"} />
+                <InfoLine label={t.phone} value={form.phone_number || "—"} />
+                <InfoLine label={t.displayName} value={form.display_name || [form.first_name, form.last_name].filter(Boolean).join(" ") || "—"} />
+                <InfoLine label={t.userType} value={userTypeLabel(form.user_type, locale)} />
+                <InfoLine label={t.role} value={roleLabel(form.role, locale)} />
+                <InfoLine label={t.active} value={form.is_active ? t.yes : t.no} />
+                <InfoLine label={t.entityType} value={entityLabel(form.entity_type, locale)} />
+                <InfoLine label={t.entityId} value={form.entity_id || "—"} />
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="pt-4">
                   <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 rounded-xl"
-                    disabled={isSubmitting}
-                    onClick={restoreDraft}
+                    className="h-10 w-full rounded-lg bg-black text-white hover:bg-black/90"
+                    onClick={() => void submitForm()}
+                    disabled={saving}
                   >
-                    <RefreshCcw className="h-4 w-4" />
-                    {t.restoreDraft}
-                  </Button>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 rounded-xl"
-                    disabled={isSubmitting}
-                    onClick={clearForm}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {t.clearForm}
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    {saving ? t.saving : t.save}
                   </Button>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
-                {t.stepsTitle}
-              </CardTitle>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              {t.quickNotes.map((item, index) => (
-                <div
-                  key={item}
-                  className="flex items-start gap-3 rounded-xl border bg-background p-3"
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                    {index + 1}
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardContent className="space-y-3 p-4">
+                <div className="flex items-start gap-3">
+                  <KeyRound className="mt-0.5 h-5 w-5 text-muted-foreground" />
+                  <div className="space-y-1 text-right">
+                    <p className="text-sm font-semibold">{t.securitySection}</p>
+                    <p className="text-sm text-muted-foreground">{t.afterCreateNote}</p>
                   </div>
-
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {item}
-                  </p>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-        </aside>
+
+                <Badge variant="outline" className="rounded-full bg-muted/40 px-2.5 py-1">
+                  {form.send_password_link ? t.yes : t.no}
+                </Badge>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
     </div>
   );

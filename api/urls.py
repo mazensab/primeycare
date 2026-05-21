@@ -1,10 +1,24 @@
 # ============================================================
 # 📂 api/urls.py
-# 🧠 Primey Care | Main API Router V2
+# 🧠 Primey Care | Main API Router V2.8
 # ------------------------------------------------------------
 # ✅ نقطة تجميع جميع APIs الخاصة بالنظام
 # ✅ يعتمد على include لكل موديول
 # ✅ متوافق مع Frontend API-first
+# ✅ Core Business APIs:
+#    - Customers
+#    - Agents
+#    - Products Catalog
+#    - Provider Offers
+#    - Providers
+#    - Contracts
+#    - Service Items
+# ✅ Orders & Operations APIs:
+#    - Orders lifecycle
+#    - Order timeline
+#    - Delivery assignment
+#    - Cash on delivery collection
+#    - Order items execution
 # ✅ Finance APIs:
 #    - Invoices
 #    - Payments
@@ -18,15 +32,31 @@
 #    - Invoices
 #    - Payments
 #    - Accounting
+#    - Treasury
 # ✅ Notification Center + legacy alias
 # ✅ WhatsApp Center
 # ------------------------------------------------------------
 # ملاحظات مهمة:
 # - لا نضع منطق أعمال هنا.
 # - هذا الملف فقط لتجميع مسارات api/*.
+# - Product = كتالوج ثابت.
+# - /api/products/ يعرض كتالوج المنتجات الثابت.
+# - /api/products/offers/ يعرض عروض عامة محفوظة على Product نفسه.
+# - /api/offers/ يعرض عروض مقدمي الخدمة المبنية على ContractProduct.
+# - ContractProduct = سعر/خصم/عرض المنتج حسب مقدم الخدمة والعقد.
+# - عند إنشاء طلب من عرض مقدم خدمة:
+#   أرسل offer_id أو contract_product_id إلى /api/orders/.
+# - عند إنشاء عنصر طلب من عرض:
+#   استخدم order_item_payload القادم من /api/offers/.
+# - منطق الطلبات داخل orders.services.
+# - منطق عناصر الطلب داخل order_items.services.
 # - منطق الفواتير والمدفوعات والبوابات داخل services الخاصة بها.
+# - مسار التشغيل المعتمد:
+#   Order → OrderItems → Delivery → Completion
 # - مسار الدفع المالي المعتمد:
 #   Order → Invoice → Payment → Accounting → Treasury
+# - مسار COD:
+#   Order → Assign Delivery Agent → Deliver → Collect Cash
 # - مسار بوابات الدفع:
 #   Gateway Transaction → Webhook/Lookup → Payment Confirm
 #   → Accounting + Treasury
@@ -59,10 +89,30 @@ urlpatterns = [
         "agents/",
         include("api.agents.urls"),
     ),
+
+    # --------------------------------------------------------
+    # 📦 Products Catalog / Provider Offers
+    # --------------------------------------------------------
+    # /api/products/
+    # - كتالوج المنتجات الثابت:
+    #   بطاقة، خدمة طبية، برنامج، عضوية.
+    #
+    # /api/products/offers/
+    # - عروض عامة محفوظة على Product نفسه.
+    #
+    # /api/offers/
+    # - عروض مقدمي الخدمة المبنية على ContractProduct.
+    # - مصدر عروض الهبوط والـ Checkout عندما يختلف السعر حسب مقدم الخدمة.
+    # --------------------------------------------------------
     path(
         "products/",
         include("api.products.urls"),
     ),
+    path(
+        "offers/",
+        include("api.offers.urls"),
+    ),
+
     path(
         "providers/",
         include("api.providers.urls"),
@@ -86,6 +136,19 @@ urlpatterns = [
 
     # --------------------------------------------------------
     # 🧾 Orders & Operations APIs
+    # --------------------------------------------------------
+    # /api/orders/
+    # /api/orders/<id>/
+    # /api/orders/<id>/status/
+    # /api/orders/open/
+    # /api/orders/reports/
+    #
+    # /api/order-items/
+    # /api/order-items/pending/
+    # /api/order-items/<id>/
+    #
+    # orders يدعم offer_id / contract_product_id.
+    # order_items يحفظ Snapshot العرض والسعر.
     # --------------------------------------------------------
     path(
         "orders/",
@@ -180,6 +243,8 @@ urlpatterns = [
 
     # --------------------------------------------------------
     # 💬 Communication APIs
+    # --------------------------------------------------------
+    # /api/whatsapp/
     # --------------------------------------------------------
     path(
         "whatsapp/",

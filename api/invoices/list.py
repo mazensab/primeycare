@@ -1,12 +1,13 @@
 # ============================================================
 # 📂 api/invoices/list.py
-# 🧠 Invoices API List — Primey Care V2
+# 🧠 Invoices API List — Primey Care V2.1
 # ------------------------------------------------------------
 # ✅ قائمة الفواتير
 # ✅ فلاتر حسب الحالة / العميل / الطلب / التاريخ / البحث
 # ✅ Summary مالي للقائمة الحالية
 # ✅ Pagination موحد
-# ✅ إظهار حالة ومراجع الترحيل المحاسبي
+# ✅ آمن مع الحقول غير الموجودة مثل is_accounting_posted
+# ✅ بحث آمن حسب حقول Customer / Order الموجودة فعليًا
 # ✅ Unified response: ok / success / data / results
 # ✅ Compatible with Accounting / Payments / Treasury flow
 # ============================================================
@@ -124,7 +125,30 @@ def _extract_company_id(request) -> int | None:
 
 
 def _model_field_names(model) -> set[str]:
-    return {field.name for field in model._meta.fields}
+    try:
+        return {field.name for field in model._meta.fields}
+    except Exception:
+        return set()
+
+
+def _model_has_field(model, field_name: str) -> bool:
+    return field_name in _model_field_names(model)
+
+
+def _related_model(model, field_name: str):
+    try:
+        field = model._meta.get_field(field_name)
+        return getattr(field, "related_model", None)
+    except Exception:
+        return None
+
+
+def _related_model_field_names(model, field_name: str) -> set[str]:
+    related = _related_model(model, field_name)
+    if not related:
+        return set()
+
+    return _model_field_names(related)
 
 
 def _apply_company_scope(queryset, company_id: int | None):
@@ -219,7 +243,18 @@ def _related_label(obj: Any) -> str:
 
 def _parse_pagination(request) -> tuple[int, int]:
     page = max(_to_int(request.GET.get("page"), 1), 1)
-    page_size = min(max(_to_int(request.GET.get("page_size") or request.GET.get("limit"), 50), 1), 200)
+
+    page_size = min(
+        max(
+            _to_int(
+                request.GET.get("page_size")
+                or request.GET.get("limit"),
+                50,
+            ),
+            1,
+        ),
+        500,
+    )
 
     if request.GET.get("offset") and not request.GET.get("page"):
         offset = max(_to_int(request.GET.get("offset"), 0), 0)
@@ -247,6 +282,97 @@ def _paginate(queryset, *, page: int, page_size: int) -> dict[str, Any]:
             "next_offset": offset + page_size if current_page.has_next() else None,
         },
     }
+
+
+def _add_q_if_field_exists(
+    *,
+    base_q: Q,
+    has_any: bool,
+    model_fields: set[str],
+    field_name: str,
+    lookup: str,
+    value: str,
+) -> tuple[Q, bool]:
+    if field_name not in model_fields:
+        return base_q, has_any
+
+    return base_q | Q(**{lookup: value}), True
+
+
+def _build_search_q(model, search: str) -> Q | None:
+    model_fields = _model_field_names(model)
+    customer_fields = _related_model_field_names(model, "customer")
+    order_fields = _related_model_field_names(model, "order")
+
+    search_q = Q()
+    has_search = False
+
+    search_q, has_search = _add_q_if_field_exists(
+        base_q=search_q,
+        has_any=has_search,
+        model_fields=model_fields,
+        field_name="invoice_number",
+        lookup="invoice_number__icontains",
+        value=search,
+    )
+
+    search_q, has_search = _add_q_if_field_exists(
+        base_q=search_q,
+        has_any=has_search,
+        model_fields=model_fields,
+        field_name="notes",
+        lookup="notes__icontains",
+        value=search,
+    )
+
+    search_q, has_search = _add_q_if_field_exists(
+        base_q=search_q,
+        has_any=has_search,
+        model_fields=model_fields,
+        field_name="internal_notes",
+        lookup="internal_notes__icontains",
+        value=search,
+    )
+
+    search_q, has_search = _add_q_if_field_exists(
+        base_q=search_q,
+        has_any=has_search,
+        model_fields=model_fields,
+        field_name="accounting_entry_reference",
+        lookup="accounting_entry_reference__icontains",
+        value=search,
+    )
+
+    if "customer" in model_fields:
+        customer_search_fields = {
+            "customer_code": "customer__customer_code__icontains",
+            "display_name": "customer__display_name__icontains",
+            "full_name": "customer__full_name__icontains",
+            "name": "customer__name__icontains",
+            "phone": "customer__phone__icontains",
+            "phone_number": "customer__phone_number__icontains",
+            "mobile": "customer__mobile__icontains",
+            "email": "customer__email__icontains",
+        }
+
+        for field_name, lookup in customer_search_fields.items():
+            if field_name in customer_fields:
+                search_q |= Q(**{lookup: search})
+                has_search = True
+
+    if "order" in model_fields:
+        order_search_fields = {
+            "order_number": "order__order_number__icontains",
+            "number": "order__number__icontains",
+            "code": "order__code__icontains",
+        }
+
+        for field_name, lookup in order_search_fields.items():
+            if field_name in order_fields:
+                search_q |= Q(**{lookup: search})
+                has_search = True
+
+    return search_q if has_search else None
 
 
 # ============================================================
@@ -281,6 +407,7 @@ def _serialize_order(order) -> dict[str, Any] | None:
         "order_number": (
             _safe_attr(order, "order_number", "")
             or _safe_attr(order, "number", "")
+            or _safe_attr(order, "code", "")
             or f"ORD-{_safe_attr(order, 'id', '')}"
         ),
         "status": _safe_attr(order, "status", ""),
@@ -299,6 +426,22 @@ def _serialize_invoice(invoice) -> dict[str, Any]:
 
     invoice_number = _safe_attr(invoice, "invoice_number", "") or f"INV-{invoice.pk}"
 
+    accounting_entry_reference = _safe_attr(
+        invoice,
+        "accounting_entry_reference",
+        "",
+    )
+    is_accounting_posted = bool(
+        _safe_attr(
+            invoice,
+            "is_accounting_posted",
+            False,
+        )
+    )
+
+    due_amount = _money(_safe_attr(invoice, "due_amount", "0.00"))
+    status_value = _safe_attr(invoice, "status", "")
+
     return {
         "id": invoice.pk,
         "invoice_number": invoice_number,
@@ -306,7 +449,7 @@ def _serialize_invoice(invoice) -> dict[str, Any]:
         "reference": invoice_number,
 
         "invoice_type": _safe_attr(invoice, "invoice_type", ""),
-        "status": _safe_attr(invoice, "status", ""),
+        "status": status_value,
 
         "issue_date": _iso_datetime(_safe_attr(invoice, "issue_date", None)),
         "due_date": _iso_datetime(_safe_attr(invoice, "due_date", None)),
@@ -325,24 +468,29 @@ def _serialize_invoice(invoice) -> dict[str, Any]:
         "tax_amount": _money(_safe_attr(invoice, "tax_amount", "0.00")),
         "total_amount": _money(_safe_attr(invoice, "total_amount", "0.00")),
         "paid_amount": _money(_safe_attr(invoice, "paid_amount", "0.00")),
-        "due_amount": _money(_safe_attr(invoice, "due_amount", "0.00")),
+        "due_amount": due_amount,
         "currency": _safe_attr(invoice, "currency", "SAR") or "SAR",
 
         "notes": _safe_attr(invoice, "notes", "") or "",
         "internal_notes": _safe_attr(invoice, "internal_notes", "") or "",
 
-        "accounting_entry_reference": _safe_attr(invoice, "accounting_entry_reference", ""),
-        "is_accounting_posted": bool(_safe_attr(invoice, "is_accounting_posted", False)),
+        "accounting_entry_reference": accounting_entry_reference,
+        "is_accounting_posted": is_accounting_posted,
 
         "created_at": _iso_datetime(_safe_attr(invoice, "created_at", None)),
         "updated_at": _iso_datetime(_safe_attr(invoice, "updated_at", None)),
 
         "financial_flow": {
-            "invoice_issued": _safe_attr(invoice, "status", "") not in {"DRAFT", "CANCELLED", ""},
-            "accounting_posted": bool(_safe_attr(invoice, "is_accounting_posted", False)),
-            "accounting_reference": _safe_attr(invoice, "accounting_entry_reference", ""),
-            "is_paid": _money(_safe_attr(invoice, "due_amount", "0.00")) <= Decimal("0.00"),
-            "has_due_amount": _money(_safe_attr(invoice, "due_amount", "0.00")) > Decimal("0.00"),
+            "invoice_issued": str(status_value).upper() not in {
+                "DRAFT",
+                "CANCELLED",
+                "CANCELED",
+                "",
+            },
+            "accounting_posted": is_accounting_posted,
+            "accounting_reference": accounting_entry_reference,
+            "is_paid": due_amount <= Decimal("0.00"),
+            "has_due_amount": due_amount > Decimal("0.00"),
         },
     }
 
@@ -375,15 +523,28 @@ def _apply_filters(request, queryset):
     if order_id and "order" in model_fields:
         queryset = queryset.filter(order_id=order_id)
 
-    is_accounting_posted = _to_bool(request.GET.get("is_accounting_posted"), None)
+    is_accounting_posted = _to_bool(
+        request.GET.get("is_accounting_posted"),
+        None,
+    )
 
-    if is_accounting_posted is not None and "is_accounting_posted" in model_fields:
+    if (
+        is_accounting_posted is not None
+        and "is_accounting_posted" in model_fields
+    ):
         queryset = queryset.filter(is_accounting_posted=is_accounting_posted)
 
-    accounting_entry_reference = _clean_str(request.GET.get("accounting_entry_reference"))
+    accounting_entry_reference = _clean_str(
+        request.GET.get("accounting_entry_reference")
+    )
 
-    if accounting_entry_reference and "accounting_entry_reference" in model_fields:
-        queryset = queryset.filter(accounting_entry_reference__icontains=accounting_entry_reference)
+    if (
+        accounting_entry_reference
+        and "accounting_entry_reference" in model_fields
+    ):
+        queryset = queryset.filter(
+            accounting_entry_reference__icontains=accounting_entry_reference
+        )
 
     date_from = _clean_str(request.GET.get("date_from"))
 
@@ -408,20 +569,9 @@ def _apply_filters(request, queryset):
     search = _clean_str(request.GET.get("search") or request.GET.get("q"))
 
     if search:
-        queryset = queryset.filter(
-            Q(invoice_number__icontains=search)
-            | Q(customer__customer_code__icontains=search)
-            | Q(customer__display_name__icontains=search)
-            | Q(customer__full_name__icontains=search)
-            | Q(customer__name__icontains=search)
-            | Q(customer__phone__icontains=search)
-            | Q(customer__phone_number__icontains=search)
-            | Q(customer__email__icontains=search)
-            | Q(order__order_number__icontains=search)
-            | Q(accounting_entry_reference__icontains=search)
-            | Q(notes__icontains=search)
-            | Q(internal_notes__icontains=search)
-        )
+        search_q = _build_search_q(Invoice, search)
+        if search_q is not None:
+            queryset = queryset.filter(search_q)
 
     return queryset
 
@@ -447,73 +597,128 @@ def _filters_payload(request) -> dict[str, Any]:
 # ============================================================
 
 def _build_summary(queryset) -> dict[str, Any]:
-    totals = queryset.aggregate(
-        total_count=Count("id"),
-        subtotal=Sum("subtotal"),
-        discount_amount=Sum("discount_amount"),
-        tax_amount=Sum("tax_amount"),
-        total_amount=Sum("total_amount"),
-        paid_amount=Sum("paid_amount"),
-        due_amount=Sum("due_amount"),
-        accounting_posted_count=Count("id", filter=Q(is_accounting_posted=True)),
-        accounting_pending_count=Count("id", filter=Q(is_accounting_posted=False)),
-    )
+    model_fields = _model_field_names(queryset.model)
 
-    status_breakdown = list(
-        queryset
-        .values("status")
-        .annotate(
-            count=Count("id"),
-            total_amount=Sum("total_amount"),
-            paid_amount=Sum("paid_amount"),
-            due_amount=Sum("due_amount"),
-        )
-        .order_by("status")
-    )
+    aggregate_kwargs: dict[str, Any] = {
+        "total_count": Count("id"),
+    }
 
-    type_breakdown = list(
-        queryset
-        .values("invoice_type")
-        .annotate(
-            count=Count("id"),
-            total_amount=Sum("total_amount"),
-            paid_amount=Sum("paid_amount"),
-            due_amount=Sum("due_amount"),
+    money_fields = [
+        "subtotal",
+        "discount_amount",
+        "tax_amount",
+        "total_amount",
+        "paid_amount",
+        "due_amount",
+    ]
+
+    for field_name in money_fields:
+        if field_name in model_fields:
+            aggregate_kwargs[field_name] = Sum(field_name)
+
+    if "is_accounting_posted" in model_fields:
+        aggregate_kwargs["accounting_posted_count"] = Count(
+            "id",
+            filter=Q(is_accounting_posted=True),
         )
-        .order_by("invoice_type")
-    )
+        aggregate_kwargs["accounting_pending_count"] = Count(
+            "id",
+            filter=Q(is_accounting_posted=False),
+        )
+
+    totals = queryset.aggregate(**aggregate_kwargs)
+
+    if "is_accounting_posted" not in model_fields:
+        totals["accounting_posted_count"] = 0
+        totals["accounting_pending_count"] = 0
+
+    status_breakdown: list[dict[str, Any]] = []
+    if "status" in model_fields:
+        status_values = (
+            queryset
+            .values("status")
+            .annotate(
+                count=Count("id"),
+                total_amount=Sum("total_amount") if "total_amount" in model_fields else Count("id"),
+                paid_amount=Sum("paid_amount") if "paid_amount" in model_fields else Count("id"),
+                due_amount=Sum("due_amount") if "due_amount" in model_fields else Count("id"),
+            )
+            .order_by("status")
+        )
+
+        status_breakdown = [
+            {
+                "status": item.get("status") or "",
+                "count": item.get("count") or 0,
+                "total_amount": _money(
+                    item.get("total_amount")
+                    if "total_amount" in model_fields
+                    else None
+                ),
+                "paid_amount": _money(
+                    item.get("paid_amount")
+                    if "paid_amount" in model_fields
+                    else None
+                ),
+                "due_amount": _money(
+                    item.get("due_amount")
+                    if "due_amount" in model_fields
+                    else None
+                ),
+            }
+            for item in status_values
+        ]
+
+    type_breakdown: list[dict[str, Any]] = []
+    if "invoice_type" in model_fields:
+        type_values = (
+            queryset
+            .values("invoice_type")
+            .annotate(
+                count=Count("id"),
+                total_amount=Sum("total_amount") if "total_amount" in model_fields else Count("id"),
+                paid_amount=Sum("paid_amount") if "paid_amount" in model_fields else Count("id"),
+                due_amount=Sum("due_amount") if "due_amount" in model_fields else Count("id"),
+            )
+            .order_by("invoice_type")
+        )
+
+        type_breakdown = [
+            {
+                "invoice_type": item.get("invoice_type") or "",
+                "count": item.get("count") or 0,
+                "total_amount": _money(
+                    item.get("total_amount")
+                    if "total_amount" in model_fields
+                    else None
+                ),
+                "paid_amount": _money(
+                    item.get("paid_amount")
+                    if "paid_amount" in model_fields
+                    else None
+                ),
+                "due_amount": _money(
+                    item.get("due_amount")
+                    if "due_amount" in model_fields
+                    else None
+                ),
+            }
+            for item in type_values
+        ]
 
     return {
-        "total_count": totals["total_count"] or 0,
+        "total_count": totals.get("total_count") or 0,
         "subtotal": _money(totals.get("subtotal")),
         "discount_amount": _money(totals.get("discount_amount")),
         "tax_amount": _money(totals.get("tax_amount")),
         "total_amount": _money(totals.get("total_amount")),
         "paid_amount": _money(totals.get("paid_amount")),
         "due_amount": _money(totals.get("due_amount")),
-        "accounting_posted_count": totals["accounting_posted_count"] or 0,
-        "accounting_pending_count": totals["accounting_pending_count"] or 0,
+        "accounting_posted_count": totals.get("accounting_posted_count") or 0,
+        "accounting_pending_count": totals.get("accounting_pending_count") or 0,
         "currency": "SAR",
-        "status_breakdown": [
-            {
-                "status": item["status"] or "",
-                "count": item["count"] or 0,
-                "total_amount": _money(item.get("total_amount")),
-                "paid_amount": _money(item.get("paid_amount")),
-                "due_amount": _money(item.get("due_amount")),
-            }
-            for item in status_breakdown
-        ],
-        "type_breakdown": [
-            {
-                "invoice_type": item["invoice_type"] or "",
-                "count": item["count"] or 0,
-                "total_amount": _money(item.get("total_amount")),
-                "paid_amount": _money(item.get("paid_amount")),
-                "due_amount": _money(item.get("due_amount")),
-            }
-            for item in type_breakdown
-        ],
+        "status_breakdown": status_breakdown,
+        "type_breakdown": type_breakdown,
     }
 
 
@@ -554,7 +759,6 @@ def invoice_list_api(request):
             },
             message="Invoices loaded successfully.",
             extra={
-                # توافق خلفي مع الفرونت القديم
                 "count": len(items),
                 "total_count": pagination["total_items"],
                 "page": pagination["page"],

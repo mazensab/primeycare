@@ -1,7 +1,7 @@
 # ===============================================================
 # 📂 الملف: auth_center/permissions.py
 # 🧭 Primey Care — Roles & Permissions Core
-# 🚀 الإصدار: Primey Care Permissions V1.3
+# 🚀 الإصدار: Primey Care Permissions V1.4
 # ---------------------------------------------------------------
 # ✅ مصدر مركزي للصلاحيات في Backend
 # ✅ بدون اعتماد على Django REST Framework
@@ -15,12 +15,12 @@
 #    - provider_admin
 #    - customer_user
 #    - agent_user
+#    - broker_user
 # ---------------------------------------------------------------
-# ✅ V1.3:
-#    - توسيع Permission Codes لتغطية المرحلة الثانية
-#    - إضافة صلاحيات تفصيلية للمحاسبة والخزينة
-#    - دعم aliases لمسارات provider / center / company
-#    - تثبيت مصفوفة صلاحيات نهائية لكل Role
+# ✅ V1.4:
+#    - إضافة broker_user كدور مستقل للوسيط
+#    - إضافة صلاحيات Workspace خاصة بالوسيط
+#    - إبقاء broker_user على مساحة /agent حاليًا
 #    - الحفاظ على توافق whoami.py و AuthProvider.tsx
 # ===============================================================
 
@@ -84,7 +84,7 @@ class PermissionCodes:
     CENTERS_EXPORT = "centers.export"
 
     # -----------------------------------------------------------
-    # Agents
+    # Agents / Brokers
     # -----------------------------------------------------------
     AGENTS_VIEW = "agents.view"
     AGENTS_CREATE = "agents.create"
@@ -93,6 +93,12 @@ class PermissionCodes:
     AGENTS_EXPORT = "agents.export"
     AGENTS_COMMISSIONS_VIEW = "agents.commissions.view"
     AGENTS_COMMISSIONS_APPROVE = "agents.commissions.approve"
+
+    BROKERS_VIEW = "brokers.view"
+    BROKERS_CREATE = "brokers.create"
+    BROKERS_EDIT = "brokers.edit"
+    BROKERS_DELETE = "brokers.delete"
+    BROKERS_EXPORT = "brokers.export"
 
     # -----------------------------------------------------------
     # Products
@@ -305,6 +311,17 @@ class PermissionCodes:
     AGENT_ORDERS_VIEW = "agent_orders.view"
     AGENT_REPORTS_VIEW = "agent_reports.view"
 
+    # -----------------------------------------------------------
+    # Broker Workspace
+    # -----------------------------------------------------------
+    BROKER_WORKSPACE_VIEW = "broker_workspace.view"
+    BROKER_DASHBOARD_VIEW = "broker.dashboard.view"
+    BROKER_AGENTS_VIEW = "broker_agents.view"
+    BROKER_CUSTOMERS_VIEW = "broker_customers.view"
+    BROKER_COMMISSIONS_VIEW = "broker_commissions.view"
+    BROKER_ORDERS_VIEW = "broker_orders.view"
+    BROKER_REPORTS_VIEW = "broker_reports.view"
+
 
 ALL_PERMISSIONS: set[str] = {
     value
@@ -370,6 +387,7 @@ SYSTEM_READ_PERMISSIONS: set[str] = {
     PermissionCodes.PROVIDERS_VIEW,
     PermissionCodes.CENTERS_VIEW,
     PermissionCodes.AGENTS_VIEW,
+    PermissionCodes.BROKERS_VIEW,
     PermissionCodes.PRODUCTS_VIEW,
     PermissionCodes.CONTRACTS_VIEW,
     PermissionCodes.SERVICE_ITEMS_VIEW,
@@ -412,6 +430,7 @@ EXPORT_PERMISSIONS: set[str] = {
     PermissionCodes.PROVIDERS_EXPORT,
     PermissionCodes.CENTERS_EXPORT,
     PermissionCodes.AGENTS_EXPORT,
+    PermissionCodes.BROKERS_EXPORT,
     PermissionCodes.PRODUCTS_EXPORT,
     PermissionCodes.CONTRACTS_EXPORT,
     PermissionCodes.SERVICE_ITEMS_EXPORT,
@@ -526,6 +545,7 @@ ACCOUNTANT_PERMISSIONS: set[str] = {
     PermissionCodes.PROVIDERS_VIEW,
     PermissionCodes.CENTERS_VIEW,
     PermissionCodes.AGENTS_VIEW,
+    PermissionCodes.BROKERS_VIEW,
     PermissionCodes.PRODUCTS_VIEW,
     PermissionCodes.CONTRACTS_VIEW,
     PermissionCodes.SERVICE_ITEMS_VIEW,
@@ -571,9 +591,11 @@ SUPPORT_PERMISSIONS: set[str] = {
     PermissionCodes.CENTERS_VIEW,
     PermissionCodes.CENTERS_EXPORT,
 
-    # Agents.
+    # Agents / Brokers.
     PermissionCodes.AGENTS_VIEW,
     PermissionCodes.AGENTS_EXPORT,
+    PermissionCodes.BROKERS_VIEW,
+    PermissionCodes.BROKERS_EXPORT,
 
     # Products / contracts / services / orders.
     PermissionCodes.PRODUCTS_VIEW,
@@ -670,6 +692,34 @@ AGENT_USER_PERMISSIONS: set[str] = {
     PermissionCodes.REPORTS_VIEW,
 }
 
+BROKER_USER_PERMISSIONS: set[str] = {
+    PermissionCodes.BROKER_WORKSPACE_VIEW,
+    PermissionCodes.BROKER_DASHBOARD_VIEW,
+    PermissionCodes.BROKER_AGENTS_VIEW,
+    PermissionCodes.BROKER_CUSTOMERS_VIEW,
+    PermissionCodes.BROKER_COMMISSIONS_VIEW,
+    PermissionCodes.BROKER_ORDERS_VIEW,
+    PermissionCodes.BROKER_REPORTS_VIEW,
+
+    # مساحة التشغيل الحالية مشتركة على /agent.
+    PermissionCodes.AGENT_WORKSPACE_VIEW,
+    PermissionCodes.AGENT_DASHBOARD_VIEW,
+    PermissionCodes.AGENT_CUSTOMERS_VIEW,
+    PermissionCodes.AGENT_COMMISSIONS_VIEW,
+    PermissionCodes.AGENT_ORDERS_VIEW,
+    PermissionCodes.AGENT_REPORTS_VIEW,
+
+    # قراءة فريقه وعملائه وطلباته.
+    PermissionCodes.AGENTS_VIEW,
+    PermissionCodes.BROKERS_VIEW,
+    PermissionCodes.CUSTOMERS_VIEW,
+    PermissionCodes.ORDERS_VIEW,
+    PermissionCodes.INVOICES_VIEW,
+    PermissionCodes.PAYMENTS_VIEW,
+    PermissionCodes.PRODUCTS_VIEW,
+    PermissionCodes.REPORTS_VIEW,
+}
+
 PERMISSIONS_BY_ROLE: dict[str, set[str]] = {
     _normalize_role_value(RoleChoices.SYSTEM_ADMIN): set(ALL_PERMISSIONS),
     _normalize_role_value(RoleChoices.ACCOUNTANT): set(ACCOUNTANT_PERMISSIONS),
@@ -677,6 +727,7 @@ PERMISSIONS_BY_ROLE: dict[str, set[str]] = {
     _normalize_role_value(RoleChoices.PROVIDER_ADMIN): set(PROVIDER_ADMIN_PERMISSIONS),
     _normalize_role_value(RoleChoices.CUSTOMER_USER): set(CUSTOMER_USER_PERMISSIONS),
     _normalize_role_value(RoleChoices.AGENT_USER): set(AGENT_USER_PERMISSIONS),
+    _normalize_role_value(RoleChoices.BROKER_USER): set(BROKER_USER_PERMISSIONS),
     _normalize_role_value(RoleChoices.VIEWER): set(VIEWER_PERMISSIONS),
 }
 
@@ -742,7 +793,10 @@ def get_user_workspace(user: Any) -> str:
     if role == _normalize_role_value(RoleChoices.CUSTOMER_USER):
         return "customer"
 
-    if role == _normalize_role_value(RoleChoices.AGENT_USER):
+    if role in {
+        _normalize_role_value(RoleChoices.AGENT_USER),
+        _normalize_role_value(RoleChoices.BROKER_USER),
+    }:
         return "agent"
 
     return "system"

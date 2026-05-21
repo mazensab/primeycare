@@ -98,10 +98,31 @@ ASGI_APPLICATION = "primey_care.asgi.application"
 
 
 # ============================================================
+# 🔌 CHANNELS / WEBSOCKET
+# ============================================================
+# Local development uses in-memory channel layer.
+# Production can later be switched to Redis by env/config.
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": env(
+            "CHANNEL_LAYER_BACKEND",
+            "channels.layers.InMemoryChannelLayer",
+        ),
+    }
+}
+
+
+# ============================================================
 # 📦 INSTALLED APPS
 # ============================================================
 
 INSTALLED_APPS = [
+    # ASGI / WebSocket
+    # Daphne must be before django.contrib.staticfiles.
+    "daphne",
+    "channels",
+
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -335,6 +356,44 @@ EMAIL_AUDIT_BCC = [
     for item in str(env("EMAIL_AUDIT_BCC", "")).split(",")
     if item.strip()
 ]
+
+
+# ============================================================
+# 📁 GOOGLE DRIVE STORAGE
+# ============================================================
+# Used by services/google_drive.py for uploading provider/product files.
+# Keep secrets and real paths in .env only.
+
+GOOGLE_DRIVE_ENABLED = env_bool("GOOGLE_DRIVE_ENABLED", False)
+
+GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE = env(
+    "GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE",
+    str(BASE_DIR / "credentials" / "google-drive-service-account.json"),
+)
+
+GOOGLE_DRIVE_ROOT_FOLDER_ID = env("GOOGLE_DRIVE_ROOT_FOLDER_ID", "")
+
+GOOGLE_DRIVE_SHARED_DRIVE_ID = env("GOOGLE_DRIVE_SHARED_DRIVE_ID", "")
+
+GOOGLE_DRIVE_PROVIDER_ROOT_FOLDER_NAME = env(
+    "GOOGLE_DRIVE_PROVIDER_ROOT_FOLDER_NAME",
+    "Primey Care Providers",
+)
+
+GOOGLE_DRIVE_PRODUCTS_FOLDER_NAME = env(
+    "GOOGLE_DRIVE_PRODUCTS_FOLDER_NAME",
+    "Products",
+)
+
+GOOGLE_DRIVE_PUBLIC_PERMISSION_ROLE = env(
+    "GOOGLE_DRIVE_PUBLIC_PERMISSION_ROLE",
+    "reader",
+)
+
+GOOGLE_DRIVE_PUBLIC_PERMISSION_TYPE = env(
+    "GOOGLE_DRIVE_PUBLIC_PERMISSION_TYPE",
+    "anyone",
+)
 
 
 # ============================================================

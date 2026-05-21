@@ -1,9 +1,21 @@
 "use client";
 
-import { useRouter, usePathname } from "next/navigation";
-import { useState, useMemo, useEffect } from "react";
-import { useAuth } from "@/components/providers/AuthProvider";
+/* =====================================================
+   📂 components/layout/sidebar/nav-user.tsx
+   🧠 Primey Care — Premium Sidebar User Menu
+   -----------------------------------------------------
+   ✅ يدعم النظام / العميل / المندوب / مقدم الخدمة
+   ✅ يوجه روابط القائمة حسب المساحة الحالية
+   ✅ بدون hardcoded localhost
+   ✅ يحافظ على هوية السايدر الجديدة
+   ✅ يدعم عربي/إنجليزي عبر primey-locale
+===================================================== */
 
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
+
+import { useAuth } from "@/components/providers/AuthProvider";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -20,14 +32,17 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 
 import {
   BellIcon,
   CreditCardIcon,
+  HeadphonesIcon,
+  Loader2,
   LogOutIcon,
+  ShieldCheck,
   UserCircle2Icon,
 } from "lucide-react";
-
 import { DotsVerticalIcon } from "@radix-ui/react-icons";
 
 type AppLocale = "ar" | "en";
@@ -52,9 +67,7 @@ type PrimeyAuthSession = {
 };
 
 /* =====================================================
-   ✅ قراءة لغة النظام بشكل آمن
-   الأولوية لـ localStorage لأنه المصدر الرسمي للتبديل
-   ثم document.documentElement.lang كاحتياط فقط
+   Locale Helpers
 ===================================================== */
 
 function readStoredLocale(): AppLocale {
@@ -73,10 +86,6 @@ function readStoredLocale(): AppLocale {
   }
 }
 
-/* =====================================================
-   ✅ مزامنة اتجاه الصفحة مع اللغة الحالية
-===================================================== */
-
 function applyDocumentLocale(locale: AppLocale) {
   try {
     if (typeof document === "undefined") return;
@@ -90,21 +99,28 @@ function applyDocumentLocale(locale: AppLocale) {
 }
 
 /* =====================================================
-   ✅ API Base
-   بدون hardcoded localhost داخل الاستخدام المباشر
+   API Helpers
 ===================================================== */
 
 function getApiBaseUrl(): string {
   const apiUrl =
     process.env.NEXT_PUBLIC_API_BASE_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
-    "http://127.0.0.1:8000";
+    "";
 
   return apiUrl.replace(/\/$/, "");
 }
 
+function buildApiUrl(path: string): string {
+  const base = getApiBaseUrl();
+
+  if (!base) return path;
+
+  return `${base}${path}`;
+}
+
 /* =====================================================
-   ✅ Safe User Helpers
+   Safe User Helpers
 ===================================================== */
 
 function normalizeSession(value: unknown): PrimeyAuthSession {
@@ -140,6 +156,27 @@ function getAvatarFallback(userName: string, isArabic: boolean): string {
   return cleanName.charAt(0).toUpperCase();
 }
 
+function getRoleLabel(role: string | null | undefined, isArabic: boolean): string {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+
+  const labels: Record<string, { ar: string; en: string }> = {
+    system_admin: { ar: "مدير النظام", en: "System Admin" },
+    superuser: { ar: "مدير عام", en: "Superuser" },
+    provider_admin: { ar: "مدير مقدم خدمة", en: "Provider Admin" },
+    customer_user: { ar: "عميل", en: "Customer" },
+    agent_user: { ar: "مندوب", en: "Agent" },
+    accountant: { ar: "محاسب", en: "Accountant" },
+    support: { ar: "دعم", en: "Support" },
+    viewer: { ar: "مشاهد", en: "Viewer" },
+  };
+
+  return labels[normalizedRole]?.[isArabic ? "ar" : "en"] || normalizedRole || (isArabic ? "حساب مستخدم" : "User Account");
+}
+
+/* =====================================================
+   Component
+===================================================== */
+
 export function NavUser() {
   const { isMobile } = useSidebar();
   const router = useRouter();
@@ -150,10 +187,6 @@ export function NavUser() {
 
   const [loading, setLoading] = useState(false);
   const [locale, setLocale] = useState<AppLocale>("ar");
-
-  /* =====================================================
-     ✅ مزامنة لغة قائمة المستخدم مع الهيدر مباشرة
-  ===================================================== */
 
   useEffect(() => {
     const syncLocale = () => {
@@ -189,29 +222,62 @@ export function NavUser() {
   const userEmail = String(user?.email || "");
   const userAvatar = String(user?.avatar || "");
   const avatarFallback = getAvatarFallback(userName, isArabic);
+  const roleLabel = getRoleLabel(session.role, isArabic);
 
   const isCompanyArea =
     pathname?.startsWith("/company") ||
     pathname?.startsWith("/center") ||
     pathname?.startsWith("/provider");
 
+  const isCustomerArea = pathname?.startsWith("/customer");
+  const isAgentArea = pathname?.startsWith("/agent");
+
   const accountHref = useMemo(() => {
-    return isCompanyArea ? "/company/profile" : "/system/profile";
-  }, [isCompanyArea]);
+    if (isCustomerArea) return "/customer/profile";
+    if (isAgentArea) return "/agent/account";
+    if (isCompanyArea) return "/company/profile";
+
+    return "/system/profile";
+  }, [isCompanyArea, isCustomerArea, isAgentArea]);
 
   const billingHref = useMemo(() => {
-    return isCompanyArea ? "/company/billing" : "/system/billing";
-  }, [isCompanyArea]);
+    if (isCustomerArea) return "/customer/invoices";
+    if (isAgentArea) return "/agent/commissions";
+    if (isCompanyArea) return "/company/billing";
+
+    return "/system/invoices";
+  }, [isCompanyArea, isCustomerArea, isAgentArea]);
 
   const notificationsHref = useMemo(() => {
-    return isCompanyArea ? "/company/notifications" : "/system/notifications";
-  }, [isCompanyArea]);
+    if (isCustomerArea) return "/customer/support";
+    if (isAgentArea) return "/agent/account";
+    if (isCompanyArea) return "/company/notifications";
 
-  /**
-   * =====================================================
-   * 🔐 SAFE CSRF READER
-   * =====================================================
-   */
+    return "/system/notifications";
+  }, [isCompanyArea, isCustomerArea, isAgentArea]);
+
+  const accountLabel = useMemo(() => {
+    if (isCustomerArea) return isArabic ? "حسابي" : "My Profile";
+    if (isAgentArea) return isArabic ? "حسابي" : "My Account";
+
+    return isArabic ? "الحساب" : "Account";
+  }, [isArabic, isCustomerArea, isAgentArea]);
+
+  const billingLabel = useMemo(() => {
+    if (isCustomerArea) return isArabic ? "فواتيري" : "My Invoices";
+    if (isAgentArea) return isArabic ? "عمولاتي" : "My Commissions";
+
+    return isArabic ? "الفواتير" : "Invoices";
+  }, [isArabic, isCustomerArea, isAgentArea]);
+
+  const notificationsLabel = useMemo(() => {
+    if (isCustomerArea) return isArabic ? "الدعم" : "Support";
+    if (isAgentArea) return isArabic ? "حساب المندوب" : "Agent Account";
+
+    return isArabic ? "الإشعارات" : "Notifications";
+  }, [isArabic, isCustomerArea, isAgentArea]);
+
+  const NotificationsIcon = isCustomerArea ? HeadphonesIcon : BellIcon;
 
   const getCSRFToken = () => {
     if (typeof document === "undefined") return "";
@@ -220,28 +286,20 @@ export function NavUser() {
     return match ? match[1] : "";
   };
 
-  /**
-   * =====================================================
-   * 🔐 FIXED ENTERPRISE LOGOUT
-   * =====================================================
-   */
-
   const handleLogout = async () => {
     if (loading) return;
 
     setLoading(true);
 
     try {
-      const apiBaseUrl = getApiBaseUrl();
-
-      await fetch(`${apiBaseUrl}/api/auth/csrf/`, {
+      await fetch(buildApiUrl("/api/auth/csrf/"), {
         method: "GET",
         credentials: "include",
       });
 
       const csrfToken = getCSRFToken();
 
-      await fetch(`${apiBaseUrl}/api/auth/logout/`, {
+      await fetch(buildApiUrl("/api/auth/logout/"), {
         method: "POST",
         credentials: "include",
         headers: {
@@ -249,8 +307,15 @@ export function NavUser() {
           "X-CSRFToken": csrfToken,
         },
       });
+
+      toast.success(isArabic ? "تم تسجيل الخروج بنجاح" : "Signed out successfully");
     } catch (error) {
       console.error("Logout API error:", error);
+      toast.error(
+        isArabic
+          ? "تعذر الاتصال بالخادم، سيتم تحويلك لصفحة الدخول"
+          : "Could not reach the server. Redirecting to login.",
+      );
     } finally {
       try {
         window.localStorage.setItem("primey_logout", Date.now().toString());
@@ -262,6 +327,8 @@ export function NavUser() {
     }
   };
 
+  const menuDirectionClass = isArabic ? "flex-row-reverse text-right" : "flex-row text-left";
+
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -269,9 +336,19 @@ export function NavUser() {
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              className={cn(
+                "h-14 rounded-2xl border border-white/70 px-2 transition-all",
+                "bg-gradient-to-b from-white/86 to-white/52 shadow-sm",
+                "hover:border-slate-200 hover:bg-white hover:text-foreground hover:shadow-md",
+                "data-[state=open]:border-primary/20 data-[state=open]:bg-primary/8 data-[state=open]:text-primary",
+                "dark:border-white/10 dark:from-white/[0.075] dark:to-white/[0.025]",
+                "dark:hover:bg-white/[0.08] dark:data-[state=open]:bg-primary/15",
+                "group-data-[collapsible=icon]:!h-12 group-data-[collapsible=icon]:!w-12 group-data-[collapsible=icon]:!px-0",
+              )}
+              aria-label={isArabic ? "قائمة المستخدم" : "User menu"}
+              title={isArabic ? "قائمة المستخدم" : "User menu"}
             >
-              <Avatar className="rounded-full">
+              <Avatar className="h-9 w-9 shrink-0 rounded-2xl border border-white/80 shadow-sm dark:border-white/10">
                 {userAvatar ? (
                   <AvatarImage
                     src={userAvatar}
@@ -280,112 +357,167 @@ export function NavUser() {
                   />
                 ) : null}
 
-                <AvatarFallback className="rounded-lg">
+                <AvatarFallback className="rounded-2xl bg-primary/10 text-sm font-bold text-primary">
                   {avatarFallback}
                 </AvatarFallback>
               </Avatar>
 
               <div
-                className={`grid flex-1 text-sm leading-tight ${
-                  isArabic ? "text-right" : "text-left"
-                }`}
+                className={cn(
+                  "grid min-w-0 flex-1 text-sm leading-tight group-data-[collapsible=icon]:hidden",
+                  isArabic ? "text-right" : "text-left",
+                )}
               >
-                <span className="truncate font-medium">{userName}</span>
+                <span className="truncate font-semibold text-foreground">
+                  {userName}
+                </span>
 
-                <span className="text-muted-foreground truncate text-xs">
-                  {userEmail}
+                <span className="truncate text-xs text-muted-foreground">
+                  {userEmail || roleLabel}
                 </span>
               </div>
 
-              <DotsVerticalIcon className="ms-auto size-4" />
+              <DotsVerticalIcon className="ms-auto size-4 shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
 
           <DropdownMenuContent
-            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
+            className={cn(
+              "w-[--radix-dropdown-menu-trigger-width] min-w-64 overflow-hidden rounded-2xl border-white/70 bg-background/95 p-2 shadow-[0_18px_55px_rgba(15,23,42,0.14)] backdrop-blur-xl",
+              "dark:border-white/10 dark:bg-slate-950/94 dark:shadow-[0_18px_55px_rgba(0,0,0,0.35)]",
+            )}
             side={isMobile ? "bottom" : isArabic ? "left" : "right"}
             align="end"
-            sideOffset={4}
+            sideOffset={8}
           >
-            <DropdownMenuLabel className="p-0 font-normal">
-              <div
-                className={`flex items-center gap-2 px-1 py-1.5 text-sm ${
-                  isArabic ? "text-right" : "text-left"
-                }`}
-              >
-                <Avatar className="h-8 w-8 rounded-lg">
-                  {userAvatar ? (
-                    <AvatarImage
-                      src={userAvatar}
-                      alt={userName}
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : null}
-
-                  <AvatarFallback className="rounded-lg">
-                    {avatarFallback}
-                  </AvatarFallback>
-                </Avatar>
-
+            <div dir={isArabic ? "rtl" : "ltr"}>
+              <DropdownMenuLabel className="p-0 font-normal">
                 <div
-                  className={`grid flex-1 text-sm leading-tight ${
-                    isArabic ? "text-right" : "text-left"
-                  }`}
+                  className={cn(
+                    "flex items-center gap-3 rounded-2xl border border-slate-200/70 bg-white/70 px-3 py-3 text-sm shadow-sm",
+                    "dark:border-white/10 dark:bg-white/[0.055]",
+                    menuDirectionClass,
+                  )}
                 >
-                  <span className="truncate font-medium">{userName}</span>
+                  <Avatar className="h-10 w-10 shrink-0 rounded-2xl border border-white/80 shadow-sm dark:border-white/10">
+                    {userAvatar ? (
+                      <AvatarImage
+                        src={userAvatar}
+                        alt={userName}
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : null}
 
-                  <span className="text-muted-foreground truncate text-xs">
-                    {userEmail}
-                  </span>
+                    <AvatarFallback className="rounded-2xl bg-primary/10 text-sm font-bold text-primary">
+                      {avatarFallback}
+                    </AvatarFallback>
+                  </Avatar>
+
+                  <div
+                    className={cn(
+                      "grid min-w-0 flex-1 text-sm leading-tight",
+                      isArabic ? "text-right" : "text-left",
+                    )}
+                  >
+                    <span className="truncate font-semibold text-foreground">
+                      {userName}
+                    </span>
+
+                    <span className="truncate text-xs text-muted-foreground">
+                      {userEmail || roleLabel}
+                    </span>
+
+                    <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                      <ShieldCheck className="size-3" />
+                      {roleLabel}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </DropdownMenuLabel>
+              </DropdownMenuLabel>
 
-            <DropdownMenuSeparator />
+              <DropdownMenuSeparator className="my-2" />
 
-            <DropdownMenuGroup>
+              <DropdownMenuGroup className="space-y-1">
+                <DropdownMenuItem
+                  onClick={() => router.push(accountHref)}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
+                    "focus:bg-primary/10 focus:text-primary",
+                    menuDirectionClass,
+                  )}
+                >
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-muted-foreground dark:bg-white/[0.06]">
+                    <UserCircle2Icon className="size-4" />
+                  </span>
+
+                  <span className="min-w-0 flex-1 truncate">{accountLabel}</span>
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  onClick={() => router.push(billingHref)}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
+                    "focus:bg-primary/10 focus:text-primary",
+                    menuDirectionClass,
+                  )}
+                >
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-muted-foreground dark:bg-white/[0.06]">
+                    <CreditCardIcon className="size-4" />
+                  </span>
+
+                  <span className="min-w-0 flex-1 truncate">{billingLabel}</span>
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  onClick={() => router.push(notificationsHref)}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
+                    "focus:bg-primary/10 focus:text-primary",
+                    menuDirectionClass,
+                  )}
+                >
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-muted-foreground dark:bg-white/[0.06]">
+                    <NotificationsIcon className="size-4" />
+                  </span>
+
+                  <span className="min-w-0 flex-1 truncate">
+                    {notificationsLabel}
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+
+              <DropdownMenuSeparator className="my-2" />
+
               <DropdownMenuItem
-                onClick={() => router.push(accountHref)}
-                className="cursor-pointer"
+                onClick={handleLogout}
+                disabled={loading}
+                className={cn(
+                  "flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
+                  "text-red-600 focus:bg-red-50 focus:text-red-700",
+                  "dark:text-red-400 dark:focus:bg-red-950/30 dark:focus:text-red-300",
+                  "disabled:cursor-not-allowed disabled:opacity-60",
+                  menuDirectionClass,
+                )}
               >
-                <UserCircle2Icon />
-                {isArabic ? "الحساب" : "Account"}
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400">
+                  {loading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <LogOutIcon className="size-4" />
+                  )}
+                </span>
+
+                <span className="min-w-0 flex-1 truncate">
+                  {loading
+                    ? isArabic
+                      ? "جارٍ تسجيل الخروج..."
+                      : "Signing out..."
+                    : isArabic
+                      ? "تسجيل الخروج"
+                      : "Log out"}
+                </span>
               </DropdownMenuItem>
-
-              <DropdownMenuItem
-                onClick={() => router.push(billingHref)}
-                className="cursor-pointer"
-              >
-                <CreditCardIcon />
-                {isArabic ? "الفوترة" : "Billing"}
-              </DropdownMenuItem>
-
-              <DropdownMenuItem
-                onClick={() => router.push(notificationsHref)}
-                className="cursor-pointer"
-              >
-                <BellIcon />
-                {isArabic ? "الإشعارات" : "Notifications"}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-
-            <DropdownMenuSeparator />
-
-            <DropdownMenuItem
-              onClick={handleLogout}
-              disabled={loading}
-              className="cursor-pointer text-red-600 focus:text-red-600"
-            >
-              <LogOutIcon />
-
-              {loading
-                ? isArabic
-                  ? "جارٍ تسجيل الخروج..."
-                  : "Signing out..."
-                : isArabic
-                  ? "تسجيل الخروج"
-                  : "Log out"}
-            </DropdownMenuItem>
+            </div>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

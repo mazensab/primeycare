@@ -1,76 +1,88 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/customers/[id]/page.tsx
-   🧠 Primey Care | Customer Detail Page
+   📂 primey_frontend/app/system/customers/[id]/page.tsx
+   🧭 Primey Care — Customer Details
    ------------------------------------------------------------
-   ✅ المسار: /system/customers/[id]
-   ✅ الإصدار: v1.1.0 - UX Refinement
-
-   ✅ العمل:
-      عرض تفاصيل العميل، بيانات التواصل، العنوان، الملخص المالي،
-      الروابط التشغيلية، وكشف الحساب.
-
-   ✅ API:
+   ✅ Same visual spirit as approved Products + Customers pages
+   ✅ Paid profile detail layout: profile card + main workspace
+   ✅ Real API only:
       GET /api/customers/{id}/
       GET /api/customers/{id}/statement/
+   ✅ Customer profile, contact, linked login account, address, notes
+   ✅ Customer statement + orders/invoices/payments lines
+   ✅ Internal UI components only
+   ✅ No localhost
+   ✅ No fake data
+   ✅ RTL/LTR via primey-locale
+   ✅ English numerals + English dates always
+   ✅ SAR icon from /currency/sar.svg
+   ✅ Shows Customer.user login_user/profile after backend linking
+   ✅ Web print
+   ============================================================ */
 
-   ✅ ملاحظات UX المعتمدة:
-      - لا يتم إظهار المسارات التقنية أو أسماء API داخل الواجهة.
-      - لا يتم عرض Badge مثل Live Data / بيانات حقيقية.
-      - لا يتم عرض زر تعديل معطل.
-      - لا يتم عرض زر حذف نهائي داخل صفحة التفاصيل.
-      - Error State مستقل عن Not Found.
-      - Skeleton Loading كامل.
-      - كشف الحساب له Error State مستقل.
-      - الصفحة ممتدة على عرض المساحة.
-      - نسخ سريع للكود والجوال والواتساب والبريد والهوية.
-      - الملخص المالي يستخدم رمز العملة /currency/sar.svg بدون كتابة SAR داخل الرقم.
-      - Web PDF Print منسق لكشف الحساب.
-      - روابط تشغيلية محمية بمعرف صالح.
-      - دعم عربي / إنجليزي عبر primey-locale.
-      - استخدام sonner للتنبيهات.
-      - الأرقام تبقى بالإنجليزية.
-============================================================ */
-
-import type { ComponentType, ReactNode } from "react";
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import {
   Activity,
   ArrowLeft,
+  ArrowRight,
+  ArrowUpDown,
   BadgeCheck,
-  Building2,
   CalendarDays,
-  CheckCircle2,
+  CircleDollarSign,
   Copy,
-  CreditCard,
+  Eye,
   FileText,
+  Home,
+  Inbox,
   Loader2,
   Mail,
   MapPin,
+  MoreHorizontal,
   Phone,
   Printer,
-  RefreshCcw,
+  ReceiptText,
+  RefreshCw,
+  RotateCcw,
+  Search,
   ShieldCheck,
-  UserRound,
-  Wallet,
-  XCircle,
+  ShoppingCart,
+  TriangleAlert,
+  User,
+  UserCircle2,
+  Users,
+  WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { apiGet, API_PATHS } from "@/lib/api";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -79,76 +91,169 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
 
-type AppLocale = "ar" | "en";
+type LoginUserProfile = {
+  id?: number | string | null;
+  display_name?: string;
+  user_type?: string;
+  role?: string;
+  phone_number?: string;
+  whatsapp_number?: string;
+  alternate_email?: string;
+  preferred_language?: string;
+  timezone?: string;
+  extra_data?: Record<string, unknown>;
+  tags?: unknown[];
+};
 
-type CustomerStatus =
-  | "ACTIVE"
-  | "INACTIVE"
-  | "BLOCKED"
-  | "LEAD"
-  | "UNKNOWN";
+type LoginUserRecord = {
+  id?: number | string | null;
+  username?: string;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  full_name?: string;
+  is_active?: boolean;
+  is_staff?: boolean;
+  is_superuser?: boolean;
+  last_login?: string | null;
+  date_joined?: string | null;
+  profile?: LoginUserProfile | null;
+};
 
-type CustomerType = "INDIVIDUAL" | "CORPORATE" | "UNKNOWN";
-
-type CustomerDetail = {
+type CustomerRecord = {
   id: number | string;
-  code: string;
-  name: string;
-  customerType: CustomerType;
-  status: CustomerStatus;
-  source: string;
+  customer_code?: string;
+  customer_type?: string;
+  status?: string;
+  source?: string;
 
-  firstName: string;
-  lastName: string;
-  companyName: string;
-  gender: string;
-  dateOfBirth: string;
+  user_id?: number | string | null;
+  user_username?: string;
+  login_user?: LoginUserRecord | null;
+  has_customer_account?: boolean;
+  normalized_phone?: string;
+  login_identifier?: string;
+  is_phone_verified?: boolean;
+  is_whatsapp_verified?: boolean;
+  phone_verified_at?: string | null;
+  whatsapp_verified_at?: string | null;
+  last_login_at?: string | null;
 
-  email: string;
-  phone: string;
-  whatsapp: string;
-  alternativePhone: string;
-  primaryContact: string;
-
-  nationalId: string;
-  passportNumber: string;
-  nationality: string;
-
-  country: string;
-  city: string;
-  district: string;
-  streetAddress: string;
-  postalCode: string;
-  nationalAddressText: string;
-
-  notes: string;
-  tags: string;
-
-  createdAt: string;
-  updatedAt: string;
-  raw: Record<string, unknown>;
+  first_name?: string;
+  last_name?: string;
+  company_name?: string;
+  display_name?: string;
+  full_name?: string;
+  gender?: string;
+  date_of_birth?: string | null;
+  national_id?: string;
+  passport_number?: string;
+  nationality?: string;
+  email?: string;
+  phone_number?: string;
+  whatsapp_number?: string;
+  alternative_phone_number?: string;
+  primary_contact_number?: string;
+  country?: string;
+  city?: string;
+  district?: string;
+  street_address?: string;
+  postal_code?: string;
+  national_address_text?: string;
+  notes?: string;
+  tags?: string;
+  created_by_id?: number | string | null;
+  updated_by_id?: number | string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type CustomerDetailResponse = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
-  customer?: unknown;
-  data?: unknown;
+  detail?: string;
+  error?: string;
+  customer?: CustomerRecord;
+  data?: CustomerRecord | { customer?: CustomerRecord };
+};
+
+type StatementSummary = {
+  total_orders?: number;
+  orders_count?: number;
+  total_invoices?: number;
+  invoices_count?: number;
+  total_payments?: number;
+  payments_count?: number;
+  total_amount?: number | string;
+  total_invoiced?: number | string;
+  total_paid?: number | string;
+  paid_amount?: number | string;
+  outstanding_amount?: number | string;
+  remaining_amount?: number | string;
+  balance?: number | string;
+  debit?: number | string;
+  credit?: number | string;
+  orders_total?: number | string;
+  invoices_total?: number | string;
+  payments_total?: number | string;
+};
+
+type StatementLine = {
+  id?: string | number;
+  type?: string;
+  kind?: string;
+  source?: string;
+  document_type?: string;
+  reference?: string;
+  number?: string;
+  code?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  payment_status?: string;
+  fulfillment_status?: string;
+  amount?: number | string;
+  total?: number | string;
+  paid_amount?: number | string;
+  remaining_amount?: number | string;
+  debit?: number | string;
+  credit?: number | string;
+  balance?: number | string;
+  currency?: string;
+  date?: string | null;
+  created_at?: string | null;
+  issued_at?: string | null;
+  paid_at?: string | null;
+  due_date?: string | null;
+  order_id?: string | number;
+  invoice_id?: string | number;
+  payment_id?: string | number;
+  url?: string;
+  href?: string;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 type StatementResponse = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
-  customer?: unknown;
+  detail?: string;
+  error?: string;
+  customer?: CustomerRecord;
+  filters?: Record<string, unknown>;
   statement?: {
     summary?: StatementSummary;
     lines?: StatementLine[];
+    [key: string]: unknown;
   };
+  summary?: StatementSummary;
+  lines?: StatementLine[];
   data?: {
     statement?: {
       summary?: StatementSummary;
@@ -157,100 +262,280 @@ type StatementResponse = {
     summary?: StatementSummary;
     lines?: StatementLine[];
   };
-  summary?: StatementSummary;
-  lines?: StatementLine[];
 };
 
-type StatementSummary = {
-  customer_id?: number;
-  customer_code?: string;
-  customer_name?: string;
-  customer_status?: string;
-  primary_contact?: string;
-  total_orders_count?: number;
-  total_orders_amount?: string;
-  total_invoices_count?: number;
-  total_invoices_amount?: string;
-  total_paid_amount?: string;
-  total_due_amount?: string;
-  currency?: string;
-};
+type LineFilter = "all" | "orders" | "invoices" | "payments";
+type SortFilter = "newest" | "oldest" | "amount_high" | "amount_low";
 
-type StatementLine = {
-  line_type: string;
-  line_date: string | null;
-  reference: string;
-  related_order_id?: number | null;
-  related_invoice_id?: number | null;
-  related_payment_id?: number | null;
-  description: string;
-  debit_amount: string;
-  credit_amount: string;
-  balance_after: string;
-  currency: string;
-  status: string;
-  metadata?: Record<string, unknown>;
-};
+const PAGE_SIZE = 10;
 
-/* ============================================================
-   Locale Helpers
-============================================================ */
+const translations = {
+  ar: {
+    title: "تفاصيل العميل",
+    subtitle: "ملف العميل التشغيلي مع الطلبات والفواتير والمدفوعات وكشف الحساب.",
+    back: "رجوع",
+    refresh: "تحديث",
+    print: "طباعة",
+    copy: "نسخ",
+    copied: "تم النسخ",
+    retry: "إعادة المحاولة",
+    loading: "جاري التحميل",
+    errorTitle: "تعذر تحميل بيانات العميل",
+    statementErrorTitle: "تعذر تحميل كشف الحساب",
+    notFound: "العميل غير موجود",
+    notFoundDesc: "لم يتم العثور على بيانات لهذا العميل.",
+    customerProfile: "ملف العميل",
+    customerCode: "كود العميل",
+    accountStatus: "حساب الدخول",
+    linked: "مرتبط",
+    missing: "بدون حساب",
+    verified: "موثق",
+    unverified: "غير موثق",
+    active: "نشط",
+    inactive: "غير نشط",
+    blocked: "موقوف",
+    lead: "مهتم",
+    individual: "فرد",
+    corporate: "شركة",
+    website: "الموقع",
+    whatsapp: "واتساب",
+    agent: "مندوب",
+    admin: "النظام",
+    import: "استيراد",
+    other: "أخرى",
+    phone: "الجوال",
+    email: "البريد",
+    city: "المدينة",
+    country: "الدولة",
+    district: "الحي",
+    address: "العنوان",
+    nationalAddress: "العنوان الوطني",
+    identity: "الهوية",
+    nationality: "الجنسية",
+    birthDate: "تاريخ الميلاد",
+    gender: "الجنس",
+    source: "المصدر",
+    type: "النوع",
+    status: "الحالة",
+    lastLogin: "آخر دخول",
+    createdAt: "تاريخ الإنشاء",
+    updatedAt: "آخر تحديث",
+    contactInfo: "بيانات التواصل",
+    personalInfo: "البيانات الشخصية",
+    accountInfo: "بيانات الحساب",
+    loginUsername: "اسم المستخدم",
+    loginEmail: "بريد الحساب",
+    loginDisplayName: "اسم العرض",
+    loginRole: "الدور",
+    loginUserType: "نوع المستخدم",
+    loginWorkspace: "المساحة",
+    loginPhone: "جوال الحساب",
+    loginWhatsapp: "واتساب الحساب",
+    loginUserId: "معرّف الحساب",
+    accountActive: "الحساب نشط",
+    locationInfo: "العنوان والموقع",
+    notes: "الملاحظات",
+    noNotes: "لا توجد ملاحظات مسجلة.",
+    overview: "نظرة عامة",
+    statement: "كشف الحساب",
+    activity: "النشاط",
+    all: "الكل",
+    orders: "الطلبات",
+    invoices: "الفواتير",
+    payments: "المدفوعات",
+    totalOrders: "إجمالي الطلبات",
+    totalInvoices: "إجمالي الفواتير",
+    totalPayments: "إجمالي المدفوعات",
+    outstanding: "المتبقي",
+    totalAmount: "الإجمالي",
+    paidAmount: "المدفوع",
+    balance: "الرصيد",
+    searchPlaceholder: "بحث في سجل العميل...",
+    fromDate: "من تاريخ",
+    toDate: "إلى تاريخ",
+    sort: "الترتيب",
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    amountHigh: "الأعلى مبلغًا",
+    amountLow: "الأقل مبلغًا",
+    reset: "إعادة ضبط",
+    document: "المستند",
+    date: "التاريخ",
+    amount: "المبلغ",
+    paid: "المدفوع",
+    remaining: "المتبقي",
+    actions: "الإجراءات",
+    view: "عرض",
+    noLines: "لا توجد سجلات",
+    noLinesDesc: "لا توجد طلبات أو فواتير أو مدفوعات حسب الفلاتر الحالية.",
+    noContact: "غير مسجل",
+    noAddress: "غير مسجل",
+    noValue: "—",
+    statementLoaded: "تم تحديث كشف العميل",
+    profileLoaded: "تم تحديث بيانات العميل",
+    printReady: "تم تجهيز صفحة الطباعة",
+    quickLinks: "روابط تشغيلية",
+    viewOrders: "طلبات العميل",
+    viewInvoices: "فواتير العميل",
+    viewPayments: "مدفوعات العميل",
+    customerWorkspace: "مساحة العميل",
+    page: "صفحة",
+    of: "من",
+    previous: "السابق",
+    next: "التالي",
+  },
+  en: {
+    title: "Customer Details",
+    subtitle:
+      "Customer operational profile with orders, invoices, payments, and statement.",
+    back: "Back",
+    refresh: "Refresh",
+    print: "Print",
+    copy: "Copy",
+    copied: "Copied",
+    retry: "Retry",
+    loading: "Loading",
+    errorTitle: "Unable to load customer",
+    statementErrorTitle: "Unable to load statement",
+    notFound: "Customer not found",
+    notFoundDesc: "No customer data was found for this record.",
+    customerProfile: "Customer Profile",
+    customerCode: "Customer Code",
+    accountStatus: "Portal Account",
+    linked: "Linked",
+    missing: "No account",
+    verified: "Verified",
+    unverified: "Unverified",
+    active: "Active",
+    inactive: "Inactive",
+    blocked: "Blocked",
+    lead: "Lead",
+    individual: "Individual",
+    corporate: "Corporate",
+    website: "Website",
+    whatsapp: "WhatsApp",
+    agent: "Agent",
+    admin: "System",
+    import: "Import",
+    other: "Other",
+    phone: "Phone",
+    email: "Email",
+    city: "City",
+    country: "Country",
+    district: "District",
+    address: "Address",
+    nationalAddress: "National Address",
+    identity: "Identity",
+    nationality: "Nationality",
+    birthDate: "Birth Date",
+    gender: "Gender",
+    source: "Source",
+    type: "Type",
+    status: "Status",
+    lastLogin: "Last Login",
+    createdAt: "Created At",
+    updatedAt: "Updated At",
+    contactInfo: "Contact Info",
+    personalInfo: "Personal Info",
+    accountInfo: "Account Info",
+    loginUsername: "Username",
+    loginEmail: "Account Email",
+    loginDisplayName: "Display Name",
+    loginRole: "Role",
+    loginUserType: "User Type",
+    loginWorkspace: "Workspace",
+    loginPhone: "Account Phone",
+    loginWhatsapp: "Account WhatsApp",
+    loginUserId: "User ID",
+    accountActive: "Account Active",
+    locationInfo: "Address & Location",
+    notes: "Notes",
+    noNotes: "No notes recorded.",
+    overview: "Overview",
+    statement: "Statement",
+    activity: "Activity",
+    all: "All",
+    orders: "Orders",
+    invoices: "Invoices",
+    payments: "Payments",
+    totalOrders: "Total Orders",
+    totalInvoices: "Total Invoices",
+    totalPayments: "Total Payments",
+    outstanding: "Outstanding",
+    totalAmount: "Total",
+    paidAmount: "Paid",
+    balance: "Balance",
+    searchPlaceholder: "Search customer activity...",
+    fromDate: "From date",
+    toDate: "To date",
+    sort: "Sort",
+    newest: "Newest",
+    oldest: "Oldest",
+    amountHigh: "Highest Amount",
+    amountLow: "Lowest Amount",
+    reset: "Reset",
+    document: "Document",
+    date: "Date",
+    amount: "Amount",
+    paid: "Paid",
+    remaining: "Remaining",
+    actions: "Actions",
+    view: "View",
+    noLines: "No records",
+    noLinesDesc: "No orders, invoices, or payments were found for current filters.",
+    noContact: "Not provided",
+    noAddress: "Not provided",
+    noValue: "—",
+    statementLoaded: "Customer statement refreshed",
+    profileLoaded: "Customer refreshed",
+    printReady: "Print page prepared",
+    quickLinks: "Quick Links",
+    viewOrders: "Customer Orders",
+    viewInvoices: "Customer Invoices",
+    viewPayments: "Customer Payments",
+    customerWorkspace: "Customer Workspace",
+    page: "Page",
+    of: "of",
+    previous: "Previous",
+    next: "Next",
+  },
+} as const;
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const savedLocale = window.localStorage.getItem("primey-locale");
-
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
-    return "ar";
-  }
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
+function toEnglishDigits(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "";
 
-  if (!Number.isFinite(numericValue)) return "0";
+  return String(value)
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
+}
 
+function toNumber(value: string | number | null | undefined) {
+  const cleaned = toEnglishDigits(value ?? 0).replace(/[^\d.-]/g, "");
+  const numeric = Number(cleaned);
+
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function formatNumber(value: string | number | null | undefined, digits = 0) {
   return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(numericValue);
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(toNumber(value));
 }
 
-function formatMoneyValue(value: string | number | undefined): string {
-  const amount = Number(value || 0);
-
-  if (!Number.isFinite(amount)) return "0.00";
-
-  return amount.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return "-";
+function formatDateEnglish(value: string | null | undefined) {
+  if (!value) return "—";
 
   const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return value;
+  if (Number.isNaN(date.getTime())) return "—";
 
   return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
@@ -259,1403 +544,400 @@ function formatDate(value: string | null | undefined): string {
   }).format(date);
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
 
-function dictionary(locale: AppLocale) {
-  const ar = locale === "ar";
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
+  }
 
-  return {
-    pageTitle: ar ? "تفاصيل العميل" : "Customer Details",
-    pageSubtitle: ar
-      ? "عرض ملف العميل وبيانات التواصل والعنوان والملخص المالي وكشف الحساب."
-      : "View customer profile, contact data, address, financial summary, and statement.",
+  return envBase;
+}
 
-    back: ar ? "قائمة العملاء" : "Customers List",
-    refresh: ar ? "تحديث" : "Refresh",
-    retry: ar ? "إعادة المحاولة" : "Retry",
-    print: ar ? "طباعة PDF" : "Print PDF",
+function makeApiUrl(path: string, searchParams?: URLSearchParams) {
+  const query = searchParams?.toString();
 
-    customerProfile: ar ? "ملف العميل" : "Customer Profile",
-    profileSubtitle: ar
-      ? "البيانات الأساسية والتعريفية للعميل."
-      : "Basic and identity information for the customer.",
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
+}
 
-    financialSummary: ar ? "الملخص المالي" : "Financial Summary",
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
 
-    statementTitle: ar ? "كشف حساب العميل" : "Customer Statement",
-    statementSubtitle: ar
-      ? "الحركات المالية المرتبطة بالعميل حسب الفواتير والمدفوعات."
-      : "Financial movements linked to the customer through invoices and payments.",
+  const found = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${name}=`));
 
-    contactInfo: ar ? "بيانات التواصل" : "Contact Information",
-    addressInfo: ar ? "العنوان" : "Address",
-    legalInfo: ar ? "البيانات النظامية" : "Legal Information",
-    notesInfo: ar ? "ملاحظات وتصنيفات" : "Notes & Tags",
-    operationalLinks: ar ? "روابط تشغيلية" : "Operational Links",
-    operationalLinksDesc: ar
-      ? "اختصارات لمتابعة الطلبات والفواتير والمدفوعات المرتبطة بهذا العميل."
-      : "Shortcuts to track orders, invoices, and payments related to this customer.",
+  return found ? decodeURIComponent(found.split("=").slice(1).join("=")) : "";
+}
 
-    customerCode: ar ? "كود العميل" : "Customer Code",
-    customerType: ar ? "نوع العميل" : "Customer Type",
-    status: ar ? "الحالة" : "Status",
-    source: ar ? "المصدر" : "Source",
-    gender: ar ? "الجنس" : "Gender",
-    dateOfBirth: ar ? "تاريخ الميلاد" : "Date of Birth",
-    createdAt: ar ? "تاريخ الإنشاء" : "Created At",
-    updatedAt: ar ? "آخر تحديث" : "Updated At",
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
 
-    email: ar ? "البريد الإلكتروني" : "Email",
-    phone: ar ? "الجوال" : "Phone",
-    whatsapp: ar ? "الواتساب" : "WhatsApp",
-    alternativePhone: ar ? "رقم بديل" : "Alternative Phone",
-
-    nationalId: ar ? "الهوية / الإقامة" : "National ID / Iqama",
-    passportNumber: ar ? "رقم الجواز" : "Passport Number",
-    nationality: ar ? "الجنسية" : "Nationality",
-
-    country: ar ? "الدولة" : "Country",
-    city: ar ? "المدينة" : "City",
-    district: ar ? "الحي" : "District",
-    streetAddress: ar ? "العنوان" : "Street Address",
-    postalCode: ar ? "الرمز البريدي" : "Postal Code",
-    nationalAddress: ar ? "العنوان الوطني" : "National Address",
-
-    notes: ar ? "ملاحظات" : "Notes",
-    tags: ar ? "وسوم" : "Tags",
-    noNotes: ar ? "لا توجد ملاحظات." : "No notes available.",
-
-    totalOrders: ar ? "عدد الطلبات" : "Orders",
-    invoicesAmount: ar ? "إجمالي الفواتير" : "Invoices Amount",
-    paidAmount: ar ? "إجمالي المدفوع" : "Paid Amount",
-    dueAmount: ar ? "المتبقي" : "Due Amount",
-
-    invoices: ar ? "الفواتير" : "Invoices",
-    payments: ar ? "المدفوعات" : "Payments",
-    orders: ar ? "الطلبات" : "Orders",
-
-    table: {
-      date: ar ? "التاريخ" : "Date",
-      reference: ar ? "المرجع" : "Reference",
-      type: ar ? "النوع" : "Type",
-      description: ar ? "الوصف" : "Description",
-      debit: ar ? "مدين" : "Debit",
-      credit: ar ? "دائن" : "Credit",
-      balance: ar ? "الرصيد" : "Balance",
-      status: ar ? "الحالة" : "Status",
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
     },
+  });
 
-    active: ar ? "نشط" : "Active",
-    inactive: ar ? "غير نشط" : "Inactive",
-    blocked: ar ? "محظور" : "Blocked",
-    lead: ar ? "عميل محتمل" : "Lead",
-    unknown: ar ? "غير محدد" : "Unknown",
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
 
-    individual: ar ? "فرد" : "Individual",
-    corporate: ar ? "شركة" : "Corporate",
+  let payload: any = null;
 
-    invoice: ar ? "فاتورة" : "Invoice",
-    payment: ar ? "دفعة" : "Payment",
-    order: ar ? "طلب" : "Order",
-
-    loadError: ar ? "تعذر تحميل بيانات العميل." : "Unable to load customer data.",
-    loadErrorHint: ar
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    notFound: ar ? "لم يتم العثور على بيانات العميل" : "Customer was not found",
-    notFoundHint: ar
-      ? "قد يكون السجل غير موجود أو لم يعد متاحًا."
-      : "The record may not exist or may no longer be available.",
-    statementError: ar
-      ? "تعذر تحميل كشف حساب العميل."
-      : "Unable to load customer statement.",
-    emptyStatement: ar
-      ? "لا توجد حركات في كشف الحساب."
-      : "No statement lines available.",
-    copied: ar ? "تم النسخ بنجاح." : "Copied successfully.",
-    unavailable: ar ? "غير متوفر" : "Unavailable",
-    refreshed: ar ? "تم تحديث بيانات العميل." : "Customer data refreshed.",
-    statementPrintReady: ar
-      ? "تم تجهيز نافذة طباعة كشف الحساب."
-      : "Statement print window prepared.",
-    printError: ar
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    printGeneratedAt: ar ? "تاريخ الطباعة" : "Printed At",
-    printCustomer: ar ? "العميل" : "Customer",
-    printRows: ar ? "عدد الحركات" : "Rows Count",
-  };
-}
-
-/* ============================================================
-   API Normalizers
-============================================================ */
-
-function pickString(
-  obj: Record<string, unknown>,
-  keys: string[],
-  fallback = "",
-) {
-  for (const key of keys) {
-    const value = obj[key];
-
-    if (
-      value !== null &&
-      value !== undefined &&
-      String(value).trim() !== ""
-    ) {
-      return String(value).trim();
-    }
-  }
-
-  return fallback;
-}
-
-function normalizeStatus(value: unknown): CustomerStatus {
-  const status = String(value || "").toUpperCase();
-
-  if (status === "ACTIVE") return "ACTIVE";
-  if (status === "INACTIVE") return "INACTIVE";
-  if (status === "BLOCKED") return "BLOCKED";
-  if (status === "LEAD") return "LEAD";
-
-  return "UNKNOWN";
-}
-
-function normalizeCustomerType(value: unknown): CustomerType {
-  const type = String(value || "").toUpperCase();
-
-  if (type === "INDIVIDUAL") return "INDIVIDUAL";
-  if (type === "CORPORATE") return "CORPORATE";
-
-  return "UNKNOWN";
-}
-
-function normalizeCustomer(payload: CustomerDetailResponse | unknown): CustomerDetail {
-  const source = (payload || {}) as Record<string, unknown>;
-  const obj =
-    (source.customer as Record<string, unknown> | undefined) ||
-    (source.data as Record<string, unknown> | undefined) ||
-    source;
-
-  const firstName = pickString(obj, ["first_name", "firstName"]);
-  const lastName = pickString(obj, ["last_name", "lastName"]);
-  const companyName = pickString(obj, ["company_name", "companyName"]);
-
-  const customerType = normalizeCustomerType(
-    obj.customer_type ?? obj.customerType,
-  );
-
-  const fallbackName =
-    customerType === "CORPORATE"
-      ? companyName
-      : `${firstName} ${lastName}`.trim();
-
-  const email = pickString(obj, ["email"]);
-  const phone = pickString(obj, ["phone_number", "phoneNumber", "phone"]);
-  const whatsapp = pickString(obj, [
-    "whatsapp_number",
-    "whatsappNumber",
-    "whatsapp",
-  ]);
-  const alternativePhone = pickString(obj, [
-    "alternative_phone_number",
-    "alternativePhoneNumber",
-  ]);
-
-  return {
-    id: (obj.id ?? obj.pk ?? "") as number | string,
-    code: pickString(obj, ["customer_code", "customerCode", "code"], "-"),
-    name: pickString(
-      obj,
-      ["display_name", "displayName", "name", "full_name", "fullName"],
-      fallbackName || "-",
-    ),
-    customerType,
-    status: normalizeStatus(obj.status),
-    source: pickString(obj, ["source"], "-"),
-
-    firstName,
-    lastName,
-    companyName,
-    gender: pickString(obj, ["gender"], "-"),
-    dateOfBirth: pickString(obj, ["date_of_birth", "dateOfBirth"], ""),
-
-    email,
-    phone,
-    whatsapp,
-    alternativePhone,
-    primaryContact:
-      pickString(obj, ["primary_contact_number", "primaryContactNumber"]) ||
-      whatsapp ||
-      phone ||
-      alternativePhone ||
-      email,
-
-    nationalId: pickString(obj, ["national_id", "nationalId"], "-"),
-    passportNumber: pickString(obj, ["passport_number", "passportNumber"], "-"),
-    nationality: pickString(obj, ["nationality"], "-"),
-
-    country: pickString(obj, ["country"], "-"),
-    city: pickString(obj, ["city"], "-"),
-    district: pickString(obj, ["district"], "-"),
-    streetAddress: pickString(obj, ["street_address", "streetAddress"], "-"),
-    postalCode: pickString(obj, ["postal_code", "postalCode"], "-"),
-    nationalAddressText: pickString(
-      obj,
-      ["national_address_text", "nationalAddressText"],
-      "-",
-    ),
-
-    notes: pickString(obj, ["notes"], "-"),
-    tags: pickString(obj, ["tags"], "-"),
-
-    createdAt: pickString(obj, ["created_at", "createdAt"], ""),
-    updatedAt: pickString(obj, ["updated_at", "updatedAt"], ""),
-    raw: obj,
-  };
-}
-
-function extractStatement(payload: StatementResponse) {
-  return {
-    summary:
-      payload.statement?.summary ||
-      payload.data?.statement?.summary ||
-      payload.data?.summary ||
-      payload.summary ||
-      null,
-    lines:
-      payload.statement?.lines ||
-      payload.data?.statement?.lines ||
-      payload.data?.lines ||
-      payload.lines ||
-      [],
-  };
-}
-
-/* ============================================================
-   UI Helpers
-============================================================ */
-
-function statusLabel(status: CustomerStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<CustomerStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
-    BLOCKED: t.blocked,
-    LEAD: t.lead,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function typeLabel(type: CustomerType, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<CustomerType, string> = {
-    INDIVIDUAL: t.individual,
-    CORPORATE: t.corporate,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[type];
-}
-
-function statusBadge(status: CustomerStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "LEAD") {
-    return (
-      <Badge className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 hover:bg-blue-50 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "BLOCKED") {
-    return (
-      <Badge className="rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700 hover:bg-orange-50 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "INACTIVE") {
-    return (
-      <Badge variant="outline" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
-  );
-}
-
-function statementTypeLabel(type: string, locale: AppLocale) {
-  const t = dictionary(locale);
-  const normalized = String(type || "").toUpperCase();
-
-  if (normalized === "INVOICE") return t.invoice;
-  if (normalized === "PAYMENT") return t.payment;
-  if (normalized === "ORDER") return t.order;
-
-  return type || "-";
-}
-
-function isValidCustomerId(id: CustomerDetail["id"]) {
-  const value = String(id || "").trim();
-  return value.length > 0 && value !== "-" && value !== "undefined";
-}
-
-function isUsableValue(value?: string) {
-  const clean = String(value || "").trim();
-  return clean.length > 0 && clean !== "-";
-}
-
-function escapeHtml(value: string | number) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function DetailsSkeleton() {
-  return (
-    <div className="w-full space-y-4">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="space-y-3">
-          <SkeletonLine className="h-8 w-64" />
-          <SkeletonLine className="h-4 w-[520px] max-w-full" />
-        </div>
-
-        <div className="flex gap-2">
-          <SkeletonLine className="h-10 w-28 rounded-xl" />
-          <SkeletonLine className="h-10 w-24 rounded-xl" />
-          <SkeletonLine className="h-10 w-24 rounded-xl" />
-        </div>
-      </div>
-
-      <div className="grid w-full gap-4 xl:grid-cols-[380px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)]">
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="space-y-4 p-4">
-            <SkeletonLine className="h-56 w-full rounded-2xl" />
-            <SkeletonLine className="mx-auto h-5 w-44" />
-            <SkeletonLine className="mx-auto h-4 w-28" />
-            {Array.from({ length: 6 }).map((_, index) => (
-              <SkeletonLine key={index} className="h-14 w-full rounded-xl" />
-            ))}
-          </CardContent>
-        </Card>
-
-        <main className="min-w-0 space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <SkeletonLine key={index} className="h-24 rounded-2xl" />
-            ))}
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <SkeletonLine className="h-72 rounded-2xl" />
-            <SkeletonLine className="h-72 rounded-2xl" />
-            <SkeletonLine className="h-72 rounded-2xl" />
-            <SkeletonLine className="h-72 rounded-2xl" />
-          </div>
-
-          <SkeletonLine className="h-96 rounded-2xl" />
-        </main>
-      </div>
-    </div>
-  );
-}
-
-function buildStatementPrintHtml({
-  locale,
-  customer,
-  lines,
-  t,
-}: {
-  locale: AppLocale;
-  customer: CustomerDetail;
-  lines: StatementLine[];
-  t: ReturnType<typeof dictionary>;
-}) {
-  const isArabic = locale === "ar";
-  const direction = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const generatedAt = new Date().toLocaleString("en-US");
-
-  const rowsHtml = lines
-    .map(
-      (line) => `
-        <tr>
-          <td>${escapeHtml(formatDate(line.line_date))}</td>
-          <td>${escapeHtml(line.reference || "-")}</td>
-          <td>${escapeHtml(statementTypeLabel(line.line_type, locale))}</td>
-          <td>${escapeHtml(line.description || "-")}</td>
-          <td>${escapeHtml(formatMoneyValue(line.debit_amount))}</td>
-          <td>${escapeHtml(formatMoneyValue(line.credit_amount))}</td>
-          <td>${escapeHtml(formatMoneyValue(line.balance_after))}</td>
-          <td>${escapeHtml(line.status || "-")}</td>
-        </tr>
-      `,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${direction}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(t.statementTitle)}</title>
-        <style>
-          * {
-            box-sizing: border-box;
-          }
-
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #ffffff;
-            direction: ${direction};
-            text-align: ${align};
-          }
-
-          .header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 16px;
-            margin-bottom: 20px;
-          }
-
-          h1 {
-            margin: 0 0 8px;
-            font-size: 22px;
-          }
-
-          .meta {
-            color: #6b7280;
-            font-size: 12px;
-            line-height: 1.8;
-          }
-
-          .badge {
-            display: inline-block;
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            color: #374151;
-          }
-
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-          }
-
-          th,
-          td {
-            border: 1px solid #e5e7eb;
-            padding: 9px;
-            vertical-align: top;
-            text-align: ${align};
-          }
-
-          th {
-            background: #f9fafb;
-            font-weight: 700;
-          }
-
-          tr:nth-child(even) td {
-            background: #fafafa;
-          }
-
-          @page {
-            size: A4 landscape;
-            margin: 12mm;
-          }
-
-          @media print {
-            body {
-              padding: 0;
-            }
-          }
-        </style>
-      </head>
-
-      <body>
-        <div class="header">
-          <div>
-            <h1>${escapeHtml(t.statementTitle)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printCustomer)}: ${escapeHtml(customer.name)} - ${escapeHtml(customer.code)}</div>
-              <div>${escapeHtml(t.printGeneratedAt)}: ${escapeHtml(generatedAt)}</div>
-              <div>${escapeHtml(t.printRows)}: ${formatNumber(lines.length)}</div>
-            </div>
-          </div>
-          <div class="badge">Primey Care</div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>${escapeHtml(t.table.date)}</th>
-              <th>${escapeHtml(t.table.reference)}</th>
-              <th>${escapeHtml(t.table.type)}</th>
-              <th>${escapeHtml(t.table.description)}</th>
-              <th>${escapeHtml(t.table.debit)}</th>
-              <th>${escapeHtml(t.table.credit)}</th>
-              <th>${escapeHtml(t.table.balance)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              rowsHtml ||
-              `<tr><td colspan="8" style="text-align:center">${escapeHtml(
-                t.emptyStatement,
-              )}</td></tr>`
-            }
-          </tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
-}
-
-/* ============================================================
-   Page
-============================================================ */
-
-export default function SystemCustomerDetailPage() {
-  const params = useParams<{ id: string }>();
-  const customerId = String(params?.id || "").trim();
-
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [customer, setCustomer] = useState<CustomerDetail | null>(null);
-  const [summary, setSummary] = useState<StatementSummary | null>(null);
-  const [lines, setLines] = useState<StatementLine[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [statementError, setStatementError] = useState("");
-
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-
-  const financialCards = useMemo(
-    () => [
-      {
-        title: t.totalOrders,
-        value: summary?.total_orders_count || 0,
-        icon: FileText,
-        isMoney: false,
-      },
-      {
-        title: t.invoicesAmount,
-        value: summary?.total_invoices_amount || "0",
-        icon: Wallet,
-        isMoney: true,
-      },
-      {
-        title: t.paidAmount,
-        value: summary?.total_paid_amount || "0",
-        icon: BadgeCheck,
-        isMoney: true,
-      },
-      {
-        title: t.dueAmount,
-        value: summary?.total_due_amount || "0",
-        icon: CreditCard,
-        isMoney: true,
-      },
-    ],
-    [summary, t],
-  );
-
-  const canOpenOperationalLinks = Boolean(customer && isValidCustomerId(customer.id));
-
-  async function loadCustomer(showSuccessToast = false) {
-    if (!customerId) {
-      setCustomer(null);
-      setErrorMessage(t.loadError);
-      setIsLoading(false);
-      return;
-    }
-
+  if (rawText && contentType.includes("application/json")) {
     try {
-      setIsLoading(true);
-      setErrorMessage("");
-      setStatementError("");
-
-      const detailResponse = await apiGet<CustomerDetailResponse>(
-        API_PATHS.customers.detail(customerId),
-      );
-
-      if (!detailResponse.ok) {
-        setCustomer(null);
-        setSummary(null);
-        setLines([]);
-        setErrorMessage(detailResponse.message || t.loadError);
-        return;
-      }
-
-      const normalizedCustomer = normalizeCustomer(detailResponse.data);
-
-      if (!isValidCustomerId(normalizedCustomer.id)) {
-        setCustomer(null);
-        setSummary(null);
-        setLines([]);
-        setErrorMessage("");
-        return;
-      }
-
-      setCustomer(normalizedCustomer);
-
-      const statementResponse = await apiGet<StatementResponse>(
-        `/api/customers/${customerId}/statement/`,
-      );
-
-      if (statementResponse.ok) {
-        const statement = extractStatement(statementResponse.data);
-        setSummary(statement.summary);
-        setLines(statement.lines);
-      } else {
-        setSummary(null);
-        setLines([]);
-        setStatementError(statementResponse.message || t.statementError);
-      }
-
-      if (showSuccessToast) {
-        toast.success(t.refreshed);
-      }
-    } catch (error) {
-      console.error("Load customer details error:", error);
-      setCustomer(null);
-      setSummary(null);
-      setLines([]);
-      setErrorMessage(t.loadError);
-      toast.error(t.loadError);
-    } finally {
-      setIsLoading(false);
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  async function copyToClipboard(value: string) {
-    const cleanValue = String(value || "").trim();
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
 
-    if (!isUsableValue(cleanValue)) {
-      toast.error(t.unavailable);
-      return;
+    throw new Error(message);
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
+}
+
+function extractCustomer(payload: CustomerDetailResponse): CustomerRecord | null {
+  if (payload.customer) return payload.customer;
+
+  if (payload.data && !Array.isArray(payload.data)) {
+    if ("customer" in payload.data && payload.data.customer) {
+      return payload.data.customer;
     }
 
-    try {
-      await navigator.clipboard.writeText(cleanValue);
-      toast.success(t.copied);
-    } catch (error) {
-      console.error("Copy error:", error);
-      toast.error(t.unavailable);
+    if ("id" in payload.data) {
+      return payload.data as CustomerRecord;
     }
   }
 
-  function printStatement() {
-    if (!customer) return;
+  return null;
+}
 
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
+function extractStatementSummary(payload: StatementResponse): StatementSummary {
+  if (payload.summary) return payload.summary;
+  if (payload.statement?.summary) return payload.statement.summary;
+  if (payload.data?.summary) return payload.data.summary;
+  if (payload.data?.statement?.summary) return payload.data.statement.summary;
 
-    if (!printWindow) {
-      toast.error(t.printError);
-      return;
-    }
+  return {};
+}
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildStatementPrintHtml({
-        locale,
-        customer,
-        lines,
-        t,
-      }),
-    );
-    printWindow.document.close();
+function extractStatementLines(payload: StatementResponse): StatementLine[] {
+  if (Array.isArray(payload.lines)) return payload.lines;
+  if (Array.isArray(payload.statement?.lines)) return payload.statement.lines;
+  if (Array.isArray(payload.data?.lines)) return payload.data.lines;
+  if (Array.isArray(payload.data?.statement?.lines)) return payload.data.statement.lines;
 
-    toast.success(t.statementPrintReady);
-  }
+  return [];
+}
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    loadCustomer(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customerId, locale]);
-
-  if (isLoading) {
-    return <DetailsSkeleton />;
-  }
-
-  if (errorMessage) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-              {t.pageTitle}
-            </h1>
-            <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
-              {t.pageSubtitle}
-            </p>
-          </div>
-
-          <Link href="/system/customers/list">
-            <Button variant="outline" className="h-10 rounded-xl">
-              <ArrowLeft className="h-4 w-4" />
-              {t.back}
-            </Button>
-          </Link>
-        </div>
-
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p className="font-semibold text-destructive">
-                  {errorMessage}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadCustomer(true)}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!customer) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-              {t.pageTitle}
-            </h1>
-            <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
-              {t.pageSubtitle}
-            </p>
-          </div>
-
-          <Link href="/system/customers/list">
-            <Button variant="outline" className="h-10 rounded-xl">
-              <ArrowLeft className="h-4 w-4" />
-              {t.back}
-            </Button>
-          </Link>
-        </div>
-
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted">
-              <UserRound className="h-7 w-7 text-muted-foreground" />
-            </div>
-
-            <div>
-              <p className="font-semibold">{t.notFound}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.notFoundHint}
-              </p>
-            </div>
-
-            <Link href="/system/customers/list">
-              <Button className="mt-2 rounded-xl">
-                <ArrowLeft className="h-4 w-4" />
-                {t.back}
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+function getCustomerName(customer: CustomerRecord | null) {
+  if (!customer) return "";
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      {/* Header */}
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            {statusBadge(customer.status, locale)}
-            <Badge variant="secondary" className="rounded-full">
-              {typeLabel(customer.customerType, locale)}
-            </Badge>
-          </div>
-
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {customer.name}
-          </h1>
-
-          <div className="mt-2 flex flex-col gap-2 text-sm text-muted-foreground lg:flex-row lg:flex-wrap lg:gap-4">
-            <div>
-              <span className="font-semibold text-foreground">
-                {t.customerCode}:
-              </span>{" "}
-              {customer.code}
-            </div>
-
-            <div>
-              <span className="font-semibold text-foreground">
-                {t.phone}:
-              </span>{" "}
-              {customer.primaryContact || "-"}
-            </div>
-
-            <div>
-              <span className="font-semibold text-foreground">
-                {t.createdAt}:
-              </span>{" "}
-              {formatDate(customer.createdAt)}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/customers/list">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {t.back}
-            </Button>
-          </Link>
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadCustomer(true)}
-          >
-            <RefreshCcw className="h-4 w-4" />
-            {t.refresh}
-          </Button>
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={printStatement}
-          >
-            <Printer className="h-4 w-4" />
-            {t.print}
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid w-full gap-4 xl:grid-cols-[380px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)]">
-        {/* Profile */}
-        <aside className="min-w-0 space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-4 p-4">
-              <div className="flex aspect-[4/3] items-center justify-center rounded-2xl border bg-muted">
-                <div className="flex h-28 w-28 items-center justify-center rounded-3xl bg-background shadow-sm">
-                  {customer.customerType === "CORPORATE" ? (
-                    <Building2 className="h-14 w-14 text-muted-foreground" />
-                  ) : (
-                    <UserRound className="h-14 w-14 text-muted-foreground" />
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2 text-center">
-                <h2 className="text-lg font-bold">{customer.name}</h2>
-                <p className="text-sm text-muted-foreground">
-                  {customer.code}
-                </p>
-
-                <div className="flex flex-wrap justify-center gap-2">
-                  <Badge variant="secondary" className="rounded-full">
-                    {typeLabel(customer.customerType, locale)}
-                  </Badge>
-                  {statusBadge(customer.status, locale)}
-                </div>
-              </div>
-
-              <div className="grid gap-2">
-                <QuickInfo
-                  icon={ShieldCheck}
-                  label={t.customerCode}
-                  value={customer.code || "-"}
-                  onCopy={() => copyToClipboard(customer.code)}
-                />
-
-                <QuickInfo
-                  icon={Phone}
-                  label={t.phone}
-                  value={customer.phone || customer.primaryContact || "-"}
-                  onCopy={() =>
-                    copyToClipboard(customer.phone || customer.primaryContact)
-                  }
-                />
-
-                <QuickInfo
-                  icon={Phone}
-                  label={t.whatsapp}
-                  value={customer.whatsapp || "-"}
-                  onCopy={() => copyToClipboard(customer.whatsapp)}
-                />
-
-                <QuickInfo
-                  icon={Mail}
-                  label={t.email}
-                  value={customer.email || "-"}
-                  onCopy={() => copyToClipboard(customer.email)}
-                />
-
-                <QuickInfo
-                  icon={ShieldCheck}
-                  label={t.nationalId}
-                  value={customer.nationalId || "-"}
-                  onCopy={() => copyToClipboard(customer.nationalId)}
-                />
-
-                <QuickInfo
-                  icon={MapPin}
-                  label={t.city}
-                  value={customer.city || customer.district || "-"}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </aside>
-
-        {/* Content */}
-        <main className="min-w-0 space-y-4">
-          {/* Financial Summary */}
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {financialCards.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <Card key={item.title} className="rounded-2xl border shadow-sm">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm text-muted-foreground">
-                          {item.title}
-                        </p>
-
-                        <div className="mt-2 flex items-center gap-2">
-                          <p className="truncate text-xl font-bold">
-                            {item.isMoney
-                              ? formatMoneyValue(item.value)
-                              : formatNumber(item.value)}
-                          </p>
-
-                          {item.isMoney ? (
-                            <Image
-                              src="/currency/sar.svg"
-                              alt=""
-                              width={16}
-                              height={16}
-                            />
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-                        <Icon className="h-5 w-5" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <InfoCard
-              title={t.contactInfo}
-              icon={Phone}
-              items={[
-                {
-                  label: t.email,
-                  value: customer.email || "-",
-                  icon: Mail,
-                  copyValue: customer.email,
-                  onCopy: copyToClipboard,
-                },
-                {
-                  label: t.phone,
-                  value: customer.phone || "-",
-                  icon: Phone,
-                  copyValue: customer.phone,
-                  onCopy: copyToClipboard,
-                },
-                {
-                  label: t.whatsapp,
-                  value: customer.whatsapp || "-",
-                  icon: Phone,
-                  copyValue: customer.whatsapp,
-                  onCopy: copyToClipboard,
-                },
-                {
-                  label: t.alternativePhone,
-                  value: customer.alternativePhone || "-",
-                  icon: Phone,
-                  copyValue: customer.alternativePhone,
-                  onCopy: copyToClipboard,
-                },
-              ]}
-            />
-
-            <InfoCard
-              title={t.addressInfo}
-              icon={MapPin}
-              items={[
-                { label: t.country, value: customer.country || "-", icon: MapPin },
-                { label: t.city, value: customer.city || "-", icon: MapPin },
-                {
-                  label: t.district,
-                  value: customer.district || "-",
-                  icon: MapPin,
-                },
-                {
-                  label: t.streetAddress,
-                  value: customer.streetAddress || "-",
-                  icon: MapPin,
-                },
-                {
-                  label: t.postalCode,
-                  value: customer.postalCode || "-",
-                  icon: MapPin,
-                },
-              ]}
-            />
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <InfoCard
-              title={t.legalInfo}
-              icon={ShieldCheck}
-              items={[
-                {
-                  label: t.nationalId,
-                  value: customer.nationalId || "-",
-                  icon: ShieldCheck,
-                  copyValue: customer.nationalId,
-                  onCopy: copyToClipboard,
-                },
-                {
-                  label: t.passportNumber,
-                  value: customer.passportNumber || "-",
-                  icon: ShieldCheck,
-                  copyValue: customer.passportNumber,
-                  onCopy: copyToClipboard,
-                },
-                {
-                  label: t.nationality,
-                  value: customer.nationality || "-",
-                  icon: ShieldCheck,
-                },
-                {
-                  label: t.gender,
-                  value: customer.gender || "-",
-                  icon: UserRound,
-                },
-                {
-                  label: t.dateOfBirth,
-                  value: customer.dateOfBirth || "-",
-                  icon: CalendarDays,
-                },
-              ]}
-            />
-
-            <InfoCard
-              title={t.notesInfo}
-              icon={Activity}
-              items={[
-                { label: t.tags, value: customer.tags || "-", icon: BadgeCheck },
-                {
-                  label: t.notes,
-                  value: customer.notes || t.noNotes,
-                  icon: FileText,
-                },
-                {
-                  label: t.nationalAddress,
-                  value: customer.nationalAddressText || "-",
-                  icon: MapPin,
-                },
-              ]}
-            />
-          </div>
-
-          {/* Operational Links */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-bold">
-                {t.operationalLinks}
-              </CardTitle>
-              <CardDescription>{t.operationalLinksDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-3">
-                {canOpenOperationalLinks ? (
-                  <>
-                    <QuickLink
-                      title={t.invoices}
-                      href={`/system/invoices/list?customer=${customer.id}`}
-                      icon={FileText}
-                    />
-                    <QuickLink
-                      title={t.payments}
-                      href={`/system/payments/list?customer=${customer.id}`}
-                      icon={Wallet}
-                    />
-                    <QuickLink
-                      title={t.orders}
-                      href={`/system/orders/list?customer=${customer.id}`}
-                      icon={CheckCircle2}
-                    />
-                  </>
-                ) : (
-                  <div className="rounded-xl border border-dashed p-5 text-center text-sm text-muted-foreground md:col-span-3">
-                    {t.unavailable}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Statement */}
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="text-base font-bold">
-                  {t.statementTitle}
-                </CardTitle>
-                <CardDescription>{t.statementSubtitle}</CardDescription>
-              </div>
-
-              <Button
-                variant="outline"
-                className="rounded-xl"
-                onClick={printStatement}
-              >
-                <Printer className="h-4 w-4" />
-                {t.print}
-              </Button>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              {statementError ? (
-                <div className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                    <XCircle className="h-5 w-5" />
-                  </div>
-
-                  <div>
-                    <p className="font-semibold text-destructive">
-                      {statementError}
-                    </p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {t.loadErrorHint}
-                    </p>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="overflow-hidden rounded-xl border">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t.table.date}</TableHead>
-                        <TableHead>{t.table.reference}</TableHead>
-                        <TableHead>{t.table.type}</TableHead>
-                        <TableHead>{t.table.description}</TableHead>
-                        <TableHead>{t.table.debit}</TableHead>
-                        <TableHead>{t.table.credit}</TableHead>
-                        <TableHead>{t.table.balance}</TableHead>
-                        <TableHead>{t.table.status}</TableHead>
-                      </TableRow>
-                    </TableHeader>
-
-                    <TableBody>
-                      {lines.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={8} className="h-32 text-center">
-                            <div className="mx-auto max-w-md space-y-2">
-                              <p className="font-semibold">
-                                {t.emptyStatement}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {statementError ? t.loadErrorHint : t.statementSubtitle}
-                              </p>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        lines.map((line, index) => (
-                          <TableRow key={`${line.reference}-${index}`}>
-                            <TableCell>{formatDate(line.line_date)}</TableCell>
-
-                            <TableCell className="font-medium">
-                              {line.reference || "-"}
-                            </TableCell>
-
-                            <TableCell>
-                              <Badge variant="secondary" className="rounded-full">
-                                {statementTypeLabel(line.line_type, locale)}
-                              </Badge>
-                            </TableCell>
-
-                            <TableCell>{line.description || "-"}</TableCell>
-
-                            <TableCell>
-                              <MoneyAmount value={line.debit_amount} />
-                            </TableCell>
-
-                            <TableCell>
-                              <MoneyAmount value={line.credit_amount} />
-                            </TableCell>
-
-                            <TableCell className="font-semibold">
-                              <MoneyAmount value={line.balance_after} />
-                            </TableCell>
-
-                            <TableCell>
-                              <Badge variant="outline" className="rounded-full">
-                                {line.status || "-"}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </main>
-      </div>
-    </div>
+    customer.display_name ||
+    customer.full_name ||
+    customer.company_name ||
+    [customer.first_name, customer.last_name].filter(Boolean).join(" ") ||
+    customer.phone_number ||
+    customer.whatsapp_number ||
+    customer.email ||
+    `Customer #${customer.id}`
   );
 }
 
-/* ============================================================
-   Small Components
-============================================================ */
+function getCustomerInitials(customer: CustomerRecord | null) {
+  const name = getCustomerName(customer);
+  const words = name.split(/\s+/).filter(Boolean);
 
-function MoneyAmount({ value }: { value: string | number | undefined }) {
+  if (words.length === 0) return "PC";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+
+  return `${words[0].slice(0, 1)}${words[1].slice(0, 1)}`.toUpperCase();
+}
+
+function hasCustomerAccount(customer: CustomerRecord | null) {
+  return Boolean(customer?.has_customer_account || customer?.user_id || customer?.login_user?.id);
+}
+
+function getCustomerLoginUser(customer: CustomerRecord | null): LoginUserRecord | null {
+  if (!customer?.login_user) return null;
+  return customer.login_user;
+}
+
+function getCustomerLoginProfile(customer: CustomerRecord | null): LoginUserProfile | null {
+  return getCustomerLoginUser(customer)?.profile || null;
+}
+
+function getCustomerLoginUsername(customer: CustomerRecord | null) {
+  const loginUser = getCustomerLoginUser(customer);
+
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span>{formatMoneyValue(value)}</span>
-      <Image src="/currency/sar.svg" alt="" width={14} height={14} />
+    loginUser?.username ||
+    customer?.user_username ||
+    customer?.login_identifier ||
+    ""
+  );
+}
+
+function getCustomerLoginEmail(customer: CustomerRecord | null) {
+  return getCustomerLoginUser(customer)?.email || customer?.email || "";
+}
+
+function getProfileWorkspace(profile: LoginUserProfile | null) {
+  const extraData = profile?.extra_data || {};
+  const workspaceValue = extraData.workspace;
+
+  return typeof workspaceValue === "string" ? workspaceValue : "";
+}
+
+function getVerificationCount(customer: CustomerRecord | null) {
+  let count = 0;
+
+  if (customer?.is_phone_verified) count += 1;
+  if (customer?.is_whatsapp_verified) count += 1;
+
+  return count;
+}
+
+function getStatusLabel(status: string | undefined, t: (typeof translations)[Locale]) {
+  const normalized = normalizeText(status);
+
+  if (normalized === "active") return t.active;
+  if (normalized === "inactive") return t.inactive;
+  if (normalized === "blocked") return t.blocked;
+  if (normalized === "lead") return t.lead;
+
+  return status || t.noValue;
+}
+
+function getStatusBadgeClass(status: string | undefined) {
+  const normalized = normalizeText(status);
+
+  if (normalized === "active") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (normalized === "blocked") return "border-red-200 bg-red-50 text-red-700";
+  if (normalized === "lead") return "border-amber-200 bg-amber-50 text-amber-700";
+
+  return "border-slate-200 bg-slate-50 text-slate-600";
+}
+
+function getTypeLabel(type: string | undefined, t: (typeof translations)[Locale]) {
+  const normalized = normalizeText(type);
+
+  if (normalized === "individual") return t.individual;
+  if (normalized === "corporate") return t.corporate;
+
+  return type || t.noValue;
+}
+
+function getSourceLabel(source: string | undefined, t: (typeof translations)[Locale]) {
+  const normalized = normalizeText(source);
+
+  if (normalized === "website") return t.website;
+  if (normalized === "whatsapp") return t.whatsapp;
+  if (normalized === "agent") return t.agent;
+  if (normalized === "admin") return t.admin;
+  if (normalized === "import") return t.import;
+  if (normalized === "other") return t.other;
+
+  return source || t.noValue;
+}
+
+function getLineType(line: StatementLine): LineFilter {
+  const raw = normalizeText(
+    line.type ||
+      line.kind ||
+      line.source ||
+      line.document_type ||
+      line.metadata?.type ||
+      "",
+  );
+
+  if (raw.includes("order")) return "orders";
+  if (raw.includes("invoice")) return "invoices";
+  if (raw.includes("payment")) return "payments";
+
+  return "all";
+}
+
+function getLineReference(line: StatementLine) {
+  return (
+    line.reference ||
+    line.number ||
+    line.code ||
+    line.title ||
+    line.description ||
+    `#${line.id || ""}`
+  );
+}
+
+function getLineDate(line: StatementLine) {
+  return (
+    line.date ||
+    line.created_at ||
+    line.issued_at ||
+    line.paid_at ||
+    line.due_date ||
+    null
+  );
+}
+
+function getLineAmount(line: StatementLine) {
+  return (
+    line.amount ||
+    line.total ||
+    line.paid_amount ||
+    line.debit ||
+    line.credit ||
+    0
+  );
+}
+
+function getLineUrl(line: StatementLine) {
+  if (line.url || line.href) return String(line.url || line.href);
+
+  if (line.order_id) return `/system/orders/${line.order_id}`;
+  if (line.invoice_id) return `/system/invoices/${line.invoice_id}`;
+  if (line.payment_id) return `/system/payments/${line.payment_id}`;
+
+  const type = getLineType(line);
+
+  if (type === "orders" && line.id) return `/system/orders/${line.id}`;
+  if (type === "invoices" && line.id) return `/system/invoices/${line.id}`;
+  if (type === "payments" && line.id) return `/system/payments/${line.id}`;
+
+  return "";
+}
+
+function SarIcon({ className }: { className?: string }) {
+  return (
+    <img
+      src="/currency/sar.svg"
+      alt="SAR"
+      className={cn("inline-block h-3.5 w-3.5 object-contain", className)}
+    />
+  );
+}
+
+function MoneyValue({ value }: { value: string | number | null | undefined }) {
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap tabular-nums">
+      <span>{formatNumber(value, 2)}</span>
+      <SarIcon />
     </span>
   );
 }
 
-function QuickInfo({
-  icon: Icon,
-  label,
+function KpiCard({
+  title,
   value,
-  onCopy,
+  trend,
+  icon: Icon,
 }: {
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  value: string;
-  onCopy?: () => void;
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 rounded-xl border bg-background p-3">
-      <div className="flex min-w-0 items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-          <Icon className="h-4 w-4" />
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
+
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
         </div>
+      </CardHeader>
+    </Card>
+  );
+}
+
+function DetailField({
+  label,
+  value,
+  icon,
+  copyValue,
+  t,
+}: {
+  label: string;
+  value: React.ReactNode;
+  icon?: React.ReactNode;
+  copyValue?: string;
+  t: (typeof translations)[Locale];
+}) {
+  const normalizedCopy = String(copyValue || "").trim();
+
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-lg border bg-background p-3">
+      <div className="flex min-w-0 items-start gap-3">
+        {icon ? (
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+            {icon}
+          </div>
+        ) : null}
 
         <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-1 truncate text-sm font-semibold">{value}</p>
+          <p className="text-xs font-medium text-muted-foreground">{label}</p>
+          <div className="mt-1 break-words text-sm font-medium text-foreground">
+            {value || "—"}
+          </div>
         </div>
       </div>
 
-      {onCopy ? (
+      {normalizedCopy ? (
         <Button
+          type="button"
           variant="ghost"
           size="icon"
           className="h-8 w-8 shrink-0 rounded-lg"
-          onClick={onCopy}
+          onClick={() => {
+            void navigator.clipboard.writeText(normalizedCopy);
+            toast.success(t.copied);
+          }}
         >
           <Copy className="h-3.5 w-3.5" />
         </Button>
@@ -1664,90 +946,1212 @@ function QuickInfo({
   );
 }
 
-function InfoCard({
-  title,
-  icon: Icon,
-  items,
-}: {
-  title: string;
-  icon: ComponentType<{ className?: string }>;
-  items: Array<{
-    label: string;
-    value: ReactNode;
-    icon: ComponentType<{ className?: string }>;
-    copyValue?: string;
-    onCopy?: (value: string) => void;
-  }>;
-}) {
+function HeaderSortButton({ label }: { label: string }) {
   return (
-    <Card className="rounded-2xl border shadow-sm">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base font-bold">
-          <Icon className="h-5 w-5" />
-          {title}
-        </CardTitle>
-      </CardHeader>
-
-      <CardContent className="space-y-3">
-        {items.map((item) => {
-          const ItemIcon = item.icon;
-
-          return (
-            <div
-              key={item.label}
-              className="flex items-start justify-between gap-3 rounded-xl border bg-background p-3"
-            >
-              <div className="flex min-w-0 items-start gap-3">
-                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                  <ItemIcon className="h-4 w-4" />
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">{item.label}</p>
-                  <p className="mt-1 break-words text-sm font-medium">
-                    {item.value || "-"}
-                  </p>
-                </div>
-              </div>
-
-              {item.copyValue && item.onCopy ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0 rounded-lg"
-                  onClick={() => item.onCopy?.(item.copyValue || "")}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
-              ) : null}
-            </div>
-          );
-        })}
-      </CardContent>
-    </Card>
+    <Button
+      type="button"
+      variant="ghost"
+      className="h-8 px-2 text-xs font-medium text-foreground hover:bg-muted"
+    >
+      {label}
+      <ArrowUpDown className="h-3.5 w-3.5" />
+    </Button>
   );
 }
 
-function QuickLink({
-  title,
-  href,
-  icon: Icon,
+function CustomerDetailsSkeleton() {
+  return (
+    <div className="w-full space-y-7">
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-2">
+          <div className="h-7 w-52 animate-pulse rounded bg-muted" />
+          <div className="h-4 w-96 animate-pulse rounded bg-muted" />
+        </div>
+        <div className="h-10 w-48 animate-pulse rounded bg-muted" />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="relative min-h-[112px] px-6 py-5">
+              <div className="h-4 w-28 animate-pulse rounded bg-muted" />
+              <div className="mt-5 h-8 w-16 animate-pulse rounded bg-muted" />
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <div className="space-y-4">
+          <div className="h-[430px] animate-pulse rounded-lg border bg-muted/40" />
+        </div>
+        <div className="space-y-4 xl:col-span-2">
+          <div className="h-[520px] animate-pulse rounded-lg border bg-muted/40" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DateTextInput({
+  value,
+  onChange,
+  placeholder,
 }: {
-  title: string;
-  href: string;
-  icon: ComponentType<{ className?: string }>;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
 }) {
   return (
-    <Link href={href} className="block">
-      <Card className="h-full rounded-2xl border bg-background shadow-none transition hover:bg-muted/40">
-        <CardContent className="flex items-center justify-between gap-4 p-4">
-          <p className="font-semibold">{title}</p>
+    <Input
+      type="date"
+      value={value}
+      onChange={(event) => onChange(toEnglishDigits(event.target.value))}
+      placeholder={placeholder}
+      dir="ltr"
+      className="h-10 w-[170px] rounded-md border bg-background text-left font-mono text-sm shadow-none [color-scheme:light] dark:[color-scheme:dark]"
+    />
+  );
+}
 
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-            <Icon className="h-5 w-5" />
+function SearchIcon() {
+  return (
+    <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+  );
+}
+
+export default function CustomerDetailsPage() {
+  const params = useParams<{ id?: string }>();
+  const router = useRouter();
+
+  const customerId = React.useMemo(() => {
+    const raw = Array.isArray(params?.id) ? params.id[0] : params?.id;
+
+    return String(raw || "").trim();
+  }, [params]);
+
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [customer, setCustomer] = React.useState<CustomerRecord | null>(null);
+  const [statementSummary, setStatementSummary] = React.useState<StatementSummary>({});
+  const [statementLines, setStatementLines] = React.useState<StatementLine[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [statementError, setStatementError] = React.useState("");
+
+  const [lineFilter, setLineFilter] = React.useState<LineFilter>("all");
+  const [lineSearch, setLineSearch] = React.useState("");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
+  const [sort, setSort] = React.useState<SortFilter>("newest");
+  const [pageIndex, setPageIndex] = React.useState(0);
+
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const isRtl = locale === "ar";
+  const textAlign = locale === "ar" ? "text-right" : "text-left";
+
+  React.useEffect(() => {
+    const readLocale = () => {
+      try {
+        const saved = window.localStorage.getItem("primey-locale");
+        const nextLocale: Locale = saved === "en" ? "en" : "ar";
+
+        setLocale(nextLocale);
+        document.documentElement.lang = nextLocale;
+        document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+        document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      } catch {
+        setLocale("ar");
+      }
+    };
+
+    readLocale();
+
+    window.addEventListener("storage", readLocale);
+    window.addEventListener("primey-locale-changed", readLocale);
+
+    return () => {
+      window.removeEventListener("storage", readLocale);
+      window.removeEventListener("primey-locale-changed", readLocale);
+    };
+  }, []);
+
+  const loadCustomerOnly = React.useCallback(
+    async (signal?: AbortSignal) => {
+      const payload = await fetchJson<CustomerDetailResponse>(
+        makeApiUrl(`/api/customers/${customerId}/`),
+        signal,
+      );
+
+      const nextCustomer = extractCustomer(payload);
+
+      if (!nextCustomer) {
+        throw new Error(t.notFound);
+      }
+
+      setCustomer(nextCustomer);
+
+      return nextCustomer;
+    },
+    [customerId, t.notFound],
+  );
+
+  const loadStatementOnly = React.useCallback(
+    async (signal?: AbortSignal) => {
+      if (!customerId) return;
+
+      setRefreshing(true);
+      setStatementError("");
+
+      try {
+        const params = new URLSearchParams();
+
+        if (dateFrom) params.set("date_from", dateFrom);
+        if (dateTo) params.set("date_to", dateTo);
+
+        const payload = await fetchJson<StatementResponse>(
+          makeApiUrl(`/api/customers/${customerId}/statement/`, params),
+          signal,
+        );
+
+        setStatementSummary(extractStatementSummary(payload));
+        setStatementLines(extractStatementLines(payload));
+        setPageIndex(0);
+
+        if (!signal?.aborted) {
+          toast.success(t.statementLoaded);
+        }
+      } catch (caughtError) {
+        if (signal?.aborted) return;
+
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.statementErrorTitle;
+
+        setStatementError(message);
+      } finally {
+        if (!signal?.aborted) setRefreshing(false);
+      }
+    },
+    [customerId, dateFrom, dateTo, t.statementErrorTitle, t.statementLoaded],
+  );
+
+  const loadAll = React.useCallback(
+    async (signal?: AbortSignal) => {
+      if (!customerId) return;
+
+      setLoading(true);
+      setError("");
+      setStatementError("");
+
+      try {
+        await loadCustomerOnly(signal);
+
+        const statementPayload = await fetchJson<StatementResponse>(
+          makeApiUrl(`/api/customers/${customerId}/statement/`),
+          signal,
+        );
+
+        setStatementSummary(extractStatementSummary(statementPayload));
+        setStatementLines(extractStatementLines(statementPayload));
+      } catch (caughtError) {
+        if (signal?.aborted) return;
+
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorTitle;
+
+        setError(message);
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [customerId, loadCustomerOnly, t.errorTitle],
+  );
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+
+    void loadAll(controller.signal);
+
+    return () => controller.abort();
+  }, [loadAll]);
+
+  const filteredLines = React.useMemo(() => {
+    const query = normalizeText(lineSearch);
+    const fromTime = dateFrom ? new Date(dateFrom).getTime() : null;
+    const toTime = dateTo ? new Date(dateTo).getTime() : null;
+
+    const rows = statementLines.filter((line) => {
+      const type = getLineType(line);
+      const ref = normalizeText(
+        [
+          getLineReference(line),
+          line.status,
+          line.payment_status,
+          line.fulfillment_status,
+          line.description,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+
+      if (lineFilter !== "all" && type !== lineFilter) return false;
+      if (query && !ref.includes(query)) return false;
+
+      const lineDate = getLineDate(line);
+      if (fromTime || toTime) {
+        if (!lineDate) return false;
+
+        const time = new Date(lineDate).getTime();
+        if (Number.isNaN(time)) return false;
+
+        if (fromTime && time < fromTime) return false;
+        if (toTime && time > toTime + 86_399_999) return false;
+      }
+
+      return true;
+    });
+
+    return rows.sort((a, b) => {
+      if (sort === "amount_high") return toNumber(getLineAmount(b)) - toNumber(getLineAmount(a));
+      if (sort === "amount_low") return toNumber(getLineAmount(a)) - toNumber(getLineAmount(b));
+
+      const aDate = new Date(getLineDate(a) || 0).getTime();
+      const bDate = new Date(getLineDate(b) || 0).getTime();
+
+      if (sort === "oldest") return aDate - bDate;
+
+      return bDate - aDate;
+    });
+  }, [dateFrom, dateTo, lineFilter, lineSearch, sort, statementLines]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredLines.length / PAGE_SIZE));
+  const currentPage = Math.min(pageIndex, totalPages - 1);
+  const pageRows = filteredLines.slice(
+    currentPage * PAGE_SIZE,
+    currentPage * PAGE_SIZE + PAGE_SIZE,
+  );
+
+  const customerName = getCustomerName(customer);
+  const customerCode = customer?.customer_code || `#${customer?.id || customerId}`;
+  const accountLinked = hasCustomerAccount(customer);
+  const verificationCount = getVerificationCount(customer);
+
+  const totalOrders =
+    statementSummary.total_orders ||
+    statementSummary.orders_count ||
+    0;
+  const totalInvoices =
+    statementSummary.total_invoices ||
+    statementSummary.invoices_count ||
+    0;
+  const totalPayments =
+    statementSummary.total_payments ||
+    statementSummary.payments_count ||
+    0;
+  const totalPaid =
+    statementSummary.total_paid ||
+    statementSummary.paid_amount ||
+    statementSummary.payments_total ||
+    0;
+  const outstanding =
+    statementSummary.outstanding_amount ||
+    statementSummary.remaining_amount ||
+    statementSummary.balance ||
+    0;
+
+  function handlePrint() {
+    window.print();
+    toast.success(t.printReady);
+  }
+
+  function resetFilters() {
+    setLineFilter("all");
+    setLineSearch("");
+    setDateFrom("");
+    setDateTo("");
+    setSort("newest");
+    setPageIndex(0);
+  }
+
+  if (loading) {
+    return <CustomerDetailsSkeleton />;
+  }
+
+  if (error || !customer) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="flex min-h-[360px] flex-col items-center justify-center p-8 text-center">
+            <TriangleAlert className="h-10 w-10 text-red-600" />
+            <h2 className="mt-4 text-xl font-semibold">{error ? t.errorTitle : t.notFound}</h2>
+            <p className="mt-2 max-w-lg text-sm text-muted-foreground">
+              {error || t.notFoundDesc}
+            </p>
+
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+              <Button
+                type="button"
+                className="h-9 rounded-md bg-black px-4 text-white hover:bg-black/90"
+                onClick={() => void loadAll()}
+              >
+                <RefreshCw className="h-4 w-4" />
+                {t.retry}
+              </Button>
+
+              <Button asChild variant="outline" className="h-9 rounded-md">
+                <Link href="/system/customers">
+                  {isRtl ? <ArrowRight className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />}
+                  {t.back}
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className={cn("space-y-1", textAlign)}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn("rounded-full px-2.5 py-1", getStatusBadgeClass(customer.status))}
+            >
+              {getStatusLabel(customer.status, t)}
+            </Badge>
+
+            <Badge
+              variant="outline"
+              className={cn(
+                "rounded-full px-2.5 py-1",
+                accountLinked
+                  ? "border-violet-200 bg-violet-50 text-violet-700"
+                  : "border-slate-200 bg-slate-50 text-slate-600",
+              )}
+            >
+              <UserCircle2 className="me-1 h-3.5 w-3.5" />
+              {accountLinked ? t.linked : t.missing}
+            </Badge>
           </div>
-        </CardContent>
-      </Card>
-    </Link>
+
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+            {customerName}
+          </h1>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/customers">
+              {isRtl ? <ArrowRight className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />}
+              {t.back}
+            </Link>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9 rounded-lg"
+            onClick={() => void loadAll()}
+            disabled={refreshing}
+          >
+            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+            {t.refresh}
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9 rounded-lg"
+            onClick={handlePrint}
+          >
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-9 rounded-lg">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent align={isRtl ? "start" : "end"}>
+              <DropdownMenuItem asChild>
+                <Link href={`/system/orders?customer=${encodeURIComponent(String(customer.id))}`}>
+                  <ShoppingCart className="h-4 w-4" />
+                  {t.viewOrders}
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href={`/system/invoices?customer=${encodeURIComponent(String(customer.id))}`}>
+                  <ReceiptText className="h-4 w-4" />
+                  {t.viewInvoices}
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href={`/system/payments?customer=${encodeURIComponent(String(customer.id))}`}>
+                  <WalletCards className="h-4 w-4" />
+                  {t.viewPayments}
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => {
+                  void navigator.clipboard.writeText(String(customer.id));
+                  toast.success(t.copied);
+                }}
+              >
+                <Copy className="h-4 w-4" />
+                {t.copy}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.totalOrders}
+          value={formatNumber(totalOrders)}
+          trend={t.orders}
+          icon={ShoppingCart}
+        />
+        <KpiCard
+          title={t.totalInvoices}
+          value={formatNumber(totalInvoices)}
+          trend={t.invoices}
+          icon={ReceiptText}
+        />
+        <KpiCard
+          title={t.totalPayments}
+          value={formatNumber(totalPayments)}
+          trend={t.payments}
+          icon={WalletCards}
+        />
+        <KpiCard
+          title={t.outstanding}
+          value={<MoneyValue value={outstanding} />}
+          trend={`${t.paidAmount}: ${formatNumber(totalPaid, 2)}`}
+          icon={CircleDollarSign}
+        />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <div className="space-y-4">
+          <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+            <CardHeader className="border-b bg-muted/20 px-6 py-5">
+              <div className="flex items-center gap-4">
+                <Avatar className="h-16 w-16 rounded-2xl border">
+                  <AvatarFallback className="rounded-2xl bg-background text-lg font-bold">
+                    {getCustomerInitials(customer)}
+                  </AvatarFallback>
+                </Avatar>
+
+                <div className="min-w-0">
+                  <CardTitle className="truncate text-lg">{customerName}</CardTitle>
+                  <CardDescription className="truncate">{customerCode}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-3 p-5">
+              <DetailField
+                label={t.customerCode}
+                value={customerCode}
+                copyValue={customer.customer_code || String(customer.id)}
+                icon={<BadgeCheck className="h-4 w-4" />}
+                t={t}
+              />
+
+              <DetailField
+                label={t.accountStatus}
+                value={
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "rounded-full",
+                      accountLinked
+                        ? "border-violet-200 bg-violet-50 text-violet-700"
+                        : "border-slate-200 bg-slate-50 text-slate-600",
+                    )}
+                  >
+                    {accountLinked ? t.linked : t.missing}
+                  </Badge>
+                }
+                icon={<UserCircle2 className="h-4 w-4" />}
+                t={t}
+              />
+
+              <DetailField
+                label={t.phone}
+                value={customer.phone_number || customer.primary_contact_number || t.noContact}
+                copyValue={customer.phone_number || customer.primary_contact_number}
+                icon={<Phone className="h-4 w-4" />}
+                t={t}
+              />
+
+              <DetailField
+                label={t.whatsapp}
+                value={customer.whatsapp_number || t.noContact}
+                copyValue={customer.whatsapp_number}
+                icon={<Phone className="h-4 w-4" />}
+                t={t}
+              />
+
+              <DetailField
+                label={t.email}
+                value={customer.email || t.noContact}
+                copyValue={customer.email}
+                icon={<Mail className="h-4 w-4" />}
+                t={t}
+              />
+
+              <DetailField
+                label={t.city}
+                value={customer.city || t.noAddress}
+                icon={<MapPin className="h-4 w-4" />}
+                t={t}
+              />
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardHeader>
+              <CardTitle className="text-base">{t.quickLinks}</CardTitle>
+              <CardDescription>{t.customerWorkspace}</CardDescription>
+            </CardHeader>
+
+            <CardContent className="grid gap-2">
+              <Button
+                asChild
+                variant="outline"
+                className="h-10 w-full justify-between rounded-md shadow-none"
+              >
+                <Link href={`/system/orders?customer=${encodeURIComponent(String(customer.id))}`}>
+                  <span className="inline-flex items-center gap-2">
+                    <ShoppingCart className="h-4 w-4" />
+                    {t.viewOrders}
+                  </span>
+                  <Eye className="h-4 w-4" />
+                </Link>
+              </Button>
+
+              <Button
+                asChild
+                variant="outline"
+                className="h-10 w-full justify-between rounded-md shadow-none"
+              >
+                <Link href={`/system/invoices?customer=${encodeURIComponent(String(customer.id))}`}>
+                  <span className="inline-flex items-center gap-2">
+                    <ReceiptText className="h-4 w-4" />
+                    {t.viewInvoices}
+                  </span>
+                  <Eye className="h-4 w-4" />
+                </Link>
+              </Button>
+
+              <Button
+                asChild
+                variant="outline"
+                className="h-10 w-full justify-between rounded-md shadow-none"
+              >
+                <Link href={`/system/payments?customer=${encodeURIComponent(String(customer.id))}`}>
+                  <span className="inline-flex items-center gap-2">
+                    <WalletCards className="h-4 w-4" />
+                    {t.viewPayments}
+                  </span>
+                  <Eye className="h-4 w-4" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-4 xl:col-span-2">
+          <Tabs defaultValue="overview" className="space-y-4">
+            <TabsList className="rounded-lg border bg-background p-1 shadow-none">
+              <TabsTrigger value="overview">{t.overview}</TabsTrigger>
+              <TabsTrigger value="statement">{t.statement}</TabsTrigger>
+              <TabsTrigger value="activity">{t.activity}</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="overview" className="space-y-4">
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader>
+                    <CardTitle className="text-base">{t.personalInfo}</CardTitle>
+                    <CardDescription>{customerCode}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-3">
+                    <DetailField
+                      label={t.type}
+                      value={getTypeLabel(customer.customer_type, t)}
+                      icon={<User className="h-4 w-4" />}
+                      t={t}
+                    />
+                    <DetailField
+                      label={t.source}
+                      value={getSourceLabel(customer.source, t)}
+                      icon={<Inbox className="h-4 w-4" />}
+                      t={t}
+                    />
+                    <DetailField
+                      label={t.identity}
+                      value={customer.national_id || customer.passport_number || t.noValue}
+                      copyValue={customer.national_id || customer.passport_number}
+                      icon={<BadgeCheck className="h-4 w-4" />}
+                      t={t}
+                    />
+                    <DetailField
+                      label={t.nationality}
+                      value={customer.nationality || t.noValue}
+                      icon={<Users className="h-4 w-4" />}
+                      t={t}
+                    />
+                    <DetailField
+                      label={t.birthDate}
+                      value={formatDateEnglish(customer.date_of_birth)}
+                      icon={<CalendarDays className="h-4 w-4" />}
+                      t={t}
+                    />
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader>
+                    <CardTitle className="text-base">{t.accountInfo}</CardTitle>
+                    <CardDescription>
+                      {getCustomerLoginUsername(customer) || customer.login_identifier || "—"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-3">
+                    <DetailField
+                      label={t.accountStatus}
+                      value={
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "rounded-full",
+                            hasCustomerAccount(customer)
+                              ? "border-violet-200 bg-violet-50 text-violet-700"
+                              : "border-slate-200 bg-slate-50 text-slate-600",
+                          )}
+                        >
+                          <UserCircle2 className="me-1 h-3.5 w-3.5" />
+                          {hasCustomerAccount(customer) ? t.linked : t.missing}
+                        </Badge>
+                      }
+                      icon={<UserCircle2 className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.loginUsername}
+                      value={getCustomerLoginUsername(customer) || t.noValue}
+                      copyValue={getCustomerLoginUsername(customer)}
+                      icon={<UserCircle2 className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.loginEmail}
+                      value={getCustomerLoginEmail(customer) || t.noValue}
+                      copyValue={getCustomerLoginEmail(customer)}
+                      icon={<Mail className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.loginDisplayName}
+                      value={
+                        getCustomerLoginUser(customer)?.full_name ||
+                        getCustomerLoginProfile(customer)?.display_name ||
+                        t.noValue
+                      }
+                      icon={<User className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.loginUserId}
+                      value={
+                        getCustomerLoginUser(customer)?.id ||
+                        customer.user_id ||
+                        t.noValue
+                      }
+                      copyValue={String(getCustomerLoginUser(customer)?.id || customer.user_id || "")}
+                      icon={<BadgeCheck className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.accountActive}
+                      value={
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "rounded-full",
+                            getCustomerLoginUser(customer)?.is_active
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-slate-200 bg-slate-50 text-slate-600",
+                          )}
+                        >
+                          {getCustomerLoginUser(customer)?.is_active ? t.active : t.inactive}
+                        </Badge>
+                      }
+                      icon={<ShieldCheck className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.loginUserType}
+                      value={getCustomerLoginProfile(customer)?.user_type || t.noValue}
+                      icon={<Users className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.loginRole}
+                      value={getCustomerLoginProfile(customer)?.role || t.noValue}
+                      icon={<ShieldCheck className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.loginWorkspace}
+                      value={getProfileWorkspace(getCustomerLoginProfile(customer)) || t.customerWorkspace}
+                      icon={<Home className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.loginPhone}
+                      value={getCustomerLoginProfile(customer)?.phone_number || t.noValue}
+                      copyValue={getCustomerLoginProfile(customer)?.phone_number}
+                      icon={<Phone className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.loginWhatsapp}
+                      value={getCustomerLoginProfile(customer)?.whatsapp_number || t.noValue}
+                      copyValue={getCustomerLoginProfile(customer)?.whatsapp_number}
+                      icon={<Phone className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.verified}
+                      value={
+                        <div className="flex flex-wrap gap-1.5">
+                          {customer.is_phone_verified ? (
+                            <Badge className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700">
+                              {t.phone}
+                            </Badge>
+                          ) : null}
+
+                          {customer.is_whatsapp_verified ? (
+                            <Badge className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
+                              {t.whatsapp}
+                            </Badge>
+                          ) : null}
+
+                          {getVerificationCount(customer) === 0 ? (
+                            <Badge variant="outline" className="rounded-full bg-white">
+                              {t.unverified}
+                            </Badge>
+                          ) : null}
+                        </div>
+                      }
+                      icon={<ShieldCheck className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.lastLogin}
+                      value={formatDateEnglish(customer.last_login_at)}
+                      icon={<Activity className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.createdAt}
+                      value={formatDateEnglish(customer.created_at)}
+                      icon={<CalendarDays className="h-4 w-4" />}
+                      t={t}
+                    />
+
+                    <DetailField
+                      label={t.updatedAt}
+                      value={formatDateEnglish(customer.updated_at)}
+                      icon={<RefreshCw className="h-4 w-4" />}
+                      t={t}
+                    />
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card className="rounded-lg border bg-card shadow-none">
+                <CardHeader>
+                  <CardTitle className="text-base">{t.locationInfo}</CardTitle>
+                  <CardDescription>
+                    {customer.city || customer.country || t.noAddress}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3 lg:grid-cols-2">
+                  <DetailField
+                    label={t.country}
+                    value={customer.country || t.noAddress}
+                    icon={<MapPin className="h-4 w-4" />}
+                    t={t}
+                  />
+                  <DetailField
+                    label={t.city}
+                    value={customer.city || t.noAddress}
+                    icon={<MapPin className="h-4 w-4" />}
+                    t={t}
+                  />
+                  <DetailField
+                    label={t.district}
+                    value={customer.district || t.noAddress}
+                    icon={<Home className="h-4 w-4" />}
+                    t={t}
+                  />
+                  <DetailField
+                    label={t.address}
+                    value={customer.street_address || t.noAddress}
+                    copyValue={customer.street_address}
+                    icon={<Home className="h-4 w-4" />}
+                    t={t}
+                  />
+                  <div className="lg:col-span-2">
+                    <DetailField
+                      label={t.nationalAddress}
+                      value={customer.national_address_text || t.noAddress}
+                      copyValue={customer.national_address_text}
+                      icon={<MapPin className="h-4 w-4" />}
+                      t={t}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-lg border bg-card shadow-none">
+                <CardHeader>
+                  <CardTitle className="text-base">{t.notes}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="min-h-[72px] rounded-lg border bg-background p-4 text-sm leading-7 text-muted-foreground">
+                    {customer.notes || t.noNotes}
+                  </p>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="statement" className="space-y-4">
+              <Card className="rounded-lg border bg-card shadow-none">
+                <CardHeader>
+                  <CardTitle className="text-base">{t.statement}</CardTitle>
+                  <CardDescription>{customerName}</CardDescription>
+                  <CardAction>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-md shadow-none"
+                      onClick={() => void loadStatementOnly()}
+                      disabled={refreshing}
+                    >
+                      {refreshing ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      {t.refresh}
+                    </Button>
+                  </CardAction>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+                    <div className="flex flex-1 flex-col gap-2 md:flex-row md:items-center">
+                      <div className="relative w-full md:max-w-sm">
+                        <SearchIcon />
+                        <Input
+                          value={lineSearch}
+                          onChange={(event) => setLineSearch(event.target.value)}
+                          placeholder={t.searchPlaceholder}
+                          className="h-10 rounded-md border bg-background pe-10 shadow-none"
+                        />
+                      </div>
+
+                      <Select
+                        value={lineFilter}
+                        onValueChange={(value) => setLineFilter(value as LineFilter)}
+                      >
+                        <SelectTrigger className="h-10 w-[150px] rounded-md border bg-background shadow-none">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">{t.all}</SelectItem>
+                          <SelectItem value="orders">{t.orders}</SelectItem>
+                          <SelectItem value="invoices">{t.invoices}</SelectItem>
+                          <SelectItem value="payments">{t.payments}</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      <DateTextInput
+                        value={dateFrom}
+                        onChange={setDateFrom}
+                        placeholder={t.fromDate}
+                      />
+
+                      <DateTextInput
+                        value={dateTo}
+                        onChange={setDateTo}
+                        placeholder={t.toDate}
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Select
+                        value={sort}
+                        onValueChange={(value) => setSort(value as SortFilter)}
+                      >
+                        <SelectTrigger className="h-10 w-[150px] rounded-md border bg-background shadow-none">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="newest">{t.newest}</SelectItem>
+                          <SelectItem value="oldest">{t.oldest}</SelectItem>
+                          <SelectItem value="amount_high">{t.amountHigh}</SelectItem>
+                          <SelectItem value="amount_low">{t.amountLow}</SelectItem>
+                        </SelectContent>
+                      </Select>
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 rounded-md shadow-none"
+                        onClick={resetFilters}
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        {t.reset}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {statementError ? (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                      <p className="font-semibold">{t.statementErrorTitle}</p>
+                      <p className="mt-1">{statementError}</p>
+                    </div>
+                  ) : null}
+
+                  <div className="overflow-hidden rounded-lg border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/40">
+                          <TableHead className={cn("min-w-[180px]", textAlign)}>
+                            <HeaderSortButton label={t.document} />
+                          </TableHead>
+                          <TableHead className={textAlign}>{t.date}</TableHead>
+                          <TableHead className={textAlign}>{t.status}</TableHead>
+                          <TableHead className={textAlign}>{t.amount}</TableHead>
+                          <TableHead className={textAlign}>{t.paid}</TableHead>
+                          <TableHead className={textAlign}>{t.remaining}</TableHead>
+                          <TableHead className="w-[70px] text-center">{t.actions}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+
+                      <TableBody>
+                        {pageRows.length ? (
+                          pageRows.map((line, index) => {
+                            const href = getLineUrl(line);
+                            const lineType = getLineType(line);
+
+                            return (
+                              <TableRow key={`${line.id || "line"}-${index}`}>
+                                <TableCell className="align-top">
+                                  <div className="space-y-1">
+                                    <p className="font-medium">{getLineReference(line)}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {lineType === "orders"
+                                        ? t.orders
+                                        : lineType === "invoices"
+                                          ? t.invoices
+                                          : lineType === "payments"
+                                            ? t.payments
+                                            : t.document}
+                                    </p>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="whitespace-nowrap">
+                                  {formatDateEnglish(getLineDate(line))}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className="rounded-full bg-background">
+                                    {line.status ||
+                                      line.payment_status ||
+                                      line.fulfillment_status ||
+                                      t.noValue}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <MoneyValue value={getLineAmount(line)} />
+                                </TableCell>
+                                <TableCell>
+                                  <MoneyValue value={line.paid_amount || 0} />
+                                </TableCell>
+                                <TableCell>
+                                  <MoneyValue value={line.remaining_amount || 0} />
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  {href ? (
+                                    <Button
+                                      asChild
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 rounded-xl"
+                                    >
+                                      <Link href={href}>
+                                        <Eye className="h-4 w-4" />
+                                      </Link>
+                                    </Button>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={7}>
+                              <div className="flex min-h-[220px] flex-col items-center justify-center text-center">
+                                <Activity className="h-8 w-8 text-muted-foreground" />
+                                <p className="mt-3 font-semibold">{t.noLines}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">{t.noLinesDesc}</p>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {filteredLines.length > PAGE_SIZE ? (
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <p className="text-sm text-muted-foreground">
+                        {t.page} {formatNumber(currentPage + 1)} {t.of} {formatNumber(totalPages)}
+                      </p>
+
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-md shadow-none"
+                          disabled={currentPage <= 0}
+                          onClick={() => setPageIndex((value) => Math.max(0, value - 1))}
+                        >
+                          {t.previous}
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-md shadow-none"
+                          disabled={currentPage >= totalPages - 1}
+                          onClick={() =>
+                            setPageIndex((value) => Math.min(totalPages - 1, value + 1))
+                          }
+                        >
+                          {t.next}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="activity" className="space-y-4">
+              <Card className="rounded-lg border bg-card shadow-none">
+                <CardHeader>
+                  <CardTitle className="text-base">{t.activity}</CardTitle>
+                  <CardDescription>{customerName}</CardDescription>
+                </CardHeader>
+
+                <CardContent className="space-y-3">
+                  {statementLines.slice(0, 12).map((line, index) => {
+                    const href = getLineUrl(line);
+
+                    return (
+                      <div
+                        key={`${line.id || "activity"}-${index}`}
+                        className="flex items-start justify-between gap-4 rounded-lg border bg-background p-3"
+                      >
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                            {getLineType(line) === "orders" ? (
+                              <ShoppingCart className="h-4 w-4" />
+                            ) : getLineType(line) === "invoices" ? (
+                              <ReceiptText className="h-4 w-4" />
+                            ) : getLineType(line) === "payments" ? (
+                              <WalletCards className="h-4 w-4" />
+                            ) : (
+                              <Activity className="h-4 w-4" />
+                            )}
+                          </div>
+
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">
+                              {getLineReference(line)}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {formatDateEnglish(getLineDate(line))} ·{" "}
+                              {line.status || line.payment_status || t.noValue}
+                            </p>
+                          </div>
+                        </div>
+
+                        {href ? (
+                          <Button
+                            asChild
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 shrink-0 rounded-xl"
+                          >
+                            <Link href={href}>
+                              <Eye className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+
+                  {statementLines.length === 0 ? (
+                    <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border bg-background text-center">
+                      <Activity className="h-8 w-8 text-muted-foreground" />
+                      <p className="mt-3 font-semibold">{t.noLines}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{t.noLinesDesc}</p>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </div>
+    </div>
   );
 }

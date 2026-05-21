@@ -2,6 +2,16 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+/* =====================================================
+   📂 components/ui/card.tsx
+   🧠 Primey Care — Premium Card
+   -----------------------------------------------------
+   ✅ نفس روح العنصر النشط في السايدر
+   ✅ تدرج بنفسجي خفيف وناعم
+   ✅ أبيض موحد بدون رمادي ثقيل
+   ✅ يحافظ على Card API بدون كسر الصفحات
+===================================================== */
+
 function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -9,16 +19,18 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
       className={cn(
         [
           "relative isolate flex flex-col gap-6 overflow-hidden rounded-3xl border py-6",
-          "border-white/30 bg-gradient-to-br from-white via-neutral-50/90 to-neutral-200/55",
-          "text-card-foreground shadow-[0_18px_45px_rgba(15,23,42,0.08)]",
-          "backdrop-blur-xl transition-colors",
+          "border-primary/10 bg-gradient-to-br from-white via-primary/[0.025] to-primary/[0.075]",
+          "text-card-foreground shadow-[0_16px_40px_rgba(67,42,88,0.075)]",
+          "backdrop-blur-xl transition-all duration-200",
           "before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:content-['']",
-          "before:bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.95),rgba(245,245,246,0.72)_38%,rgba(229,229,231,0.52)_100%)]",
+          "before:bg-[radial-gradient(circle_at_top_right,rgba(67,42,88,0.08),transparent_36%),linear-gradient(135deg,rgba(255,255,255,0.92),rgba(255,255,255,0.62),rgba(67,42,88,0.035))]",
           "after:pointer-events-none after:absolute after:inset-0 after:-z-10 after:content-['']",
-          "after:bg-[linear-gradient(135deg,rgba(255,255,255,0.78),rgba(255,255,255,0.18),rgba(209,213,219,0.28))]",
-          "dark:border-white/10 dark:from-white/10 dark:via-white/5 dark:to-white/[0.03]",
-          "dark:before:bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.13),rgba(255,255,255,0.055)_42%,rgba(255,255,255,0.02)_100%)]",
-          "dark:after:bg-[linear-gradient(135deg,rgba(255,255,255,0.09),rgba(255,255,255,0.025),rgba(255,255,255,0.015))]",
+          "after:bg-[linear-gradient(180deg,rgba(255,255,255,0.72),rgba(255,255,255,0.18))]",
+          "hover:border-primary/15 hover:shadow-[0_18px_48px_rgba(67,42,88,0.095)]",
+          "dark:border-white/10 dark:bg-gradient-to-br dark:from-white/[0.075] dark:via-primary/[0.10] dark:to-white/[0.025]",
+          "dark:text-card-foreground dark:shadow-[0_18px_48px_rgba(0,0,0,0.30)]",
+          "dark:before:bg-[radial-gradient(circle_at_top_right,rgba(211,216,236,0.12),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.035),rgba(211,216,236,0.055))]",
+          "dark:after:bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.015))]",
         ].join(" "),
         className
       )}
@@ -54,7 +66,7 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-description"
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn("text-sm text-muted-foreground", className)}
       {...props}
     />
   );

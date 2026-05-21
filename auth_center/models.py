@@ -1,7 +1,7 @@
 # ===============================================================
 # 📂 الملف: auth_center/models.py
 # 🧭 Primey Care — Auth Center Models
-# 🚀 الإصدار: Primey Care Auth Core V1.2
+# 🚀 الإصدار: Primey Care Auth Core V1.3
 # ---------------------------------------------------------------
 # ✅ نواة هوية عامة تخدم:
 #    - سوبر أدمن النظام
@@ -10,7 +10,7 @@
 #    - مستخدمي القراءة فقط
 #    - العملاء
 #    - المندوبين
-#    - الوكلاء
+#    - الوسطاء / الوكلاء
 #    - المراكز
 #    - مزودي الخدمة
 #    - أي Actor مستقبلي داخل المنصة
@@ -24,10 +24,10 @@
 #    /customer
 #    /agent
 # ---------------------------------------------------------------
-# ✅ V1.2:
-#    - إضافة RoleChoices كطبقة صلاحيات رسمية
-#    - الإبقاء على UserType كتوافق تشغيلي قديم
-#    - إضافة UserProfile.role
+# ✅ V1.3:
+#    - إضافة RoleChoices.BROKER_USER كدور مستقل للوسيط
+#    - الإبقاء على UserType.BROKER كتوافق تشغيلي
+#    - جعل وسيط النظام يملك role مستقل broker_user بدل agent_user
 # ===============================================================
 
 from __future__ import annotations
@@ -95,12 +95,18 @@ class RoleChoices(models.TextChoices):
     - Frontend guards
     - Sidebar permissions
     - Action permissions
+
+    ملاحظة:
+    - agent_user مخصص للمندوب.
+    - broker_user مخصص للوسيط / الوكيل.
+    - كلاهما حاليًا يفتح مساحة /agent، لكن الصلاحيات والسياق يختلفان.
     """
 
     SYSTEM_ADMIN = "system_admin", "System Admin"
     PROVIDER_ADMIN = "provider_admin", "Provider Admin"
     CUSTOMER_USER = "customer_user", "Customer User"
     AGENT_USER = "agent_user", "Agent User"
+    BROKER_USER = "broker_user", "Broker User"
     ACCOUNTANT = "accountant", "Accountant"
     SUPPORT = "support", "Support"
     VIEWER = "viewer", "Viewer"
@@ -113,7 +119,7 @@ DEFAULT_ROLE_BY_USER_TYPE = {
     UserType.ACCOUNTANT: RoleChoices.ACCOUNTANT,
     UserType.CUSTOMER: RoleChoices.CUSTOMER_USER,
     UserType.AGENT: RoleChoices.AGENT_USER,
-    UserType.BROKER: RoleChoices.AGENT_USER,
+    UserType.BROKER: RoleChoices.BROKER_USER,
     UserType.PROVIDER: RoleChoices.PROVIDER_ADMIN,
     UserType.CENTER: RoleChoices.PROVIDER_ADMIN,
     UserType.PARTNER: RoleChoices.VIEWER,
@@ -320,7 +326,12 @@ class UserProfile(models.Model):
         """
         المساحة الافتراضية حسب الدور.
         """
-        if self.role in {RoleChoices.SYSTEM_ADMIN, RoleChoices.ACCOUNTANT, RoleChoices.SUPPORT, RoleChoices.VIEWER}:
+        if self.role in {
+            RoleChoices.SYSTEM_ADMIN,
+            RoleChoices.ACCOUNTANT,
+            RoleChoices.SUPPORT,
+            RoleChoices.VIEWER,
+        }:
             return "system"
 
         if self.role == RoleChoices.PROVIDER_ADMIN:
@@ -329,10 +340,30 @@ class UserProfile(models.Model):
         if self.role == RoleChoices.CUSTOMER_USER:
             return "customer"
 
-        if self.role == RoleChoices.AGENT_USER:
+        if self.role in {RoleChoices.AGENT_USER, RoleChoices.BROKER_USER}:
             return "agent"
 
         return "system"
+
+    @property
+    def is_system_user(self) -> bool:
+        return self.workspace == "system"
+
+    @property
+    def is_provider_user(self) -> bool:
+        return self.role == RoleChoices.PROVIDER_ADMIN
+
+    @property
+    def is_customer_user(self) -> bool:
+        return self.role == RoleChoices.CUSTOMER_USER
+
+    @property
+    def is_agent_user(self) -> bool:
+        return self.role == RoleChoices.AGENT_USER
+
+    @property
+    def is_broker_user(self) -> bool:
+        return self.role == RoleChoices.BROKER_USER
 
     def sync_role_from_user_type(self, commit: bool = True) -> None:
         """

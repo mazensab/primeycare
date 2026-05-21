@@ -2,2314 +2,1175 @@
 
 /* ============================================================
    📂 app/system/treasury/vouchers/payment/page.tsx
-   🧠 Primey Care | Treasury Payment Vouchers Page
-
-   ✅ المسار:
-      app/system/treasury/vouchers/payment/page.tsx
-
-   ✅ العمل:
-      صفحة سندات الصرف داخل الخزينة.
-      تعرض سندات الصرف فقط مع الحساب والمبلغ والحالة والترحيل والمرجع.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Treasury Payment Vouchers Build
-
-   ✅ يعتمد على:
-      - /api/treasury/transactions/
-      - /api/treasury/accounts/
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Treasury overview page
-      - Treasury vouchers page
-      - Treasury receipt vouchers page
-      - Treasury transactions page
-      - Treasury transaction details/create pages
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - عرض سندات الصرف فقط.
-      - البحث في صف مستقل.
-      - الفلاتر والأعمدة في صف مستقل.
-      - فلترة حسب الحالة والحساب.
-      - التحكم بالأعمدة.
-      - فرز الأعمدة المهمة.
-      - صفحات محلية.
-      - Excel export بصيغة .xls HTML Workbook.
-      - Web PDF Print.
-      - Error State مستقل.
-      - Empty State ذكي.
-      - Skeleton Loading.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - أرقام إنجليزية دائمًا.
-      - رمز SAR من /currency/sar.svg بعد الرقم.
-      - استخدام sonner للتنبيهات.
-
+   🧠 Primey Care | Create Treasury Payment Voucher
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - بناء صفحة سندات الصرف كاملة بنفس النمط التشغيلي المعتمد.
-      - الالتزام بالقاعدة: w-full space-y-4 بدون main/min-h-screen/max-w.
-      - عدم عرض أي مسارات أو عبارات تقنية داخل واجهة المستخدم.
-      - إخفاء الأزرار غير المصرح بها بدل تعطيلها.
-      - استخدام Excel HTML Workbook بدل CSV أو XLSX.
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Real API:
+      GET  /api/treasury/accounts/
+      POST /api/treasury/transactions/create/
+      fallback POST /api/treasury/transactions/
+   ✅ Create/save/confirm primary buttons are black
+   ✅ Secondary actions are outline
+   ✅ Payment voucher form
+   ✅ Unsaved changes protection
+   ✅ Form validation
+   ✅ Skeleton / Error / Empty states
+   ✅ sonner
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
-  Banknote,
-  Columns3,
-  Download,
-  Eye,
-  Filter,
+  ArrowRight,
+  CheckCircle2,
+  CreditCard,
+  FileText,
   Loader2,
-  PlusCircle,
-  Printer,
-  RefreshCcw,
-  Search,
+  ReceiptText,
+  RefreshCw,
+  RotateCcw,
+  Save,
   ShieldCheck,
-  Wallet,
-  XCircle,
+  TriangleAlert,
+  WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type PaymentStatus = "DRAFT" | "CONFIRMED" | "CANCELLED" | "UNKNOWN";
-type StatusFilter = "ALL" | PaymentStatus;
-type AccountFilter = "ALL" | string;
-
-type SortKey =
-  | "transaction_date"
-  | "transaction_number"
-  | "status"
-  | "amount"
-  | "account_name"
-  | "created_at";
-
-type SortDirection = "asc" | "desc";
-
-type TreasuryAccountOption = {
-  id: string;
-  name: string;
-  code: string;
-};
-
-type PaymentVoucherRow = {
-  id: string;
-  transaction_number: string;
-  status: PaymentStatus;
-  amount: number;
-  currency: string;
-  transaction_date: string;
-  account_id: string;
-  account_name: string;
-  account_code: string;
-  source_reference: string;
-  description: string;
-  is_treasury_posted: boolean;
-  is_accounting_posted: boolean;
-  created_at: string;
-};
-
-type PaymentSummary = {
-  total_payments: number;
-  confirmed_payments: number;
-  draft_payments: number;
-  cancelled_payments: number;
-  total_amount: number;
-  treasury_posted_count: number;
-  accounting_posted_count: number;
-  unposted_count: number;
-};
-
-type ApiEnvelope<T> = {
+type ApiResponse = {
   ok?: boolean;
   success?: boolean;
+  id?: string | number;
+  transaction_id?: string | number;
+  data?: unknown;
+  result?: unknown;
+  item?: unknown;
   message?: string;
   detail?: string;
   error?: string;
-  data?: T;
+  errors?: unknown;
   results?: unknown[];
   items?: unknown[];
   rows?: unknown[];
-  transactions?: unknown[];
-  accounts?: unknown[];
-  summary?: Partial<PaymentSummary>;
 };
 
-type VisibleColumns = {
-  date: boolean;
-  number: boolean;
-  status: boolean;
-  account: boolean;
-  amount: boolean;
-  reference: boolean;
-  posting: boolean;
-  description: boolean;
-  actions: boolean;
+type TreasuryAccount = {
+  id: string;
+  name: string;
+  code: string;
+  account_type: string;
+  account_type_label: string;
+  current_balance: number;
+  currency: string;
+  status: string;
+  is_default: boolean;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-const PAGE_SIZE = 14;
+type SubmitMode = "draft" | "confirmed";
 
-const DEFAULT_COLUMNS: VisibleColumns = {
-  date: true,
-  number: true,
-  status: true,
-  account: true,
-  amount: true,
-  reference: true,
-  posting: true,
-  description: true,
-  actions: true,
+type FormState = {
+  treasury_account_id: string;
+  transaction_date: string;
+  amount: string;
+  fees_amount: string;
+  party_name: string;
+  reference: string;
+  source_number: string;
+  description: string;
+  notes: string;
 };
 
-const DEFAULT_SUMMARY: PaymentSummary = {
-  total_payments: 0,
-  confirmed_payments: 0,
-  draft_payments: 0,
-  cancelled_payments: 0,
-  total_amount: 0,
-  treasury_posted_count: 0,
-  accounting_posted_count: 0,
-  unposted_count: 0,
+type FormErrors = Partial<Record<keyof FormState, string>>;
+
+const API = {
+  accounts: "/api/treasury/accounts/",
+  create: "/api/treasury/transactions/create/",
+  transactions: "/api/treasury/transactions/",
 };
 
-/* ============================================================
-   Locale / API
-============================================================ */
+const INITIAL_FORM: FormState = {
+  treasury_account_id: "",
+  transaction_date: new Date().toISOString().slice(0, 10),
+  amount: "",
+  fees_amount: "0",
+  party_name: "",
+  reference: "",
+  source_number: "",
+  description: "",
+  notes: "",
+};
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+const translations = {
+  ar: {
+    title: "إنشاء سند صرف",
+    subtitle: "تسجيل سند صرف جديد داخل الخزينة مع الحساب والمبلغ والطرف والمرجع.",
+    back: "سندات الخزينة",
+    treasury: "الخزينة",
+    transactions: "حركات الخزينة",
+    refresh: "تحديث الحسابات",
+    clear: "مسح النموذج",
+    saveDraft: "حفظ كمسودة",
+    saveConfirmed: "حفظ وتأكيد",
+    saving: "جاري الحفظ...",
 
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+    voucherData: "بيانات سند الصرف",
+    voucherDataDesc: "حدد الحساب والتاريخ والمبلغ الأساسي للسند.",
+    financialData: "البيانات المالية",
+    financialDataDesc: "المبلغ والرسوم والصافي المتوقع.",
+    referenceData: "الطرف والمرجع",
+    referenceDataDesc: "أضف بيانات الطرف والمرجع والوصف عند الحاجة.",
+    summary: "ملخص السند",
+    summaryDesc: "راجع بيانات سند الصرف قبل الحفظ.",
 
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
+    account: "حساب الخزينة",
+    chooseAccount: "اختر حساب الخزينة",
+    transactionDate: "تاريخ السند",
+    amount: "المبلغ",
+    feesAmount: "الرسوم",
+    netAmount: "الصافي",
+    partyName: "الطرف",
+    reference: "مرجع خارجي",
+    sourceNumber: "رقم المصدر",
+    description: "الوصف",
+    notes: "ملاحظات",
+    currentBalance: "الرصيد الحالي",
+    accountType: "نوع الحساب",
+    paymentVoucher: "سند صرف",
+    outgoing: "صادر من الخزينة",
+    draft: "مسودة",
+    confirmed: "مؤكد",
+    optional: "اختياري",
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+    required: "هذا الحقل مطلوب.",
+    invalidAmount: "أدخل مبلغًا صحيحًا أكبر من صفر.",
+    invalidFees: "أدخل رسومًا صحيحة أو اتركها صفر.",
+    dateRequired: "تاريخ السند مطلوب.",
+    accountRequired: "حساب الخزينة مطلوب.",
+    confirmClear: "هل تريد مسح النموذج؟",
+    leaveWarning: "لديك تغييرات غير محفوظة.",
+    createdDraft: "تم حفظ سند الصرف كمسودة.",
+    createdConfirmed: "تم إنشاء وتأكيد سند الصرف بنجاح.",
+    submitError: "تعذر حفظ سند الصرف.",
+    errorTitle: "تعذر تجهيز صفحة سند الصرف",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    noAccountsTitle: "لا توجد حسابات خزينة",
+    noAccountsDesc: "أضف صندوقًا أو حسابًا بنكيًا قبل إنشاء سند صرف.",
+    tryAgain: "إعادة المحاولة",
+    notAvailable: "—",
+    sar: "ر.س",
+  },
+  en: {
+    title: "Create Payment Voucher",
+    subtitle: "Record a new treasury payment voucher with account, amount, party, and reference.",
+    back: "Treasury vouchers",
+    treasury: "Treasury",
+    transactions: "Treasury transactions",
+    refresh: "Refresh accounts",
+    clear: "Clear form",
+    saveDraft: "Save draft",
+    saveConfirmed: "Save & confirm",
+    saving: "Saving...",
+
+    voucherData: "Payment voucher data",
+    voucherDataDesc: "Select the account, date, and main voucher amount.",
+    financialData: "Financial data",
+    financialDataDesc: "Amount, fees, and expected net amount.",
+    referenceData: "Party and reference",
+    referenceDataDesc: "Add party, reference, and description when needed.",
+    summary: "Voucher summary",
+    summaryDesc: "Review the payment voucher data before saving.",
+
+    account: "Treasury account",
+    chooseAccount: "Choose treasury account",
+    transactionDate: "Voucher date",
+    amount: "Amount",
+    feesAmount: "Fees",
+    netAmount: "Net amount",
+    partyName: "Party",
+    reference: "External reference",
+    sourceNumber: "Source number",
+    description: "Description",
+    notes: "Notes",
+    currentBalance: "Current balance",
+    accountType: "Account type",
+    paymentVoucher: "Payment voucher",
+    outgoing: "Outgoing from treasury",
+    draft: "Draft",
+    confirmed: "Confirmed",
+    optional: "Optional",
+
+    required: "This field is required.",
+    invalidAmount: "Enter a valid amount greater than zero.",
+    invalidFees: "Enter valid fees or keep it zero.",
+    dateRequired: "Voucher date is required.",
+    accountRequired: "Treasury account is required.",
+    confirmClear: "Clear the form?",
+    leaveWarning: "You have unsaved changes.",
+    createdDraft: "Payment voucher saved as draft.",
+    createdConfirmed: "Payment voucher created and confirmed successfully.",
+    submitError: "Unable to save payment voucher.",
+    errorTitle: "Unable to prepare payment voucher page",
+    errorDesc: "Make sure the backend is running, then try again.",
+    noAccountsTitle: "No treasury accounts",
+    noAccountsDesc: "Add a cashbox or bank account before creating a payment voucher.",
+    tryAgain: "Try again",
+    notAvailable: "—",
+    sar: "SAR",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
 }
 
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
 
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  const roles = getAuthRoles(authValue);
+  return fallback;
+}
 
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
-    }
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (["1", "true", "yes", "on", "active", "default"].includes(normalized)) return true;
+    if (["0", "false", "no", "off", "inactive"].includes(normalized)) return false;
   }
 
-  return true;
+  return fallback;
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "سندات الصرف" : "Payment Vouchers",
-    subtitle: isArabic
-      ? "مراجعة سندات الصرف المسجلة في الخزينة مع الحساب والمبلغ وحالة الترحيل."
-      : "Review treasury payment vouchers with account, amount, and posting status.",
-
-    back: isArabic ? "سندات الخزينة" : "Vouchers",
-    treasury: isArabic ? "الخزينة" : "Treasury",
-    transactions: isArabic ? "الحركات المالية" : "Transactions",
-    accounts: isArabic ? "حسابات الخزينة" : "Treasury Accounts",
-    create: isArabic ? "إنشاء سند صرف" : "Create Payment",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-
-    tableTitle: isArabic ? "قائمة سندات الصرف" : "Payment Vouchers List",
-    tableDesc: isArabic
-      ? "كل سندات الصرف المسجلة في الخزينة."
-      : "All payment vouchers recorded in treasury.",
-
-    totalPayments: isArabic ? "إجمالي سندات الصرف" : "Total Payments",
-    confirmedPayments: isArabic ? "سندات مؤكدة" : "Confirmed Payments",
-    draftPayments: isArabic ? "مسودات" : "Drafts",
-    cancelledPayments: isArabic ? "ملغاة" : "Cancelled",
-    totalAmount: isArabic ? "إجمالي المصروفات" : "Total Paid",
-    treasuryPosted: isArabic ? "مرحّل خزينة" : "Treasury Posted",
-    accountingPosted: isArabic ? "مرحّل محاسبيًا" : "Accounting Posted",
-    unposted: isArabic ? "غير مرحّل" : "Unposted",
-
-    searchPlaceholder: isArabic
-      ? "ابحث برقم السند أو الحساب أو المرجع أو الوصف..."
-      : "Search by voucher number, account, reference, or description...",
-
-    filters: isArabic ? "الفلاتر" : "Filters",
-    columns: isArabic ? "الأعمدة" : "Columns",
-    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
-
-    allStatuses: isArabic ? "كل الحالات" : "All Statuses",
-    allAccounts: isArabic ? "كل الحسابات" : "All Accounts",
-
-    payment: isArabic ? "سند صرف" : "Payment Voucher",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    draft: isArabic ? "مسودة" : "Draft",
-    confirmed: isArabic ? "مؤكد" : "Confirmed",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
-
-    posted: isArabic ? "مرحّل" : "Posted",
-    notPosted: isArabic ? "غير مرحّل" : "Not Posted",
-    accounting: isArabic ? "محاسبي" : "Accounting",
-
-    table: {
-      date: isArabic ? "التاريخ" : "Date",
-      number: isArabic ? "رقم سند الصرف" : "Payment No.",
-      status: isArabic ? "الحالة" : "Status",
-      account: isArabic ? "الحساب" : "Account",
-      amount: isArabic ? "المبلغ" : "Amount",
-      reference: isArabic ? "المرجع" : "Reference",
-      posting: isArabic ? "الترحيل" : "Posting",
-      description: isArabic ? "الوصف" : "Description",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    view: isArabic ? "عرض" : "View",
-
-    emptyTitle: isArabic ? "لا توجد سندات صرف" : "No payment vouchers",
-    emptyText: isArabic
-      ? "ستظهر سندات الصرف هنا بعد تسجيلها."
-      : "Payment vouchers will appear here after they are recorded.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير البحث أو الفلاتر."
-      : "Try changing the search or filters.",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض سندات الصرف" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض سندات الصرف. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view payment vouchers. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل سندات الصرف."
-      : "Unable to load payment vouchers.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث سندات الصرف بنجاح."
-      : "Payment vouchers refreshed successfully.",
-
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    previous: isArabic ? "السابق" : "Previous",
-    next: isArabic ? "التالي" : "Next",
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
-}
-
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function formatDate(value: string, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-function escapeHtml(value: string | number) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const query = params?.toString();
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
+}
 
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
 
-  for (const container of [
-    "account",
-    "treasury_account",
-    "cashbox",
-    "bank",
-    "transaction",
-    "treasury_transaction",
-    "voucher",
-    "item",
-    "data",
-  ]) {
-    const nested = obj[container];
+  const match = document.cookie.split("; ").find((row) => row.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.split("=")[1] || "") : "";
+}
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+async function fetchJson<T>(
+  url: string,
+  options: RequestInit & { signal?: AbortSignal } = {},
+): Promise<T> {
+  const response = await fetch(url, {
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    ...options,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options.method && options.method !== "GET"
+        ? {
+            "Content-Type": "application/json",
+            "X-CSRFToken": getCookie("csrftoken"),
+          }
+        : {}),
+      ...(options.headers || {}),
+    },
+  });
 
-      if (value !== undefined && value !== null && value !== "") return value;
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      payload?.errors ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+
+  return (payload || {}) as T;
 }
 
-function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
+function extractData(payload: ApiResponse | null) {
+  return asRecord(payload?.data);
+}
+
+function extractItems(payload: ApiResponse | null) {
   if (!payload) return [];
 
-  const data = asDict(payload.data);
-  const directValue = (payload as Dict)[key];
-
-  if (Array.isArray(directValue)) return directValue;
   if (Array.isArray(payload.results)) return payload.results;
   if (Array.isArray(payload.items)) return payload.items;
   if (Array.isArray(payload.rows)) return payload.rows;
 
-  if (Array.isArray(data[key])) return data[key] as unknown[];
-  if (Array.isArray(data.results)) return data.results as unknown[];
-  if (Array.isArray(data.items)) return data.items as unknown[];
-  if (Array.isArray(data.rows)) return data.rows as unknown[];
+  const data = extractData(payload);
 
-  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.rows)) return data.rows;
+  if (Array.isArray(data.accounts)) return data.accounts;
 
   return [];
 }
 
-function extractSummary(payload: ApiEnvelope<unknown> | null) {
-  if (!payload) return {};
-
-  const data = asDict(payload.data);
+function normalizeAccount(value: unknown): TreasuryAccount {
+  const item = asRecord(value);
 
   return {
-    ...asDict(payload.summary),
-    ...asDict(data.summary),
-    ...asDict(data.totals),
-    ...asDict(data),
-  } as Partial<PaymentSummary>;
+    id: normalizeText(item.id || item.pk || item.uuid),
+    name: normalizeText(item.name || item.title),
+    code: normalizeText(item.code || item.number),
+    account_type: normalizeText(item.account_type || item.type),
+    account_type_label: normalizeText(item.account_type_label || item.type_label),
+    current_balance: toNumber(item.current_balance ?? item.balance),
+    currency: normalizeText(item.currency || "SAR"),
+    status: normalizeText(item.status || "active"),
+    is_default: toBoolean(item.is_default),
+  };
 }
 
-function normalizeTransactionType(value: unknown): string {
-  return String(value || "").toUpperCase();
-}
+function getCreatedId(payload: ApiResponse) {
+  const data = asRecord(payload.data);
+  const result = asRecord(payload.result);
+  const item = asRecord(payload.item);
 
-function isPaymentRow(item: unknown) {
-  const obj = asDict(item);
-  const type = normalizeTransactionType(
-    getNestedValue(obj, ["transaction_type", "type", "kind", "voucher_type"]),
+  return normalizeText(
+    payload.id ||
+      payload.transaction_id ||
+      data.id ||
+      data.transaction_id ||
+      result.id ||
+      result.transaction_id ||
+      item.id ||
+      item.transaction_id,
   );
-
-  return [
-    "PAYMENT",
-    "EXPENSE",
-    "PAY",
-    "CASH_OUT",
-    "PAYMENT_VOUCHER",
-    "PAYMENTVOUCHER",
-  ].includes(type);
 }
 
-function normalizeStatus(value: unknown): PaymentStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["DRAFT", "PENDING"].includes(clean)) return "DRAFT";
-  if (["CONFIRMED", "POSTED", "APPROVED", "TRUE"].includes(clean)) {
-    return "CONFIRMED";
-  }
-  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
-
-  if (typeof value === "boolean") return value ? "CONFIRMED" : "DRAFT";
-
-  return "UNKNOWN";
-}
-
-function normalizeAccount(item: unknown): TreasuryAccountOption {
-  const obj = asDict(item);
-
-  return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || ""),
-    name: String(getNestedValue(obj, ["name", "title", "label"]) || "-"),
-    code: String(getNestedValue(obj, ["code", "account_code", "number"]) || "-"),
-  };
-}
-
-function normalizePayment(item: unknown, index: number): PaymentVoucherRow {
-  const obj = asDict(item);
-  const accountObj = asDict(obj.account || obj.treasury_account);
-
-  const accountId = String(
-    getNestedValue(obj, [
-      "account_id",
-      "treasury_account_id",
-      "cashbox_id",
-      "bank_id",
-    ]) ||
-      accountObj.id ||
-      accountObj.uuid ||
-      "",
-  );
-
-  const accountName = String(
-    accountObj.name ||
-      accountObj.title ||
-      getNestedValue(obj, [
-        "account_name",
-        "treasury_account_name",
-        "cashbox_name",
-        "bank_name",
-      ]) ||
-      "",
-  );
-
-  const accountCode = String(
-    accountObj.code ||
-      accountObj.account_code ||
-      getNestedValue(obj, ["account_code", "treasury_account_code"]) ||
-      "",
-  );
-
-  return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    transaction_number: String(
-      getNestedValue(obj, [
-        "transaction_number",
-        "voucher_number",
-        "number",
-        "code",
-        "reference",
-      ]) || "-",
-    ),
-    status: normalizeStatus(getNestedValue(obj, ["status", "state", "is_confirmed"])),
-    amount: toNumber(getNestedValue(obj, ["amount", "total_amount", "value"])),
-    currency: String(getNestedValue(obj, ["currency"]) || "SAR"),
-    transaction_date: String(
-      getNestedValue(obj, ["transaction_date", "date", "created_at"]) || "",
-    ),
-    account_id: accountId,
-    account_name: accountName,
-    account_code: accountCode,
-    source_reference: String(
-      getNestedValue(obj, [
-        "source_reference",
-        "external_reference",
-        "payment_reference",
-        "accounting_reference",
-        "ref",
-      ]) || "",
-    ),
-    description: String(getNestedValue(obj, ["description", "notes", "memo"]) || ""),
-    is_treasury_posted: Boolean(
-      getNestedValue(obj, ["is_treasury_posted", "treasury_posted"]),
-    ),
-    is_accounting_posted: Boolean(
-      getNestedValue(obj, ["is_accounting_posted", "accounting_posted"]),
-    ),
-    created_at: String(getNestedValue(obj, ["created_at", "created"]) || ""),
-  };
-}
-
-function buildSummary(
-  rows: PaymentVoucherRow[],
-  apiSummary?: Partial<PaymentSummary>,
-): PaymentSummary {
-  const fallback: PaymentSummary = {
-    total_payments: rows.length,
-    confirmed_payments: rows.filter((item) => item.status === "CONFIRMED").length,
-    draft_payments: rows.filter((item) => item.status === "DRAFT").length,
-    cancelled_payments: rows.filter((item) => item.status === "CANCELLED").length,
-    total_amount: rows.reduce((sum, item) => sum + item.amount, 0),
-    treasury_posted_count: rows.filter((item) => item.is_treasury_posted).length,
-    accounting_posted_count: rows.filter((item) => item.is_accounting_posted)
-      .length,
-    unposted_count: rows.filter(
-      (item) => !item.is_treasury_posted || !item.is_accounting_posted,
-    ).length,
-  };
-
-  const api = apiSummary as Dict;
-
-  return {
-    total_payments:
-      toNumber(apiSummary?.total_payments) ||
-      toNumber(api.payments_count) ||
-      fallback.total_payments,
-    confirmed_payments:
-      toNumber(apiSummary?.confirmed_payments) || fallback.confirmed_payments,
-    draft_payments:
-      toNumber(apiSummary?.draft_payments) || fallback.draft_payments,
-    cancelled_payments:
-      toNumber(apiSummary?.cancelled_payments) || fallback.cancelled_payments,
-    total_amount:
-      toNumber(apiSummary?.total_amount) ||
-      toNumber(api.payments_total) ||
-      toNumber(api.payment_total) ||
-      fallback.total_amount,
-    treasury_posted_count:
-      toNumber(apiSummary?.treasury_posted_count) ||
-      fallback.treasury_posted_count,
-    accounting_posted_count:
-      toNumber(apiSummary?.accounting_posted_count) ||
-      fallback.accounting_posted_count,
-    unposted_count: toNumber(apiSummary?.unposted_count) || fallback.unposted_count,
-  };
-}
-
-function statusLabel(status: PaymentStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<PaymentStatus, string> = {
-    DRAFT: t.draft,
-    CONFIRMED: t.confirmed,
-    CANCELLED: t.cancelled,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function statusBadge(status: PaymentStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
-
-  if (status === "CONFIRMED") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "DRAFT") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "CANCELLED") {
-    return (
-      <Badge variant="secondary" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
+function MoneyValue({ value, label }: { value: number; label: string }) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
-  );
-}
-
-function sortValue(row: PaymentVoucherRow, key: SortKey): string | number {
-  if (key === "amount") return row.amount;
-
-  return String(row[key] || "");
-}
-
-function isValidId(value: unknown) {
-  const id = String(value || "").trim();
-
-  return id && id !== "-" && id !== "undefined" && id !== "null";
-}
-
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
-  );
-}
-
-function MoneyText({ value }: { value: unknown }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <div className="flex items-center gap-1 text-sm font-semibold tabular-nums">
       <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-/* ============================================================
-   Skeleton
-============================================================ */
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function KpiSkeleton() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <SkeletonLine className="h-8 w-28" />
-            <SkeletonLine className="mt-3 h-4 w-24" />
-          </CardContent>
-        </Card>
-      ))}
+      <img src="/currency/sar.svg" alt={label} className="h-3.5 w-3.5" />
     </div>
   );
 }
 
-function TableSkeleton({ columnsCount }: { columnsCount: number }) {
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <p className="mt-1 text-xs font-medium text-red-600">{message}</p>;
+}
+
+function KpiCard({
+  title,
+  value,
+  trend,
+  icon: Icon,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
   return (
-    <>
-      {Array.from({ length: 7 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 1
-                    ? "h-8 w-44 rounded-lg"
-                    : "h-4 w-24 rounded-lg"
-                }
-              />
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </>
-  );
-}
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-/* ============================================================
-   Export / Print
-============================================================ */
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
 
-function downloadExcel({
-  filename,
-  worksheetName,
-  title,
-  locale,
-  summary,
-  rows,
-}: {
-  filename: string;
-  worksheetName: string;
-  title: string;
-  locale: AppLocale;
-  summary: PaymentSummary;
-  rows: PaymentVoucherRow[];
-}) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const t = dictionary(locale);
-
-  const rowsHtml = rows
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(formatDate(item.transaction_date, locale))}</td>
-          <td>${escapeHtml(item.transaction_number)}</td>
-          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(item.account_name || "-")}</td>
-          <td>${escapeHtml(item.account_code || "-")}</td>
-          <td>${escapeHtml(formatMoney(item.amount))}</td>
-          <td>${escapeHtml(item.source_reference || "-")}</td>
-          <td>${escapeHtml(item.is_treasury_posted ? t.posted : t.notPosted)}</td>
-          <td>${escapeHtml(item.is_accounting_posted ? t.posted : t.notPosted)}</td>
-          <td>${escapeHtml(item.description || "-")}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${isArabic ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; color: #000; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-          .summary-value { font-weight: 700; }
-        </style>
-      </head>
-
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="10">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="10"></td></tr>
-          <tr><td class="section" colspan="10">${escapeHtml(title)}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.generatedAt)}</td><td class="summary-value" colspan="9">${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalPayments)}</td><td class="summary-value" colspan="9">${escapeHtml(formatNumber(summary.total_payments))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalAmount)}</td><td class="summary-value" colspan="9">${escapeHtml(formatMoney(summary.total_amount))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.confirmedPayments)}</td><td class="summary-value" colspan="9">${escapeHtml(formatNumber(summary.confirmed_payments))}</td></tr>
-
-          <tr><td colspan="10"></td></tr>
-          <tr>
-            <th>${escapeHtml(t.table.date)}</th>
-            <th>${escapeHtml(t.table.number)}</th>
-            <th>${escapeHtml(t.table.status)}</th>
-            <th>${escapeHtml(t.table.account)}</th>
-            <th>${escapeHtml(isArabic ? "كود الحساب" : "Account Code")}</th>
-            <th>${escapeHtml(t.table.amount)}</th>
-            <th>${escapeHtml(t.table.reference)}</th>
-            <th>${escapeHtml(t.treasuryPosted)}</th>
-            <th>${escapeHtml(t.accountingPosted)}</th>
-            <th>${escapeHtml(t.table.description)}</th>
-          </tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  summary,
-  rows,
-}: {
-  locale: AppLocale;
-  title: string;
-  summary: PaymentSummary;
-  rows: PaymentVoucherRow[];
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-  const now = new Date().toLocaleString("en-US");
-
-  const tableRows = rows
-    .map(
-      (item, index) => `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(formatDate(item.transaction_date, locale))}</td>
-          <td>${escapeHtml(item.transaction_number)}</td>
-          <td>${escapeHtml(statusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(item.account_name || "-")}</td>
-          <td>${escapeHtml(formatMoney(item.amount))}</td>
-          <td>${escapeHtml(item.source_reference || "-")}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .print-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 18px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .summary-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .summary-card span {
-            display: block;
-            color: #6b7280;
-            font-size: 11px;
-            margin-bottom: 5px;
-          }
-          .summary-card strong { font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; }
-          th { background: #f3f4f6; color: #111827; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 9px 8px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          tr:nth-child(even) td { background: #fafafa; }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-
-      <body>
-        <div class="print-header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(rows.length)}</div>
-            </div>
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
           </div>
-          <div class="badge">Primey Care</div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-red-500/30 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
+          >
+            {trend}
+          </Badge>
         </div>
-
-        <div class="summary-grid">
-          <div class="summary-card"><span>${escapeHtml(t.totalPayments)}</span><strong>${formatNumber(summary.total_payments)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.confirmedPayments)}</span><strong>${formatNumber(summary.confirmed_payments)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.totalAmount)}</span><strong>${formatMoney(summary.total_amount)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.unposted)}</span><strong>${formatNumber(summary.unposted_count)}</strong></div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>${escapeHtml(t.table.date)}</th>
-              <th>${escapeHtml(t.table.number)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-              <th>${escapeHtml(t.table.account)}</th>
-              <th>${escapeHtml(t.table.amount)}</th>
-              <th>${escapeHtml(t.table.reference)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              tableRows ||
-              `<tr><td colspan="7" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+      </CardHeader>
+    </Card>
+  );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function PageSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-96" />
+        </div>
 
-export default function TreasuryPaymentVouchersPage() {
-  const auth = useAuth() as unknown;
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-32" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [rows, setRows] = useState<PaymentVoucherRow[]>([]);
-  const [accounts, setAccounts] = useState<TreasuryAccountOption[]>([]);
-  const [summary, setSummary] = useState<PaymentSummary>(DEFAULT_SUMMARY);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+      <div className="grid gap-3 md:grid-cols-3">
+        <Skeleton className="h-28 rounded-lg" />
+        <Skeleton className="h-28 rounded-lg" />
+        <Skeleton className="h-28 rounded-lg" />
+      </div>
 
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-  const [accountFilter, setAccountFilter] = useState<AccountFilter>("ALL");
-  const [sortKey, setSortKey] = useState<SortKey>("transaction_date");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [page, setPage] = useState(1);
-  const [visibleColumns, setVisibleColumns] =
-    useState<VisibleColumns>(DEFAULT_COLUMNS);
-
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
-
-  const canView = hasSafePermission(
-    auth,
-    [
-      "treasury.view",
-      "treasury.transactions.view",
-      "treasury.vouchers.view",
-      "treasury.payments.view",
-    ],
-    "view",
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Skeleton className="h-[520px] rounded-lg" />
+        <Skeleton className="h-[520px] rounded-lg" />
+      </div>
+    </div>
   );
+}
 
-  const canCreate = hasSafePermission(
-    auth,
-    [
-      "treasury.create",
-      "treasury.transactions.create",
-      "treasury.vouchers.create",
-      "treasury.payments.create",
-      "treasury.manage",
-    ],
-    "action",
-  );
+export default function TreasuryPaymentVoucherPage() {
+  const router = useRouter();
 
-  const canExport = hasSafePermission(
-    auth,
-    ["treasury.export", "treasury.reports.export", "reports.export"],
-    "action",
-  );
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [accounts, setAccounts] = React.useState<TreasuryAccount[]>([]);
+  const [form, setForm] = React.useState<FormState>(INITIAL_FORM);
+  const [errors, setErrors] = React.useState<FormErrors>({});
+  const [dirty, setDirty] = React.useState(false);
 
-  const canPrint = hasSafePermission(
-    auth,
-    ["treasury.print", "treasury.reports.print", "reports.print"],
-    "action",
-  );
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [loadError, setLoadError] = React.useState("");
+  const [submitError, setSubmitError] = React.useState("");
+  const [savingMode, setSavingMode] = React.useState<SubmitMode | null>(null);
 
-  const canViewDetails = hasSafePermission(
-    auth,
-    ["treasury.view", "treasury.transactions.view"],
-    "view",
-  );
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const filteredRows = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
+  const amount = toNumber(form.amount);
+  const fees = toNumber(form.fees_amount);
+  const netAmount = Math.max(0, amount + fees);
 
-    const filtered = rows.filter((item) => {
-      const matchesStatus =
-        statusFilter === "ALL" ? true : item.status === statusFilter;
+  const selectedAccount = React.useMemo(() => {
+    return accounts.find((account) => account.id === form.treasury_account_id) || null;
+  }, [accounts, form.treasury_account_id]);
 
-      const matchesAccount =
-        accountFilter === "ALL"
-          ? true
-          : item.account_id === accountFilter || item.account_code === accountFilter;
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            item.transaction_number,
-            item.account_name,
-            item.account_code,
-            item.source_reference,
-            item.description,
-            statusLabel(item.status, locale),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
-
-      return matchesStatus && matchesAccount && matchesQuery;
-    });
-
-    return [...filtered].sort((a, b) => {
-      const first = sortValue(a, sortKey);
-      const second = sortValue(b, sortKey);
-
-      if (typeof first === "number" && typeof second === "number") {
-        return sortDirection === "asc" ? first - second : second - first;
-      }
-
-      return sortDirection === "asc"
-        ? String(first).localeCompare(String(second))
-        : String(second).localeCompare(String(first));
-    });
-  }, [
-    accountFilter,
-    locale,
-    query,
-    rows,
-    sortDirection,
-    sortKey,
-    statusFilter,
-  ]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
-
-  const paginatedRows = useMemo(() => {
-    const safePage = Math.min(page, totalPages);
-    const startIndex = (safePage - 1) * PAGE_SIZE;
-
-    return filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
-  }, [filteredRows, page, totalPages]);
-
-  const hasSearchOrFilter =
-    query.trim().length > 0 || statusFilter !== "ALL" || accountFilter !== "ALL";
-
-  const visibleColumnCount = Object.entries(visibleColumns).filter(
-    ([key, value]) => value && (key !== "actions" || canViewDetails),
-  ).length;
-
-  const statusOptions = useMemo(
-    () => [
-      { value: "ALL" as StatusFilter, label: t.allStatuses, count: rows.length },
-      {
-        value: "DRAFT" as StatusFilter,
-        label: t.draft,
-        count: rows.filter((item) => item.status === "DRAFT").length,
-      },
-      {
-        value: "CONFIRMED" as StatusFilter,
-        label: t.confirmed,
-        count: rows.filter((item) => item.status === "CONFIRMED").length,
-      },
-      {
-        value: "CANCELLED" as StatusFilter,
-        label: t.cancelled,
-        count: rows.filter((item) => item.status === "CANCELLED").length,
-      },
-    ],
-    [rows, t],
-  );
-
-  const accountOptions = useMemo(() => {
-    const fromRows = rows
-      .filter((item) => item.account_id || item.account_code || item.account_name)
-      .map((item) => ({
-        id: item.account_id || item.account_code || item.account_name,
-        name: item.account_name || item.account_code || "-",
-        code: item.account_code || "",
-      }));
-
-    const merged = [...accounts, ...fromRows];
-
-    return Array.from(
-      new Map(
-        merged
-          .filter((item) => item.id || item.name)
-          .map((item) => [item.id || item.name, item]),
-      ).values(),
-    );
-  }, [accounts, rows]);
-
-  const columnOptions: Array<{ key: keyof VisibleColumns; label: string }> = [
-    { key: "date", label: t.table.date },
-    { key: "number", label: t.table.number },
-    { key: "status", label: t.table.status },
-    { key: "account", label: t.table.account },
-    { key: "amount", label: t.table.amount },
-    { key: "reference", label: t.table.reference },
-    { key: "posting", label: t.table.posting },
-    { key: "description", label: t.table.description },
-    { key: "actions", label: t.table.action },
-  ];
-
-  const loadPayments = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setRows([]);
-        setAccounts([]);
-        setSummary(DEFAULT_SUMMARY);
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        setIsLoading(true);
-        setErrorMessage("");
-
-        const [transactionsResponse, accountsResponse] = await Promise.allSettled([
-          fetch(
-            apiUrl(
-              "/api/treasury/transactions/?transaction_type=PAYMENT&page_size=500",
-            ),
-            {
-              method: "GET",
-              credentials: "include",
-              cache: "no-store",
-              headers: { Accept: "application/json" },
-            },
-          ),
-          fetch(apiUrl("/api/treasury/accounts/?page_size=500"), {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-          }),
-        ]);
-
-        async function readJson(result: PromiseSettledResult<Response>) {
-          if (result.status !== "fulfilled") return null;
-
-          const response = result.value;
-          const payload = (await response.json().catch(() => null)) as
-            | ApiEnvelope<unknown>
-            | null;
-
-          if ([400, 404, 405].includes(response.status)) return null;
-
-          if (
-            !response.ok ||
-            payload?.ok === false ||
-            payload?.success === false
-          ) {
-            throw new Error(
-              payload?.message ||
-                payload?.detail ||
-                payload?.error ||
-                `HTTP ${response.status}`,
-            );
-          }
-
-          return payload;
-        }
-
-        const transactionsPayload = await readJson(transactionsResponse);
-        const accountsPayload = await readJson(accountsResponse);
-
-        const normalizedRows = extractRows(transactionsPayload, "transactions")
-          .filter(isPaymentRow)
-          .map(normalizePayment)
-          .filter((item) => item.id || item.transaction_number);
-
-        const normalizedAccounts = extractRows(accountsPayload, "accounts")
-          .map(normalizeAccount)
-          .filter((item) => item.id || item.name);
-
-        setRows(normalizedRows);
-        setAccounts(normalizedAccounts);
-        setSummary(buildSummary(normalizedRows, extractSummary(transactionsPayload)));
-        setPage(1);
-
-        if (showToast) toast.success(t.loadSuccess);
-      } catch (error) {
-        console.error("Treasury payment vouchers load error:", error);
-        setRows([]);
-        setAccounts([]);
-        setSummary(DEFAULT_SUMMARY);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [canView, t.loadError, t.loadSuccess],
-  );
-
-  function clearFilters() {
-    setQuery("");
-    setStatusFilter("ALL");
-    setAccountFilter("ALL");
-    setPage(1);
-  }
-
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
-      return;
-    }
-
-    setSortKey(key);
-    setSortDirection("asc");
-  }
-
-  function exportExcel() {
-    if (!canExport) return;
-
-    if (filteredRows.length === 0) {
-      toast.error(t.exportEmpty);
-      return;
-    }
-
-    downloadExcel({
-      filename: `primey-care-treasury-payment-vouchers-${new Date()
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "سندات الصرف" : "Payments",
-      title: t.title,
-      locale,
-      summary,
-      rows: filteredRows,
-    });
-
-    toast.success(t.exportSuccess);
-  }
-
-  function printPage() {
-    if (!canPrint) return;
-
-    if (filteredRows.length === 0) {
-      toast.error(t.exportEmpty);
-      return;
-    }
-
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
-
-    if (!printWindow) {
-      toast.error(t.printError);
-      return;
-    }
-
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        summary,
-        rows: filteredRows,
-      }),
-    );
-    printWindow.document.close();
-
-    toast.success(t.printSuccess);
-  }
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
       setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
     };
 
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
+    applyLocale();
 
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
     };
   }, []);
 
-  useEffect(() => {
-    if (authResolving) return;
-    loadPayments(false);
-  }, [authResolving, loadPayments]);
+  React.useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty || savingMode) return;
 
-  useEffect(() => {
-    setPage(1);
-  }, [query, statusFilter, accountFilter]);
+      event.preventDefault();
+      event.returnValue = t.leaveWarning;
+    };
 
-  if (!authResolving && !canView) {
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [dirty, savingMode, t.leaveWarning]);
+
+  const loadAccounts = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
+
+      try {
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setLoadError("");
+
+        const params = new URLSearchParams({
+          page: "1",
+          page_size: "500",
+          ordering: "account_type",
+        });
+
+        const payload = await fetchJson<ApiResponse>(makeApiUrl(API.accounts, params), {
+          method: "GET",
+          signal: controller.signal,
+        });
+
+        const nextAccounts = extractItems(payload)
+          .map(normalizeAccount)
+          .filter((account) => {
+            if (!account.id && !account.name && !account.code) return false;
+            return account.status !== "inactive" && account.status !== "archived";
+          });
+
+        setAccounts(nextAccounts);
+
+        setForm((current) => {
+          if (current.treasury_account_id || !nextAccounts.length) return current;
+
+          return {
+            ...current,
+            treasury_account_id:
+              nextAccounts.find((account) => account.is_default)?.id || nextAccounts[0].id,
+          };
+        });
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message ? caughtError.message : t.errorDesc;
+
+        setLoadError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+
+      return () => controller.abort();
+    },
+    [t.errorDesc],
+  );
+
+  React.useEffect(() => {
+    void loadAccounts();
+  }, [loadAccounts]);
+
+  function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((current) => ({ ...current, [key]: value }));
+    setErrors((current) => ({ ...current, [key]: undefined }));
+    setSubmitError("");
+    setDirty(true);
+  }
+
+  function validateForm() {
+    const nextErrors: FormErrors = {};
+
+    if (!form.treasury_account_id) nextErrors.treasury_account_id = t.accountRequired;
+    if (!form.transaction_date) nextErrors.transaction_date = t.dateRequired;
+    if (amount <= 0) nextErrors.amount = t.invalidAmount;
+    if (fees < 0) nextErrors.fees_amount = t.invalidFees;
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  function buildPayload(mode: SubmitMode) {
+    return {
+      transaction_type: "expense",
+      type: "expense",
+      voucher_type: "payment",
+      voucher_kind: "payment",
+      source: "treasury_payment",
+      treasury_account_id: form.treasury_account_id,
+      account_id: form.treasury_account_id,
+      transaction_date: form.transaction_date,
+      date: form.transaction_date,
+      amount,
+      fees_amount: fees,
+      net_amount: netAmount,
+      party_name: form.party_name.trim(),
+      reference: form.reference.trim(),
+      source_number: form.source_number.trim(),
+      description: form.description.trim() || t.paymentVoucher,
+      notes: form.notes.trim(),
+      status: mode,
+      confirm: mode === "confirmed",
+      should_confirm: mode === "confirmed",
+      balance_applied: mode === "confirmed",
+    };
+  }
+
+  async function submitForm(mode: SubmitMode) {
+    if (!validateForm()) {
+      toast.error(t.submitError);
+      return;
+    }
+
+    setSavingMode(mode);
+    setSubmitError("");
+
+    const payload = buildPayload(mode);
+
+    try {
+      let responsePayload: ApiResponse | null = null;
+
+      try {
+        responsePayload = await fetchJson<ApiResponse>(makeApiUrl(API.create), {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        responsePayload = await fetchJson<ApiResponse>(makeApiUrl(API.transactions), {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      const createdId = responsePayload ? getCreatedId(responsePayload) : "";
+
+      setDirty(false);
+      toast.success(mode === "confirmed" ? t.createdConfirmed : t.createdDraft);
+
+      if (createdId) {
+        router.push(`/system/treasury/transactions/${encodeURIComponent(createdId)}`);
+      } else {
+        router.push("/system/treasury/vouchers");
+      }
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message ? caughtError.message : t.submitError;
+
+      setSubmitError(message);
+      toast.error(t.submitError);
+    } finally {
+      setSavingMode(null);
+    }
+  }
+
+  function clearForm() {
+    if (dirty && !window.confirm(t.confirmClear)) return;
+
+    setForm({
+      ...INITIAL_FORM,
+      treasury_account_id:
+        accounts.find((account) => account.is_default)?.id || accounts[0]?.id || "",
+      transaction_date: new Date().toISOString().slice(0, 10),
+    });
+
+    setErrors({});
+    setSubmitError("");
+    setDirty(false);
+  }
+
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="w-full space-y-4" dir={dir}>
+        <PageSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/treasury/vouchers">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury/vouchers">
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
 
-          <Link href="/system/treasury">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <Wallet className="h-4 w-4" />
-              <span>{t.treasury}</span>
-            </Button>
-          </Link>
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury">
+              <WalletCards className="h-4 w-4" />
+              {t.treasury}
+            </Link>
+          </Button>
+
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury/transactions">
+              <ReceiptText className="h-4 w-4" />
+              {t.transactions}
+            </Link>
+          </Button>
 
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadPayments(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadAccounts({ silent: true })}
+            disabled={refreshing || Boolean(savingMode)}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
-
-          {canExport ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={
-                isLoading || filteredRows.length === 0 || Boolean(errorMessage)
-              }
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
-
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={
-                isLoading || filteredRows.length === 0 || Boolean(errorMessage)
-              }
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
-
-          {canCreate ? (
-            <Link href="/system/treasury/transactions/create">
-              <Button className="h-10 w-full rounded-xl sm:w-auto">
-                <PlusCircle className="h-4 w-4" />
-                <span>{t.create}</span>
-              </Button>
-            </Link>
-          ) : null}
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <KpiCard
+          title={t.paymentVoucher}
+          value={t.outgoing}
+          trend={t.confirmed}
+          icon={CreditCard}
+        />
 
+        <KpiCard
+          title={t.amount}
+          value={<MoneyValue value={amount} label={t.sar} />}
+          trend={t.paymentVoucher}
+          icon={ReceiptText}
+        />
+
+        <KpiCard
+          title={t.netAmount}
+          value={<MoneyValue value={netAmount} label={t.sar} />}
+          trend={t.sar}
+          icon={FileText}
+        />
+      </div>
+
+      {loadError ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{loadError || t.errorDesc}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadPayments(true)}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadAccounts()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {isLoading ? (
-        <KpiSkeleton />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    {formatNumber(summary.total_payments)}
+      {!accounts.length && !loadError ? (
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="flex min-h-[260px] flex-col items-center justify-center gap-3 p-6 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+              <WalletCards className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <div className="space-y-1">
+              <p className="font-semibold text-foreground">{t.noAccountsTitle}</p>
+              <p className="text-sm text-muted-foreground">{t.noAccountsDesc}</p>
+            </div>
+            <Button asChild variant="outline" className="h-9 rounded-lg">
+              <Link href="/system/treasury">
+                <WalletCards className="h-4 w-4" />
+                {t.treasury}
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {accounts.length ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-4">
+            {submitError ? (
+              <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+                <CardContent className="flex items-start gap-3 p-4 text-right">
+                  <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                  <div>
+                    <p className="font-semibold text-red-900">{t.submitError}</p>
+                    <p className="text-sm text-red-700">{submitError}</p>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.totalPayments}
-                  </p>
-                </div>
+                </CardContent>
+              </Card>
+            ) : null}
 
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">
-                  <Banknote className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <CardTitle>{t.voucherData}</CardTitle>
+                <CardDescription>{t.voucherDataDesc}</CardDescription>
+              </CardHeader>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
+              <CardContent className="grid gap-4 px-6 pb-6 md:grid-cols-2">
                 <div>
-                  <div className="text-2xl font-bold">
-                    {formatNumber(summary.confirmed_payments)}
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.confirmedPayments}
-                  </p>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.account}
+                  </label>
+                  <Select
+                    value={form.treasury_account_id || undefined}
+                    onValueChange={(value) => updateField("treasury_account_id", value)}
+                    disabled={Boolean(savingMode)}
+                  >
+                    <SelectTrigger className="h-10 rounded-lg bg-background">
+                      <SelectValue placeholder={t.chooseAccount} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((account) => (
+                        <SelectItem key={account.id || account.code} value={account.id}>
+                          {account.code ? `${account.code} — ${account.name}` : account.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FieldError message={errors.treasury_account_id} />
                 </div>
 
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                  <ShieldCheck className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm md:col-span-2">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-2xl font-bold">
-                    <MoneyText value={summary.total_amount} />
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.transactionDate}
+                  </label>
+                  <Input
+                    type="date"
+                    value={form.transaction_date}
+                    onChange={(event) => updateField("transaction_date", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                  />
+                  <FieldError message={errors.transaction_date} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <CardTitle>{t.financialData}</CardTitle>
+                <CardDescription>{t.financialDataDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="grid gap-4 px-6 pb-6 md:grid-cols-3">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.amount}
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.amount}
+                    onChange={(event) => updateField("amount", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                    placeholder="0.00"
+                  />
+                  <FieldError message={errors.amount} />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.feesAmount}
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.fees_amount}
+                    onChange={(event) => updateField("fees_amount", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                    placeholder="0.00"
+                  />
+                  <FieldError message={errors.fees_amount} />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.netAmount}
+                  </label>
+                  <div className="flex h-10 items-center rounded-lg border bg-muted/30 px-3">
+                    <MoneyValue value={netAmount} label={t.sar} />
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.totalAmount}
-                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <CardTitle>{t.referenceData}</CardTitle>
+                <CardDescription>{t.referenceDataDesc}</CardDescription>
+              </CardHeader>
+
+              <CardContent className="grid gap-4 px-6 pb-6 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.partyName}{" "}
+                    <span className="text-xs text-muted-foreground">({t.optional})</span>
+                  </label>
+                  <Input
+                    value={form.party_name}
+                    onChange={(event) => updateField("party_name", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                  />
                 </div>
 
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-300">
-                  <Wallet className="h-5 w-5" />
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.reference}{" "}
+                    <span className="text-xs text-muted-foreground">({t.optional})</span>
+                  </label>
+                  <Input
+                    value={form.reference}
+                    onChange={(event) => updateField("reference", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                  />
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-muted-foreground">{t.draftPayments}</span>
-              <span className="font-semibold">
-                {formatNumber(summary.draft_payments)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.sourceNumber}{" "}
+                    <span className="text-xs text-muted-foreground">({t.optional})</span>
+                  </label>
+                  <Input
+                    value={form.source_number}
+                    onChange={(event) => updateField("source_number", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                  />
+                </div>
 
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-muted-foreground">{t.cancelledPayments}</span>
-              <span className="font-semibold">
-                {formatNumber(summary.cancelled_payments)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.description}{" "}
+                    <span className="text-xs text-muted-foreground">({t.optional})</span>
+                  </label>
+                  <Input
+                    value={form.description}
+                    onChange={(event) => updateField("description", event.target.value)}
+                    className="h-10 rounded-lg bg-background"
+                    disabled={Boolean(savingMode)}
+                  />
+                </div>
 
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-muted-foreground">{t.treasuryPosted}</span>
-              <span className="font-semibold">
-                {formatNumber(summary.treasury_posted_count)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-sm font-medium text-foreground">
+                    {t.notes}{" "}
+                    <span className="text-xs text-muted-foreground">({t.optional})</span>
+                  </label>
+                  <textarea
+                    value={form.notes}
+                    onChange={(event) => updateField("notes", event.target.value)}
+                    className="min-h-[110px] w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={Boolean(savingMode)}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-muted-foreground">{t.unposted}</span>
-              <span className="font-semibold">
-                {formatNumber(summary.unposted_count)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          <div className="space-y-4">
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="relative px-6 py-5">
+                <CardDescription>{t.summaryDesc}</CardDescription>
+                <CardTitle>{t.summary}</CardTitle>
+                <CardAction>
+                  <Badge
+                    variant="outline"
+                    className="rounded-full border-red-500/30 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
+                  >
+                    {t.paymentVoucher}
+                  </Badge>
+                </CardAction>
+              </CardHeader>
 
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardHeader className="space-y-4 pb-3">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <CardTitle className="text-base font-bold">
-                {t.tableTitle}
-              </CardTitle>
-              <CardDescription className="mt-1">{t.tableDesc}</CardDescription>
-            </div>
+              <CardContent className="space-y-4 px-6 pb-6">
+                <div className="rounded-lg border bg-background p-4">
+                  <div className="mb-1 text-xs text-muted-foreground">{t.outgoing}</div>
+                  <div className="text-sm font-semibold text-foreground">
+                    {selectedAccount?.name || t.notAvailable}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground tabular-nums">
+                    {selectedAccount?.code || t.notAvailable}
+                  </div>
+                </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                className="h-10 rounded-xl"
-                onClick={() => loadPayments(true)}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="h-4 w-4" />
-                )}
-                {t.refresh}
-              </Button>
+                <div className="grid gap-3">
+                  <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                    <span className="text-sm text-muted-foreground">{t.amount}</span>
+                    <MoneyValue value={amount} label={t.sar} />
+                  </div>
 
-              {hasSearchOrFilter ? (
+                  <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                    <span className="text-sm text-muted-foreground">{t.feesAmount}</span>
+                    <MoneyValue value={fees} label={t.sar} />
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-lg border bg-background p-3">
+                    <span className="text-sm font-medium text-foreground">{t.netAmount}</span>
+                    <MoneyValue value={netAmount} label={t.sar} />
+                  </div>
+                </div>
+
+                {selectedAccount ? (
+                  <div className="rounded-lg border bg-muted/30 p-4">
+                    <div className="mb-1 text-xs text-muted-foreground">
+                      {t.currentBalance}
+                    </div>
+                    <MoneyValue value={selectedAccount.current_balance} label={t.sar} />
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {t.accountType}:{" "}
+                      {selectedAccount.account_type_label ||
+                        selectedAccount.account_type ||
+                        t.notAvailable}
+                    </div>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardContent className="space-y-2 p-4">
+                <Button
+                  className="h-10 w-full rounded-lg bg-black text-white hover:bg-black/90"
+                  onClick={() => void submitForm("confirmed")}
+                  disabled={Boolean(savingMode)}
+                >
+                  {savingMode === "confirmed" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-4 w-4" />
+                  )}
+                  {savingMode === "confirmed" ? t.saving : t.saveConfirmed}
+                </Button>
+
+                <Button
+                  className="h-10 w-full rounded-lg bg-black text-white hover:bg-black/90"
+                  onClick={() => void submitForm("draft")}
+                  disabled={Boolean(savingMode)}
+                >
+                  {savingMode === "draft" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  {savingMode === "draft" ? t.saving : t.saveDraft}
+                </Button>
+
                 <Button
                   variant="outline"
-                  className="h-10 rounded-xl"
-                  onClick={clearFilters}
+                  className="h-10 w-full rounded-lg bg-background"
+                  onClick={clearForm}
+                  disabled={Boolean(savingMode)}
                 >
-                  {t.clearFilters}
+                  <RotateCcw className="h-4 w-4" />
+                  {t.clear}
                 </Button>
-              ) : null}
-            </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardContent className="flex items-start gap-3 p-4 text-right">
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-foreground">
+                    {t.confirmed}
+                  </p>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {locale === "ar"
+                      ? "عند حفظ وتأكيد السند سيتم إرساله للباكند كسند صرف مؤكد مع تطبيق أثر الرصيد إذا كان مدعومًا."
+                      : "Save & confirm sends the voucher as confirmed and applies balance impact when supported by the backend."}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
           </div>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          <div className="relative w-full">
-            <Search
-              className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                isArabic ? "right-3" : "left-3"
-              }`}
-            />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t.searchPlaceholder}
-              className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-10 rounded-xl">
-                    <Filter className="h-4 w-4" />
-                    {t.filters}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent
-                  align={isArabic ? "start" : "end"}
-                  className="w-80 rounded-2xl"
-                >
-                  <div dir={isArabic ? "rtl" : "ltr"}>
-                    <DropdownMenuLabel>{t.allStatuses}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    {statusOptions.map((item) => (
-                      <DropdownMenuCheckboxItem
-                        key={item.value}
-                        checked={statusFilter === item.value}
-                        onCheckedChange={() => setStatusFilter(item.value)}
-                      >
-                        {item.label} ({formatNumber(item.count)})
-                      </DropdownMenuCheckboxItem>
-                    ))}
-
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel>{t.allAccounts}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    <DropdownMenuCheckboxItem
-                      checked={accountFilter === "ALL"}
-                      onCheckedChange={() => setAccountFilter("ALL")}
-                    >
-                      {t.allAccounts} ({formatNumber(rows.length)})
-                    </DropdownMenuCheckboxItem>
-
-                    {accountOptions.slice(0, 30).map((item) => (
-                      <DropdownMenuCheckboxItem
-                        key={item.id || item.name}
-                        checked={accountFilter === (item.id || item.code)}
-                        onCheckedChange={() => setAccountFilter(item.id || item.code)}
-                      >
-                        {item.name} {item.code ? `(${item.code})` : ""}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-10 rounded-xl">
-                    <Columns3 className="h-4 w-4" />
-                    {t.columns}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent
-                  align={isArabic ? "start" : "end"}
-                  className="w-64 rounded-2xl"
-                >
-                  <div dir={isArabic ? "rtl" : "ltr"}>
-                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    {columnOptions.map((column) => {
-                      if (column.key === "actions" && !canViewDetails) {
-                        return null;
-                      }
-
-                      return (
-                        <DropdownMenuCheckboxItem
-                          key={column.key}
-                          checked={visibleColumns[column.key]}
-                          onCheckedChange={(checked) =>
-                            setVisibleColumns((current) => ({
-                              ...current,
-                              [column.key]: Boolean(checked),
-                            }))
-                          }
-                        >
-                          {column.label}
-                        </DropdownMenuCheckboxItem>
-                      );
-                    })}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-
-          <div className="overflow-hidden rounded-xl border">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {visibleColumns.date ? (
-                      <TableHead className="min-w-[130px]">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("transaction_date")}
-                          className="inline-flex items-center gap-1 font-medium"
-                        >
-                          {t.table.date}
-                          {sortKey === "transaction_date" &&
-                            (sortDirection === "asc" ? (
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            ))}
-                        </button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.number ? (
-                      <TableHead className="min-w-[160px]">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("transaction_number")}
-                          className="inline-flex items-center gap-1 font-medium"
-                        >
-                          {t.table.number}
-                          {sortKey === "transaction_number" &&
-                            (sortDirection === "asc" ? (
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            ))}
-                        </button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.status ? (
-                      <TableHead className="min-w-[120px]">{t.table.status}</TableHead>
-                    ) : null}
-
-                    {visibleColumns.account ? (
-                      <TableHead className="min-w-[220px]">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("account_name")}
-                          className="inline-flex items-center gap-1 font-medium"
-                        >
-                          {t.table.account}
-                          {sortKey === "account_name" &&
-                            (sortDirection === "asc" ? (
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            ))}
-                        </button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.amount ? (
-                      <TableHead className="min-w-[140px]">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("amount")}
-                          className="inline-flex items-center gap-1 font-medium"
-                        >
-                          {t.table.amount}
-                          {sortKey === "amount" &&
-                            (sortDirection === "asc" ? (
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            ))}
-                        </button>
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.reference ? (
-                      <TableHead className="min-w-[150px]">
-                        {t.table.reference}
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.posting ? (
-                      <TableHead className="min-w-[170px]">
-                        {t.table.posting}
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.description ? (
-                      <TableHead className="min-w-[220px]">
-                        {t.table.description}
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.actions && canViewDetails ? (
-                      <TableHead className="min-w-[100px]">
-                        {t.table.action}
-                      </TableHead>
-                    ) : null}
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {isLoading ? (
-                    <TableSkeleton columnsCount={visibleColumnCount || 1} />
-                  ) : paginatedRows.length > 0 ? (
-                    paginatedRows.map((item) => (
-                      <TableRow key={`${item.id}-${item.transaction_number}`}>
-                        {visibleColumns.date ? (
-                          <TableCell className="whitespace-nowrap">
-                            {formatDate(item.transaction_date, locale)}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.number ? (
-                          <TableCell className="font-semibold" dir="ltr">
-                            {item.transaction_number || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.status ? (
-                          <TableCell>{statusBadge(item.status, locale)}</TableCell>
-                        ) : null}
-
-                        {visibleColumns.account ? (
-                          <TableCell>
-                            <div className="min-w-[200px]">
-                              <p className="font-medium">
-                                {item.account_name || "-"}
-                              </p>
-                              <p className="text-xs text-muted-foreground" dir="ltr">
-                                {item.account_code || "-"}
-                              </p>
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.amount ? (
-                          <TableCell>
-                            <MoneyText value={item.amount} />
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.reference ? (
-                          <TableCell>
-                            <span dir="ltr">{item.source_reference || "-"}</span>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.posting ? (
-                          <TableCell>
-                            <div className="flex flex-col gap-1">
-                              <Badge
-                                variant="outline"
-                                className="w-fit rounded-full px-3 py-1"
-                              >
-                                {t.treasuryPosted}:{" "}
-                                {item.is_treasury_posted ? t.posted : t.notPosted}
-                              </Badge>
-                              <Badge
-                                variant="outline"
-                                className="w-fit rounded-full px-3 py-1"
-                              >
-                                {t.accounting}:{" "}
-                                {item.is_accounting_posted ? t.posted : t.notPosted}
-                              </Badge>
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.description ? (
-                          <TableCell>
-                            <span className="line-clamp-2 min-w-[200px] text-sm text-muted-foreground">
-                              {item.description || "-"}
-                            </span>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.actions && canViewDetails ? (
-                          <TableCell>
-                            {isValidId(item.id) ? (
-                              <Link href={`/system/treasury/transactions/${item.id}`}>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 rounded-lg"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  <span className="sr-only">{t.view}</span>
-                                </Button>
-                              </Link>
-                            ) : (
-                              <span className="text-sm text-muted-foreground">
-                                -
-                              </span>
-                            )}
-                          </TableCell>
-                        ) : null}
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell
-                        colSpan={visibleColumnCount || 1}
-                        className="h-44 text-center"
-                      >
-                        <div className="flex flex-col items-center justify-center gap-2">
-                          <Banknote className="h-10 w-10 text-muted-foreground/40" />
-                          <p className="font-semibold">
-                            {hasSearchOrFilter ? t.noResultsTitle : t.emptyTitle}
-                          </p>
-                          <p className="max-w-md text-sm text-muted-foreground">
-                            {hasSearchOrFilter ? t.noResultsText : t.emptyText}
-                          </p>
-
-                          {hasSearchOrFilter ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="mt-2 rounded-xl"
-                              onClick={clearFilters}
-                            >
-                              {t.clearFilters}
-                            </Button>
-                          ) : canCreate ? (
-                            <Link href="/system/treasury/transactions/create">
-                              <Button size="sm" className="mt-2 rounded-xl">
-                                <PlusCircle className="h-4 w-4" />
-                                {t.create}
-                              </Button>
-                            </Link>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              {t.showing} {formatNumber(paginatedRows.length)} {t.from}{" "}
-              {formatNumber(filteredRows.length)}
-            </span>
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl"
-                disabled={page <= 1 || isLoading}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-              >
-                {t.previous}
-              </Button>
-
-              <Badge variant="outline" className="rounded-full px-3 py-1">
-                {formatNumber(Math.min(page, totalPages))} /{" "}
-                {formatNumber(totalPages)}
-              </Badge>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl"
-                disabled={page >= totalPages || isLoading}
-                onClick={() =>
-                  setPage((current) => Math.min(totalPages, current + 1))
-                }
-              >
-                {t.next}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      ) : null}
     </div>
   );
 }

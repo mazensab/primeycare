@@ -30,6 +30,7 @@ from .models import (
     DeliveryStatus,
     MessageType,
     ScopeType,
+    SystemWhatsAppConfig,
     TemplateApprovalStatus,
     TemplateProviderSyncStatus,
     TriggerSource,
@@ -49,6 +50,15 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
+# 🔒 Constants
+# ============================================================
+
+WEB_SESSION_PROVIDER = "whatsapp_web_session"
+DEFAULT_SESSION_NAME = "primey-care-system-session"
+DEFAULT_API_VERSION = "v22.0"
+
+
+# ============================================================
 # 🔧 Internal Helpers
 # ============================================================
 
@@ -63,6 +73,28 @@ def _stringify(value) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _safe_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+
+    if value is None:
+        return default
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+
+    if isinstance(value, int):
+        return value == 1
+
+    return default
 
 
 def _resolve_company_reference(company=None, company_reference: str | None = None) -> str:
@@ -96,13 +128,107 @@ def _resolve_company_name(company=None, context: dict | None = None) -> str:
     return ""
 
 
+def _set_attr_if_exists(instance, field_name: str, value) -> bool:
+    if hasattr(instance, field_name):
+        setattr(instance, field_name, value)
+        return True
+    return False
+
+
+def _save_if_fields(instance, update_fields: list[str]) -> None:
+    if not update_fields:
+        return
+
+    seen: set[str] = set()
+    unique_fields: list[str] = []
+
+    for field in update_fields:
+        if field in seen:
+            continue
+
+        seen.add(field)
+        unique_fields.append(field)
+
+    if unique_fields:
+        instance.save(update_fields=unique_fields)
+
+
+def _ensure_system_config_defaults(config, *, force_active: bool = False):
+    update_fields: list[str] = []
+
+    if _set_attr_if_exists(config, "provider", getattr(config, "provider", "") or WEB_SESSION_PROVIDER):
+        update_fields.append("provider")
+
+    if _set_attr_if_exists(
+        config,
+        "session_name",
+        getattr(config, "session_name", "") or DEFAULT_SESSION_NAME,
+    ):
+        update_fields.append("session_name")
+
+    if _set_attr_if_exists(
+        config,
+        "api_version",
+        getattr(config, "api_version", "") or DEFAULT_API_VERSION,
+    ):
+        update_fields.append("api_version")
+
+    if force_active:
+        if hasattr(config, "is_enabled") and not _safe_bool(getattr(config, "is_enabled", False)):
+            config.is_enabled = True
+            update_fields.append("is_enabled")
+
+        if hasattr(config, "is_active") and not _safe_bool(getattr(config, "is_active", False)):
+            config.is_active = True
+            update_fields.append("is_active")
+
+    _save_if_fields(config, update_fields)
+    return config
+
+
+def _get_system_config_with_fallback(*, force_active: bool = False):
+    """
+    جلب إعداد واتساب النظام مع fallback آمن.
+
+    السبب:
+    - selectors قد ترجع None إذا لم يكن الإعداد active.
+    - أزرار QR / Pairing تحتاج إعداد النظام حتى لو كان غير نشط سابقًا.
+    """
+    config = None
+
+    try:
+        config = get_active_system_whatsapp_config()
+    except Exception:
+        logger.exception("Failed while resolving active system WhatsApp config")
+        config = None
+
+    if config:
+        return _ensure_system_config_defaults(config, force_active=force_active)
+
+    try:
+        config, _ = SystemWhatsAppConfig.objects.get_or_create(
+            id=1,
+            defaults={
+                "provider": WEB_SESSION_PROVIDER,
+                "session_name": DEFAULT_SESSION_NAME,
+                "api_version": DEFAULT_API_VERSION,
+                "is_enabled": True if force_active else False,
+                "is_active": True if force_active else False,
+            },
+        )
+        return _ensure_system_config_defaults(config, force_active=force_active)
+    except Exception:
+        logger.exception("Failed while resolving fallback SystemWhatsAppConfig id=1")
+        return None
+
+
 def _build_client_from_config(config) -> WhatsAppClient:
     return WhatsAppClient(
-        provider=getattr(config, "provider", "") or "",
+        provider=getattr(config, "provider", "") or WEB_SESSION_PROVIDER,
         access_token=getattr(config, "access_token", "") or "",
         phone_number_id=getattr(config, "phone_number_id", "") or "",
-        api_version=getattr(config, "api_version", "v22.0"),
-        session_name=getattr(config, "session_name", "") or "primey-system-session",
+        api_version=getattr(config, "api_version", DEFAULT_API_VERSION) or DEFAULT_API_VERSION,
+        session_name=getattr(config, "session_name", "") or DEFAULT_SESSION_NAME,
     )
 
 
@@ -111,6 +237,7 @@ def _get_scope_config(
     *,
     company=None,
     company_reference: str | None = None,
+    force_active_system_fallback: bool = False,
 ):
     """
     جلب WhatsApp config حسب الـ scope مع fallback آمن:
@@ -128,35 +255,36 @@ def _get_scope_config(
         except Exception:
             logger.exception(
                 "Failed while resolving company WhatsApp config | company_reference=%s",
-                _resolve_company_reference(company=company, company_reference=company_reference),
+                _resolve_company_reference(
+                    company=company,
+                    company_reference=company_reference,
+                ),
             )
             company_config = None
 
         if company_config:
             return company_config
 
-        system_config = None
-        try:
-            system_config = get_active_system_whatsapp_config()
-        except Exception:
-            logger.exception("Failed while resolving fallback system WhatsApp config")
-            system_config = None
+        system_config = _get_system_config_with_fallback(
+            force_active=force_active_system_fallback,
+        )
 
         if system_config:
             logger.info(
                 "WhatsApp config fallback applied | requested_scope=COMPANY | company_reference=%s | fallback_scope=SYSTEM | system_config_id=%s",
-                _resolve_company_reference(company=company, company_reference=company_reference),
+                _resolve_company_reference(
+                    company=company,
+                    company_reference=company_reference,
+                ),
                 getattr(system_config, "id", None),
             )
             return system_config
 
         return None
 
-    try:
-        return get_active_system_whatsapp_config()
-    except Exception:
-        logger.exception("Failed while resolving system WhatsApp config")
-        return None
+    return _get_system_config_with_fallback(
+        force_active=force_active_system_fallback,
+    )
 
 
 def _build_fallback_body(*, event_code: str, context: dict) -> str:
@@ -264,13 +392,6 @@ def _build_fallback_body(*, event_code: str, context: dict) -> str:
     return f"Primey Care notification for {recipient_name}."
 
 
-def _set_attr_if_exists(instance, field_name: str, value) -> bool:
-    if hasattr(instance, field_name):
-        setattr(instance, field_name, value)
-        return True
-    return False
-
-
 def _sync_config_session_fields_from_result(config, result: WhatsAppSessionResult) -> None:
     update_fields: list[str] = []
 
@@ -287,26 +408,53 @@ def _sync_config_session_fields_from_result(config, result: WhatsAppSessionResul
         if _set_attr_if_exists(config, field_name, field_value):
             update_fields.append(field_name)
 
-    if result.connected and result.last_connected_at:
+    if result.connected:
+        if hasattr(config, "is_enabled") and not _safe_bool(getattr(config, "is_enabled", False)):
+            config.is_enabled = True
+            update_fields.append("is_enabled")
+
+        if hasattr(config, "is_active") and not _safe_bool(getattr(config, "is_active", False)):
+            config.is_active = True
+            update_fields.append("is_active")
+
         if _set_attr_if_exists(config, "session_last_connected_at", timezone.now()):
             update_fields.append("session_last_connected_at")
 
     if _set_attr_if_exists(config, "last_health_check_at", timezone.now()):
         update_fields.append("last_health_check_at")
 
-    if update_fields:
-        seen = set()
-        unique_fields = []
-        for field in update_fields:
-            if field not in seen:
-                seen.add(field)
-                unique_fields.append(field)
-
-        config.save(update_fields=unique_fields)
+    _save_if_fields(config, update_fields)
 
 
 def _session_result_to_payload(result: WhatsAppSessionResult) -> dict[str, Any]:
-    return asdict(result)
+    payload = asdict(result)
+
+    if "session_status" not in payload:
+        payload["session_status"] = getattr(result, "session_status", "") or "disconnected"
+
+    if "connected" not in payload:
+        payload["connected"] = bool(getattr(result, "connected", False))
+
+    if "success" not in payload:
+        payload["success"] = bool(getattr(result, "success", False))
+
+    if "message" not in payload:
+        payload["message"] = getattr(result, "error_message", "") or ""
+
+    return payload
+
+
+def _session_failure_payload(message: str, *, resolved_company_reference: str = "") -> dict[str, Any]:
+    return {
+        "success": False,
+        "message": message,
+        "error_message": message,
+        "session_status": "failed",
+        "connected": False,
+        "session_name": DEFAULT_SESSION_NAME,
+        "provider": WEB_SESSION_PROVIDER,
+        "company_reference": resolved_company_reference,
+    }
 
 
 def _is_session_not_connected_failure(log: WhatsAppMessageLog) -> bool:
@@ -348,7 +496,9 @@ def _retry_existing_whatsapp_log(log: WhatsAppMessageLog):
     config = _get_scope_config(
         scope_type=scope_type,
         company_reference=company_reference,
+        force_active_system_fallback=False,
     )
+
     if not config:
         log.delivery_status = DeliveryStatus.FAILED
         log.provider_status = "gateway_failed"
@@ -951,8 +1101,7 @@ def _create_or_get_seed_template(
             item.updated_by = user
             update_fields.append("updated_by")
 
-        if update_fields:
-            item.save(update_fields=update_fields)
+        _save_if_fields(item, update_fields)
 
     return item, created
 
@@ -1017,7 +1166,10 @@ def ensure_company_default_whatsapp_templates(
         company=company,
         company_reference=company_reference,
     )
-    resolved_company_name = _resolve_company_name(company=company, context={"company_name": company_name or ""})
+    resolved_company_name = _resolve_company_name(
+        company=company,
+        context={"company_name": company_name or ""},
+    )
 
     if not resolved_company_reference:
         return {
@@ -1075,15 +1227,14 @@ def get_whatsapp_session_status(
         scope_type=scope_type,
         company=company,
         company_reference=resolved_company_reference,
+        force_active_system_fallback=False,
     )
 
     if not config:
-        return {
-            "success": False,
-            "message": "No active WhatsApp config found",
-            "session_status": "failed",
-            "connected": False,
-        }
+        return _session_failure_payload(
+            "No active WhatsApp config found",
+            resolved_company_reference=resolved_company_reference,
+        )
 
     client = _build_client_from_config(config)
     result = client.get_session_status()
@@ -1091,8 +1242,8 @@ def get_whatsapp_session_status(
     _sync_config_session_fields_from_result(config, result)
 
     payload = _session_result_to_payload(result)
-    payload["session_name"] = getattr(config, "session_name", "") or "primey-system-session"
-    payload["provider"] = getattr(config, "provider", "") or ""
+    payload["session_name"] = getattr(config, "session_name", "") or DEFAULT_SESSION_NAME
+    payload["provider"] = getattr(config, "provider", "") or WEB_SESSION_PROVIDER
     payload["company_reference"] = resolved_company_reference
 
     retry_result = _auto_retry_failed_messages_after_reconnect(
@@ -1122,15 +1273,14 @@ def create_whatsapp_qr_session(
         scope_type=scope_type,
         company=company,
         company_reference=resolved_company_reference,
+        force_active_system_fallback=True,
     )
 
     if not config:
-        return {
-            "success": False,
-            "message": "No active WhatsApp config found",
-            "session_status": "failed",
-            "connected": False,
-        }
+        return _session_failure_payload(
+            "No active WhatsApp config found",
+            resolved_company_reference=resolved_company_reference,
+        )
 
     client = _build_client_from_config(config)
     result = client.create_qr_session()
@@ -1138,8 +1288,8 @@ def create_whatsapp_qr_session(
     _sync_config_session_fields_from_result(config, result)
 
     payload = _session_result_to_payload(result)
-    payload["session_name"] = getattr(config, "session_name", "") or "primey-system-session"
-    payload["provider"] = getattr(config, "provider", "") or ""
+    payload["session_name"] = getattr(config, "session_name", "") or DEFAULT_SESSION_NAME
+    payload["provider"] = getattr(config, "provider", "") or WEB_SESSION_PROVIDER
     payload["company_reference"] = resolved_company_reference
 
     retry_result = _auto_retry_failed_messages_after_reconnect(
@@ -1170,25 +1320,22 @@ def create_whatsapp_pairing_code_session(
         scope_type=scope_type,
         company=company,
         company_reference=resolved_company_reference,
+        force_active_system_fallback=True,
     )
 
     if not config:
-        return {
-            "success": False,
-            "message": "No active WhatsApp config found",
-            "session_status": "failed",
-            "connected": False,
-        }
+        return _session_failure_payload(
+            "No active WhatsApp config found",
+            resolved_company_reference=resolved_company_reference,
+        )
 
     normalized_phone = normalize_phone_number(phone_number)
 
     if not normalized_phone:
-        return {
-            "success": False,
-            "message": "phone_number is required",
-            "session_status": "failed",
-            "connected": False,
-        }
+        return _session_failure_payload(
+            "phone_number is required",
+            resolved_company_reference=resolved_company_reference,
+        )
 
     client = _build_client_from_config(config)
     result = client.create_pairing_code_session(phone_number=normalized_phone)
@@ -1196,8 +1343,8 @@ def create_whatsapp_pairing_code_session(
     _sync_config_session_fields_from_result(config, result)
 
     payload = _session_result_to_payload(result)
-    payload["session_name"] = getattr(config, "session_name", "") or "primey-system-session"
-    payload["provider"] = getattr(config, "provider", "") or ""
+    payload["session_name"] = getattr(config, "session_name", "") or DEFAULT_SESSION_NAME
+    payload["provider"] = getattr(config, "provider", "") or WEB_SESSION_PROVIDER
     payload["company_reference"] = resolved_company_reference
 
     retry_result = _auto_retry_failed_messages_after_reconnect(
@@ -1227,15 +1374,14 @@ def disconnect_whatsapp_session(
         scope_type=scope_type,
         company=company,
         company_reference=resolved_company_reference,
+        force_active_system_fallback=True,
     )
 
     if not config:
-        return {
-            "success": False,
-            "message": "No active WhatsApp config found",
-            "session_status": "failed",
-            "connected": False,
-        }
+        return _session_failure_payload(
+            "No active WhatsApp config found",
+            resolved_company_reference=resolved_company_reference,
+        )
 
     client = _build_client_from_config(config)
     result = client.disconnect_session()
@@ -1243,8 +1389,8 @@ def disconnect_whatsapp_session(
     _sync_config_session_fields_from_result(config, result)
 
     payload = _session_result_to_payload(result)
-    payload["session_name"] = getattr(config, "session_name", "") or "primey-system-session"
-    payload["provider"] = getattr(config, "provider", "") or ""
+    payload["session_name"] = getattr(config, "session_name", "") or DEFAULT_SESSION_NAME
+    payload["provider"] = getattr(config, "provider", "") or WEB_SESSION_PROVIDER
     payload["company_reference"] = resolved_company_reference
 
     return payload
@@ -1315,6 +1461,7 @@ def send_event_whatsapp_message(
         scope_type=scope_type,
         company=company,
         company_reference=resolved_company_reference,
+        force_active_system_fallback=False,
     )
 
     if not config:
@@ -1348,6 +1495,7 @@ def send_event_whatsapp_message(
 
     built = build_message_from_template(template, context) if template else None
     message_type = MessageType.DOCUMENT if attachment_url else MessageType.TEXT
+
     if template:
         message_type = template.message_type or message_type
 
@@ -1606,12 +1754,12 @@ def send_notification_center_whatsapp_delivery(
     event = getattr(delivery, "event", None)
     resolved_company_reference = (
         _stringify(getattr(delivery, "company_reference", ""))
-        or _stringify(getattr(event, "company_reference", ""))  # إن وجد
+        or _stringify(getattr(event, "company_reference", ""))
         or _resolve_company_reference(company=company)
     )
     resolved_company_name = (
         safe_text(getattr(delivery, "company_name", ""))
-        or safe_text(getattr(event, "company_name", ""))  # إن وجد
+        or safe_text(getattr(event, "company_name", ""))
         or _resolve_company_name(company=company, context=context or {})
     )
 

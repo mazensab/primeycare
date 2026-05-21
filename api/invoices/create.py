@@ -1,6 +1,6 @@
 # ============================================================
 # 📂 api/invoices/create.py
-# 🧠 Create Invoice API — Primey Care V2
+# 🧠 Create Invoice API — Primey Care V2.1
 # ------------------------------------------------------------
 # ✅ إنشاء فاتورة من الطلب
 # ✅ يستدعي invoices.services.create_invoice_from_order الرسمي فقط
@@ -8,6 +8,7 @@
 # ✅ اختيار إصدار مباشر اختياري issue_immediately
 # ✅ عند الإصدار المباشر يتم جدولة الترحيل المحاسبي بعد commit
 # ✅ متوافق مع Accounting Backend الجديد
+# ✅ متوافق مع Customer Portal / OTP customer account fields
 # ✅ استجابة موحدة للواجهة: ok / success / data
 # ============================================================
 
@@ -225,7 +226,18 @@ def _resolve_order_model():
 
 
 def _build_order_queryset(Order, request):
-    queryset = Order.objects.select_related("customer").all()
+    queryset = (
+        Order.objects
+        .select_related(
+            "customer",
+            "customer__user",
+            "product",
+            "provider",
+            "contract",
+            "agent",
+        )
+        .all()
+    )
 
     company_id = _extract_company_id(request)
     model_fields = {field.name for field in Order._meta.fields}
@@ -236,25 +248,65 @@ def _build_order_queryset(Order, request):
     return queryset
 
 
+# ============================================================
+# Serialization
+# ============================================================
+
 def _serialize_customer(customer) -> dict[str, Any] | None:
     if not customer:
         return None
 
+    full_name = (
+        _safe_attr(customer, "full_name", "")
+        or _safe_attr(customer, "name", "")
+        or _safe_attr(customer, "display_name", "")
+    )
+
+    phone_number = (
+        _safe_attr(customer, "phone_number", "")
+        or _safe_attr(customer, "phone", "")
+    )
+
+    whatsapp_number = _safe_attr(customer, "whatsapp_number", "")
+
+    user_id = _safe_attr(customer, "user_id", None)
+    user = _safe_attr(customer, "user", None)
+
     return {
         "id": _safe_attr(customer, "id", None),
-        "name": (
-            _safe_attr(customer, "full_name", "")
-            or _safe_attr(customer, "name", "")
-            or _safe_attr(customer, "display_name", "")
+        "customer_code": _safe_attr(customer, "customer_code", ""),
+        "name": full_name,
+        "display_name": _safe_attr(customer, "display_name", "") or full_name,
+        "full_name": full_name,
+        "status": _safe_attr(customer, "status", ""),
+        "phone": phone_number,
+        "phone_number": phone_number,
+        "whatsapp_number": whatsapp_number,
+        "primary_contact_number": (
+            whatsapp_number
+            or phone_number
+            or _safe_attr(customer, "alternative_phone_number", "")
         ),
-        "phone": _safe_attr(customer, "phone", ""),
         "email": _safe_attr(customer, "email", ""),
+        "normalized_phone": _safe_attr(customer, "normalized_phone", ""),
+        "user_id": user_id,
+        "user_username": _safe_attr(user, "username", "") if user else "",
+        "has_customer_account": bool(user_id),
+        "is_phone_verified": bool(_safe_attr(customer, "phone_verified_at", None)),
+        "is_whatsapp_verified": bool(_safe_attr(customer, "whatsapp_verified_at", None)),
+        "phone_verified_at": _iso_datetime(_safe_attr(customer, "phone_verified_at", None)),
+        "whatsapp_verified_at": _iso_datetime(_safe_attr(customer, "whatsapp_verified_at", None)),
+        "last_login_at": _iso_datetime(_safe_attr(customer, "last_login_at", None)),
     }
 
 
 def _serialize_order(order) -> dict[str, Any] | None:
     if not order:
         return None
+
+    product = _safe_attr(order, "product", None)
+    provider = _safe_attr(order, "provider", None)
+    agent = _safe_attr(order, "agent", None)
 
     return {
         "id": _safe_attr(order, "id", None),
@@ -264,9 +316,47 @@ def _serialize_order(order) -> dict[str, Any] | None:
             or _safe_attr(order, "code", "")
         ),
         "status": _safe_attr(order, "status", ""),
-        "total_amount": _safe_attr(order, "total_amount", None),
+        "payment_status": _safe_attr(order, "payment_status", ""),
+        "fulfillment_status": _safe_attr(order, "fulfillment_status", ""),
+        "source": _safe_attr(order, "source", ""),
+        "total_amount": _money(_safe_attr(order, "total_amount", "0.00")),
+        "amount_paid": _money(_safe_attr(order, "amount_paid", "0.00")),
+        "remaining_amount": _money(_safe_attr(order, "remaining_amount", "0.00")),
+        "currency_code": _safe_attr(order, "currency_code", "SAR") or "SAR",
         "customer_id": _safe_attr(order, "customer_id", None),
         "customer": _serialize_customer(_safe_attr(order, "customer", None)),
+        "product_id": _safe_attr(order, "product_id", None),
+        "product": {
+            "id": _safe_attr(product, "id", None),
+            "name": _safe_attr(product, "name", ""),
+            "code": _safe_attr(product, "code", ""),
+            "product_type": _safe_attr(product, "product_type", ""),
+        } if product else None,
+        "provider_id": _safe_attr(order, "provider_id", None),
+        "provider": {
+            "id": _safe_attr(provider, "id", None),
+            "name": (
+                _safe_attr(provider, "name", "")
+                or _safe_attr(provider, "display_name", "")
+                or _safe_attr(provider, "provider_name", "")
+            ),
+            "code": (
+                _safe_attr(provider, "code", "")
+                or _safe_attr(provider, "provider_code", "")
+            ),
+        } if provider else None,
+        "agent_id": _safe_attr(order, "agent_id", None),
+        "agent": {
+            "id": _safe_attr(agent, "id", None),
+            "agent_code": _safe_attr(agent, "agent_code", ""),
+            "name": (
+                _safe_attr(agent, "display_name", "")
+                or _safe_attr(agent, "full_name", "")
+                or _safe_attr(agent, "name", "")
+            ),
+        } if agent else None,
+        "created_at": _iso_datetime(_safe_attr(order, "created_at", None)),
+        "updated_at": _iso_datetime(_safe_attr(order, "updated_at", None)),
     }
 
 
@@ -336,8 +426,8 @@ def create_invoice_api(request):
     Body:
     {
       "order_id": 1,
-      "invoice_type": "SALES",
-      "status": "DRAFT",
+      "invoice_type": "sales",
+      "status": "draft",
       "issue_date": "2026-05-06",
       "due_date": "2026-05-13",
       "tax_rate": "15.00",
@@ -366,16 +456,27 @@ def create_invoice_api(request):
         if not order:
             return _json_error("الطلب غير موجود.", status=404)
 
-        invoice_type = _clean_text(body.get("invoice_type") or InvoiceType.SALES)
+        invoice_type = _clean_text(body.get("invoice_type") or InvoiceType.SALES).lower()
         if invoice_type not in InvoiceType.values:
             return _json_error("نوع الفاتورة غير صحيح.", status=400)
 
-        status_value = _clean_text(body.get("status") or InvoiceStatus.DRAFT)
+        status_value = _clean_text(body.get("status") or InvoiceStatus.DRAFT).lower()
         if status_value not in InvoiceStatus.values:
             return _json_error("حالة الفاتورة غير صحيحة.", status=400)
 
         issue_date = _parse_date(body.get("issue_date"), "issue_date")
         due_date = _parse_date(body.get("due_date"), "due_date")
+
+        if issue_date and due_date and due_date < issue_date:
+            return _json_error(
+                "تاريخ الاستحقاق لا يمكن أن يكون قبل تاريخ الإصدار.",
+                status=400,
+                errors={
+                    "due_date": [
+                        "Due date must be greater than or equal to issue date."
+                    ]
+                },
+            )
 
         tax_rate = _parse_decimal(
             body.get("tax_rate"),
@@ -421,6 +522,7 @@ def create_invoice_api(request):
                 "created": result.created,
                 "invoice": _serialize_invoice(result.invoice),
                 "order": _serialize_order(order),
+                "customer": _serialize_customer(_safe_attr(order, "customer", None)),
                 "flags": _serialize_request_flags(
                     sync_items=sync_items,
                     issue_immediately=issue_immediately,

@@ -2,154 +2,132 @@
 
 /* ============================================================
    📂 app/system/products/create/page.tsx
-   🧠 Primey Care | Create Product / Medical Offer
+   🧭 Primey Care — Create Product Premium Page
    ------------------------------------------------------------
-   ✅ إنشاء منتج / برنامج / خدمة / عرض طبي
-   ✅ دعم مقدم خدمة اختياري
-   ✅ دعم صورة رمزية وصورة تسويقية
-   ✅ دعم الظهور في الهبوط والموبايل والعروض
-   ✅ UX Pattern المعتمد + صلاحيات المرحلة 2
+   ✅ Same visual spirit as Products list + Product detail
+   ✅ Product = fixed catalog item
+   ✅ Provider pricing/offers stay in ContractProduct / Offers
+   ✅ Real POST to /api/products/
+   ✅ No mock data
+   ✅ No localhost
+   ✅ Internal UI only
+   ✅ Local draft
+   ✅ Arabic / English
+   ✅ RTL / LTR
+   ✅ English numerals
+   ✅ SAR icon from /currency/sar.svg
+   ✅ Sonner toast
+   ✅ Permission-aware
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ComponentType, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   ArrowLeft,
-  BadgeCheck,
-  Boxes,
+  BadgePercent,
+  Box,
   CalendarDays,
   CheckCircle2,
   CircleDollarSign,
-  ClipboardList,
-  CreditCard,
-  FileImage,
+  Eye,
   FileText,
   ImagePlus,
   Layers3,
   Loader2,
   Package,
-  Percent,
+  RefreshCw,
   RotateCcw,
   Save,
   ShieldCheck,
   Sparkles,
-  Stethoscope,
   Tag,
   Trash2,
-  UploadCloud,
-  XCircle,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 /* ============================================================
    Types
 ============================================================ */
 
-type AppLocale = "ar" | "en";
-type AuthRecord = Record<string, unknown>;
+type Locale = "ar" | "en";
+type Direction = "rtl" | "ltr";
 
-type ProductType = "membership" | "card" | "program" | "service" | "other";
-type ProductStatus = "draft" | "active" | "inactive" | "archived";
-type BillingType = "one_time" | "recurring";
-type FulfillmentType = "digital" | "physical" | "both" | "service_based" | "none";
-type DurationUnit = "day" | "month" | "year" | "none";
+type ProductType =
+  | "card"
+  | "membership"
+  | "program"
+  | "service"
+  | "medical_service"
+  | "package";
+
+type ProductStatus = "active" | "draft" | "inactive" | "archived";
 
 type ProductFormData = {
-  name: string;
+  name_ar: string;
+  name_en: string;
   code: string;
-  slug: string;
+  category_name: string;
   product_type: ProductType;
   status: ProductStatus;
-  category_id: string;
-  provider_id: string;
 
-  short_description: string;
-  description: string;
-  terms_and_conditions: string;
-  features: string;
-  tags: string;
+  description_ar: string;
+  description_en: string;
 
-  price: string;
+  base_price: string;
   sale_price: string;
-  cost_price: string;
-  billing_type: BillingType;
-  fulfillment_type: FulfillmentType;
-  duration_value: string;
-  duration_unit: DurationUnit;
+  discount_percentage: string;
 
-  is_taxable: boolean;
-  tax_rate: string;
+  has_duration: boolean;
+  duration_days: string;
+  has_expiry: boolean;
+  valid_from: string;
+  valid_until: string;
 
+  is_public: boolean;
+  is_featured: boolean;
   is_offer: boolean;
-  offer_title: string;
-  offer_subtitle: string;
-  offer_badge: string;
-  offer_terms: string;
-  offer_start_date: string;
-  offer_end_date: string;
+  allow_online_purchase: boolean;
   show_on_landing: boolean;
   show_on_mobile: boolean;
   show_on_offers: boolean;
 
-  is_public: boolean;
-  is_featured: boolean;
-  requires_approval: boolean;
+  offer_title_ar: string;
+  offer_title_en: string;
+  offer_subtitle_ar: string;
+  offer_subtitle_en: string;
+  offer_badge_ar: string;
+  offer_badge_en: string;
+  offer_terms_ar: string;
+  offer_terms_en: string;
 
-  allow_online_purchase: boolean;
-  allow_agent_sale: boolean;
-  allow_provider_sale: boolean;
-
-  can_be_ordered: boolean;
-  can_be_used_in_contracts: boolean;
-  requires_provider: boolean;
-
-  max_discount_rate: string;
-  default_agent_commission_rate: string;
-
-  pricing_tiers_text: string;
-  service_items_text: string;
+  thumbnail_image_url: string;
+  marketing_image_url: string;
 };
 
-type ProductFormErrors = Partial<Record<keyof ProductFormData, string>>;
+type ProductFormErrors = Partial<Record<keyof ProductFormData | "form", string>>;
 
-type SelectOption = {
-  id: number | string;
-  name?: string;
-  name_ar?: string;
-  name_en?: string;
-  code?: string;
-  title?: string;
-};
-
-type ListApiResponse<T> = {
+type ApiResponse = {
   ok?: boolean;
-  results?: T[];
-  data?: T[] | { results?: T[]; items?: T[] };
-  items?: T[];
-};
-
-type CreateProductApiResponse = {
-  ok?: boolean;
+  success?: boolean;
   message?: string;
-  errors?: Record<string, string[] | string>;
+  detail?: string;
+  error?: string;
   id?: number | string;
   product?: {
     id?: number | string;
@@ -160,1052 +138,809 @@ type CreateProductApiResponse = {
       id?: number | string;
     };
   };
+  result?: {
+    id?: number | string;
+  };
+  errors?: Record<string, unknown>;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-const DRAFT_STORAGE_KEY = "primey-care-product-create-draft-v3";
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
-
-/* ============================================================
-   Locale Helpers
-============================================================ */
-
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const savedLocale = window.localStorage.getItem("primey-locale");
-
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
-    return "ar";
-  }
-}
-
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
-
-/* ============================================================
-   API Helpers
-============================================================ */
-
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-function readCookie(name: string) {
-  if (typeof document === "undefined") return "";
-
-  const match = document.cookie
-    .split("; ")
-    .find((cookie) => cookie.startsWith(`${name}=`));
-
-  return match ? decodeURIComponent(match.split("=")[1] || "") : "";
-}
-
-function extractList<T>(payload: ListApiResponse<T>): T[] {
-  if (Array.isArray(payload.results)) return payload.results;
-  if (Array.isArray(payload.items)) return payload.items;
-  if (Array.isArray(payload.data)) return payload.data;
-  if (payload.data && typeof payload.data === "object") {
-    if (Array.isArray(payload.data.results)) return payload.data.results;
-    if (Array.isArray(payload.data.items)) return payload.data.items;
-  }
-  return [];
-}
-
-/* ============================================================
-   Permission Helpers
-============================================================ */
-
-function asRecord(value: unknown): AuthRecord {
-  return value && typeof value === "object" ? (value as AuthRecord) : {};
-}
-
-function getNestedRecord(source: AuthRecord, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as AuthRecord;
-    }
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as AuthRecord;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as AuthRecord;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown): AuthRecord {
-  const auth = asRecord(authValue);
-
-  return getNestedRecord(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asRecord(auth.permissions);
-  const userPermissions = asRecord(user.permissions);
-  const authProfilePermissions = asRecord(auth.profile_permissions);
-  const userProfilePermissions = asRecord(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asRecord(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasKnownPermissionSignal(authValue: unknown) {
-  return (
-    getAuthRoles(authValue).length > 0 ||
-    getAuthPermissionCodes(authValue).length > 0
-  );
-}
-
-function hasPermissionCode(authValue: unknown, codes: string[]) {
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length === 0) return undefined;
-
-  return codes.some((code) => permissions.includes(code));
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const explicitPermission = hasPermissionCode(authValue, codes);
-
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "support",
-          "accountant",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin"].includes(role),
-    );
-  }
-
-  if (!hasKnownPermissionSignal(authValue)) {
-    return true;
-  }
-
-  return mode === "view";
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "إنشاء منتج أو عرض طبي" : "Create Product or Medical Offer",
-    subtitle: isArabic
-      ? "إضافة بطاقة أو برنامج أو خدمة، مع إمكانية ربطها بمقدم خدمة وعرضها في الهبوط والتطبيق."
-      : "Add a card, program, or service, with optional provider linking and landing/mobile visibility.",
-
-    back: isArabic ? "العودة للمنتجات" : "Back to Products",
-    productsList: isArabic ? "قائمة المنتجات" : "Products List",
-    create: isArabic ? "إنشاء المنتج" : "Create Product",
-    saving: isArabic ? "جاري الحفظ..." : "Saving...",
-    saveDraft: isArabic ? "حفظ كمسودة محلية" : "Save Local Draft",
-    restoreDraft: isArabic ? "استعادة المسودة" : "Restore Draft",
-    clearForm: isArabic ? "تفريغ النموذج" : "Clear Form",
-
-    basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
-    basicDesc: isArabic
-      ? "اسم المنتج، الكود، النوع، التصنيف، ومقدم الخدمة عند الحاجة."
-      : "Product name, code, type, category, and provider when needed.",
-
-    descriptionInfo: isArabic ? "الوصف والمحتوى" : "Description & Content",
-    descriptionDesc: isArabic
-      ? "وصف مختصر، وصف تفصيلي، مزايا، شروط، ووسوم."
-      : "Short description, full description, features, terms, and tags.",
-
-    marketingInfo: isArabic ? "العرض والظهور التسويقي" : "Offer & Marketing Visibility",
-    marketingDesc: isArabic
-      ? "تحديد ظهور المنتج في صفحة الهبوط والتطبيق والعروض."
-      : "Control product visibility on landing, mobile, and offers.",
-
-    imagesInfo: isArabic ? "صور المنتج" : "Product Images",
-    imagesDesc: isArabic
-      ? "صورة رمزية للنظام وصورة تسويقية للهبوط والتطبيق."
-      : "Thumbnail for the system and marketing image for landing/mobile.",
-
-    pricingInfo: isArabic ? "التسعير والفوترة" : "Pricing & Billing",
-    pricingDesc: isArabic
-      ? "السعر الأساسي، سعر الخصم، الضريبة، الفوترة، والمدة."
-      : "Base price, sale price, tax, billing, and duration.",
-
-    availabilityInfo: isArabic ? "الجاهزية وقنوات البيع" : "Readiness & Sales Channels",
-    availabilityDesc: isArabic
-      ? "تحديد جاهزية المنتج للطلبات والعقود وقنوات البيع."
-      : "Define product readiness for orders, contracts, and sales channels.",
-
-    limitsInfo: isArabic ? "الخصومات والعمولات" : "Discounts & Commissions",
-    limitsDesc: isArabic
-      ? "الحد الأعلى للخصم وعمولة المندوب الافتراضية."
-      : "Maximum discount and default agent commission.",
-
-    advancedInfo: isArabic ? "بيانات متقدمة" : "Advanced Data",
-    advancedDesc: isArabic
-      ? "شرائح التسعير وعناصر الخدمات للبرامج والخدمات المركبة."
-      : "Pricing tiers and service items for programs and bundled services.",
-
-    summaryTitle: isArabic ? "ملخص المنتج" : "Product Summary",
-    summaryDesc: isArabic
-      ? "مراجعة سريعة للبيانات قبل الحفظ."
-      : "Quick review before saving.",
-
-    stepsTitle: isArabic ? "إرشادات قبل الحفظ" : "Before Saving",
-    stepsDesc: isArabic
-      ? "نقاط تساعدك على إدخال بيانات دقيقة."
-      : "Helpful points for entering accurate data.",
-
-    formErrorTitle: isArabic ? "تعذر حفظ البيانات" : "Unable to save data",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بإنشاء منتج" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية إنشاء المنتجات. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to create products. Contact your system administrator if you need access.",
-
-    fields: {
-      name: isArabic ? "اسم المنتج" : "Product Name",
-      code: isArabic ? "كود المنتج" : "Product Code",
-      slug: isArabic ? "الرابط المختصر" : "Slug",
-      type: isArabic ? "نوع المنتج" : "Product Type",
-      status: isArabic ? "الحالة" : "Status",
-      category: isArabic ? "التصنيف" : "Category",
-      provider: isArabic ? "مقدم الخدمة" : "Provider",
-      shortDescription: isArabic ? "الوصف المختصر" : "Short Description",
-      description: isArabic ? "الوصف التفصيلي" : "Full Description",
-      features: isArabic ? "المزايا" : "Features",
-      terms: isArabic ? "الشروط والأحكام" : "Terms & Conditions",
-      tags: isArabic ? "الوسوم" : "Tags",
-      price: isArabic ? "السعر الأساسي" : "Base Price",
-      salePrice: isArabic ? "سعر الخصم" : "Sale Price",
-      costPrice: isArabic ? "التكلفة" : "Cost Price",
-      billingType: isArabic ? "نوع الفوترة" : "Billing Type",
-      fulfillmentType: isArabic ? "نوع التسليم" : "Fulfillment Type",
-      durationValue: isArabic ? "مدة المنتج" : "Duration",
-      durationUnit: isArabic ? "وحدة المدة" : "Duration Unit",
-      taxable: isArabic ? "خاضع للضريبة" : "Taxable",
-      taxRate: isArabic ? "نسبة الضريبة" : "Tax Rate",
-      isOffer: isArabic ? "منتج يظهر كعرض" : "Mark as Offer",
-      offerTitle: isArabic ? "عنوان العرض" : "Offer Title",
-      offerSubtitle: isArabic ? "وصف العرض المختصر" : "Offer Subtitle",
-      offerBadge: isArabic ? "شارة العرض" : "Offer Badge",
-      offerTerms: isArabic ? "شروط العرض" : "Offer Terms",
-      offerStart: isArabic ? "بداية العرض" : "Offer Start",
-      offerEnd: isArabic ? "نهاية العرض" : "Offer End",
-      landing: isArabic ? "يظهر في صفحة الهبوط" : "Show on Landing",
-      mobile: isArabic ? "يظهر في التطبيق" : "Show on Mobile",
-      offers: isArabic ? "يظهر في صفحة العروض" : "Show on Offers",
-      thumbnail: isArabic ? "الصورة الرمزية" : "Thumbnail Image",
-      marketingImage: isArabic ? "الصورة التسويقية" : "Marketing Image",
-      public: isArabic ? "منتج عام" : "Public Product",
-      featured: isArabic ? "منتج مميز" : "Featured Product",
-      requiresApproval: isArabic ? "يتطلب موافقة" : "Requires Approval",
-      onlinePurchase: isArabic ? "الشراء الإلكتروني" : "Online Purchase",
-      agentSale: isArabic ? "بيع المندوب" : "Agent Sale",
-      providerSale: isArabic ? "بيع مقدم الخدمة" : "Provider Sale",
-      canBeOrdered: isArabic ? "جاهز للطلبات" : "Order Ready",
-      contractsReady: isArabic ? "جاهز للعقود" : "Contracts Ready",
-      requiresProvider: isArabic ? "يتطلب مقدم خدمة" : "Requires Provider",
-      maxDiscount: isArabic ? "الحد الأعلى للخصم" : "Max Discount",
-      agentCommission: isArabic ? "عمولة المندوب الافتراضية" : "Default Agent Commission",
-      pricingTiers: isArabic ? "شرائح التسعير" : "Pricing Tiers",
-      serviceItems: isArabic ? "عناصر الخدمات" : "Service Items",
-    },
-
-    placeholders: {
-      name: isArabic ? "مثال: برنامج الولادة الطبيعية" : "Example: Natural Delivery Program",
-      code: isArabic ? "اتركه فارغًا للتوليد التلقائي" : "Leave blank for auto generation",
-      slug: isArabic ? "natural-delivery-program" : "natural-delivery-program",
-      shortDescription: isArabic
-        ? "وصف مختصر يظهر في القوائم..."
-        : "Short description shown in lists...",
-      description: isArabic
-        ? "اكتب وصفًا تفصيليًا للمنتج أو العرض..."
-        : "Write a detailed product or offer description...",
-      features: isArabic
-        ? "ميزة في كل سطر..."
-        : "One feature per line...",
-      terms: isArabic
-        ? "شروط وأحكام المنتج أو العرض..."
-        : "Product or offer terms...",
-      tags: isArabic ? "ولادة، عروض، مستشفى" : "delivery, offers, hospital",
-      price: isArabic ? "مثال: 2300" : "Example: 2300",
-      salePrice: isArabic ? "مثال: 1999" : "Example: 1999",
-      costPrice: isArabic ? "اختياري" : "Optional",
-      durationValue: isArabic ? "مثال: 12" : "Example: 12",
-      taxRate: isArabic ? "مثال: 15" : "Example: 15",
-      offerTitle: isArabic ? "مثال: عرض الولادة الطبيعية" : "Example: Natural Delivery Offer",
-      offerSubtitle: isArabic
-        ? "مثال: بطاقة خصومات مجانية لمدة عام"
-        : "Example: Free discount card for one year",
-      offerBadge: isArabic ? "مثال: عرض محدود" : "Example: Limited Offer",
-      maxDiscount: isArabic ? "مثال: 20" : "Example: 20",
-      agentCommission: isArabic ? "مثال: 10" : "Example: 10",
-      pricingTiers: isArabic
-        ? "اكتب كل شريحة في سطر: الاسم | السعر | سعر الخصم"
-        : "One tier per line: name | price | sale price",
-      serviceItems: isArabic
-        ? "اكتب كل خدمة في سطر: اسم الخدمة | الكمية | السعر"
-        : "One service per line: service name | quantity | price",
-    },
-
-    productTypes: {
-      membership: isArabic ? "عضوية" : "Membership",
-      card: isArabic ? "بطاقة" : "Card",
-      program: isArabic ? "برنامج" : "Program",
-      service: isArabic ? "خدمة" : "Service",
-      other: isArabic ? "أخرى" : "Other",
-    } satisfies Record<ProductType, string>,
-
-    statuses: {
-      draft: isArabic ? "مسودة" : "Draft",
-      active: isArabic ? "نشط" : "Active",
-      inactive: isArabic ? "غير نشط" : "Inactive",
-      archived: isArabic ? "مؤرشف" : "Archived",
-    } satisfies Record<ProductStatus, string>,
-
-    billingTypes: {
-      one_time: isArabic ? "مرة واحدة" : "One Time",
-      recurring: isArabic ? "متكرر" : "Recurring",
-    } satisfies Record<BillingType, string>,
-
-    fulfillmentTypes: {
-      digital: isArabic ? "رقمي" : "Digital",
-      physical: isArabic ? "فعلي" : "Physical",
-      both: isArabic ? "رقمي وفعلي" : "Digital & Physical",
-      service_based: isArabic ? "مرتبط بخدمة" : "Service Based",
-      none: isArabic ? "بدون" : "None",
-    } satisfies Record<FulfillmentType, string>,
-
-    durationUnits: {
-      day: isArabic ? "يوم" : "Day",
-      month: isArabic ? "شهر" : "Month",
-      year: isArabic ? "سنة" : "Year",
-      none: isArabic ? "بدون" : "None",
-    } satisfies Record<DurationUnit, string>,
-
-    validation: {
-      name: isArabic ? "اسم المنتج مطلوب." : "Product name is required.",
-      price: isArabic ? "السعر يجب أن يكون رقمًا صحيحًا." : "Price must be a valid number.",
-      salePrice: isArabic ? "سعر الخصم يجب أن يكون رقمًا صحيحًا." : "Sale price must be a valid number.",
-      saleGreater: isArabic
-        ? "سعر الخصم لا يجب أن يكون أكبر من السعر الأساسي."
-        : "Sale price must not be greater than base price.",
-      percent: isArabic
-        ? "النسبة يجب أن تكون بين 0 و 100."
-        : "Percentage must be between 0 and 100.",
-      duration: isArabic ? "المدة يجب أن تكون رقمًا صحيحًا." : "Duration must be a valid number.",
-      offerDates: isArabic
-        ? "تاريخ نهاية العرض يجب أن يكون بعد تاريخ البداية."
-        : "Offer end date must be after start date.",
-      imageSize: isArabic
-        ? "حجم الصورة يجب ألا يتجاوز 10MB."
-        : "Image size must not exceed 10MB.",
-      imageType: isArabic
-        ? "يرجى اختيار ملف صورة صالح."
-        : "Please select a valid image file.",
-    },
-
-    loadingLookups: isArabic ? "جاري تحميل الخيارات..." : "Loading options...",
-    noCategory: isArabic ? "بدون تصنيف" : "No Category",
-    noProvider: isArabic ? "بدون مقدم خدمة" : "No Provider",
-    chooseFile: isArabic ? "اختيار صورة" : "Choose Image",
-    fileSelected: isArabic ? "تم اختيار الصورة" : "Image selected",
-
-    success: isArabic ? "تم إنشاء المنتج بنجاح." : "Product created successfully.",
-    imageUploadPartial: isArabic
-      ? "تم إنشاء المنتج، لكن تعذر رفع إحدى الصور."
-      : "Product created, but one image could not be uploaded.",
-    draftSaved: isArabic ? "تم حفظ المسودة محليًا." : "Draft saved locally.",
-    draftRestored: isArabic ? "تمت استعادة المسودة." : "Draft restored.",
-    noDraft: isArabic ? "لا توجد مسودة محفوظة." : "No saved draft found.",
-    formCleared: isArabic ? "تم تفريغ النموذج." : "Form cleared.",
-    apiError: isArabic
-      ? "تعذر إنشاء المنتج. تحقق من البيانات وحاول مرة أخرى."
-      : "Unable to create product. Please check the data and try again.",
-    validationToast: isArabic
-      ? "يرجى تصحيح الحقول المطلوبة قبل المتابعة."
-      : "Please fix the required fields before continuing.",
-    confirmLeave: isArabic
-      ? "لديك بيانات غير محفوظة. هل تريد المغادرة؟"
-      : "You have unsaved changes. Do you want to leave?",
-    confirmClear: isArabic
-      ? "سيتم تفريغ النموذج الحالي. هل تريد المتابعة؟"
-      : "The current form will be cleared. Do you want to continue?",
-
-    completion: isArabic ? "نسبة الاكتمال" : "Completion",
-    ready: isArabic ? "جاهز للحفظ" : "Ready to save",
-    missingData: isArabic ? "ينقصه بيانات أساسية" : "Missing required data",
-    priceSummary: isArabic ? "التسعير" : "Pricing",
-    saleChannelsSummary: isArabic ? "قنوات البيع" : "Sales Channels",
-    readinessSummary: isArabic ? "الجاهزية" : "Readiness",
-    offerSummary: isArabic ? "العرض" : "Offer",
-
-    yes: isArabic ? "نعم" : "Yes",
-    no: isArabic ? "لا" : "No",
-
-    quickNotes: [
-      isArabic
-        ? "صورة المنتج الرمزية مخصصة للنظام الداخلي."
-        : "The thumbnail image is for the internal system.",
-      isArabic
-        ? "الصورة التسويقية مخصصة للهبوط والتطبيق والعروض."
-        : "The marketing image is for landing, mobile, and offers.",
-      isArabic
-        ? "اربط المنتج بمقدم خدمة عندما يكون العرض خاصًا بمستشفى أو مركز."
-        : "Link a provider when the offer belongs to a hospital or center.",
-      isArabic
-        ? "يمكن حفظ البيانات كمسودة محلية قبل الإرسال."
-        : "You can save the form as a local draft before submitting.",
-    ],
+type WhoamiPayload = {
+  role?: string;
+  user_type?: string;
+  workspace?: string;
+  is_superuser?: boolean;
+  is_staff?: boolean;
+  permission_codes?: string[];
+  permissions?: { codes?: string[] };
+  profile_permissions?: { codes?: string[] };
+  profile?: {
+    role?: string;
+    user_type?: string;
+    workspace?: string;
+    permission_codes?: string[];
+    permissions?: { codes?: string[] };
   };
-}
+};
+
+type Dict = {
+  dir: Direction;
+  pageTitle: string;
+  subtitle: string;
+  back: string;
+  products: string;
+  save: string;
+  saving: string;
+  reset: string;
+  refresh: string;
+  saveDraft: string;
+  restoreDraft: string;
+  deleteDraft: string;
+  draftSaved: string;
+  draftRestored: string;
+  draftDeleted: string;
+  confirmReset: string;
+  confirmLeave: string;
+  created: string;
+  noPermission: string;
+
+  basicInfo: string;
+  basicInfoDesc: string;
+  pricing: string;
+  pricingDesc: string;
+  availability: string;
+  availabilityDesc: string;
+  marketing: string;
+  marketingDesc: string;
+  images: string;
+  imagesDesc: string;
+  preview: string;
+  readiness: string;
+  summary: string;
+
+  nameAr: string;
+  nameEn: string;
+  code: string;
+  category: string;
+  productType: string;
+  status: string;
+  descriptionAr: string;
+  descriptionEn: string;
+  basePrice: string;
+  salePrice: string;
+  discountPercentage: string;
+  finalPrice: string;
+  duration: string;
+  durationDays: string;
+  hasDuration: string;
+  hasExpiry: string;
+  validFrom: string;
+  validUntil: string;
+
+  visibility: string;
+  isPublic: string;
+  isFeatured: string;
+  isOffer: string;
+  allowOnlinePurchase: string;
+  showOnLanding: string;
+  showOnMobile: string;
+  showOnOffers: string;
+
+  offerTitleAr: string;
+  offerTitleEn: string;
+  offerSubtitleAr: string;
+  offerSubtitleEn: string;
+  offerBadgeAr: string;
+  offerBadgeEn: string;
+  offerTermsAr: string;
+  offerTermsEn: string;
+
+  thumbnailImage: string;
+  marketingImage: string;
+  imageUrl: string;
+
+  card: string;
+  membership: string;
+  program: string;
+  service: string;
+  medicalService: string;
+  package: string;
+
+  active: string;
+  draft: string;
+  inactive: string;
+  archived: string;
+
+  complete: string;
+  incomplete: string;
+  required: string;
+  invalidNumber: string;
+  invalidDateRange: string;
+  submitError: string;
+  requiredFields: string;
+  pricingReady: string;
+  marketingReady: string;
+  yes: string;
+  no: string;
+  notSet: string;
+  sar: string;
+};
 
 /* ============================================================
-   Defaults / Validation
+   Constants
 ============================================================ */
 
-const initialFormData: ProductFormData = {
-  name: "",
+const SAR_ICON = "/currency/sar.svg";
+const DRAFT_KEY = "primey-care-system-product-create-draft-v2";
+const PRODUCTS_ENDPOINT = "/api/products/";
+const WHOAMI_ENDPOINT = "/api/auth/whoami/";
+
+const initialForm: ProductFormData = {
+  name_ar: "",
+  name_en: "",
   code: "",
-  slug: "",
-  product_type: "program",
+  category_name: "",
+  product_type: "service",
   status: "active",
-  category_id: "",
-  provider_id: "",
 
-  short_description: "",
-  description: "",
-  terms_and_conditions: "",
-  features: "",
-  tags: "",
+  description_ar: "",
+  description_en: "",
 
-  price: "",
-  sale_price: "",
-  cost_price: "",
-  billing_type: "one_time",
-  fulfillment_type: "service_based",
-  duration_value: "0",
-  duration_unit: "none",
+  base_price: "0",
+  sale_price: "0",
+  discount_percentage: "0",
 
-  is_taxable: true,
-  tax_rate: "15",
+  has_duration: false,
+  duration_days: "",
+  has_expiry: false,
+  valid_from: "",
+  valid_until: "",
 
+  is_public: true,
+  is_featured: false,
   is_offer: false,
-  offer_title: "",
-  offer_subtitle: "",
-  offer_badge: "",
-  offer_terms: "",
-  offer_start_date: "",
-  offer_end_date: "",
+  allow_online_purchase: true,
   show_on_landing: false,
   show_on_mobile: false,
   show_on_offers: false,
 
-  is_public: true,
-  is_featured: false,
-  requires_approval: false,
+  offer_title_ar: "",
+  offer_title_en: "",
+  offer_subtitle_ar: "",
+  offer_subtitle_en: "",
+  offer_badge_ar: "",
+  offer_badge_en: "",
+  offer_terms_ar: "",
+  offer_terms_en: "",
 
-  allow_online_purchase: true,
-  allow_agent_sale: true,
-  allow_provider_sale: false,
-
-  can_be_ordered: true,
-  can_be_used_in_contracts: true,
-  requires_provider: false,
-
-  max_discount_rate: "0",
-  default_agent_commission_rate: "0",
-
-  pricing_tiers_text: "",
-  service_items_text: "",
+  thumbnail_image_url: "",
+  marketing_image_url: "",
 };
 
-function normalizeCode(value: string) {
-  return value
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^A-Z0-9-_]/g, "");
+const dictionaries: Record<Locale, Dict> = {
+  ar: {
+    dir: "rtl",
+    pageTitle: "إنشاء منتج",
+    subtitle:
+      "إضافة منتج ثابت في كتالوج Primey Care. أسعار مقدمي الخدمة والعروض تدار لاحقًا من العقود والعروض.",
+    back: "رجوع",
+    products: "المنتجات",
+    save: "حفظ المنتج",
+    saving: "جاري الحفظ...",
+    reset: "إعادة ضبط",
+    refresh: "تحديث",
+    saveDraft: "حفظ مسودة",
+    restoreDraft: "استعادة المسودة",
+    deleteDraft: "حذف المسودة",
+    draftSaved: "تم حفظ المسودة محليًا",
+    draftRestored: "تم استعادة المسودة",
+    draftDeleted: "تم حذف المسودة",
+    confirmReset: "هل تريد مسح البيانات الحالية؟",
+    confirmLeave: "لديك تغييرات غير محفوظة. هل تريد المغادرة؟",
+    created: "تم إنشاء المنتج بنجاح",
+    noPermission: "لا تملك صلاحية إنشاء المنتجات",
+
+    basicInfo: "البيانات الأساسية",
+    basicInfoDesc: "اسم المنتج، الكود، التصنيف، النوع والحالة.",
+    pricing: "التسعير الافتراضي",
+    pricingDesc:
+      "هذه أسعار كتالوج عامة. أسعار مقدمي الخدمة تدار من عقود المنتجات.",
+    availability: "المدة والصلاحية",
+    availabilityDesc: "إعداد مدة المنتج وتواريخ الصلاحية إن وجدت.",
+    marketing: "التسويق والظهور",
+    marketingDesc: "إعدادات ظهور المنتج والعرض الافتراضي.",
+    images: "صور المنتج",
+    imagesDesc: "روابط الصورة الرئيسية والصورة التسويقية.",
+    preview: "معاينة المنتج",
+    readiness: "جاهزية الإدخال",
+    summary: "ملخص المنتج",
+
+    nameAr: "اسم المنتج عربي",
+    nameEn: "اسم المنتج إنجليزي",
+    code: "كود المنتج",
+    category: "التصنيف",
+    productType: "نوع المنتج",
+    status: "الحالة",
+    descriptionAr: "الوصف عربي",
+    descriptionEn: "الوصف إنجليزي",
+    basePrice: "السعر الأساسي",
+    salePrice: "سعر البيع",
+    discountPercentage: "نسبة الخصم",
+    finalPrice: "السعر النهائي",
+    duration: "المدة",
+    durationDays: "عدد الأيام",
+    hasDuration: "له مدة",
+    hasExpiry: "له تاريخ انتهاء",
+    validFrom: "صالح من",
+    validUntil: "صالح حتى",
+
+    visibility: "الظهور",
+    isPublic: "عام",
+    isFeatured: "مميز",
+    isOffer: "عرض",
+    allowOnlinePurchase: "يسمح بالشراء الإلكتروني",
+    showOnLanding: "إظهار في صفحة الهبوط",
+    showOnMobile: "إظهار في تطبيق العميل",
+    showOnOffers: "إظهار في صفحة العروض",
+
+    offerTitleAr: "عنوان العرض عربي",
+    offerTitleEn: "عنوان العرض إنجليزي",
+    offerSubtitleAr: "وصف مختصر عربي",
+    offerSubtitleEn: "وصف مختصر إنجليزي",
+    offerBadgeAr: "شارة العرض عربي",
+    offerBadgeEn: "شارة العرض إنجليزي",
+    offerTermsAr: "شروط العرض عربي",
+    offerTermsEn: "شروط العرض إنجليزي",
+
+    thumbnailImage: "رابط الصورة الرئيسية",
+    marketingImage: "رابط الصورة التسويقية",
+    imageUrl: "رابط الصورة",
+
+    card: "بطاقة",
+    membership: "عضوية",
+    program: "برنامج",
+    service: "خدمة",
+    medicalService: "خدمة طبية",
+    package: "باقة",
+
+    active: "نشط",
+    draft: "مسودة",
+    inactive: "غير نشط",
+    archived: "مؤرشف",
+
+    complete: "مكتمل",
+    incomplete: "غير مكتمل",
+    required: "هذا الحقل مطلوب",
+    invalidNumber: "الرقم غير صحيح",
+    invalidDateRange: "تاريخ النهاية يجب أن يكون بعد تاريخ البداية",
+    submitError: "تعذر إنشاء المنتج",
+    requiredFields: "الحقول المطلوبة",
+    pricingReady: "التسعير",
+    marketingReady: "التسويق",
+    yes: "نعم",
+    no: "لا",
+    notSet: "غير محدد",
+    sar: "ر.س",
+  },
+  en: {
+    dir: "ltr",
+    pageTitle: "Create Product",
+    subtitle:
+      "Add a fixed catalog product in Primey Care. Provider-specific pricing and offers are managed later through contracts and offers.",
+    back: "Back",
+    products: "Products",
+    save: "Save Product",
+    saving: "Saving...",
+    reset: "Reset",
+    refresh: "Refresh",
+    saveDraft: "Save draft",
+    restoreDraft: "Restore draft",
+    deleteDraft: "Delete draft",
+    draftSaved: "Draft saved locally",
+    draftRestored: "Draft restored",
+    draftDeleted: "Draft deleted",
+    confirmReset: "Do you want to clear the current data?",
+    confirmLeave: "You have unsaved changes. Do you want to leave?",
+    created: "Product created successfully",
+    noPermission: "You do not have permission to create products",
+
+    basicInfo: "Basic Information",
+    basicInfoDesc: "Product name, code, category, type, and status.",
+    pricing: "Default Pricing",
+    pricingDesc:
+      "These are general catalog prices. Provider-specific pricing is managed through product contracts.",
+    availability: "Duration & Validity",
+    availabilityDesc: "Configure product duration and validity dates if needed.",
+    marketing: "Marketing & Visibility",
+    marketingDesc: "Configure visibility and default offer metadata.",
+    images: "Product Images",
+    imagesDesc: "Main image and marketing image links.",
+    preview: "Product Preview",
+    readiness: "Input Readiness",
+    summary: "Product Summary",
+
+    nameAr: "Arabic Product Name",
+    nameEn: "English Product Name",
+    code: "Product Code",
+    category: "Category",
+    productType: "Product Type",
+    status: "Status",
+    descriptionAr: "Arabic Description",
+    descriptionEn: "English Description",
+    basePrice: "Base Price",
+    salePrice: "Sale Price",
+    discountPercentage: "Discount %",
+    finalPrice: "Final Price",
+    duration: "Duration",
+    durationDays: "Duration days",
+    hasDuration: "Has duration",
+    hasExpiry: "Has expiry",
+    validFrom: "Valid from",
+    validUntil: "Valid until",
+
+    visibility: "Visibility",
+    isPublic: "Public",
+    isFeatured: "Featured",
+    isOffer: "Offer",
+    allowOnlinePurchase: "Allow online purchase",
+    showOnLanding: "Show on landing",
+    showOnMobile: "Show on customer app",
+    showOnOffers: "Show on offers page",
+
+    offerTitleAr: "Arabic offer title",
+    offerTitleEn: "English offer title",
+    offerSubtitleAr: "Arabic offer subtitle",
+    offerSubtitleEn: "English offer subtitle",
+    offerBadgeAr: "Arabic offer badge",
+    offerBadgeEn: "English offer badge",
+    offerTermsAr: "Arabic offer terms",
+    offerTermsEn: "English offer terms",
+
+    thumbnailImage: "Thumbnail image URL",
+    marketingImage: "Marketing image URL",
+    imageUrl: "Image URL",
+
+    card: "Card",
+    membership: "Membership",
+    program: "Program",
+    service: "Service",
+    medicalService: "Medical service",
+    package: "Package",
+
+    active: "Active",
+    draft: "Draft",
+    inactive: "Inactive",
+    archived: "Archived",
+
+    complete: "Complete",
+    incomplete: "Incomplete",
+    required: "This field is required",
+    invalidNumber: "Invalid number",
+    invalidDateRange: "End date must be after start date",
+    submitError: "Unable to create product",
+    requiredFields: "Required fields",
+    pricingReady: "Pricing",
+    marketingReady: "Marketing",
+    yes: "Yes",
+    no: "No",
+    notSet: "Not set",
+    sar: "SAR",
+  },
+};
+
+/* ============================================================
+   Helpers
+============================================================ */
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function normalizeSlug(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\u0600-\u06FF\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
-function normalizeNumberString(value: string, fallback = "0.00") {
-  const clean = value.replace(/,/g, "").replace(/[^\d.]/g, "");
-  const parsed = Number(clean);
+function toEnglishDigits(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "";
 
-  if (!Number.isFinite(parsed)) return fallback;
-
-  return parsed.toFixed(2);
+  return String(value)
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
 }
 
-function toNumber(value: string) {
-  const parsed = Number(String(value || "").replace(/,/g, ""));
+function toNumber(value: string | number | null | undefined) {
+  const normalized = toEnglishDigits(value ?? "0").replace(/,/g, "");
+  const numeric = Number(normalized);
 
-  return Number.isFinite(parsed) ? parsed : 0;
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function isValidNumber(value: string) {
-  if (!value.trim()) return true;
-
-  const parsed = Number(value.replace(/,/g, ""));
-
-  return Number.isFinite(parsed);
+function formatNumber(value: string | number | null | undefined) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 0,
+  }).format(toNumber(value));
 }
 
-function isPercent(value: string) {
-  if (!value.trim()) return true;
-
-  const parsed = Number(value.replace(/,/g, ""));
-
-  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100;
+function formatMoney(value: string | number | null | undefined) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(toNumber(value));
 }
 
-function isValidImage(file: File | null) {
-  if (!file) return true;
-
-  return file.type.startsWith("image/");
+function formatPercent(value: string | number | null | undefined) {
+  return `${new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+  }).format(toNumber(value))}%`;
 }
 
-function isValidImageSize(file: File | null) {
-  if (!file) return true;
-
-  return file.size <= MAX_IMAGE_SIZE;
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
 }
 
-function parsePricingTiers(value: string) {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      const [name = "", price = "0", salePrice = ""] = line
-        .split("|")
-        .map((part) => part.trim());
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
 
-      return {
-        name,
-        pricing_type: "standard",
-        currency_code: "SAR",
-        price: normalizeNumberString(price || "0"),
-        sale_price: salePrice ? normalizeNumberString(salePrice) : null,
-        min_quantity: 1,
-        discount_rate: "0",
-        agent_commission_rate: "0",
-        provider_share_rate: "0",
-        system_share_rate: "0",
-        sort_order: index,
-        is_active: true,
-      };
-    })
-    .filter((item) => item.name);
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-function parseServiceItems(value: string) {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      const [name = "", quantity = "1", unitPrice = "0"] = line
-        .split("|")
-        .map((part) => part.trim());
+function isAdminLike(payload: WhoamiPayload | null) {
+  if (!payload) return false;
 
-      return {
-        name,
-        description: "",
-        included_quantity: Math.max(1, Math.round(toNumber(quantity || "1"))),
-        unit_price: normalizeNumberString(unitPrice || "0"),
-        discount_rate: "0",
-        requires_provider: true,
-        is_optional: false,
-        sort_order: index,
-        is_active: true,
-      };
-    })
-    .filter((item) => item.name);
-}
+  const role = normalizeText(payload.role || payload.profile?.role);
+  const userType = normalizeText(payload.user_type || payload.profile?.user_type);
+  const workspace = normalizeText(payload.workspace || payload.profile?.workspace);
 
-function normalizePayload(formData: ProductFormData) {
-  const price = normalizeNumberString(formData.price);
-  const salePrice = formData.sale_price.trim()
-    ? normalizeNumberString(formData.sale_price)
-    : null;
-  const costPrice = formData.cost_price.trim()
-    ? normalizeNumberString(formData.cost_price)
-    : null;
-
-  const providerId = formData.provider_id.trim();
-  const categoryId = formData.category_id.trim();
-
-  return {
-    name: formData.name.trim(),
-    ...(formData.code.trim() ? { code: normalizeCode(formData.code) } : {}),
-    ...(formData.slug.trim()
-      ? { slug: normalizeSlug(formData.slug) }
-      : { slug: normalizeSlug(formData.name) }),
-    product_type: formData.product_type,
-    status: formData.status,
-    category_id: categoryId || null,
-    provider_id: providerId || null,
-
-    short_description: formData.short_description.trim(),
-    description: formData.description.trim(),
-    terms_and_conditions: formData.terms_and_conditions.trim(),
-    features: formData.features.trim(),
-    tags: formData.tags.trim(),
-
-    price,
-    sale_price: salePrice,
-    cost_price: costPrice,
-    billing_type: formData.billing_type,
-    fulfillment_type: formData.fulfillment_type,
-    duration_value: formData.duration_value.trim()
-      ? String(Math.max(0, Math.round(toNumber(formData.duration_value))))
-      : "0",
-    duration_unit: formData.duration_unit,
-
-    is_taxable: formData.is_taxable,
-    tax_rate: formData.tax_rate.trim()
-      ? String(toNumber(formData.tax_rate))
-      : "0",
-
-    is_offer: formData.is_offer,
-    offer_title: formData.offer_title.trim(),
-    offer_subtitle: formData.offer_subtitle.trim(),
-    offer_badge: formData.offer_badge.trim(),
-    offer_terms: formData.offer_terms.trim(),
-    offer_start_date: formData.offer_start_date || null,
-    offer_end_date: formData.offer_end_date || null,
-    show_on_landing: formData.show_on_landing,
-    show_on_mobile: formData.show_on_mobile,
-    show_on_offers: formData.show_on_offers,
-
-    is_public: formData.is_public,
-    is_featured: formData.is_featured,
-    requires_approval: formData.requires_approval,
-
-    allow_online_purchase: formData.allow_online_purchase,
-    allow_agent_sale: formData.allow_agent_sale,
-    allow_provider_sale: formData.allow_provider_sale,
-
-    can_be_ordered: formData.can_be_ordered,
-    can_be_used_in_contracts: formData.can_be_used_in_contracts,
-    requires_provider: Boolean(providerId) || formData.requires_provider,
-
-    max_discount_rate: formData.max_discount_rate.trim()
-      ? String(toNumber(formData.max_discount_rate))
-      : "0",
-    default_agent_commission_rate: formData.default_agent_commission_rate.trim()
-      ? String(toNumber(formData.default_agent_commission_rate))
-      : "0",
-
-    pricing_tiers: parsePricingTiers(formData.pricing_tiers_text),
-    service_items: parseServiceItems(formData.service_items_text),
-  };
-}
-
-function hasFormChanges(formData: ProductFormData) {
-  return JSON.stringify(formData) !== JSON.stringify(initialFormData);
-}
-
-function resolveCreatedId(result: CreateProductApiResponse) {
-  return (
-    result.product?.id ||
-    result.data?.product?.id ||
-    result.data?.id ||
-    result.id ||
-    null
+  return Boolean(
+    payload.is_superuser ||
+      payload.is_staff ||
+      role === "system_admin" ||
+      role === "superuser" ||
+      userType === "system_admin" ||
+      userType === "superuser" ||
+      (workspace === "system" && role.includes("admin")),
   );
 }
 
-function mapApiFieldErrors(
-  errors: CreateProductApiResponse["errors"],
-): ProductFormErrors {
-  const nextErrors: ProductFormErrors = {};
+function getPermissionCodes(payload: WhoamiPayload | null) {
+  if (!payload) return [];
 
-  if (!errors) return nextErrors;
+  return Array.from(
+    new Set(
+      [
+        ...(payload.permission_codes || []),
+        ...(payload.permissions?.codes || []),
+        ...(payload.profile_permissions?.codes || []),
+        ...(payload.profile?.permission_codes || []),
+        ...(payload.profile?.permissions?.codes || []),
+      ].filter(Boolean),
+    ),
+  );
+}
 
-  Object.entries(errors).forEach(([key, value]) => {
-    const message = Array.isArray(value) ? value[0] : value;
+function hasPermission(payload: WhoamiPayload | null, permission: string) {
+  if (isAdminLike(payload)) return true;
+  return getPermissionCodes(payload).includes(permission);
+}
 
-    if (!message) return;
+function getApiBaseUrl() {
+  const envBase =
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "";
 
-    if (key === "name") nextErrors.name = String(message);
-    if (key === "code") nextErrors.code = String(message);
-    if (key === "slug") nextErrors.slug = String(message);
-    if (key === "product_type" || key === "type") {
-      nextErrors.product_type = String(message);
-    }
-    if (key === "status") nextErrors.status = String(message);
-    if (key === "category_id") nextErrors.category_id = String(message);
-    if (key === "provider_id") nextErrors.provider_id = String(message);
-    if (key === "price" || key === "base_price") nextErrors.price = String(message);
-    if (key === "sale_price") nextErrors.sale_price = String(message);
-    if (key === "cost_price") nextErrors.cost_price = String(message);
-    if (key === "tax_rate") nextErrors.tax_rate = String(message);
-    if (key === "duration_value") nextErrors.duration_value = String(message);
-    if (key === "offer_start_date") nextErrors.offer_start_date = String(message);
-    if (key === "offer_end_date") nextErrors.offer_end_date = String(message);
-    if (key === "max_discount_rate") nextErrors.max_discount_rate = String(message);
-    if (key === "default_agent_commission_rate") {
-      nextErrors.default_agent_commission_rate = String(message);
-    }
+  if (!envBase) return "";
+
+  return envBase.replace(/\/+$/, "");
+}
+
+function buildApiUrl(path: string) {
+  const base = getApiBaseUrl();
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+
+  return `${base}${cleanPath}`;
+}
+
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+
+  if (parts.length === 2) return parts.pop()?.split(";").shift() || "";
+
+  return "";
+}
+
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(buildApiUrl(path), {
+    ...init,
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(init?.headers || {}),
+    },
   });
 
-  return nextErrors;
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+
+  let payload: any = null;
+
+  if (contentType.includes("application/json") && text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    const error = new Error(message) as Error & {
+      payload?: ApiResponse;
+      status?: number;
+    };
+
+    error.payload = payload;
+    error.status = response.status;
+
+    throw error;
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
 }
 
-function formatMoney(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0.00";
-
-  return numericValue.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function optionLabel(option: SelectOption, locale: AppLocale) {
-  const primary =
-    locale === "ar"
-      ? option.name_ar || option.name || option.title || option.name_en
-      : option.name_en || option.name || option.title || option.name_ar;
-
-  const code = option.code ? ` - ${option.code}` : "";
-
-  return `${primary || option.id}${code}`;
-}
-
-function SarAmount({ value }: { value: number | string }) {
+function extractCreatedId(payload: ApiResponse) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    payload.data?.product?.id ||
+    payload.data?.id ||
+    payload.product?.id ||
+    payload.result?.id ||
+    payload.id ||
+    ""
+  );
+}
+
+function calculateFinalPrice(form: ProductFormData) {
+  const basePrice = toNumber(form.base_price);
+  const discount = toNumber(form.discount_percentage);
+
+  if (toNumber(form.sale_price) > 0) return toNumber(form.sale_price);
+  if (discount <= 0) return basePrice;
+
+  return Math.max(basePrice - basePrice * (discount / 100), 0);
+}
+
+function isFormDirty(form: ProductFormData) {
+  return JSON.stringify(form) !== JSON.stringify(initialForm);
+}
+
+function validateForm(form: ProductFormData, t: Dict) {
+  const errors: ProductFormErrors = {};
+
+  if (!form.name_ar.trim() && !form.name_en.trim()) {
+    errors.name_ar = t.required;
+    errors.name_en = t.required;
+  }
+
+  if (!form.code.trim()) {
+    errors.code = t.required;
+  }
+
+  if (toNumber(form.base_price) < 0) {
+    errors.base_price = t.invalidNumber;
+  }
+
+  if (form.sale_price && toNumber(form.sale_price) < 0) {
+    errors.sale_price = t.invalidNumber;
+  }
+
+  if (toNumber(form.discount_percentage) < 0 || toNumber(form.discount_percentage) > 100) {
+    errors.discount_percentage = t.invalidNumber;
+  }
+
+  if (form.has_duration && toNumber(form.duration_days) <= 0) {
+    errors.duration_days = t.invalidNumber;
+  }
+
+  if (form.has_expiry && form.valid_from && form.valid_until && form.valid_until < form.valid_from) {
+    errors.valid_until = t.invalidDateRange;
+  }
+
+  return errors;
+}
+
+function buildPayload(form: ProductFormData) {
+  const finalPrice = calculateFinalPrice(form);
+
+  return {
+    name: form.name_ar.trim() || form.name_en.trim(),
+    name_ar: form.name_ar.trim(),
+    name_en: form.name_en.trim(),
+    code: form.code.trim(),
+    sku: form.code.trim(),
+    category_name: form.category_name.trim(),
+    product_type: form.product_type,
+    status: form.status,
+
+    description: form.description_ar.trim() || form.description_en.trim(),
+    description_ar: form.description_ar.trim(),
+    description_en: form.description_en.trim(),
+
+    price: toNumber(form.base_price).toFixed(2),
+    base_price: toNumber(form.base_price).toFixed(2),
+    sale_price: toNumber(form.sale_price) > 0 ? toNumber(form.sale_price).toFixed(2) : finalPrice.toFixed(2),
+    final_price: finalPrice.toFixed(2),
+    discount_percentage: toNumber(form.discount_percentage).toFixed(2),
+
+    has_duration: form.has_duration,
+    duration_days: form.has_duration ? toNumber(form.duration_days) : null,
+    has_expiry: form.has_expiry,
+    valid_from: form.has_expiry && form.valid_from ? form.valid_from : null,
+    valid_until: form.has_expiry && form.valid_until ? form.valid_until : null,
+
+    is_public: form.is_public,
+    is_featured: form.is_featured,
+    is_offer: form.is_offer,
+    allow_online_purchase: form.allow_online_purchase,
+    show_on_landing: form.show_on_landing,
+    show_on_mobile: form.show_on_mobile,
+    show_on_offers: form.show_on_offers,
+
+    offer_title_ar: form.offer_title_ar.trim(),
+    offer_title_en: form.offer_title_en.trim(),
+    offer_subtitle_ar: form.offer_subtitle_ar.trim(),
+    offer_subtitle_en: form.offer_subtitle_en.trim(),
+    offer_badge_ar: form.offer_badge_ar.trim(),
+    offer_badge_en: form.offer_badge_en.trim(),
+    offer_terms_ar: form.offer_terms_ar.trim(),
+    offer_terms_en: form.offer_terms_en.trim(),
+
+    thumbnail_image_url: form.thumbnail_image_url.trim(),
+    marketing_image_url: form.marketing_image_url.trim(),
+  };
+}
+
+function statusLabel(status: ProductStatus, t: Dict) {
+  const labels: Record<ProductStatus, string> = {
+    active: t.active,
+    draft: t.draft,
+    inactive: t.inactive,
+    archived: t.archived,
+  };
+
+  return labels[status] || t.draft;
+}
+
+function typeLabel(type: ProductType, t: Dict) {
+  const labels: Record<ProductType, string> = {
+    card: t.card,
+    membership: t.membership,
+    program: t.program,
+    service: t.service,
+    medical_service: t.medicalService,
+    package: t.package,
+  };
+
+  return labels[type] || t.service;
+}
+
+/* ============================================================
+   UI
+============================================================ */
+
+function SarIcon({ className }: { className?: string }) {
+  return (
+    <img
+      src={SAR_ICON}
+      alt="SAR"
+      className={cn("inline-flex h-3.5 w-3.5 shrink-0 object-contain", className)}
+    />
+  );
+}
+
+function MoneyValue({
+  value,
+  className,
+}: {
+  value: string | number | null | undefined;
+  className?: string;
+}) {
+  return (
+    <span className={cn("inline-flex items-center gap-1 font-semibold tabular-nums", className)}>
       <span>{formatMoney(value)}</span>
-      <Image
-        src={SAR_ICON_PATH}
-        alt=""
-        width={14}
-        height={14}
-        className="h-3.5 w-3.5"
-      />
+      <SarIcon />
     </span>
   );
 }
 
-/* ============================================================
-   Small UI
-============================================================ */
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
 
-function FieldBlock({
-  label,
-  error,
-  required,
+  return <p className="text-xs font-medium text-red-600">{message}</p>;
+}
+
+function PremiumCard({
+  title,
+  description,
+  icon: Icon,
   children,
 }: {
-  label: string;
-  error?: string;
-  required?: boolean;
-  children: ReactNode;
+  title: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-2">
-      <Label className="text-sm font-medium">
-        {label}
-        {required ? <span className="ms-1 text-destructive">*</span> : null}
-      </Label>
+    <Card className="rounded-xl border border-slate-200 bg-white shadow-none">
+      <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
+        <div className="space-y-1">
+          <CardTitle className="text-base font-bold">{title}</CardTitle>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
 
-      {children}
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-slate-50">
+          <Icon className="h-5 w-5 text-[#8c9cdc]" />
+        </div>
+      </CardHeader>
 
-      {error ? <p className="text-xs font-medium text-destructive">{error}</p> : null}
-    </div>
+      <CardContent className="space-y-4">{children}</CardContent>
+    </Card>
   );
 }
 
-function ToggleBox({
+function SwitchBox({
+  label,
   checked,
-  disabled,
-  title,
-  description,
   onChange,
 }: {
+  label: string;
   checked: boolean;
-  disabled?: boolean;
-  title: string;
-  description: string;
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-xl border bg-background p-4">
-      <Checkbox
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={(value) => onChange(Boolean(value))}
-      />
-
-      <div>
-        <p className="text-sm font-semibold">{title}</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          {description}
-        </p>
-      </div>
+    <label
+      className={cn(
+        "flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm font-semibold transition",
+        checked
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-slate-200 bg-white text-slate-600",
+      )}
+    >
+      <span>{label}</span>
+      <Checkbox checked={checked} onCheckedChange={(value) => onChange(Boolean(value))} />
     </label>
   );
 }
 
-function SummaryItem({
-  icon: Icon,
-  label,
+function KpiCard({
+  title,
   value,
+  icon: Icon,
 }: {
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  value: string;
+  title: string;
+  value: React.ReactNode;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border bg-background p-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-        <Icon className="h-4 w-4" />
+    <div className="grid auto-cols-max grid-flow-col items-center gap-4 rounded-lg border bg-white p-4">
+      <Icon className="size-6 text-[#8c9cdc] opacity-80" />
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="text-sm text-muted-foreground">{title}</span>
+        <span className="truncate text-lg font-semibold">{value}</span>
       </div>
-
-      <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="mt-1 truncate text-sm font-semibold">{value || "-"}</p>
-      </div>
-    </div>
-  );
-}
-
-function FilePicker({
-  label,
-  file,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  file: File | null;
-  disabled?: boolean;
-  onChange: (file: File | null) => void;
-}) {
-  return (
-    <div className="rounded-2xl border bg-background p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <p className="text-sm font-semibold">{label}</p>
-          <p className="text-xs text-muted-foreground">
-            {file ? file.name : "PNG / JPG / WEBP"}
-          </p>
-        </div>
-
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
-          <FileImage className="h-5 w-5" />
-        </div>
-      </div>
-
-      <Input
-        type="file"
-        accept="image/*"
-        disabled={disabled}
-        className="mt-4"
-        onChange={(event) => onChange(event.target.files?.[0] || null)}
-      />
-
-      {file ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          className="mt-2"
-          onClick={() => onChange(null)}
-        >
-          <Trash2 className="me-2 h-4 w-4" />
-          إزالة
-        </Button>
-      ) : null}
     </div>
   );
 }
@@ -1214,1209 +949,882 @@ function FilePicker({
    Page
 ============================================================ */
 
-export default function SystemCreateProductPage() {
+export default function ProductCreatePage() {
   const router = useRouter();
-  const auth = useAuth() as unknown;
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [formData, setFormData] = useState<ProductFormData>(initialFormData);
-  const [errors, setErrors] = useState<ProductFormErrors>({});
-  const [submitError, setSubmitError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [categories, setCategories] = useState<SelectOption[]>([]);
-  const [providers, setProviders] = useState<SelectOption[]>([]);
-  const [isLoadingLookups, setIsLoadingLookups] = useState(true);
-  const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
-  const [marketingFile, setMarketingFile] = useState<File | null>(null);
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [whoami, setWhoami] = React.useState<WhoamiPayload | null>(null);
+  const [form, setForm] = React.useState<ProductFormData>(initialForm);
+  const [errors, setErrors] = React.useState<ProductFormErrors>({});
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [hasDraft, setHasDraft] = React.useState(false);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const authResolving = isAuthResolving(auth);
-  const isDirty = useMemo(() => hasFormChanges(formData), [formData]);
+  const t = dictionaries[locale];
+  const dir = t.dir;
 
-  const canCreateProducts = hasSafePermission(
-    auth,
-    ["products.create", "products.add", "products.add_product"],
-    "action",
-  );
+  const canCreate =
+    hasPermission(whoami, "products.create") ||
+    hasPermission(whoami, "products.add") ||
+    isAdminLike(whoami) ||
+    !whoami;
 
-  const canViewProducts = hasSafePermission(
-    auth,
-    ["products.view", "products.list", "products.view_product"],
-    "view",
-  );
+  const finalPrice = React.useMemo(() => calculateFinalPrice(form), [form]);
+  const dirty = React.useMemo(() => isFormDirty(form), [form]);
 
-  const completedFields = useMemo(() => {
-    const keys: Array<keyof ProductFormData> = [
-      "name",
-      "product_type",
-      "status",
-      "price",
-      "billing_type",
-      "fulfillment_type",
-      "tax_rate",
-      "max_discount_rate",
-      "default_agent_commission_rate",
-    ];
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-    return keys.filter((key) => {
-      const value = formData[key];
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-      if (typeof value === "boolean") return value;
-      return String(value || "").trim().length > 0;
-    }).length;
-  }, [formData]);
+    applyLocale();
 
-  const progressPercent = Math.round((completedFields / 9) * 100);
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-  const effectivePrice = useMemo(() => {
-    const salePrice = toNumber(formData.sale_price);
-    const basePrice = toNumber(formData.price);
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
 
-    return salePrice > 0 ? salePrice : basePrice;
-  }, [formData.price, formData.sale_price]);
+  React.useEffect(() => {
+    setHasDraft(Boolean(window.localStorage.getItem(DRAFT_KEY)));
 
-  const selectedProductTypeLabel = t.productTypes[formData.product_type];
-  const selectedStatusLabel = t.statuses[formData.status];
+    fetchJson<WhoamiPayload>(WHOAMI_ENDPOINT)
+      .then((payload) => setWhoami(payload))
+      .catch(() => setWhoami(null));
+  }, []);
 
-  const isReadyToSave =
-    formData.name.trim().length > 0 && isValidNumber(formData.price);
+  React.useEffect(() => {
+    if (!dirty || isSaving) return;
 
-  function updateField<K extends keyof ProductFormData>(
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = t.confirmLeave;
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirty, isSaving, t.confirmLeave]);
+
+  const updateForm = <K extends keyof ProductFormData>(
     key: K,
     value: ProductFormData[K],
-  ) {
-    setFormData((current) => {
-      const next = {
-        ...current,
-        [key]: value,
-      };
-
-      if (key === "provider_id") {
-        next.requires_provider = Boolean(value) || next.requires_provider;
-      }
-
-      if (key === "is_offer" && value === true) {
-        next.show_on_offers = true;
-      }
-
-      return next;
-    });
-
-    setErrors((current) => ({
+  ) => {
+    setForm((current) => ({
       ...current,
-      [key]: undefined,
+      [key]: value,
     }));
 
-    if (submitError) {
-      setSubmitError("");
-    }
-  }
+    setErrors((current) => {
+      if (!current[key]) return current;
 
-  function validateForm() {
-    const nextErrors: ProductFormErrors = {};
-
-    const basePrice = toNumber(formData.price);
-    const salePrice = toNumber(formData.sale_price);
-
-    if (!formData.name.trim()) {
-      nextErrors.name = t.validation.name;
-    }
-
-    if (!isValidNumber(formData.price)) {
-      nextErrors.price = t.validation.price;
-    }
-
-    if (!isValidNumber(formData.sale_price)) {
-      nextErrors.sale_price = t.validation.salePrice;
-    }
-
-    if (
-      formData.sale_price.trim() &&
-      salePrice > 0 &&
-      basePrice > 0 &&
-      salePrice > basePrice
-    ) {
-      nextErrors.sale_price = t.validation.saleGreater;
-    }
-
-    if (!isValidNumber(formData.cost_price)) {
-      nextErrors.cost_price = t.validation.price;
-    }
-
-    if (!isValidNumber(formData.duration_value)) {
-      nextErrors.duration_value = t.validation.duration;
-    }
-
-    if (!isPercent(formData.tax_rate)) {
-      nextErrors.tax_rate = t.validation.percent;
-    }
-
-    if (!isPercent(formData.max_discount_rate)) {
-      nextErrors.max_discount_rate = t.validation.percent;
-    }
-
-    if (!isPercent(formData.default_agent_commission_rate)) {
-      nextErrors.default_agent_commission_rate = t.validation.percent;
-    }
-
-    if (
-      formData.offer_start_date &&
-      formData.offer_end_date &&
-      formData.offer_end_date < formData.offer_start_date
-    ) {
-      nextErrors.offer_end_date = t.validation.offerDates;
-    }
-
-    if (!isValidImage(thumbnailFile) || !isValidImage(marketingFile)) {
-      toast.error(t.validation.imageType);
-      return false;
-    }
-
-    if (!isValidImageSize(thumbnailFile) || !isValidImageSize(marketingFile)) {
-      toast.error(t.validation.imageSize);
-      return false;
-    }
-
-    setErrors(nextErrors);
-
-    return Object.keys(nextErrors).length === 0;
-  }
-
-  async function uploadProductImage(
-    productId: string | number,
-    imageType: "thumbnail" | "marketing",
-    file: File,
-  ) {
-    const form = new FormData();
-    form.append("file", file);
-    form.append("image_type", imageType);
-    form.append("alt_text", formData.name.trim());
-
-    const csrfToken = readCookie("csrftoken");
-
-    const response = await fetch(apiUrl(`/api/products/${productId}/upload-image/`), {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        Accept: "application/json",
-        ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-      },
-      body: form,
+      const next = { ...current };
+      delete next[key];
+      return next;
     });
+  };
 
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${imageType}`);
+  const restoreDraft = () => {
+    const savedDraft = window.localStorage.getItem(DRAFT_KEY);
+
+    if (!savedDraft) return;
+
+    try {
+      const parsed = JSON.parse(savedDraft) as Partial<ProductFormData>;
+
+      setForm({
+        ...initialForm,
+        ...parsed,
+      });
+
+      toast.success(t.draftRestored);
+    } catch {
+      window.localStorage.removeItem(DRAFT_KEY);
+      setHasDraft(false);
     }
-  }
+  };
 
-  async function submitForm() {
-    setSubmitError("");
+  const deleteDraft = () => {
+    window.localStorage.removeItem(DRAFT_KEY);
+    setHasDraft(false);
+    toast.success(t.draftDeleted);
+  };
 
-    if (!validateForm()) {
-      toast.error(t.validationToast);
+  const resetForm = () => {
+    if (dirty && !window.confirm(t.confirmReset)) return;
+
+    setForm(initialForm);
+    setErrors({});
+  };
+
+  const saveDraft = () => {
+    window.localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+    setHasDraft(true);
+    toast.success(t.draftSaved);
+  };
+
+  const submit = async () => {
+    if (!canCreate) {
+      toast.error(t.noPermission);
       return;
     }
 
+    const formErrors = validateForm(form, t);
+
+    setErrors(formErrors);
+
+    if (Object.keys(formErrors).length > 0) {
+      toast.error(t.submitError);
+      return;
+    }
+
+    setIsSaving(true);
+
     try {
-      setIsSubmitting(true);
+      const csrfToken = getCookie("csrftoken");
 
-      const csrfToken = readCookie("csrftoken");
-
-      const response = await fetch(apiUrl("/api/products/"), {
+      const payload = await fetchJson<ApiResponse>(PRODUCTS_ENDPOINT, {
         method: "POST",
-        credentials: "include",
         headers: {
-          Accept: "application/json",
           "Content-Type": "application/json",
           ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
         },
-        body: JSON.stringify(normalizePayload(formData)),
+        body: JSON.stringify(buildPayload(form)),
       });
 
-      const result = (await response.json().catch(() => ({}))) as CreateProductApiResponse;
+      const createdId = extractCreatedId(payload);
 
-      if (!response.ok || result.ok === false) {
-        const apiErrors = mapApiFieldErrors(result.errors);
+      window.localStorage.removeItem(DRAFT_KEY);
+      setHasDraft(false);
 
-        setErrors(apiErrors);
-        setSubmitError(result.message || t.apiError);
-        toast.error(result.message || t.apiError);
-        return;
-      }
-
-      const createdId = resolveCreatedId(result);
-      let imageUploadFailed = false;
-
-      if (createdId) {
-        try {
-          if (thumbnailFile) {
-            await uploadProductImage(createdId, "thumbnail", thumbnailFile);
-          }
-
-          if (marketingFile) {
-            await uploadProductImage(createdId, "marketing", marketingFile);
-          }
-        } catch (error) {
-          console.error("Product image upload error:", error);
-          imageUploadFailed = true;
-        }
-      }
-
-      try {
-        window.localStorage.removeItem(DRAFT_STORAGE_KEY);
-      } catch (error) {
-        console.error("Remove draft error:", error);
-      }
-
-      toast.success(imageUploadFailed ? t.imageUploadPartial : t.success);
+      toast.success(t.created);
 
       if (createdId) {
         router.push(`/system/products/${createdId}`);
-        return;
+      } else {
+        router.push("/system/products");
+      }
+    } catch (submitError) {
+      const error = submitError as Error & { payload?: { errors?: Record<string, unknown> } };
+      const apiErrors = error.payload?.errors || {};
+
+      if (apiErrors && typeof apiErrors === "object") {
+        const mappedErrors: ProductFormErrors = {};
+
+        Object.entries(apiErrors).forEach(([key, value]) => {
+          const message = Array.isArray(value)
+            ? String(value[0] || "")
+            : typeof value === "string"
+              ? value
+              : "";
+
+          if (message) {
+            const fieldKey = key as keyof ProductFormErrors;
+            mappedErrors[fieldKey] = message;
+          }
+        });
+
+        setErrors((current) => ({
+          ...current,
+          ...mappedErrors,
+          form: error.message,
+        }));
+      } else {
+        setErrors((current) => ({
+          ...current,
+          form: error.message,
+        }));
       }
 
-      router.push("/system/products/list");
-    } catch (error) {
-      console.error("Create product error:", error);
-      setSubmitError(t.apiError);
-      toast.error(t.apiError);
+      toast.error(error.message);
     } finally {
-      setIsSubmitting(false);
+      setIsSaving(false);
     }
-  }
-
-  function saveDraft() {
-    try {
-      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(formData));
-      toast.success(t.draftSaved);
-    } catch (error) {
-      console.error("Save draft error:", error);
-    }
-  }
-
-  function restoreDraft() {
-    try {
-      const saved = window.localStorage.getItem(DRAFT_STORAGE_KEY);
-
-      if (!saved) {
-        toast.message(t.noDraft);
-        return;
-      }
-
-      const parsed = JSON.parse(saved) as ProductFormData;
-      setFormData({ ...initialFormData, ...parsed });
-      toast.success(t.draftRestored);
-    } catch (error) {
-      console.error("Restore draft error:", error);
-    }
-  }
-
-  function clearForm() {
-    if (!window.confirm(t.confirmClear)) return;
-
-    setFormData(initialFormData);
-    setErrors({});
-    setSubmitError("");
-    setThumbnailFile(null);
-    setMarketingFile(null);
-    toast.success(t.formCleared);
-  }
-
-  function safeBack() {
-    if (isDirty && !window.confirm(t.confirmLeave)) return;
-
-    router.push("/system/products");
-  }
-
-  async function loadLookups() {
-    try {
-      setIsLoadingLookups(true);
-
-      const [categoriesResponse, providersResponse] = await Promise.all([
-        fetch(apiUrl("/api/products/categories/?page=1&page_size=100"), {
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        }),
-        fetch(apiUrl("/api/providers/?page=1&page_size=100&ordering=name"), {
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        }),
-      ]);
-
-      if (categoriesResponse.ok) {
-        const categoriesPayload =
-          (await categoriesResponse.json().catch(() => ({}))) as ListApiResponse<SelectOption>;
-        setCategories(extractList(categoriesPayload));
-      }
-
-      if (providersResponse.ok) {
-        const providersPayload =
-          (await providersResponse.json().catch(() => ({}))) as ListApiResponse<SelectOption>;
-        setProviders(extractList(providersPayload));
-      }
-    } catch (error) {
-      console.error("Load product create lookups error:", error);
-    } finally {
-      setIsLoadingLookups(false);
-    }
-  }
-
-  useEffect(() => {
-    const nextLocale = readLocale();
-
-    setLocale(nextLocale);
-    applyDocumentLocale(nextLocale);
-    loadLookups();
-  }, []);
-
-  useEffect(() => {
-    const handler = (event: BeforeUnloadEvent) => {
-      if (!hasFormChanges(formData)) return;
-
-      event.preventDefault();
-      event.returnValue = "";
-    };
-
-    window.addEventListener("beforeunload", handler);
-
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [formData]);
-
-  if (authResolving) {
-    return (
-      <div className="w-full space-y-4">
-        <Card>
-          <CardContent className="flex items-center gap-3 p-6">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-sm text-muted-foreground">{t.loadingLookups}</span>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!canCreateProducts) {
-    return (
-      <div className="w-full space-y-4">
-        <Card className="border-destructive/20">
-          <CardContent className="flex flex-col items-center justify-center gap-4 p-10 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
-              <ShieldCheck className="h-7 w-7 text-destructive" />
-            </div>
-
-            <div>
-              <h2 className="text-lg font-semibold">{t.accessDeniedTitle}</h2>
-              <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-
-            {canViewProducts ? (
-              <Button type="button" variant="outline" onClick={() => router.push("/system/products")}>
-                <ArrowLeft className="me-2 h-4 w-4" />
-                {t.back}
-              </Button>
-            ) : null}
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  };
 
   return (
-    <div className="w-full space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="rounded-full">
-              <Package className="me-1 h-3.5 w-3.5" />
-              {selectedProductTypeLabel}
-            </Badge>
-
-            <Badge variant={formData.status === "active" ? "default" : "outline"} className="rounded-full">
-              {selectedStatusLabel}
-            </Badge>
-
-            {formData.is_offer ? (
-              <Badge variant="outline" className="rounded-full">
-                <Sparkles className="me-1 h-3.5 w-3.5" />
-                {t.fields.isOffer}
-              </Badge>
-            ) : null}
+    <div dir={dir} className="w-full space-y-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="mb-2 inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">
+            <Sparkles className="h-3.5 w-3.5 text-[#8c9cdc]" />
+            {t.products}
           </div>
 
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">{t.title}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">{t.subtitle}</p>
-          </div>
+          <h1 className="text-3xl font-black tracking-tight text-slate-950">
+            {t.pageTitle}
+          </h1>
+
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+            {t.subtitle}
+          </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {canViewProducts ? (
-            <Button type="button" variant="outline" onClick={safeBack}>
-              <ArrowLeft className="me-2 h-4 w-4" />
-              {t.back}
-            </Button>
-          ) : null}
-
-          <Button type="button" variant="outline" onClick={restoreDraft} disabled={isSubmitting}>
-            <RotateCcw className="me-2 h-4 w-4" />
-            {t.restoreDraft}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 rounded-lg"
+            onClick={() => router.back()}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            {t.back}
           </Button>
 
-          <Button type="button" variant="outline" onClick={saveDraft} disabled={isSubmitting}>
-            <ClipboardList className="me-2 h-4 w-4" />
+          <Button asChild variant="outline" className="h-10 rounded-lg">
+            <Link href="/system/products">
+              <Package className="h-4 w-4" />
+              {t.products}
+            </Link>
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 rounded-lg"
+            onClick={saveDraft}
+            disabled={isSaving}
+          >
+            <Save className="h-4 w-4" />
             {t.saveDraft}
           </Button>
 
-          <Button type="button" variant="destructive" onClick={clearForm} disabled={isSubmitting}>
-            <Trash2 className="me-2 h-4 w-4" />
-            {t.clearForm}
+          {hasDraft ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-lg"
+                onClick={restoreDraft}
+                disabled={isSaving}
+              >
+                <RefreshCw className="h-4 w-4" />
+                {t.restoreDraft}
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-lg text-red-600 hover:text-red-700"
+                onClick={deleteDraft}
+                disabled={isSaving}
+              >
+                <Trash2 className="h-4 w-4" />
+                {t.deleteDraft}
+              </Button>
+            </>
+          ) : null}
+
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 rounded-lg"
+            onClick={resetForm}
+            disabled={isSaving}
+          >
+            <RotateCcw className="h-4 w-4" />
+            {t.reset}
           </Button>
 
-          <Button type="button" onClick={submitForm} disabled={isSubmitting || !isReadyToSave}>
-            {isSubmitting ? (
-              <Loader2 className="me-2 h-4 w-4 animate-spin" />
+          <Button
+            type="button"
+            className="h-10 rounded-lg bg-slate-950 text-white hover:bg-slate-800"
+            onClick={submit}
+            disabled={isSaving || !canCreate}
+          >
+            {isSaving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Save className="me-2 h-4 w-4" />
+              <CheckCircle2 className="h-4 w-4" />
             )}
-            {isSubmitting ? t.saving : t.create}
+            {isSaving ? t.saving : t.save}
           </Button>
         </div>
       </div>
 
-      {submitError ? (
-        <Card className="border-destructive/20 bg-destructive/5">
+      {errors.form ? (
+        <Card className="rounded-xl border-red-200 bg-red-50 shadow-none">
           <CardContent className="flex items-start gap-3 p-4">
-            <AlertTriangle className="mt-0.5 h-5 w-5 text-destructive" />
-            <div>
-              <p className="font-semibold text-destructive">{t.formErrorTitle}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{submitError}</p>
+            <ShieldCheck className="mt-0.5 h-5 w-5 text-red-600" />
+            <div className="space-y-1">
+              <p className="font-semibold text-red-700">{t.submitError}</p>
+              <p className="text-sm text-red-600">{errors.form}</p>
             </div>
           </CardContent>
         </Card>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Layers3 className="h-5 w-5" />
-                {t.basicInfo}
-              </CardTitle>
-              <CardDescription>{t.basicDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 lg:grid-cols-2">
-              <FieldBlock label={t.fields.name} error={errors.name} required>
+      <div className="grid gap-4 xl:grid-cols-3">
+        <div className="space-y-4 xl:col-span-2">
+          <PremiumCard
+            title={t.basicInfo}
+            description={t.basicInfoDesc}
+            icon={Package}
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>{t.nameAr}</Label>
                 <Input
-                  value={formData.name}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.name}
-                  onChange={(event) => updateField("name", event.target.value)}
+                  value={form.name_ar}
+                  onChange={(event) => updateForm("name_ar", event.target.value)}
+                  className="h-10 rounded-lg"
+                  placeholder={t.nameAr}
                 />
-              </FieldBlock>
+                <FieldError message={errors.name_ar} />
+              </div>
 
-              <FieldBlock label={t.fields.code} error={errors.code}>
+              <div className="space-y-2">
+                <Label>{t.nameEn}</Label>
                 <Input
-                  value={formData.code}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.code}
-                  onChange={(event) => updateField("code", normalizeCode(event.target.value))}
+                  value={form.name_en}
+                  onChange={(event) => updateForm("name_en", event.target.value)}
+                  className="h-10 rounded-lg"
+                  placeholder={t.nameEn}
+                  dir="ltr"
                 />
-              </FieldBlock>
+                <FieldError message={errors.name_en} />
+              </div>
 
-              <FieldBlock label={t.fields.slug} error={errors.slug}>
+              <div className="space-y-2">
+                <Label>{t.code}</Label>
                 <Input
-                  value={formData.slug}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.slug}
-                  onChange={(event) => updateField("slug", normalizeSlug(event.target.value))}
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.type} error={errors.product_type}>
-                <select
-                  value={formData.product_type}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                  value={form.code}
                   onChange={(event) =>
-                    updateField("product_type", event.target.value as ProductType)
+                    updateForm("code", event.target.value.toUpperCase())
                   }
-                >
-                  {Object.entries(t.productTypes).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
+                  className="h-10 rounded-lg"
+                  placeholder="PRD-001"
+                  dir="ltr"
+                />
+                <FieldError message={errors.code} />
+              </div>
 
-              <FieldBlock label={t.fields.status} error={errors.status}>
-                <select
-                  value={formData.status}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  onChange={(event) =>
-                    updateField("status", event.target.value as ProductStatus)
-                  }
-                >
-                  {Object.entries(t.statuses).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.category} error={errors.category_id}>
-                <select
-                  value={formData.category_id}
-                  disabled={isSubmitting || isLoadingLookups}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  onChange={(event) => updateField("category_id", event.target.value)}
-                >
-                  <option value="">{t.noCategory}</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {optionLabel(category, locale)}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.provider} error={errors.provider_id}>
-                <select
-                  value={formData.provider_id}
-                  disabled={isSubmitting || isLoadingLookups}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  onChange={(event) => updateField("provider_id", event.target.value)}
-                >
-                  <option value="">{t.noProvider}</option>
-                  {providers.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {optionLabel(provider, locale)}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                {t.descriptionInfo}
-              </CardTitle>
-              <CardDescription>{t.descriptionDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4">
-              <FieldBlock label={t.fields.shortDescription} error={errors.short_description}>
+              <div className="space-y-2">
+                <Label>{t.category}</Label>
                 <Input
-                  value={formData.short_description}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.shortDescription}
-                  onChange={(event) => updateField("short_description", event.target.value)}
+                  value={form.category_name}
+                  onChange={(event) => updateForm("category_name", event.target.value)}
+                  className="h-10 rounded-lg"
+                  placeholder={t.category}
                 />
-              </FieldBlock>
+                <FieldError message={errors.category_name} />
+              </div>
 
-              <FieldBlock label={t.fields.description} error={errors.description}>
-                <Textarea
-                  value={formData.description}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.description}
-                  className="min-h-28"
-                  onChange={(event) => updateField("description", event.target.value)}
+              <div className="space-y-2">
+                <Label>{t.productType}</Label>
+                <Select
+                  value={form.product_type}
+                  onValueChange={(value) => updateForm("product_type", value as ProductType)}
+                >
+                  <SelectTrigger className="h-10 rounded-lg">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="card">{t.card}</SelectItem>
+                    <SelectItem value="membership">{t.membership}</SelectItem>
+                    <SelectItem value="program">{t.program}</SelectItem>
+                    <SelectItem value="service">{t.service}</SelectItem>
+                    <SelectItem value="medical_service">{t.medicalService}</SelectItem>
+                    <SelectItem value="package">{t.package}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldError message={errors.product_type} />
+              </div>
+
+              <div className="space-y-2">
+                <Label>{t.status}</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(value) => updateForm("status", value as ProductStatus)}
+                >
+                  <SelectTrigger className="h-10 rounded-lg">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">{t.active}</SelectItem>
+                    <SelectItem value="draft">{t.draft}</SelectItem>
+                    <SelectItem value="inactive">{t.inactive}</SelectItem>
+                    <SelectItem value="archived">{t.archived}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldError message={errors.status} />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <Label>{t.descriptionAr}</Label>
+                <textarea
+                  value={form.description_ar}
+                  onChange={(event) => updateForm("description_ar", event.target.value)}
+                  rows={4}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-400"
+                  placeholder={t.descriptionAr}
                 />
-              </FieldBlock>
+                <FieldError message={errors.description_ar} />
+              </div>
 
-              <div className="grid gap-4 lg:grid-cols-2">
-                <FieldBlock label={t.fields.features} error={errors.features}>
-                  <Textarea
-                    value={formData.features}
-                    disabled={isSubmitting}
-                    placeholder={t.placeholders.features}
-                    className="min-h-24"
-                    onChange={(event) => updateField("features", event.target.value)}
-                  />
-                </FieldBlock>
+              <div className="space-y-2 md:col-span-2">
+                <Label>{t.descriptionEn}</Label>
+                <textarea
+                  value={form.description_en}
+                  onChange={(event) => updateForm("description_en", event.target.value)}
+                  rows={4}
+                  dir="ltr"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-400"
+                  placeholder={t.descriptionEn}
+                />
+                <FieldError message={errors.description_en} />
+              </div>
+            </div>
+          </PremiumCard>
 
-                <FieldBlock label={t.fields.terms} error={errors.terms_and_conditions}>
-                  <Textarea
-                    value={formData.terms_and_conditions}
-                    disabled={isSubmitting}
-                    placeholder={t.placeholders.terms}
-                    className="min-h-24"
+          <PremiumCard
+            title={t.pricing}
+            description={t.pricingDesc}
+            icon={CircleDollarSign}
+          >
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label>{t.basePrice}</Label>
+                <div className="relative">
+                  <Input
+                    value={form.base_price}
                     onChange={(event) =>
-                      updateField("terms_and_conditions", event.target.value)
+                      updateForm("base_price", toEnglishDigits(event.target.value))
                     }
+                    inputMode="decimal"
+                    className="h-10 rounded-lg pe-10"
+                    dir="ltr"
                   />
-                </FieldBlock>
+                  <SarIcon className="absolute end-3 top-1/2 -translate-y-1/2" />
+                </div>
+                <FieldError message={errors.base_price} />
               </div>
 
-              <FieldBlock label={t.fields.tags} error={errors.tags}>
+              <div className="space-y-2">
+                <Label>{t.salePrice}</Label>
+                <div className="relative">
+                  <Input
+                    value={form.sale_price}
+                    onChange={(event) =>
+                      updateForm("sale_price", toEnglishDigits(event.target.value))
+                    }
+                    inputMode="decimal"
+                    className="h-10 rounded-lg pe-10"
+                    dir="ltr"
+                  />
+                  <SarIcon className="absolute end-3 top-1/2 -translate-y-1/2" />
+                </div>
+                <FieldError message={errors.sale_price} />
+              </div>
+
+              <div className="space-y-2">
+                <Label>{t.discountPercentage}</Label>
                 <Input
-                  value={formData.tags}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.tags}
-                  onChange={(event) => updateField("tags", event.target.value)}
+                  value={form.discount_percentage}
+                  onChange={(event) =>
+                    updateForm("discount_percentage", toEnglishDigits(event.target.value))
+                  }
+                  inputMode="decimal"
+                  className="h-10 rounded-lg"
+                  dir="ltr"
                 />
-              </FieldBlock>
-            </CardContent>
-          </Card>
+                <FieldError message={errors.discount_percentage} />
+              </div>
+            </div>
+          </PremiumCard>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5" />
-                {t.marketingInfo}
-              </CardTitle>
-              <CardDescription>{t.marketingDesc}</CardDescription>
-            </CardHeader>
+          <PremiumCard
+            title={t.availability}
+            description={t.availabilityDesc}
+            icon={CalendarDays}
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <SwitchBox
+                label={t.hasDuration}
+                checked={form.has_duration}
+                onChange={(value) => updateForm("has_duration", value)}
+              />
 
-            <CardContent className="grid gap-4">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <ToggleBox
-                  checked={formData.is_offer}
-                  disabled={isSubmitting}
-                  title={t.fields.isOffer}
-                  description={t.fields.isOffer}
-                  onChange={(value) => updateField("is_offer", value)}
+              <SwitchBox
+                label={t.hasExpiry}
+                checked={form.has_expiry}
+                onChange={(value) => updateForm("has_expiry", value)}
+              />
+
+              {form.has_duration ? (
+                <div className="space-y-2">
+                  <Label>{t.durationDays}</Label>
+                  <Input
+                    value={form.duration_days}
+                    onChange={(event) =>
+                      updateForm("duration_days", toEnglishDigits(event.target.value))
+                    }
+                    inputMode="numeric"
+                    className="h-10 rounded-lg"
+                    dir="ltr"
+                  />
+                  <FieldError message={errors.duration_days} />
+                </div>
+              ) : null}
+
+              {form.has_expiry ? (
+                <>
+                  <div className="space-y-2">
+                    <Label>{t.validFrom}</Label>
+                    <Input
+                      type="date"
+                      value={form.valid_from || todayIso()}
+                      onChange={(event) => updateForm("valid_from", event.target.value)}
+                      className="h-10 rounded-lg"
+                    />
+                    <FieldError message={errors.valid_from} />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>{t.validUntil}</Label>
+                    <Input
+                      type="date"
+                      value={form.valid_until}
+                      onChange={(event) => updateForm("valid_until", event.target.value)}
+                      className="h-10 rounded-lg"
+                    />
+                    <FieldError message={errors.valid_until} />
+                  </div>
+                </>
+              ) : null}
+            </div>
+          </PremiumCard>
+
+          <PremiumCard
+            title={t.marketing}
+            description={t.marketingDesc}
+            icon={BadgePercent}
+          >
+            <div className="space-y-4">
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                <SwitchBox
+                  label={t.isPublic}
+                  checked={form.is_public}
+                  onChange={(value) => updateForm("is_public", value)}
                 />
 
-                <ToggleBox
-                  checked={formData.show_on_landing}
-                  disabled={isSubmitting}
-                  title={t.fields.landing}
-                  description={t.fields.landing}
-                  onChange={(value) => updateField("show_on_landing", value)}
+                <SwitchBox
+                  label={t.isFeatured}
+                  checked={form.is_featured}
+                  onChange={(value) => updateForm("is_featured", value)}
                 />
 
-                <ToggleBox
-                  checked={formData.show_on_mobile}
-                  disabled={isSubmitting}
-                  title={t.fields.mobile}
-                  description={t.fields.mobile}
-                  onChange={(value) => updateField("show_on_mobile", value)}
+                <SwitchBox
+                  label={t.isOffer}
+                  checked={form.is_offer}
+                  onChange={(value) => updateForm("is_offer", value)}
                 />
 
-                <ToggleBox
-                  checked={formData.show_on_offers}
-                  disabled={isSubmitting}
-                  title={t.fields.offers}
-                  description={t.fields.offers}
-                  onChange={(value) => updateField("show_on_offers", value)}
+                <SwitchBox
+                  label={t.allowOnlinePurchase}
+                  checked={form.allow_online_purchase}
+                  onChange={(value) => updateForm("allow_online_purchase", value)}
+                />
+
+                <SwitchBox
+                  label={t.showOnLanding}
+                  checked={form.show_on_landing}
+                  onChange={(value) => updateForm("show_on_landing", value)}
+                />
+
+                <SwitchBox
+                  label={t.showOnMobile}
+                  checked={form.show_on_mobile}
+                  onChange={(value) => updateForm("show_on_mobile", value)}
+                />
+
+                <SwitchBox
+                  label={t.showOnOffers}
+                  checked={form.show_on_offers}
+                  onChange={(value) => updateForm("show_on_offers", value)}
                 />
               </div>
 
-              <div className="grid gap-4 lg:grid-cols-3">
-                <FieldBlock label={t.fields.offerTitle} error={errors.offer_title}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>{t.offerTitleAr}</Label>
                   <Input
-                    value={formData.offer_title}
-                    disabled={isSubmitting}
-                    placeholder={t.placeholders.offerTitle}
-                    onChange={(event) => updateField("offer_title", event.target.value)}
+                    value={form.offer_title_ar}
+                    onChange={(event) => updateForm("offer_title_ar", event.target.value)}
+                    className="h-10 rounded-lg"
                   />
-                </FieldBlock>
+                </div>
 
-                <FieldBlock label={t.fields.offerSubtitle} error={errors.offer_subtitle}>
+                <div className="space-y-2">
+                  <Label>{t.offerTitleEn}</Label>
                   <Input
-                    value={formData.offer_subtitle}
-                    disabled={isSubmitting}
-                    placeholder={t.placeholders.offerSubtitle}
-                    onChange={(event) => updateField("offer_subtitle", event.target.value)}
+                    value={form.offer_title_en}
+                    onChange={(event) => updateForm("offer_title_en", event.target.value)}
+                    className="h-10 rounded-lg"
+                    dir="ltr"
                   />
-                </FieldBlock>
+                </div>
 
-                <FieldBlock label={t.fields.offerBadge} error={errors.offer_badge}>
+                <div className="space-y-2">
+                  <Label>{t.offerSubtitleAr}</Label>
                   <Input
-                    value={formData.offer_badge}
-                    disabled={isSubmitting}
-                    placeholder={t.placeholders.offerBadge}
-                    onChange={(event) => updateField("offer_badge", event.target.value)}
+                    value={form.offer_subtitle_ar}
+                    onChange={(event) => updateForm("offer_subtitle_ar", event.target.value)}
+                    className="h-10 rounded-lg"
                   />
-                </FieldBlock>
+                </div>
 
-                <FieldBlock label={t.fields.offerStart} error={errors.offer_start_date}>
+                <div className="space-y-2">
+                  <Label>{t.offerSubtitleEn}</Label>
                   <Input
-                    type="date"
-                    value={formData.offer_start_date}
-                    disabled={isSubmitting}
-                    onChange={(event) => updateField("offer_start_date", event.target.value)}
+                    value={form.offer_subtitle_en}
+                    onChange={(event) => updateForm("offer_subtitle_en", event.target.value)}
+                    className="h-10 rounded-lg"
+                    dir="ltr"
                   />
-                </FieldBlock>
+                </div>
 
-                <FieldBlock label={t.fields.offerEnd} error={errors.offer_end_date}>
+                <div className="space-y-2">
+                  <Label>{t.offerBadgeAr}</Label>
                   <Input
-                    type="date"
-                    value={formData.offer_end_date}
-                    disabled={isSubmitting}
-                    onChange={(event) => updateField("offer_end_date", event.target.value)}
+                    value={form.offer_badge_ar}
+                    onChange={(event) => updateForm("offer_badge_ar", event.target.value)}
+                    className="h-10 rounded-lg"
                   />
-                </FieldBlock>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{t.offerBadgeEn}</Label>
+                  <Input
+                    value={form.offer_badge_en}
+                    onChange={(event) => updateForm("offer_badge_en", event.target.value)}
+                    className="h-10 rounded-lg"
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="space-y-2 md:col-span-2">
+                  <Label>{t.offerTermsAr}</Label>
+                  <textarea
+                    value={form.offer_terms_ar}
+                    onChange={(event) => updateForm("offer_terms_ar", event.target.value)}
+                    rows={3}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-400"
+                  />
+                </div>
+
+                <div className="space-y-2 md:col-span-2">
+                  <Label>{t.offerTermsEn}</Label>
+                  <textarea
+                    value={form.offer_terms_en}
+                    onChange={(event) => updateForm("offer_terms_en", event.target.value)}
+                    rows={3}
+                    dir="ltr"
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-400"
+                  />
+                </div>
+              </div>
+            </div>
+          </PremiumCard>
+
+          <PremiumCard
+            title={t.images}
+            description={t.imagesDesc}
+            icon={ImagePlus}
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>{t.thumbnailImage}</Label>
+                <Input
+                  value={form.thumbnail_image_url}
+                  onChange={(event) => updateForm("thumbnail_image_url", event.target.value)}
+                  className="h-10 rounded-lg"
+                  placeholder="https://..."
+                  dir="ltr"
+                />
               </div>
 
-              <FieldBlock label={t.fields.offerTerms} error={errors.offer_terms}>
-                <Textarea
-                  value={formData.offer_terms}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.terms}
-                  className="min-h-24"
-                  onChange={(event) => updateField("offer_terms", event.target.value)}
-                />
-              </FieldBlock>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ImagePlus className="h-5 w-5" />
-                {t.imagesInfo}
-              </CardTitle>
-              <CardDescription>{t.imagesDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 lg:grid-cols-2">
-              <FilePicker
-                label={t.fields.thumbnail}
-                file={thumbnailFile}
-                disabled={isSubmitting}
-                onChange={setThumbnailFile}
-              />
-
-              <FilePicker
-                label={t.fields.marketingImage}
-                file={marketingFile}
-                disabled={isSubmitting}
-                onChange={setMarketingFile}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CircleDollarSign className="h-5 w-5" />
-                {t.pricingInfo}
-              </CardTitle>
-              <CardDescription>{t.pricingDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 lg:grid-cols-3">
-              <FieldBlock label={t.fields.price} error={errors.price} required>
+              <div className="space-y-2">
+                <Label>{t.marketingImage}</Label>
                 <Input
-                  inputMode="decimal"
-                  value={formData.price}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.price}
-                  onChange={(event) => updateField("price", event.target.value)}
+                  value={form.marketing_image_url}
+                  onChange={(event) => updateForm("marketing_image_url", event.target.value)}
+                  className="h-10 rounded-lg"
+                  placeholder="https://..."
+                  dir="ltr"
                 />
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.salePrice} error={errors.sale_price}>
-                <Input
-                  inputMode="decimal"
-                  value={formData.sale_price}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.salePrice}
-                  onChange={(event) => updateField("sale_price", event.target.value)}
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.costPrice} error={errors.cost_price}>
-                <Input
-                  inputMode="decimal"
-                  value={formData.cost_price}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.costPrice}
-                  onChange={(event) => updateField("cost_price", event.target.value)}
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.billingType} error={errors.billing_type}>
-                <select
-                  value={formData.billing_type}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  onChange={(event) =>
-                    updateField("billing_type", event.target.value as BillingType)
-                  }
-                >
-                  {Object.entries(t.billingTypes).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.fulfillmentType} error={errors.fulfillment_type}>
-                <select
-                  value={formData.fulfillment_type}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  onChange={(event) =>
-                    updateField("fulfillment_type", event.target.value as FulfillmentType)
-                  }
-                >
-                  {Object.entries(t.fulfillmentTypes).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.durationUnit} error={errors.duration_unit}>
-                <select
-                  value={formData.duration_unit}
-                  disabled={isSubmitting}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  onChange={(event) =>
-                    updateField("duration_unit", event.target.value as DurationUnit)
-                  }
-                >
-                  {Object.entries(t.durationUnits).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.durationValue} error={errors.duration_value}>
-                <Input
-                  inputMode="numeric"
-                  value={formData.duration_value}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.durationValue}
-                  onChange={(event) => updateField("duration_value", event.target.value)}
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.taxRate} error={errors.tax_rate}>
-                <Input
-                  inputMode="decimal"
-                  value={formData.tax_rate}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.taxRate}
-                  onChange={(event) => updateField("tax_rate", event.target.value)}
-                />
-              </FieldBlock>
-
-              <ToggleBox
-                checked={formData.is_taxable}
-                disabled={isSubmitting}
-                title={t.fields.taxable}
-                description={t.fields.taxable}
-                onChange={(value) => updateField("is_taxable", value)}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5" />
-                {t.availabilityInfo}
-              </CardTitle>
-              <CardDescription>{t.availabilityDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 lg:grid-cols-3">
-              <ToggleBox
-                checked={formData.is_public}
-                disabled={isSubmitting}
-                title={t.fields.public}
-                description={t.fields.public}
-                onChange={(value) => updateField("is_public", value)}
-              />
-
-              <ToggleBox
-                checked={formData.is_featured}
-                disabled={isSubmitting}
-                title={t.fields.featured}
-                description={t.fields.featured}
-                onChange={(value) => updateField("is_featured", value)}
-              />
-
-              <ToggleBox
-                checked={formData.requires_approval}
-                disabled={isSubmitting}
-                title={t.fields.requiresApproval}
-                description={t.fields.requiresApproval}
-                onChange={(value) => updateField("requires_approval", value)}
-              />
-
-              <ToggleBox
-                checked={formData.allow_online_purchase}
-                disabled={isSubmitting}
-                title={t.fields.onlinePurchase}
-                description={t.fields.onlinePurchase}
-                onChange={(value) => updateField("allow_online_purchase", value)}
-              />
-
-              <ToggleBox
-                checked={formData.allow_agent_sale}
-                disabled={isSubmitting}
-                title={t.fields.agentSale}
-                description={t.fields.agentSale}
-                onChange={(value) => updateField("allow_agent_sale", value)}
-              />
-
-              <ToggleBox
-                checked={formData.allow_provider_sale}
-                disabled={isSubmitting}
-                title={t.fields.providerSale}
-                description={t.fields.providerSale}
-                onChange={(value) => updateField("allow_provider_sale", value)}
-              />
-
-              <ToggleBox
-                checked={formData.can_be_ordered}
-                disabled={isSubmitting}
-                title={t.fields.canBeOrdered}
-                description={t.fields.canBeOrdered}
-                onChange={(value) => updateField("can_be_ordered", value)}
-              />
-
-              <ToggleBox
-                checked={formData.can_be_used_in_contracts}
-                disabled={isSubmitting}
-                title={t.fields.contractsReady}
-                description={t.fields.contractsReady}
-                onChange={(value) => updateField("can_be_used_in_contracts", value)}
-              />
-
-              <ToggleBox
-                checked={formData.requires_provider}
-                disabled={isSubmitting}
-                title={t.fields.requiresProvider}
-                description={t.fields.requiresProvider}
-                onChange={(value) => updateField("requires_provider", value)}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Percent className="h-5 w-5" />
-                {t.limitsInfo}
-              </CardTitle>
-              <CardDescription>{t.limitsDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 lg:grid-cols-2">
-              <FieldBlock label={t.fields.maxDiscount} error={errors.max_discount_rate}>
-                <Input
-                  inputMode="decimal"
-                  value={formData.max_discount_rate}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.maxDiscount}
-                  onChange={(event) =>
-                    updateField("max_discount_rate", event.target.value)
-                  }
-                />
-              </FieldBlock>
-
-              <FieldBlock
-                label={t.fields.agentCommission}
-                error={errors.default_agent_commission_rate}
-              >
-                <Input
-                  inputMode="decimal"
-                  value={formData.default_agent_commission_rate}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.agentCommission}
-                  onChange={(event) =>
-                    updateField("default_agent_commission_rate", event.target.value)
-                  }
-                />
-              </FieldBlock>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Boxes className="h-5 w-5" />
-                {t.advancedInfo}
-              </CardTitle>
-              <CardDescription>{t.advancedDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 lg:grid-cols-2">
-              <FieldBlock label={t.fields.pricingTiers} error={errors.pricing_tiers_text}>
-                <Textarea
-                  value={formData.pricing_tiers_text}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.pricingTiers}
-                  className="min-h-32"
-                  onChange={(event) => updateField("pricing_tiers_text", event.target.value)}
-                />
-              </FieldBlock>
-
-              <FieldBlock label={t.fields.serviceItems} error={errors.service_items_text}>
-                <Textarea
-                  value={formData.service_items_text}
-                  disabled={isSubmitting}
-                  placeholder={t.placeholders.serviceItems}
-                  className="min-h-32"
-                  onChange={(event) => updateField("service_items_text", event.target.value)}
-                />
-              </FieldBlock>
-            </CardContent>
-          </Card>
+              </div>
+            </div>
+          </PremiumCard>
         </div>
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BadgeCheck className="h-5 w-5" />
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <div className="rounded-2xl border bg-background p-4">
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="font-medium">{t.completion}</span>
-                  <span className="font-semibold">{progressPercent}%</span>
+        <div className="space-y-4 xl:col-span-1">
+          <div className="sticky top-20 space-y-4">
+            <Card className="rounded-xl border border-slate-200 bg-white shadow-none">
+              <CardContent className="space-y-4 p-4">
+                <div className="flex items-center gap-2">
+                  <Eye className="h-5 w-5 text-[#8c9cdc]" />
+                  <h3 className="font-bold">{t.preview}</h3>
                 </div>
 
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${Math.min(100, progressPercent)}%` }}
+                <div className="overflow-hidden rounded-xl border bg-slate-50">
+                  <div className="flex aspect-[4/3] items-center justify-center bg-white">
+                    {form.thumbnail_image_url || form.marketing_image_url ? (
+                      <img
+                        src={form.thumbnail_image_url || form.marketing_image_url}
+                        alt={form.name_ar || form.name_en || t.pageTitle}
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-slate-400">
+                        <Box className="h-10 w-10" />
+                        <span className="text-sm">{t.images}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className="rounded-full border-emerald-200 bg-emerald-50 text-emerald-700"
+                      >
+                        {statusLabel(form.status, t)}
+                      </Badge>
+
+                      <Badge variant="outline" className="rounded-full">
+                        {typeLabel(form.product_type, t)}
+                      </Badge>
+
+                      {form.is_offer ? (
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+                        >
+                          {t.isOffer}
+                        </Badge>
+                      ) : null}
+                    </div>
+
+                    <div>
+                      <h3 className="line-clamp-2 text-lg font-black text-slate-950">
+                        {form.name_ar || form.name_en || t.pageTitle}
+                      </h3>
+                      <p className="mt-1 line-clamp-2 text-sm text-slate-500">
+                        {form.description_ar || form.description_en || t.basicInfoDesc}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-lg bg-white p-3">
+                      <span className="text-sm text-slate-500">{t.finalPrice}</span>
+                      <MoneyValue value={finalPrice} />
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-xl border border-slate-200 bg-white shadow-none">
+              <CardContent className="space-y-4 p-4">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-[#8c9cdc]" />
+                  <h3 className="font-bold">{t.readiness}</h3>
+                </div>
+
+                <div className="grid gap-3">
+                  <KpiCard
+                    title={t.requiredFields}
+                    value={
+                      form.name_ar.trim() || form.name_en.trim() ? t.complete : t.incomplete
+                    }
+                    icon={CheckCircle2}
+                  />
+
+                  <KpiCard
+                    title={t.pricingReady}
+                    value={<MoneyValue value={finalPrice} />}
+                    icon={CircleDollarSign}
+                  />
+
+                  <KpiCard
+                    title={t.marketingReady}
+                    value={
+                      form.show_on_landing ||
+                      form.show_on_mobile ||
+                      form.show_on_offers ||
+                      form.is_featured
+                        ? t.yes
+                        : t.no
+                    }
+                    icon={Layers3}
                   />
                 </div>
+              </CardContent>
+            </Card>
 
-                <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                  {isReadyToSave ? (
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            <Card className="rounded-xl border border-slate-200 bg-white shadow-none">
+              <CardContent className="space-y-3 p-4">
+                <div className="flex items-center gap-2">
+                  <Tag className="h-5 w-5 text-[#8c9cdc]" />
+                  <h3 className="font-bold">{t.summary}</h3>
+                </div>
+
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500">{t.code}</span>
+                    <span className="font-semibold">{form.code || t.notSet}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500">{t.category}</span>
+                    <span className="font-semibold">{form.category_name || t.notSet}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500">{t.productType}</span>
+                    <span className="font-semibold">{typeLabel(form.product_type, t)}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500">{t.status}</span>
+                    <span className="font-semibold">{statusLabel(form.status, t)}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500">{t.discountPercentage}</span>
+                    <span className="font-semibold">{formatPercent(form.discount_percentage)}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500">{t.duration}</span>
+                    <span className="font-semibold">
+                      {form.has_duration ? `${formatNumber(form.duration_days)} ${t.durationDays}` : t.notSet}
+                    </span>
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  className="mt-2 h-10 w-full rounded-lg bg-slate-950 text-white hover:bg-slate-800"
+                  onClick={submit}
+                  disabled={isSaving || !canCreate}
+                >
+                  {isSaving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <XCircle className="h-4 w-4 text-destructive" />
+                    <CheckCircle2 className="h-4 w-4" />
                   )}
-                  <span>{isReadyToSave ? t.ready : t.missingData}</span>
-                </div>
-              </div>
-
-              <SummaryItem
-                icon={Package}
-                label={t.fields.name}
-                value={formData.name}
-              />
-
-              <SummaryItem
-                icon={Tag}
-                label={t.fields.type}
-                value={selectedProductTypeLabel}
-              />
-
-              <SummaryItem
-                icon={Stethoscope}
-                label={t.fields.provider}
-                value={
-                  providers.find((item) => String(item.id) === formData.provider_id)
-                    ? optionLabel(
-                        providers.find((item) => String(item.id) === formData.provider_id)!,
-                        locale,
-                      )
-                    : t.noProvider
-                }
-              />
-
-              <SummaryItem
-                icon={CircleDollarSign}
-                label={t.priceSummary}
-                value={formatMoney(effectivePrice)}
-              />
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="mb-3 text-sm font-semibold">{t.priceSummary}</p>
-                <div className="grid gap-2 text-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">{t.fields.price}</span>
-                    <SarAmount value={toNumber(formData.price)} />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">{t.fields.salePrice}</span>
-                    <SarAmount value={toNumber(formData.sale_price)} />
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3 font-semibold">
-                    <span>{t.ready}</span>
-                    <SarAmount value={effectivePrice} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="mb-3 text-sm font-semibold">{t.offerSummary}</p>
-                <div className="flex flex-wrap gap-2">
-                  {formData.is_offer ? <Badge>{t.fields.isOffer}</Badge> : null}
-                  {formData.show_on_landing ? <Badge variant="outline">{t.fields.landing}</Badge> : null}
-                  {formData.show_on_mobile ? <Badge variant="outline">{t.fields.mobile}</Badge> : null}
-                  {formData.show_on_offers ? <Badge variant="outline">{t.fields.offers}</Badge> : null}
-                  {thumbnailFile ? <Badge variant="secondary">{t.fields.thumbnail}</Badge> : null}
-                  {marketingFile ? <Badge variant="secondary">{t.fields.marketingImage}</Badge> : null}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <UploadCloud className="h-5 w-5" />
-                {t.imagesInfo}
-              </CardTitle>
-              <CardDescription>{t.imagesDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              <SummaryItem
-                icon={FileImage}
-                label={t.fields.thumbnail}
-                value={thumbnailFile ? t.fileSelected : t.no}
-              />
-
-              <SummaryItem
-                icon={CalendarDays}
-                label={t.fields.marketingImage}
-                value={marketingFile ? t.fileSelected : t.no}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CreditCard className="h-5 w-5" />
-                {t.stepsTitle}
-              </CardTitle>
-              <CardDescription>{t.stepsDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <ul className="space-y-3 text-sm text-muted-foreground">
-                {t.quickNotes.map((note) => (
-                  <li key={note} className="flex gap-2">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                    <span>{note}</span>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
+                  {isSaving ? t.saving : t.save}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </div>

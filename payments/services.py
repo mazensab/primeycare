@@ -1,19 +1,23 @@
 # ============================================================
 # 📂 payments/services.py
-# 🧠 Primey Care | Payment Services V2
+# 🧠 Primey Care | Payment Services V2.1
 # ------------------------------------------------------------
 # ✅ إنشاء دفعة مرتبطة بفاتورة / طلب / عميل
 # ✅ تأكيد الدفع
 # ✅ تحديث حالة الفاتورة قدر الإمكان
+# ✅ تحديث حالة الطلب بعد الدفع
 # ✅ جدولة الترحيل المحاسبي بعد commit
 # ✅ جدولة حركة الخزينة بعد commit
 # ✅ ربط الدفعة مع Accounting Backend الجديد
 # ✅ ربط الدفعة مع Treasury Backend الجديد
 # ✅ إلغاء آمن للدفعات غير المؤكدة
 # ✅ منع التكرار قدر الإمكان
+# ✅ متوافق مع Customer Portal / OTP customer account flow
 # ------------------------------------------------------------
 # المسار المالي المعتمد:
 # Payment Confirmed
+# → Update Invoice
+# → Update Order payment snapshot
 # → Accounting JournalEntry via accounting.services.post_payment_receipt
 # → TreasuryTransaction via treasury.services.create_payment_receipt_movement
 # ============================================================
@@ -40,19 +44,14 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 CANDIDATE_ACCOUNTING_POSTING_TARGETS = [
-    # ✅ الدالة الرسمية الحالية بعد إعادة بناء Backend المالي
     ("accounting.services", "post_payment_receipt"),
-
-    # توافق خلفي لأي أسماء قديمة إن وجدت
     ("accounting.services", "post_payment_confirm"),
     ("accounting.services", "post_payment_confirmation"),
     ("accounting.services", "post_payment"),
-
     ("accounting.services.posting", "post_payment_receipt"),
     ("accounting.services.posting", "post_payment_confirm"),
     ("accounting.services.posting", "post_payment_confirmation"),
     ("accounting.services.posting", "post_payment"),
-
     ("accounting.services.payment_posting", "post_payment_receipt"),
     ("accounting.services.payment_posting", "post_payment_confirm"),
     ("accounting.services.payment_posting", "post_payment_confirmation"),
@@ -60,11 +59,8 @@ CANDIDATE_ACCOUNTING_POSTING_TARGETS = [
 ]
 
 CANDIDATE_TREASURY_TARGETS = [
-    # ✅ الدالة الرسمية الحالية بعد إعادة بناء Backend المالي
     ("treasury.services", "create_payment_receipt_movement"),
     ("treasury.services", "create_payment_treasury_movement"),
-
-    # توافق خلفي إن وجدت ملفات قديمة
     ("treasury.services.movements", "create_payment_receipt_movement"),
     ("treasury.services.movements", "create_payment_treasury_movement"),
     ("treasury.services.posting", "create_payment_receipt_movement"),
@@ -201,11 +197,6 @@ def _call_accounting_with_fallbacks(
     payment: Payment,
     actor: Any = None,
 ) -> Any:
-    """
-    استدعاء مرن لدوال الترحيل المحاسبي.
-    الدالة الرسمية الحالية:
-      post_payment_receipt(payment, actor=None)
-    """
     try:
         return fn(payment=payment, actor=actor)
     except TypeError:
@@ -220,21 +211,6 @@ def _call_treasury_with_fallbacks(
     payment: Payment,
     actor: Any = None,
 ) -> Any:
-    """
-    استدعاء مرن لدوال الخزينة.
-    الدالة الرسمية الحالية:
-      create_payment_receipt_movement(
-          payment,
-          actor=None,
-          auto_confirm=True,
-          post_to_accounting=False,
-      )
-
-    ملاحظة:
-    - لا نجعل الخزينة ترحل محاسبيًا هنا لأن payments.services
-      يقوم بالترحيل المحاسبي أولًا ثم ينشئ حركة الخزينة.
-    - هذا يمنع الترحيل المكرر.
-    """
     try:
         return fn(
             payment=payment,
@@ -306,9 +282,6 @@ def _resolve_payment_paid_amount(payment: Payment) -> Decimal:
 
 
 def _set_payment_confirmed_status(payment: Payment) -> None:
-    """
-    ضبط حالة الدفعة بناء على paid_amount مقابل amount.
-    """
     amount = _resolve_payment_total(payment)
     paid_amount = _resolve_payment_paid_amount(payment)
 
@@ -320,6 +293,34 @@ def _set_payment_confirmed_status(payment: Payment) -> None:
         return
 
     payment.status = PaymentStatus.PAID
+
+
+def _resolve_invoice_status_value(name: str, fallback: str) -> str:
+    """
+    يرجع حالة الفاتورة بشكل آمن حسب enum الفاتورة إن توفر.
+    يدعم الأنظمة التي تستخدم lowercase أو uppercase.
+    """
+    try:
+        from invoices.models import InvoiceStatus
+
+        value = getattr(InvoiceStatus, name, None)
+        if value:
+            return value
+
+        values = set(getattr(InvoiceStatus, "values", []))
+        fallback_lower = fallback.lower()
+        fallback_upper = fallback.upper()
+
+        if fallback_lower in values:
+            return fallback_lower
+
+        if fallback_upper in values:
+            return fallback_upper
+
+    except Exception:
+        pass
+
+    return fallback
 
 
 def _set_invoice_status(
@@ -348,11 +349,11 @@ def _set_invoice_status(
 
     if hasattr(invoice, "status"):
         if paid_amount <= Decimal("0.00"):
-            new_status = "ISSUED"
+            new_status = _resolve_invoice_status_value("ISSUED", "issued")
         elif total_amount > Decimal("0.00") and paid_amount < total_amount:
-            new_status = "PARTIALLY_PAID"
+            new_status = _resolve_invoice_status_value("PARTIALLY_PAID", "partially_paid")
         else:
-            new_status = "PAID"
+            new_status = _resolve_invoice_status_value("PAID", "paid")
 
         invoice.status = new_status
         changed_fields.append("status")
@@ -410,6 +411,86 @@ def _update_invoice_after_payment(payment: Payment) -> None:
     )
 
 
+def _resolve_order_status_value(order: Any, enum_name: str, fallback: str) -> str:
+    try:
+        payment_status_enum = getattr(order, "PaymentStatus", None)
+        value = getattr(payment_status_enum, enum_name, None)
+        if value:
+            return value
+    except Exception:
+        pass
+
+    return fallback
+
+
+def _update_order_after_payment(payment: Payment) -> None:
+    """
+    يزامن حالة الطلب بعد تأكيد الدفع.
+
+    مهم:
+    - الدفعة قد تكون مرتبطة بالطلب مباشرة.
+    - أو مرتبطة بالفاتورة، والفاتورة مرتبطة بالطلب.
+    """
+    order = getattr(payment, "order", None)
+
+    if not order and getattr(payment, "invoice", None):
+        order = getattr(payment.invoice, "order", None)
+
+    if not order:
+        return
+
+    confirmed_payments = Payment.objects.filter(
+        order=order,
+        status__in=[
+            PaymentStatus.PAID,
+            PaymentStatus.PARTIALLY_PAID,
+            PaymentStatus.PARTIALLY_REFUNDED,
+            PaymentStatus.REFUNDED,
+        ],
+    )
+
+    paid_amount = Decimal("0.00")
+
+    for item in confirmed_payments:
+        paid_amount += _safe_decimal(item.paid_amount) - _safe_decimal(item.refunded_amount)
+
+    if paid_amount < Decimal("0.00"):
+        paid_amount = Decimal("0.00")
+
+    total_amount = _safe_decimal(_safe_getattr(order, "total_amount", Decimal("0.00")))
+    changed_fields: list[str] = []
+
+    if hasattr(order, "amount_paid"):
+        order.amount_paid = paid_amount
+        changed_fields.append("amount_paid")
+
+    if hasattr(order, "payment_status"):
+        if paid_amount <= Decimal("0.00"):
+            order.payment_status = _resolve_order_status_value(order, "UNPAID", "unpaid")
+        elif total_amount > Decimal("0.00") and paid_amount < total_amount:
+            order.payment_status = _resolve_order_status_value(order, "PARTIALLY_PAID", "partially_paid")
+        else:
+            order.payment_status = _resolve_order_status_value(order, "PAID", "paid")
+        changed_fields.append("payment_status")
+
+    if hasattr(order, "updated_at"):
+        order.updated_at = timezone.now()
+        changed_fields.append("updated_at")
+
+    if changed_fields:
+        try:
+            order.save(update_fields=list(dict.fromkeys(changed_fields)))
+        except Exception:
+            order.save()
+
+    logger.info(
+        "✅ تم تحديث حالة الطلب بعد الدفع | order=%s | paid=%s | total=%s",
+        getattr(order, "pk", None),
+        paid_amount,
+        total_amount,
+    )
+
+
 def _mark_payment_accounting_posted(
     payment: Payment,
     result: Any,
@@ -457,6 +538,37 @@ def _mark_payment_treasury_posted(
 # ============================================================
 # ✅ التحقق
 # ============================================================
+
+def validate_payment_for_creation(
+    *,
+    order: Any,
+    customer: Any,
+    invoice: Any,
+    amount: Decimal,
+) -> None:
+    if not order:
+        raise PaymentValidationError("يجب ربط الدفعة بطلب.")
+
+    if not customer:
+        raise PaymentValidationError("يجب ربط الدفعة بعميل.")
+
+    if invoice:
+        invoice_order_id = _safe_getattr(invoice, "order_id", None)
+        invoice_customer_id = _safe_getattr(invoice, "customer_id", None)
+
+        if invoice_order_id and _safe_getattr(order, "pk", None) and invoice_order_id != order.pk:
+            raise PaymentValidationError("الفاتورة المحددة لا تتبع الطلب المحدد.")
+
+        if invoice_customer_id and _safe_getattr(customer, "pk", None) and invoice_customer_id != customer.pk:
+            raise PaymentValidationError("الفاتورة المحددة لا تتبع العميل المحدد.")
+
+    order_customer_id = _safe_getattr(order, "customer_id", None)
+    if order_customer_id and _safe_getattr(customer, "pk", None) and order_customer_id != customer.pk:
+        raise PaymentValidationError("الطلب المحدد لا يتبع العميل المحدد.")
+
+    if amount <= Decimal("0.00"):
+        raise PaymentValidationError("مبلغ الدفع يجب أن يكون أكبر من صفر.")
+
 
 def validate_payment_for_confirmation(payment: Payment) -> None:
     if payment is None:
@@ -649,8 +761,12 @@ def create_payment(
 ) -> PaymentCreateResult:
     amount = _safe_decimal(amount)
 
-    if amount <= Decimal("0.00"):
-        raise PaymentValidationError("مبلغ الدفع يجب أن يكون أكبر من صفر.")
+    validate_payment_for_creation(
+        order=order,
+        customer=customer,
+        invoice=invoice,
+        amount=amount,
+    )
 
     payment = Payment.objects.create(
         order=order,
@@ -693,23 +809,6 @@ def confirm_payment(
     auto_create_treasury_movement: bool = True,
     auto_post_accounting: bool = True,
 ) -> PaymentConfirmationResult:
-    """
-    تأكيد الدفعة رسميًا مع:
-    - تعبئة paid_amount إذا لم تكن معبأة
-    - ضبط status إلى PAID أو PARTIALLY_PAID
-    - تثبيت paid_at
-    - تحديث الفاتورة المرتبطة
-    - جدولة الترحيل المحاسبي بعد نجاح commit
-    - جدولة حركة الخزينة بعد نجاح commit
-
-    ترتيب on_commit مهم:
-    1) الترحيل المحاسبي
-    2) حركة الخزينة
-
-    السبب:
-    - المحاسبة تنشئ JournalEntry للدفعة.
-    - الخزينة تنشئ TreasuryTransaction وتستطيع لاحقًا الارتباط بمرجع القيد.
-    """
     if payment is None:
         raise PaymentValidationError("payment is required.")
 
@@ -773,6 +872,7 @@ def confirm_payment(
     _refresh_payment(payment)
 
     _update_invoice_after_payment(payment)
+    _update_order_after_payment(payment)
 
     treasury_dispatched = False
     treasury_message = "لم يُطلب إنشاء حركة الخزينة."

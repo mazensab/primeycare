@@ -3,107 +3,69 @@
 /* ============================================================
    📂 app/system/treasury/reports/page.tsx
    🧠 Primey Care | Treasury Reports Page
-
-   ✅ المسار:
-      app/system/treasury/reports/page.tsx
-
-   ✅ العمل:
-      صفحة تقارير الخزينة داخل النظام.
-      تعرض ملخص الخزينة، أرصدة الحسابات، الصناديق، البنوك، الحركات، التحويلات، وحالة الترحيل.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Treasury Reports Build
-
-   ✅ يعتمد على:
-      - /api/treasury/reports/summary/
-      - /api/treasury/accounts/
-      - /api/treasury/transactions/
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Treasury overview page
-      - Treasury accounts pages
-      - Treasury transactions pages
-      - Treasury transfers page
-      - Central reports module
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - تقرير ملخص الخزينة.
-      - تقرير أرصدة الحسابات.
-      - تقرير الصناديق والبنوك.
-      - تقرير الحركات المالية.
-      - تقرير التحويلات.
-      - حالة ترحيل الخزينة والمحاسبة.
-      - البحث في صف مستقل.
-      - الفلاتر والأعمدة في صف مستقل.
-      - فلترة حسب نوع الحساب ونوع الحركة وحالة الحركة.
-      - Excel export بصيغة .xls HTML Workbook.
-      - Web PDF Print.
-      - Error State مستقل.
-      - Empty State ذكي.
-      - Skeleton Loading.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - أرقام إنجليزية دائمًا.
-      - رمز SAR من /currency/sar.svg بعد الرقم.
-      - استخدام sonner للتنبيهات.
-
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - الملف المرفق كان شبه فارغ، وتم بناء صفحة التقارير كاملة من الصفر.
-      - الالتزام بالقاعدة: w-full space-y-4 بدون main/min-h-screen/max-w.
-      - عدم عرض أي مسارات أو عبارات تقنية داخل واجهة المستخدم.
-      - إخفاء الأزرار غير المصرح بها بدل تعطيلها.
-      - استخدام Excel HTML Workbook بدل CSV أو XLSX.
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Real API:
+      GET /api/treasury/accounts/
+      GET /api/treasury/transactions/
+      GET /api/treasury/reports/summary/ optional
+   ✅ Treasury accounts / transactions / transfers reports
+   ✅ Search / date / account type / transaction type / status / balance impact
+   ✅ Excel .xls HTML Workbook
+   ✅ Web Print
+   ✅ Skeleton Loading
+   ✅ Error / Empty states
+   ✅ sonner
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
-import Image from "next/image";
+import * as React from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
-  BarChart3,
+  ArrowRight,
+  ArrowUpDown,
   Banknote,
   Building2,
-  Columns3,
+  CalendarDays,
+  CircleDollarSign,
   CreditCard,
-  Download,
-  Eye,
-  Filter,
+  FileSpreadsheet,
   Landmark,
   Loader2,
   Printer,
-  Receipt,
-  RefreshCcw,
+  ReceiptText,
+  RefreshCw,
+  Repeat2,
+  RotateCcw,
   Search,
-  ShieldCheck,
-  Wallet,
-  XCircle,
+  TriangleAlert,
+  WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -113,591 +75,384 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type AccountType = "CASHBOX" | "BANK" | "WALLET" | "OTHER";
-type AccountStatus = "ACTIVE" | "INACTIVE" | "CLOSED" | "UNKNOWN";
-
-type TransactionType =
-  | "RECEIPT"
-  | "PAYMENT"
-  | "TRANSFER"
-  | "ADJUSTMENT"
-  | "UNKNOWN";
-
-type TransactionStatus = "DRAFT" | "CONFIRMED" | "CANCELLED" | "UNKNOWN";
-
-type AccountTypeFilter = "ALL" | AccountType;
-type TransactionTypeFilter = "ALL" | TransactionType;
-type TransactionStatusFilter = "ALL" | TransactionStatus;
-
-type TreasuryAccountRow = {
-  id: string;
-  code: string;
-  name: string;
-  account_type: AccountType;
-  status: AccountStatus;
-  current_balance: number;
-  opening_balance: number;
-  bank_name: string;
-  account_number: string;
-  iban: string;
-  is_default: boolean;
-};
-
-type TreasuryTransactionRow = {
-  id: string;
-  transaction_number: string;
-  transaction_type: TransactionType;
-  status: TransactionStatus;
-  amount: number;
-  transaction_date: string;
-  account_id: string;
-  account_name: string;
-  account_code: string;
-  source_reference: string;
-  description: string;
-  is_treasury_posted: boolean;
-  is_accounting_posted: boolean;
-};
-
-type TreasuryReportsSummary = {
-  total_accounts: number;
-  active_accounts: number;
-  cashbox_accounts: number;
-  bank_accounts: number;
-  total_balance: number;
-  opening_balance_total: number;
-
-  total_transactions: number;
-  confirmed_transactions: number;
-  draft_transactions: number;
-  cancelled_transactions: number;
-
-  receipts_count: number;
-  payments_count: number;
-  transfers_count: number;
-
-  receipts_total: number;
-  payments_total: number;
-  transfers_total: number;
-  net_total: number;
-
-  treasury_posted_count: number;
-  accounting_posted_count: number;
-  unposted_count: number;
-};
-
-type ApiEnvelope<T> = {
+type ApiResponse = {
   ok?: boolean;
   success?: boolean;
-  message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
+  count?: number;
+  total?: number;
+  total_count?: number;
   results?: unknown[];
   items?: unknown[];
   rows?: unknown[];
-  accounts?: unknown[];
-  transactions?: unknown[];
-  summary?: Partial<TreasuryReportsSummary>;
+  data?: unknown;
+  summary?: unknown;
+  message?: string;
+  detail?: string;
+  error?: string;
 };
 
-type VisibleColumns = {
-  code: boolean;
-  account: boolean;
-  type: boolean;
-  status: boolean;
-  balance: boolean;
-  openingBalance: boolean;
-  defaultAccount: boolean;
-  bankInfo: boolean;
-  actions: boolean;
+type TreasuryAccount = {
+  id: string;
+  name: string;
+  code: string;
+  account_type: string;
+  account_type_label: string;
+  current_balance: number;
+  opening_balance: number;
+  currency: string;
+  status: string;
+  is_default: boolean;
 };
 
-const SAR_ICON_PATH = "/currency/sar.svg";
-const PAGE_SIZE = 14;
-
-const DEFAULT_COLUMNS: VisibleColumns = {
-  code: true,
-  account: true,
-  type: true,
-  status: true,
-  balance: true,
-  openingBalance: true,
-  defaultAccount: true,
-  bankInfo: true,
-  actions: true,
+type TreasuryTransaction = {
+  id: string;
+  transaction_number: string;
+  transaction_type: string;
+  transaction_type_label: string;
+  source: string;
+  source_label: string;
+  status: string;
+  status_label: string;
+  transaction_date: string | null;
+  treasury_account_id: string;
+  treasury_account_name: string;
+  treasury_account_code: string;
+  destination_account_id: string;
+  destination_account_name: string;
+  destination_account_code: string;
+  amount: number;
+  fees_amount: number;
+  net_amount: number;
+  currency: string;
+  reference: string;
+  source_number: string;
+  party_name: string;
+  description: string;
+  balance_applied: boolean;
+  accounting_posted: boolean;
+  created_at: string | null;
 };
 
-const DEFAULT_SUMMARY: TreasuryReportsSummary = {
-  total_accounts: 0,
-  active_accounts: 0,
-  cashbox_accounts: 0,
-  bank_accounts: 0,
-  total_balance: 0,
-  opening_balance_total: 0,
+type ReportTab = "accounts" | "transactions" | "transfers";
+type AccountTypeFilter = "all" | "cashbox" | "bank" | "wallet" | "other";
+type TransactionTypeFilter =
+  | "all"
+  | "income"
+  | "expense"
+  | "transfer"
+  | "deposit"
+  | "withdraw"
+  | "opening_balance"
+  | "refund"
+  | "fee"
+  | "adjustment";
+type StatusFilter = "all" | "draft" | "confirmed" | "cancelled";
+type BalanceFilter = "all" | "applied" | "not_applied";
+type SortKey = "newest" | "oldest" | "amount_high" | "amount_low" | "number";
 
-  total_transactions: 0,
-  confirmed_transactions: 0,
-  draft_transactions: 0,
-  cancelled_transactions: 0,
-
-  receipts_count: 0,
-  payments_count: 0,
-  transfers_count: 0,
-
-  receipts_total: 0,
-  payments_total: 0,
-  transfers_total: 0,
-  net_total: 0,
-
-  treasury_posted_count: 0,
-  accounting_posted_count: 0,
-  unposted_count: 0,
+const API = {
+  summary: "/api/treasury/reports/summary/",
+  accounts: "/api/treasury/accounts/",
+  transactions: "/api/treasury/transactions/",
 };
 
-/* ============================================================
-   Locale / API
-============================================================ */
+const translations = {
+  ar: {
+    title: "تقارير الخزينة",
+    subtitle: "تحليل أرصدة الخزينة والحركات والتحويلات وحالة الترحيل المالي.",
+    treasury: "الخزينة",
+    transactionsPage: "حركات الخزينة",
+    statement: "كشف الخزينة",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    all: "الكل",
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+    totalBalance: "إجمالي الرصيد",
+    cashboxes: "الصناديق",
+    banks: "البنوك",
+    transactions: "الحركات",
+    receipts: "القبض",
+    payments: "الصرف",
+    transfers: "التحويلات",
+    fees: "الرسوم",
+    confirmed: "مؤكدة",
+    draft: "مسودة",
+    cancelled: "ملغاة",
+    applied: "مطبق",
+    notApplied: "غير مطبق",
 
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+    accountsTab: "أرصدة الحسابات",
+    transactionsTab: "الحركات المالية",
+    transfersTab: "التحويلات",
+    reportTable: "جدول التقرير",
+    accountsTableDesc: "تقرير أرصدة الصناديق والبنوك وحسابات الخزينة.",
+    transactionsTableDesc: "تقرير الحركات المالية حسب النوع والحالة والفترة.",
+    transfersTableDesc: "تقرير التحويلات الداخلية بين حسابات الخزينة.",
 
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
+    searchPlaceholder: "ابحث بالرقم أو الحساب أو الطرف أو الوصف أو المرجع...",
+    accountType: "نوع الحساب",
+    transactionType: "نوع الحركة",
+    status: "الحالة",
+    balanceImpact: "أثر الرصيد",
+    balanceApplied: "تطبيق أثر الرصيد",
+    sort: "الترتيب",
+    from: "من",
+    to: "إلى",
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
+    accountCode: "كود الحساب",
+    accountName: "اسم الحساب",
+    accountKind: "نوع الحساب",
+    openingBalance: "الرصيد الافتتاحي",
+    currentBalance: "الرصيد الحالي",
+    defaultAccount: "افتراضي",
+    accountStatus: "الحالة",
+
+    number: "رقم الحركة",
+    date: "التاريخ",
+    movementType: "نوع الحركة",
+    sourceAccount: "حساب المصدر",
+    destinationAccount: "حساب الوجهة",
+    party: "الطرف",
+    description: "الوصف",
+    amount: "المبلغ",
+    net: "الصافي",
+    reference: "المرجع",
+    accountingPosted: "محاسبيًا",
+
+    cashbox: "صندوق",
+    bank: "بنك",
+    wallet: "محفظة",
+    other: "أخرى",
+
+    income: "قبض",
+    expense: "صرف",
+    transfer: "تحويل",
+    deposit: "إيداع",
+    withdraw: "سحب",
+    openingBalanceType: "رصيد افتتاحي",
+    refund: "استرداد",
+    fee: "رسوم",
+    adjustment: "تسوية",
+
+    active: "نشط",
+    inactive: "غير نشط",
+    yes: "نعم",
+    no: "لا",
+
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    amountHigh: "الأعلى مبلغًا",
+    amountLow: "الأقل مبلغًا",
+    numberSort: "الرقم",
+
+    showing: "عرض",
+    of: "من",
+    rows: "صفوف",
+
+    errorTitle: "تعذر تحميل تقارير الخزينة",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    refreshed: "تم تحديث تقارير الخزينة.",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير الخزينة",
+    generatedAt: "تاريخ الطباعة",
+    noDataTitle: "لا توجد بيانات",
+    noDataDesc: "ستظهر بيانات التقرير هنا بعد تسجيل حركات أو حسابات خزينة.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+    notAvailable: "—",
+    sar: "ر.س",
+  },
+  en: {
+    title: "Treasury Reports",
+    subtitle: "Analyze treasury balances, movements, transfers, and posting status.",
+    treasury: "Treasury",
+    transactionsPage: "Treasury transactions",
+    statement: "Treasury statement",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    all: "All",
+
+    totalBalance: "Total balance",
+    cashboxes: "Cashboxes",
+    banks: "Banks",
+    transactions: "Transactions",
+    receipts: "Receipts",
+    payments: "Payments",
+    transfers: "Transfers",
+    fees: "Fees",
+    confirmed: "Confirmed",
+    draft: "Draft",
+    cancelled: "Cancelled",
+    applied: "Applied",
+    notApplied: "Not applied",
+
+    accountsTab: "Account balances",
+    transactionsTab: "Financial transactions",
+    transfersTab: "Transfers",
+    reportTable: "Report table",
+    accountsTableDesc: "Treasury cashboxes, banks, and account balances report.",
+    transactionsTableDesc: "Financial movements by type, status, and date range.",
+    transfersTableDesc: "Internal transfers between treasury accounts.",
+
+    searchPlaceholder: "Search by number, account, party, description, or reference...",
+    accountType: "Account type",
+    transactionType: "Transaction type",
+    status: "Status",
+    balanceImpact: "Balance impact",
+    balanceApplied: "Balance applied",
+    sort: "Sort",
+    from: "From",
+    to: "To",
+
+    accountCode: "Account code",
+    accountName: "Account name",
+    accountKind: "Account type",
+    openingBalance: "Opening balance",
+    currentBalance: "Current balance",
+    defaultAccount: "Default",
+    accountStatus: "Status",
+
+    number: "Number",
+    date: "Date",
+    movementType: "Movement type",
+    sourceAccount: "Source account",
+    destinationAccount: "Destination account",
+    party: "Party",
+    description: "Description",
+    amount: "Amount",
+    net: "Net",
+    reference: "Reference",
+    accountingPosted: "Accounting",
+
+    cashbox: "Cashbox",
+    bank: "Bank",
+    wallet: "Wallet",
+    other: "Other",
+
+    income: "Income",
+    expense: "Expense",
+    transfer: "Transfer",
+    deposit: "Deposit",
+    withdraw: "Withdraw",
+    openingBalanceType: "Opening balance",
+    refund: "Refund",
+    fee: "Fee",
+    adjustment: "Adjustment",
+
+    active: "Active",
+    inactive: "Inactive",
+    yes: "Yes",
+    no: "No",
+
+    newest: "Newest",
+    oldest: "Oldest",
+    amountHigh: "Highest amount",
+    amountLow: "Lowest amount",
+    numberSort: "Number",
+
+    showing: "Showing",
+    of: "of",
+    rows: "rows",
+
+    errorTitle: "Unable to load treasury reports",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    refreshed: "Treasury reports refreshed.",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "Treasury report",
+    generatedAt: "Generated at",
+    noDataTitle: "No data",
+    noDataDesc: "Report data will appear here after recording treasury accounts or movements.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other results.",
+    notAvailable: "—",
+    sar: "SAR",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
+}
+
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
+
+  return fallback;
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
+    if (
+      ["1", "true", "yes", "on", "active", "default", "posted", "applied", "confirmed"].includes(
+        normalized,
+      )
+    ) {
+      return true;
     }
 
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
+    if (["0", "false", "no", "off", "inactive", "draft", "cancelled"].includes(normalized)) {
+      return false;
+    }
   }
 
-  return true;
+  return fallback;
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "تقارير الخزينة" : "Treasury Reports",
-    subtitle: isArabic
-      ? "تحليل أرصدة الخزينة والصناديق والبنوك والحركات والتحويلات وحالة الترحيل."
-      : "Analyze treasury balances, cashboxes, banks, transactions, transfers, and posting status.",
-
-    back: isArabic ? "الخزينة" : "Treasury",
-    accounts: isArabic ? "حسابات الخزينة" : "Treasury Accounts",
-    transactions: isArabic ? "الحركات المالية" : "Transactions",
-    transfers: isArabic ? "التحويلات" : "Transfers",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-
-    summaryTitle: isArabic ? "ملخص الخزينة" : "Treasury Summary",
-    summaryDesc: isArabic
-      ? "مؤشرات مالية وتشغيلية مختصرة عن الخزينة."
-      : "Short financial and operational treasury indicators.",
-
-    accountsTitle: isArabic ? "أرصدة الحسابات" : "Account Balances",
-    accountsDesc: isArabic
-      ? "أرصدة الصناديق والبنوك وحسابات الخزينة."
-      : "Balances for cashboxes, banks, and treasury accounts.",
-
-    movementsTitle: isArabic ? "ملخص الحركات" : "Movements Summary",
-    movementsDesc: isArabic
-      ? "سندات القبض والصرف والتحويلات وحالة الترحيل."
-      : "Receipts, payments, transfers, and posting status.",
-
-    totalAccounts: isArabic ? "إجمالي الحسابات" : "Total Accounts",
-    activeAccounts: isArabic ? "حسابات نشطة" : "Active Accounts",
-    cashboxes: isArabic ? "الصناديق" : "Cashboxes",
-    banks: isArabic ? "البنوك" : "Banks",
-    totalBalance: isArabic ? "إجمالي الرصيد" : "Total Balance",
-    openingBalanceTotal: isArabic
-      ? "إجمالي الرصيد الافتتاحي"
-      : "Opening Balance Total",
-
-    totalTransactions: isArabic ? "إجمالي الحركات" : "Total Transactions",
-    confirmedTransactions: isArabic ? "حركات مؤكدة" : "Confirmed Transactions",
-    draftTransactions: isArabic ? "مسودات" : "Drafts",
-    cancelledTransactions: isArabic ? "ملغاة" : "Cancelled",
-
-    receipts: isArabic ? "سندات قبض" : "Receipts",
-    payments: isArabic ? "سندات صرف" : "Payments",
-    transfersCount: isArabic ? "تحويلات" : "Transfers",
-    receiptsTotal: isArabic ? "إجمالي القبض" : "Total Receipts",
-    paymentsTotal: isArabic ? "إجمالي الصرف" : "Total Payments",
-    transfersTotal: isArabic ? "إجمالي التحويلات" : "Total Transfers",
-    netTotal: isArabic ? "الصافي" : "Net Total",
-
-    treasuryPosted: isArabic ? "مرحّل خزينة" : "Treasury Posted",
-    accountingPosted: isArabic ? "مرحّل محاسبيًا" : "Accounting Posted",
-    unposted: isArabic ? "غير مرحّل" : "Unposted",
-
-    searchPlaceholder: isArabic
-      ? "ابحث باسم الحساب أو الكود أو البنك أو رقم الحساب..."
-      : "Search by account name, code, bank, or account number...",
-
-    filters: isArabic ? "الفلاتر" : "Filters",
-    columns: isArabic ? "الأعمدة" : "Columns",
-    clearFilters: isArabic ? "مسح الفلاتر" : "Clear Filters",
-
-    allAccountTypes: isArabic ? "كل أنواع الحسابات" : "All Account Types",
-    allTransactionTypes: isArabic ? "كل أنواع الحركات" : "All Transaction Types",
-    allStatuses: isArabic ? "كل الحالات" : "All Statuses",
-
-    cashbox: isArabic ? "صندوق" : "Cashbox",
-    bank: isArabic ? "بنك" : "Bank",
-    wallet: isArabic ? "محفظة" : "Wallet",
-    other: isArabic ? "أخرى" : "Other",
-
-    active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    closed: isArabic ? "مغلق" : "Closed",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    receipt: isArabic ? "قبض" : "Receipt",
-    payment: isArabic ? "صرف" : "Payment",
-    transfer: isArabic ? "تحويل" : "Transfer",
-    adjustment: isArabic ? "تسوية" : "Adjustment",
-
-    draft: isArabic ? "مسودة" : "Draft",
-    confirmed: isArabic ? "مؤكد" : "Confirmed",
-    cancelled: isArabic ? "ملغي" : "Cancelled",
-
-    defaultAccount: isArabic ? "افتراضي" : "Default",
-    regularAccount: isArabic ? "عادي" : "Regular",
-
-    posted: isArabic ? "مرحّل" : "Posted",
-    notPosted: isArabic ? "غير مرحّل" : "Not Posted",
-
-    table: {
-      code: isArabic ? "الكود" : "Code",
-      account: isArabic ? "الحساب" : "Account",
-      type: isArabic ? "النوع" : "Type",
-      status: isArabic ? "الحالة" : "Status",
-      balance: isArabic ? "الرصيد" : "Balance",
-      openingBalance: isArabic ? "الرصيد الافتتاحي" : "Opening Balance",
-      defaultAccount: isArabic ? "الافتراضي" : "Default",
-      bankInfo: isArabic ? "بيانات البنك" : "Bank Info",
-      action: isArabic ? "الإجراء" : "Action",
-    },
-
-    view: isArabic ? "عرض" : "View",
-
-    emptyTitle: isArabic ? "لا توجد حسابات خزينة" : "No treasury accounts",
-    emptyText: isArabic
-      ? "ستظهر أرصدة حسابات الخزينة هنا بعد إنشائها."
-      : "Treasury account balances will appear here after they are created.",
-    noResultsTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noResultsText: isArabic
-      ? "جرّب تغيير البحث أو الفلاتر."
-      : "Try changing the search or filters.",
-
-    accessDeniedTitle: isArabic
-      ? "غير مصرح بعرض تقارير الخزينة"
-      : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض تقارير الخزينة. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to view treasury reports. Contact your system administrator if you need access.",
-
-    loadError: isArabic
-      ? "تعذر تحميل تقارير الخزينة."
-      : "Unable to load treasury reports.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    loadSuccess: isArabic
-      ? "تم تحديث تقارير الخزينة بنجاح."
-      : "Treasury reports refreshed successfully.",
-
-    exportSuccess: isArabic
-      ? "تم تجهيز ملف Excel بنجاح."
-      : "Excel file prepared successfully.",
-    exportEmpty: isArabic
-      ? "لا توجد بيانات قابلة للتصدير."
-      : "No data available to export.",
-    printSuccess: isArabic
-      ? "تم تجهيز نافذة الطباعة."
-      : "Print window prepared.",
-    printError: isArabic
-      ? "تعذر فتح نافذة الطباعة."
-      : "Unable to open print window.",
-
-    previous: isArabic ? "السابق" : "Previous",
-    next: isArabic ? "التالي" : "Next",
-    showing: isArabic ? "عرض" : "Showing",
-    from: isArabic ? "من" : "of",
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    rowsCount: isArabic ? "عدد السجلات" : "Rows Count",
-  };
+function formatInteger(value: unknown) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(toNumber(value));
 }
 
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
-}
-
-function formatMoney(value: unknown): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function escapeHtml(value: string | number) {
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).replace("T", " ").slice(0, 16);
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -706,1984 +461,1524 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
 
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
 
-  for (const container of [
-    "account",
-    "treasury_account",
-    "cashbox",
-    "bank",
-    "transaction",
-    "treasury_transaction",
-    "item",
-    "data",
-  ]) {
-    const nested = obj[container];
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
+}
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const query = params?.toString();
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
+}
 
-      if (value !== undefined && value !== null && value !== "") return value;
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  return (payload || {}) as T;
 }
 
-function extractRows(payload: ApiEnvelope<unknown> | null, key: string): unknown[] {
+function extractData(payload: ApiResponse | null) {
+  return asRecord(payload?.data);
+}
+
+function extractItems(payload: ApiResponse | null) {
   if (!payload) return [];
 
-  const data = asDict(payload.data);
-  const directValue = (payload as Dict)[key];
-
-  if (Array.isArray(directValue)) return directValue;
   if (Array.isArray(payload.results)) return payload.results;
   if (Array.isArray(payload.items)) return payload.items;
   if (Array.isArray(payload.rows)) return payload.rows;
 
-  if (Array.isArray(data[key])) return data[key] as unknown[];
-  if (Array.isArray(data.results)) return data.results as unknown[];
-  if (Array.isArray(data.items)) return data.items as unknown[];
-  if (Array.isArray(data.rows)) return data.rows as unknown[];
+  const data = extractData(payload);
 
-  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.rows)) return data.rows;
+  if (Array.isArray(data.accounts)) return data.accounts;
+  if (Array.isArray(data.transactions)) return data.transactions;
 
   return [];
 }
 
-function extractSummary(payload: ApiEnvelope<unknown> | null) {
-  if (!payload) return {};
-
-  const data = asDict(payload.data);
+function normalizeAccount(value: unknown): TreasuryAccount {
+  const item = asRecord(value);
 
   return {
-    ...asDict(payload.summary),
-    ...asDict(data.summary),
-    ...asDict(data.totals),
-    ...asDict(data),
-  } as Partial<TreasuryReportsSummary>;
+    id: normalizeText(item.id || item.pk || item.uuid),
+    name: normalizeText(item.name || item.title),
+    code: normalizeText(item.code || item.number),
+    account_type: normalizeText(item.account_type || item.type || "other").toLowerCase(),
+    account_type_label: normalizeText(item.account_type_label || item.type_label),
+    current_balance: toNumber(item.current_balance ?? item.balance),
+    opening_balance: toNumber(item.opening_balance),
+    currency: normalizeText(item.currency || "SAR"),
+    status: normalizeText(item.status || "active").toLowerCase(),
+    is_default: toBoolean(item.is_default),
+  };
 }
 
-function normalizeAccountType(value: unknown): AccountType {
-  const clean = String(value || "").toUpperCase();
-
-  if (["CASHBOX", "CASH", "BOX"].includes(clean)) return "CASHBOX";
-  if (["BANK", "BANK_ACCOUNT"].includes(clean)) return "BANK";
-  if (["WALLET", "E_WALLET"].includes(clean)) return "WALLET";
-
-  return "OTHER";
-}
-
-function normalizeAccountStatus(value: unknown): AccountStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["ACTIVE", "OPEN", "ENABLED", "TRUE"].includes(clean)) return "ACTIVE";
-  if (["INACTIVE", "DISABLED", "FALSE"].includes(clean)) return "INACTIVE";
-  if (["CLOSED", "LOCKED"].includes(clean)) return "CLOSED";
-
-  if (typeof value === "boolean") return value ? "ACTIVE" : "INACTIVE";
-
-  return "UNKNOWN";
-}
-
-function normalizeTransactionType(value: unknown): TransactionType {
-  const clean = String(value || "").toUpperCase();
-
-  if (["RECEIPT", "INCOME", "RECEIVE", "CASH_IN"].includes(clean)) return "RECEIPT";
-  if (["PAYMENT", "EXPENSE", "PAY", "CASH_OUT"].includes(clean)) return "PAYMENT";
-  if (["TRANSFER", "INTERNAL_TRANSFER"].includes(clean)) return "TRANSFER";
-  if (["ADJUSTMENT", "OPENING_BALANCE"].includes(clean)) return "ADJUSTMENT";
-
-  return "UNKNOWN";
-}
-
-function normalizeTransactionStatus(value: unknown): TransactionStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["DRAFT", "PENDING"].includes(clean)) return "DRAFT";
-  if (["CONFIRMED", "POSTED", "APPROVED", "TRUE"].includes(clean)) {
-    return "CONFIRMED";
-  }
-  if (["CANCELLED", "CANCELED", "VOID"].includes(clean)) return "CANCELLED";
-
-  if (typeof value === "boolean") return value ? "CONFIRMED" : "DRAFT";
-
-  return "UNKNOWN";
-}
-
-function normalizeAccount(item: unknown): TreasuryAccountRow {
-  const obj = asDict(item);
+function normalizeTransaction(value: unknown): TreasuryTransaction {
+  const item = asRecord(value);
+  const account = asRecord(item.treasury_account || item.account || item.from_account);
+  const destination = asRecord(item.destination_account || item.to_account);
 
   return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || ""),
-    code: String(getNestedValue(obj, ["code", "account_code", "number"]) || "-"),
-    name: String(getNestedValue(obj, ["name", "title", "label"]) || "-"),
-    account_type: normalizeAccountType(
-      getNestedValue(obj, ["account_type", "type", "kind"]),
+    id: normalizeText(item.id || item.pk || item.uuid),
+    transaction_number: normalizeText(item.transaction_number || item.number || item.reference),
+    transaction_type: normalizeText(item.transaction_type || item.type || "adjustment").toLowerCase(),
+    transaction_type_label: normalizeText(item.transaction_type_label || item.type_label),
+    source: normalizeText(item.source),
+    source_label: normalizeText(item.source_label),
+    status: normalizeText(item.status || "draft").toLowerCase(),
+    status_label: normalizeText(item.status_label),
+    transaction_date:
+      normalizeText(item.transaction_date || item.date || item.created_at) || null,
+    treasury_account_id: normalizeText(
+      item.treasury_account_id || item.account_id || item.from_account_id || account.id || account.pk,
     ),
-    status: normalizeAccountStatus(
-      getNestedValue(obj, ["status", "state", "is_active"]),
+    treasury_account_name: normalizeText(
+      account.name || item.treasury_account_name || item.account_name || item.from_account_name,
     ),
-    current_balance: toNumber(
-      getNestedValue(obj, ["current_balance", "balance", "available_balance"]),
+    treasury_account_code: normalizeText(
+      account.code || item.treasury_account_code || item.account_code || item.from_account_code,
     ),
-    opening_balance: toNumber(
-      getNestedValue(obj, ["opening_balance", "initial_balance"]),
+    destination_account_id: normalizeText(
+      item.destination_account_id || item.to_account_id || destination.id || destination.pk,
     ),
-    bank_name: String(getNestedValue(obj, ["bank_name", "bank"]) || ""),
-    account_number: String(
-      getNestedValue(obj, ["account_number", "bank_account_number"]) || "",
+    destination_account_name: normalizeText(
+      destination.name || item.destination_account_name || item.to_account_name,
     ),
-    iban: String(getNestedValue(obj, ["iban", "IBAN"]) || ""),
-    is_default: Boolean(getNestedValue(obj, ["is_default", "default"])),
+    destination_account_code: normalizeText(
+      destination.code || item.destination_account_code || item.to_account_code,
+    ),
+    amount: toNumber(item.amount),
+    fees_amount: toNumber(item.fees_amount || item.fee_amount),
+    net_amount: toNumber(item.net_amount ?? item.amount),
+    currency: normalizeText(item.currency || "SAR"),
+    reference: normalizeText(item.reference || item.external_reference),
+    source_number: normalizeText(item.source_number || item.source_reference),
+    party_name: normalizeText(item.party_name),
+    description: normalizeText(item.description || item.notes),
+    balance_applied: toBoolean(item.balance_applied || item.is_balance_applied),
+    accounting_posted: toBoolean(item.accounting_posted || item.is_accounting_posted),
+    created_at: normalizeText(item.created_at) || null,
   };
 }
 
-function normalizeTransaction(item: unknown, index: number): TreasuryTransactionRow {
-  const obj = asDict(item);
-  const accountObj = asDict(obj.account || obj.treasury_account);
+function accountTypeLabel(type: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = type.toLowerCase();
 
-  return {
-    id: String(getNestedValue(obj, ["id", "uuid", "pk"]) || `${index}`),
-    transaction_number: String(
-      getNestedValue(obj, [
-        "transaction_number",
-        "voucher_number",
-        "number",
-        "code",
-        "reference",
-      ]) || "-",
-    ),
-    transaction_type: normalizeTransactionType(
-      getNestedValue(obj, ["transaction_type", "type", "kind", "voucher_type"]),
-    ),
-    status: normalizeTransactionStatus(
-      getNestedValue(obj, ["status", "state", "is_confirmed"]),
-    ),
-    amount: toNumber(getNestedValue(obj, ["amount", "total_amount", "value"])),
-    transaction_date: String(
-      getNestedValue(obj, ["transaction_date", "date", "created_at"]) || "",
-    ),
-    account_id: String(
-      getNestedValue(obj, ["account_id", "treasury_account_id"]) ||
-        accountObj.id ||
-        "",
-    ),
-    account_name: String(
-      accountObj.name ||
-        accountObj.title ||
-        getNestedValue(obj, ["account_name", "treasury_account_name"]) ||
-        "",
-    ),
-    account_code: String(
-      accountObj.code ||
-        accountObj.account_code ||
-        getNestedValue(obj, ["account_code", "treasury_account_code"]) ||
-        "",
-    ),
-    source_reference: String(
-      getNestedValue(obj, [
-        "source_reference",
-        "external_reference",
-        "payment_reference",
-        "ref",
-      ]) || "",
-    ),
-    description: String(getNestedValue(obj, ["description", "notes", "memo"]) || ""),
-    is_treasury_posted: Boolean(
-      getNestedValue(obj, ["is_treasury_posted", "treasury_posted"]),
-    ),
-    is_accounting_posted: Boolean(
-      getNestedValue(obj, ["is_accounting_posted", "accounting_posted"]),
-    ),
-  };
+  if (normalized.includes("cash")) return t.cashbox;
+  if (normalized.includes("bank")) return t.bank;
+  if (normalized.includes("wallet")) return t.wallet;
+
+  return t.other;
 }
 
-function buildSummary(
-  accounts: TreasuryAccountRow[],
-  transactions: TreasuryTransactionRow[],
-  apiSummary?: Partial<TreasuryReportsSummary>,
-): TreasuryReportsSummary {
-  const receipts = transactions.filter((item) => item.transaction_type === "RECEIPT");
-  const payments = transactions.filter((item) => item.transaction_type === "PAYMENT");
-  const transfers = transactions.filter(
-    (item) => item.transaction_type === "TRANSFER",
-  );
+function transactionTypeLabel(type: string, locale: Locale) {
+  const t = translations[locale];
 
-  const receiptsTotal = receipts.reduce((sum, item) => sum + item.amount, 0);
-  const paymentsTotal = payments.reduce((sum, item) => sum + item.amount, 0);
-  const transfersTotal = transfers.reduce((sum, item) => sum + item.amount, 0);
+  if (type === "income") return t.income;
+  if (type === "expense") return t.expense;
+  if (type === "transfer" || type === "internal_transfer") return t.transfer;
+  if (type === "deposit") return t.deposit;
+  if (type === "withdraw") return t.withdraw;
+  if (type === "opening_balance") return t.openingBalanceType;
+  if (type === "refund") return t.refund;
+  if (type === "fee") return t.fee;
+  if (type === "adjustment") return t.adjustment;
 
-  const fallback: TreasuryReportsSummary = {
-    total_accounts: accounts.length,
-    active_accounts: accounts.filter((item) => item.status === "ACTIVE").length,
-    cashbox_accounts: accounts.filter((item) => item.account_type === "CASHBOX")
-      .length,
-    bank_accounts: accounts.filter((item) => item.account_type === "BANK").length,
-    total_balance: accounts.reduce((sum, item) => sum + item.current_balance, 0),
-    opening_balance_total: accounts.reduce(
-      (sum, item) => sum + item.opening_balance,
-      0,
-    ),
-
-    total_transactions: transactions.length,
-    confirmed_transactions: transactions.filter(
-      (item) => item.status === "CONFIRMED",
-    ).length,
-    draft_transactions: transactions.filter((item) => item.status === "DRAFT")
-      .length,
-    cancelled_transactions: transactions.filter(
-      (item) => item.status === "CANCELLED",
-    ).length,
-
-    receipts_count: receipts.length,
-    payments_count: payments.length,
-    transfers_count: transfers.length,
-
-    receipts_total: receiptsTotal,
-    payments_total: paymentsTotal,
-    transfers_total: transfersTotal,
-    net_total: receiptsTotal - paymentsTotal,
-
-    treasury_posted_count: transactions.filter((item) => item.is_treasury_posted)
-      .length,
-    accounting_posted_count: transactions.filter(
-      (item) => item.is_accounting_posted,
-    ).length,
-    unposted_count: transactions.filter(
-      (item) => !item.is_treasury_posted || !item.is_accounting_posted,
-    ).length,
-  };
-
-  const api = apiSummary as Dict;
-
-  return {
-    total_accounts:
-      toNumber(apiSummary?.total_accounts) ||
-      toNumber(api.accounts_count) ||
-      fallback.total_accounts,
-    active_accounts:
-      toNumber(apiSummary?.active_accounts) || fallback.active_accounts,
-    cashbox_accounts:
-      toNumber(apiSummary?.cashbox_accounts) ||
-      toNumber(api.cashboxes_count) ||
-      fallback.cashbox_accounts,
-    bank_accounts:
-      toNumber(apiSummary?.bank_accounts) ||
-      toNumber(api.banks_count) ||
-      fallback.bank_accounts,
-    total_balance:
-      toNumber(apiSummary?.total_balance) ||
-      toNumber(api.current_balance_total) ||
-      fallback.total_balance,
-    opening_balance_total:
-      toNumber(apiSummary?.opening_balance_total) ||
-      fallback.opening_balance_total,
-
-    total_transactions:
-      toNumber(apiSummary?.total_transactions) ||
-      toNumber(api.transactions_count) ||
-      fallback.total_transactions,
-    confirmed_transactions:
-      toNumber(apiSummary?.confirmed_transactions) ||
-      fallback.confirmed_transactions,
-    draft_transactions:
-      toNumber(apiSummary?.draft_transactions) || fallback.draft_transactions,
-    cancelled_transactions:
-      toNumber(apiSummary?.cancelled_transactions) ||
-      fallback.cancelled_transactions,
-
-    receipts_count:
-      toNumber(apiSummary?.receipts_count) || fallback.receipts_count,
-    payments_count:
-      toNumber(apiSummary?.payments_count) || fallback.payments_count,
-    transfers_count:
-      toNumber(apiSummary?.transfers_count) || fallback.transfers_count,
-
-    receipts_total:
-      toNumber(apiSummary?.receipts_total) ||
-      toNumber(api.receipt_total) ||
-      fallback.receipts_total,
-    payments_total:
-      toNumber(apiSummary?.payments_total) ||
-      toNumber(api.payment_total) ||
-      fallback.payments_total,
-    transfers_total:
-      toNumber(apiSummary?.transfers_total) ||
-      toNumber(api.transfer_total) ||
-      fallback.transfers_total,
-    net_total: toNumber(apiSummary?.net_total) || fallback.net_total,
-
-    treasury_posted_count:
-      toNumber(apiSummary?.treasury_posted_count) ||
-      fallback.treasury_posted_count,
-    accounting_posted_count:
-      toNumber(apiSummary?.accounting_posted_count) ||
-      fallback.accounting_posted_count,
-    unposted_count: toNumber(apiSummary?.unposted_count) || fallback.unposted_count,
-  };
+  return type || t.notAvailable;
 }
 
-function accountTypeLabel(type: AccountType, locale: AppLocale) {
-  const t = dictionary(locale);
+function statusLabel(status: string, locale: Locale) {
+  const t = translations[locale];
 
-  const labels: Record<AccountType, string> = {
-    CASHBOX: t.cashbox,
-    BANK: t.bank,
-    WALLET: t.wallet,
-    OTHER: t.other,
-  };
+  if (status === "confirmed") return t.confirmed;
+  if (status === "cancelled") return t.cancelled;
 
-  return labels[type];
+  return t.draft;
 }
 
-function accountStatusLabel(status: AccountStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<AccountStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
-    CLOSED: t.closed,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function transactionTypeLabel(type: TransactionType, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<TransactionType, string> = {
-    RECEIPT: t.receipt,
-    PAYMENT: t.payment,
-    TRANSFER: t.transfer,
-    ADJUSTMENT: t.adjustment,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[type];
-}
-
-function transactionStatusLabel(status: TransactionStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<TransactionStatus, string> = {
-    DRAFT: t.draft,
-    CONFIRMED: t.confirmed,
-    CANCELLED: t.cancelled,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[status];
-}
-
-function accountTypeBadge(type: AccountType, locale: AppLocale) {
-  const label = accountTypeLabel(type, locale);
-
-  if (type === "CASHBOX") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+function statusClass(status: string) {
+  if (status === "confirmed") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
-  if (type === "BANK") {
-    return (
-      <Badge className="rounded-full border-sky-200 bg-sky-50 px-3 py-1 text-sky-700 hover:bg-sky-50 dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-300">
-        {label}
-      </Badge>
-    );
+  if (status === "cancelled") {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
   }
 
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function typeClass(type: string) {
+  if (["income", "deposit", "opening_balance"].includes(type)) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  if (["expense", "withdraw", "refund", "fee"].includes(type)) {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+  }
+
+  if (type === "transfer" || type === "internal_transfer") {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  return "border-violet-500/30 bg-violet-50 text-violet-700 hover:bg-violet-50";
+}
+
+function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", statusClass(status))}
+    >
+      {statusLabel(status, locale)}
     </Badge>
   );
 }
 
-function accountStatusBadge(status: AccountStatus, locale: AppLocale) {
-  const label = accountStatusLabel(status, locale);
-
-  if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "INACTIVE") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
-  }
-
-  if (status === "CLOSED") {
-    return (
-      <Badge variant="secondary" className="rounded-full px-3 py-1">
-        {label}
-      </Badge>
-    );
-  }
-
+function TypeBadge({ type, locale }: { type: string; locale: Locale }) {
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", typeClass(type))}
+    >
+      {transactionTypeLabel(type, locale)}
     </Badge>
   );
 }
 
-function isValidId(value: unknown) {
-  const id = String(value || "").trim();
-
-  return id && id !== "-" && id !== "undefined" && id !== "null";
-}
-
-function SarIcon({ className = "h-4 w-4" }: { className?: string }) {
+function BooleanBadge({
+  value,
+  trueLabel,
+  falseLabel,
+}: {
+  value: boolean;
+  trueLabel: string;
+  falseLabel: string;
+}) {
   return (
-    <Image
-      src={SAR_ICON_PATH}
-      alt=""
-      width={16}
-      height={16}
-      className={className}
-    />
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full px-2.5 py-1 text-xs font-medium",
+        value
+          ? "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50"
+          : "border-slate-500/30 bg-slate-50 text-slate-700 hover:bg-slate-50",
+      )}
+    >
+      {value ? trueLabel : falseLabel}
+    </Badge>
   );
 }
 
-function MoneyText({ value }: { value: unknown }) {
+function MoneyValue({ value, label }: { value: number; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <div className="flex items-center justify-start gap-1 text-sm font-semibold tabular-nums">
       <span>{formatMoney(value)}</span>
-      <SarIcon className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-/* ============================================================
-   Skeleton
-============================================================ */
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function KpiSkeleton() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="p-5">
-            <SkeletonLine className="h-8 w-28" />
-            <SkeletonLine className="mt-3 h-4 w-24" />
-          </CardContent>
-        </Card>
-      ))}
+      <img src="/currency/sar.svg" alt={label} className="h-3.5 w-3.5" />
     </div>
   );
 }
 
-function TableSkeleton({ columnsCount }: { columnsCount: number }) {
+function KpiCard({
+  title,
+  value,
+  trend,
+  icon: Icon,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
   return (
-    <>
-      {Array.from({ length: 7 }).map((_, rowIndex) => (
-        <TableRow key={rowIndex}>
-          {Array.from({ length: columnsCount }).map((__, columnIndex) => (
-            <TableCell key={columnIndex}>
-              <SkeletonLine
-                className={
-                  columnIndex === 1
-                    ? "h-8 w-44 rounded-lg"
-                    : "h-4 w-24 rounded-lg"
-                }
-              />
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </>
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
+
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
+        </div>
+      </CardHeader>
+    </Card>
   );
 }
 
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  worksheetName,
-  title,
-  locale,
-  summary,
-  accounts,
-  transactions,
-}: {
-  filename: string;
-  worksheetName: string;
-  title: string;
-  locale: AppLocale;
-  summary: TreasuryReportsSummary;
-  accounts: TreasuryAccountRow[];
-  transactions: TreasuryTransactionRow[];
-}) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const t = dictionary(locale);
-
-  const accountsRows = accounts
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.code)}</td>
-          <td>${escapeHtml(item.name)}</td>
-          <td>${escapeHtml(accountTypeLabel(item.account_type, locale))}</td>
-          <td>${escapeHtml(accountStatusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(formatMoney(item.current_balance))}</td>
-          <td>${escapeHtml(formatMoney(item.opening_balance))}</td>
-          <td>${escapeHtml(item.is_default ? t.defaultAccount : t.regularAccount)}</td>
-          <td>${escapeHtml(item.bank_name || "-")}</td>
-          <td>${escapeHtml(item.account_number || "-")}</td>
-          <td>${escapeHtml(item.iban || "-")}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const transactionsRows = transactions
-    .slice(0, 100)
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(item.transaction_number)}</td>
-          <td>${escapeHtml(transactionTypeLabel(item.transaction_type, locale))}</td>
-          <td>${escapeHtml(transactionStatusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(item.account_name || "-")}</td>
-          <td>${escapeHtml(formatMoney(item.amount))}</td>
-          <td>${escapeHtml(item.is_treasury_posted ? t.posted : t.notPosted)}</td>
-          <td>${escapeHtml(item.is_accounting_posted ? t.posted : t.notPosted)}</td>
-          <td>${escapeHtml(item.source_reference || "-")}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <!--[if gte mso 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>${escapeHtml(worksheetName)}</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayRightToLeft>${isArabic ? "True" : "False"}</x:DisplayRightToLeft>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]-->
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; color: #000; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-          .summary-value { font-weight: 700; }
-        </style>
-      </head>
-
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="10">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="10"></td></tr>
-          <tr><td class="section" colspan="10">${escapeHtml(t.summaryTitle)}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.generatedAt)}</td><td class="summary-value" colspan="9">${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalAccounts)}</td><td class="summary-value" colspan="9">${escapeHtml(formatNumber(summary.total_accounts))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalBalance)}</td><td class="summary-value" colspan="9">${escapeHtml(formatMoney(summary.total_balance))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.totalTransactions)}</td><td class="summary-value" colspan="9">${escapeHtml(formatNumber(summary.total_transactions))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.receiptsTotal)}</td><td class="summary-value" colspan="9">${escapeHtml(formatMoney(summary.receipts_total))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.paymentsTotal)}</td><td class="summary-value" colspan="9">${escapeHtml(formatMoney(summary.payments_total))}</td></tr>
-
-          <tr><td colspan="10"></td></tr>
-          <tr><td class="section" colspan="10">${escapeHtml(t.accountsTitle)}</td></tr>
-          <tr>
-            <th>${escapeHtml(t.table.code)}</th>
-            <th>${escapeHtml(t.table.account)}</th>
-            <th>${escapeHtml(t.table.type)}</th>
-            <th>${escapeHtml(t.table.status)}</th>
-            <th>${escapeHtml(t.table.balance)}</th>
-            <th>${escapeHtml(t.table.openingBalance)}</th>
-            <th>${escapeHtml(t.table.defaultAccount)}</th>
-            <th>${escapeHtml(isArabic ? "اسم البنك" : "Bank Name")}</th>
-            <th>${escapeHtml(isArabic ? "رقم الحساب" : "Account Number")}</th>
-            <th>${escapeHtml("IBAN")}</th>
-          </tr>
-          ${accountsRows}
-
-          <tr><td colspan="10"></td></tr>
-          <tr><td class="section" colspan="10">${escapeHtml(t.movementsTitle)}</td></tr>
-          <tr>
-            <th>${escapeHtml(isArabic ? "رقم الحركة" : "Transaction No.")}</th>
-            <th>${escapeHtml(isArabic ? "نوع الحركة" : "Type")}</th>
-            <th>${escapeHtml(t.table.status)}</th>
-            <th>${escapeHtml(t.table.account)}</th>
-            <th>${escapeHtml(isArabic ? "المبلغ" : "Amount")}</th>
-            <th>${escapeHtml(t.treasuryPosted)}</th>
-            <th>${escapeHtml(t.accountingPosted)}</th>
-            <th>${escapeHtml(isArabic ? "المرجع" : "Reference")}</th>
-          </tr>
-          ${transactionsRows}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  summary,
-  accounts,
-}: {
-  locale: AppLocale;
-  title: string;
-  summary: TreasuryReportsSummary;
-  accounts: TreasuryAccountRow[];
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-  const now = new Date().toLocaleString("en-US");
-
-  const rows = accounts
-    .map(
-      (item, index) => `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(item.code)}</td>
-          <td>${escapeHtml(item.name)}</td>
-          <td>${escapeHtml(accountTypeLabel(item.account_type, locale))}</td>
-          <td>${escapeHtml(accountStatusLabel(item.status, locale))}</td>
-          <td>${escapeHtml(formatMoney(item.current_balance))}</td>
-          <td>${escapeHtml(item.is_default ? t.defaultAccount : t.regularAccount)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .print-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 18px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; line-height: 1.8; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-bottom: 18px;
-          }
-          .summary-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px;
-          }
-          .summary-card span {
-            display: block;
-            color: #6b7280;
-            font-size: 11px;
-            margin-bottom: 5px;
-          }
-          .summary-card strong { font-size: 16px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; }
-          th { background: #f3f4f6; color: #111827; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 9px 8px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          tr:nth-child(even) td { background: #fafafa; }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-
-      <body>
-        <div class="print-header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">
-              <div>${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-              <div>${escapeHtml(t.rowsCount)}: ${formatNumber(accounts.length)}</div>
-            </div>
-          </div>
-          <div class="badge">Primey Care</div>
+function PageSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-96" />
         </div>
 
-        <div class="summary-grid">
-          <div class="summary-card"><span>${escapeHtml(t.totalAccounts)}</span><strong>${formatNumber(summary.total_accounts)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.totalBalance)}</span><strong>${formatMoney(summary.total_balance)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.totalTransactions)}</span><strong>${formatNumber(summary.total_transactions)}</strong></div>
-          <div class="summary-card"><span>${escapeHtml(t.netTotal)}</span><strong>${formatMoney(summary.net_total)}</strong></div>
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-24" />
         </div>
+      </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>${escapeHtml(t.table.code)}</th>
-              <th>${escapeHtml(t.table.account)}</th>
-              <th>${escapeHtml(t.table.type)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-              <th>${escapeHtml(t.table.balance)}</th>
-              <th>${escapeHtml(t.table.defaultAccount)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              rows ||
-              `<tr><td colspan="7" style="text-align:center">${escapeHtml(t.emptyTitle)}</td></tr>`
-            }
-          </tbody>
-        </table>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <Card key={index} className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="min-h-[112px] px-6 py-5">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-5 w-20" />
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
 
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+      <Card className="rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-80 w-full" />
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
-
-/* ============================================================
-   Page
-============================================================ */
 
 export default function TreasuryReportsPage() {
-  const auth = useAuth() as unknown;
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [accounts, setAccounts] = React.useState<TreasuryAccount[]>([]);
+  const [transactions, setTransactions] = React.useState<TreasuryTransaction[]>([]);
+  const [summaryPayload, setSummaryPayload] = React.useState<ApiRecord>({});
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [accounts, setAccounts] = useState<TreasuryAccountRow[]>([]);
-  const [transactions, setTransactions] = useState<TreasuryTransactionRow[]>([]);
-  const [summary, setSummary] =
-    useState<TreasuryReportsSummary>(DEFAULT_SUMMARY);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState("");
 
-  const [query, setQuery] = useState("");
-  const [accountTypeFilter, setAccountTypeFilter] =
-    useState<AccountTypeFilter>("ALL");
+  const [activeTab, setActiveTab] = React.useState<ReportTab>("accounts");
+  const [searchInput, setSearchInput] = React.useState("");
+  const [accountTypeFilter, setAccountTypeFilter] = React.useState<AccountTypeFilter>("all");
   const [transactionTypeFilter, setTransactionTypeFilter] =
-    useState<TransactionTypeFilter>("ALL");
-  const [transactionStatusFilter, setTransactionStatusFilter] =
-    useState<TransactionStatusFilter>("ALL");
-  const [page, setPage] = useState(1);
-  const [visibleColumns, setVisibleColumns] =
-    useState<VisibleColumns>(DEFAULT_COLUMNS);
+    React.useState<TransactionTypeFilter>("all");
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
+  const [balanceFilter, setBalanceFilter] = React.useState<BalanceFilter>("all");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
+  const [sortKey, setSortKey] = React.useState<SortKey>("newest");
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const canView = hasSafePermission(
-    auth,
-    ["treasury.view", "treasury.reports.view", "reports.view"],
-    "view",
-  );
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const canExport = hasSafePermission(
-    auth,
-    ["treasury.export", "treasury.reports.export", "reports.export"],
-    "action",
-  );
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-  const canPrint = hasSafePermission(
-    auth,
-    ["treasury.print", "treasury.reports.print", "reports.print"],
-    "action",
-  );
+    applyLocale();
 
-  const canViewAccounts = hasSafePermission(
-    auth,
-    ["treasury.view", "treasury.accounts.view"],
-    "view",
-  );
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-  const filteredAccounts = useMemo(() => {
-    const cleanQuery = query.trim().toLowerCase();
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
 
-    return accounts.filter((item) => {
-      const matchesAccountType =
-        accountTypeFilter === "ALL" ? true : item.account_type === accountTypeFilter;
-
-      const matchesQuery = !cleanQuery
-        ? true
-        : [
-            item.code,
-            item.name,
-            item.bank_name,
-            item.account_number,
-            item.iban,
-            accountTypeLabel(item.account_type, locale),
-            accountStatusLabel(item.status, locale),
-          ]
-            .join(" ")
-            .toLowerCase()
-            .includes(cleanQuery);
-
-      return matchesAccountType && matchesQuery;
-    });
-  }, [accountTypeFilter, accounts, locale, query]);
-
-  const filteredTransactions = useMemo(() => {
-    return transactions.filter((item) => {
-      const matchesType =
-        transactionTypeFilter === "ALL"
-          ? true
-          : item.transaction_type === transactionTypeFilter;
-
-      const matchesStatus =
-        transactionStatusFilter === "ALL"
-          ? true
-          : item.status === transactionStatusFilter;
-
-      return matchesType && matchesStatus;
-    });
-  }, [transactionStatusFilter, transactionTypeFilter, transactions]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredAccounts.length / PAGE_SIZE));
-
-  const paginatedAccounts = useMemo(() => {
-    const safePage = Math.min(page, totalPages);
-    const startIndex = (safePage - 1) * PAGE_SIZE;
-
-    return filteredAccounts.slice(startIndex, startIndex + PAGE_SIZE);
-  }, [filteredAccounts, page, totalPages]);
-
-  const hasSearchOrFilter =
-    query.trim().length > 0 ||
-    accountTypeFilter !== "ALL" ||
-    transactionTypeFilter !== "ALL" ||
-    transactionStatusFilter !== "ALL";
-
-  const visibleColumnCount = Object.entries(visibleColumns).filter(
-    ([key, value]) => value && (key !== "actions" || canViewAccounts),
-  ).length;
-
-  const accountTypeOptions = useMemo(
-    () => [
-      {
-        value: "ALL" as AccountTypeFilter,
-        label: t.allAccountTypes,
-        count: accounts.length,
-      },
-      {
-        value: "CASHBOX" as AccountTypeFilter,
-        label: t.cashbox,
-        count: accounts.filter((item) => item.account_type === "CASHBOX").length,
-      },
-      {
-        value: "BANK" as AccountTypeFilter,
-        label: t.bank,
-        count: accounts.filter((item) => item.account_type === "BANK").length,
-      },
-      {
-        value: "WALLET" as AccountTypeFilter,
-        label: t.wallet,
-        count: accounts.filter((item) => item.account_type === "WALLET").length,
-      },
-      {
-        value: "OTHER" as AccountTypeFilter,
-        label: t.other,
-        count: accounts.filter((item) => item.account_type === "OTHER").length,
-      },
-    ],
-    [accounts, t],
-  );
-
-  const transactionTypeOptions = useMemo(
-    () => [
-      {
-        value: "ALL" as TransactionTypeFilter,
-        label: t.allTransactionTypes,
-        count: transactions.length,
-      },
-      {
-        value: "RECEIPT" as TransactionTypeFilter,
-        label: t.receipt,
-        count: transactions.filter((item) => item.transaction_type === "RECEIPT")
-          .length,
-      },
-      {
-        value: "PAYMENT" as TransactionTypeFilter,
-        label: t.payment,
-        count: transactions.filter((item) => item.transaction_type === "PAYMENT")
-          .length,
-      },
-      {
-        value: "TRANSFER" as TransactionTypeFilter,
-        label: t.transfer,
-        count: transactions.filter((item) => item.transaction_type === "TRANSFER")
-          .length,
-      },
-      {
-        value: "ADJUSTMENT" as TransactionTypeFilter,
-        label: t.adjustment,
-        count: transactions.filter(
-          (item) => item.transaction_type === "ADJUSTMENT",
-        ).length,
-      },
-    ],
-    [transactions, t],
-  );
-
-  const transactionStatusOptions = useMemo(
-    () => [
-      {
-        value: "ALL" as TransactionStatusFilter,
-        label: t.allStatuses,
-        count: transactions.length,
-      },
-      {
-        value: "DRAFT" as TransactionStatusFilter,
-        label: t.draft,
-        count: transactions.filter((item) => item.status === "DRAFT").length,
-      },
-      {
-        value: "CONFIRMED" as TransactionStatusFilter,
-        label: t.confirmed,
-        count: transactions.filter((item) => item.status === "CONFIRMED").length,
-      },
-      {
-        value: "CANCELLED" as TransactionStatusFilter,
-        label: t.cancelled,
-        count: transactions.filter((item) => item.status === "CANCELLED").length,
-      },
-    ],
-    [transactions, t],
-  );
-
-  const columnOptions: Array<{ key: keyof VisibleColumns; label: string }> = [
-    { key: "code", label: t.table.code },
-    { key: "account", label: t.table.account },
-    { key: "type", label: t.table.type },
-    { key: "status", label: t.table.status },
-    { key: "balance", label: t.table.balance },
-    { key: "openingBalance", label: t.table.openingBalance },
-    { key: "defaultAccount", label: t.table.defaultAccount },
-    { key: "bankInfo", label: t.table.bankInfo },
-    { key: "actions", label: t.table.action },
-  ];
-
-  const filteredSummary = useMemo(
-    () => buildSummary(filteredAccounts, filteredTransactions),
-    [filteredAccounts, filteredTransactions],
-  );
-
-  const loadReports = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setAccounts([]);
-        setTransactions([]);
-        setSummary(DEFAULT_SUMMARY);
-        setIsLoading(false);
-        return;
-      }
+  const loadReports = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
 
       try {
-        setIsLoading(true);
-        setErrorMessage("");
+        if (!silent) setLoading(true);
 
-        const [summaryResponse, accountsResponse, transactionsResponse] =
-          await Promise.allSettled([
-            fetch(apiUrl("/api/treasury/reports/summary/"), {
-              method: "GET",
-              credentials: "include",
-              cache: "no-store",
-              headers: { Accept: "application/json" },
-            }),
-            fetch(apiUrl("/api/treasury/accounts/?page_size=500"), {
-              method: "GET",
-              credentials: "include",
-              cache: "no-store",
-              headers: { Accept: "application/json" },
-            }),
-            fetch(apiUrl("/api/treasury/transactions/?page_size=500"), {
-              method: "GET",
-              credentials: "include",
-              cache: "no-store",
-              headers: { Accept: "application/json" },
-            }),
-          ]);
+        setRefreshing(true);
+        setError("");
 
-        async function readJson(result: PromiseSettledResult<Response>) {
-          if (result.status !== "fulfilled") return null;
+        const accountParams = new URLSearchParams({
+          page: "1",
+          page_size: "1000",
+          ordering: "account_type",
+        });
 
-          const response = result.value;
-          const payload = (await response.json().catch(() => null)) as
-            | ApiEnvelope<unknown>
-            | null;
+        const transactionParams = new URLSearchParams({
+          page: "1",
+          page_size: "1000",
+          ordering: "-transaction_date",
+        });
 
-          if ([400, 404, 405].includes(response.status)) return null;
+        if (dateFrom) transactionParams.set("date_from", dateFrom);
+        if (dateTo) transactionParams.set("date_to", dateTo);
 
-          if (
-            !response.ok ||
-            payload?.ok === false ||
-            payload?.success === false
-          ) {
-            throw new Error(
-              payload?.message ||
-                payload?.detail ||
-                payload?.error ||
-                `HTTP ${response.status}`,
-            );
-          }
+        const [accountsPayload, transactionsPayload, summaryResponse] = await Promise.all([
+          fetchJson<ApiResponse>(makeApiUrl(API.accounts, accountParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API.transactions, transactionParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API.summary), controller.signal).catch(() => null),
+        ]);
 
-          return payload;
-        }
-
-        const summaryPayload = await readJson(summaryResponse);
-        const accountsPayload = await readJson(accountsResponse);
-        const transactionsPayload = await readJson(transactionsResponse);
-
-        const normalizedAccounts = extractRows(accountsPayload, "accounts")
+        const nextAccounts = extractItems(accountsPayload)
           .map(normalizeAccount)
-          .filter((item) => item.id || item.name);
+          .filter((row) => row.id || row.name || row.code);
 
-        const normalizedTransactions = extractRows(
-          transactionsPayload,
-          "transactions",
-        )
+        const nextTransactions = extractItems(transactionsPayload)
           .map(normalizeTransaction)
-          .filter((item) => item.id || item.transaction_number);
+          .filter((row) => row.id || row.transaction_number);
 
-        setAccounts(normalizedAccounts);
-        setTransactions(normalizedTransactions);
-        setSummary(
-          buildSummary(
-            normalizedAccounts,
-            normalizedTransactions,
-            extractSummary(summaryPayload),
-          ),
-        );
-        setPage(1);
+        setAccounts(nextAccounts);
+        setTransactions(nextTransactions);
+        setSummaryPayload(asRecord(summaryResponse?.data || summaryResponse?.summary || summaryResponse));
 
-        if (showToast) toast.success(t.loadSuccess);
-      } catch (error) {
-        console.error("Treasury reports load error:", error);
-        setAccounts([]);
-        setTransactions([]);
-        setSummary(DEFAULT_SUMMARY);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
+        if (silent) toast.success(t.refreshed);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setError(message);
       } finally {
-        setIsLoading(false);
+        setLoading(false);
+        setRefreshing(false);
       }
+
+      return () => controller.abort();
     },
-    [canView, t.loadError, t.loadSuccess],
+    [dateFrom, dateTo, t.errorDesc, t.refreshed],
   );
 
-  function clearFilters() {
-    setQuery("");
-    setAccountTypeFilter("ALL");
-    setTransactionTypeFilter("ALL");
-    setTransactionStatusFilter("ALL");
-    setPage(1);
+  React.useEffect(() => {
+    void loadReports();
+  }, [loadReports]);
+
+  const reportStats = React.useMemo(() => {
+    const totalBalance =
+      toNumber(summaryPayload.total_balance, NaN) ||
+      accounts.reduce((sum, account) => sum + account.current_balance, 0);
+
+    const cashboxAccounts = accounts.filter((account) => account.account_type.includes("cash"));
+    const bankAccounts = accounts.filter((account) => account.account_type.includes("bank"));
+    const receiptRows = transactions.filter((row) =>
+      ["income", "deposit", "opening_balance"].includes(row.transaction_type),
+    );
+    const paymentRows = transactions.filter((row) =>
+      ["expense", "withdraw", "refund", "fee"].includes(row.transaction_type),
+    );
+    const transferRows = transactions.filter(
+      (row) =>
+        row.transaction_type === "transfer" ||
+        row.transaction_type === "internal_transfer" ||
+        Boolean(row.destination_account_id || row.destination_account_name),
+    );
+
+    return {
+      totalBalance,
+      cashboxCount: cashboxAccounts.length,
+      bankCount: bankAccounts.length,
+      transactionsCount: transactions.length,
+      receiptsTotal: receiptRows.reduce((sum, row) => sum + row.net_amount, 0),
+      paymentsTotal: paymentRows.reduce((sum, row) => sum + row.net_amount, 0),
+      transfersTotal: transferRows.reduce((sum, row) => sum + row.net_amount, 0),
+      feesTotal: transactions.reduce((sum, row) => sum + row.fees_amount, 0),
+      confirmedCount: transactions.filter((row) => row.status === "confirmed").length,
+      draftCount: transactions.filter((row) => row.status === "draft").length,
+      appliedCount: transactions.filter((row) => row.balance_applied).length,
+    };
+  }, [accounts, summaryPayload, transactions]);
+
+  const filteredAccounts = React.useMemo(() => {
+    const query = searchInput.trim().toLowerCase();
+
+    let rows = accounts.filter((account) => {
+      const matchesSearch =
+        activeTab !== "accounts" ||
+        !query ||
+        account.name.toLowerCase().includes(query) ||
+        account.code.toLowerCase().includes(query) ||
+        account.account_type.toLowerCase().includes(query);
+
+      const matchesType =
+        accountTypeFilter === "all" ||
+        (accountTypeFilter === "cashbox" && account.account_type.includes("cash")) ||
+        (accountTypeFilter === "bank" && account.account_type.includes("bank")) ||
+        (accountTypeFilter === "wallet" && account.account_type.includes("wallet")) ||
+        (accountTypeFilter === "other" &&
+          !account.account_type.includes("cash") &&
+          !account.account_type.includes("bank") &&
+          !account.account_type.includes("wallet"));
+
+      return matchesSearch && matchesType;
+    });
+
+    rows = [...rows].sort((a, b) => {
+      if (sortKey === "amount_high") return b.current_balance - a.current_balance;
+      if (sortKey === "amount_low") return a.current_balance - b.current_balance;
+      return a.code.localeCompare(b.code);
+    });
+
+    return rows;
+  }, [accountTypeFilter, accounts, activeTab, searchInput, sortKey]);
+
+  const filteredTransactions = React.useMemo(() => {
+    const query = searchInput.trim().toLowerCase();
+
+    let rows = transactions.filter((row) => {
+      const rowDate = formatDate(row.transaction_date).slice(0, 10);
+
+      const matchesSearch =
+        activeTab === "accounts" ||
+        !query ||
+        row.transaction_number.toLowerCase().includes(query) ||
+        row.treasury_account_name.toLowerCase().includes(query) ||
+        row.destination_account_name.toLowerCase().includes(query) ||
+        row.party_name.toLowerCase().includes(query) ||
+        row.description.toLowerCase().includes(query) ||
+        row.reference.toLowerCase().includes(query) ||
+        row.source_number.toLowerCase().includes(query);
+
+      const isTransfer =
+        row.transaction_type === "transfer" ||
+        row.transaction_type === "internal_transfer" ||
+        Boolean(row.destination_account_id || row.destination_account_name);
+
+      const matchesTab = activeTab === "transactions" || (activeTab === "transfers" && isTransfer);
+      const matchesType =
+        transactionTypeFilter === "all" || row.transaction_type === transactionTypeFilter;
+      const matchesStatus = statusFilter === "all" || row.status === statusFilter;
+      const matchesBalance =
+        balanceFilter === "all" ||
+        (balanceFilter === "applied" && row.balance_applied) ||
+        (balanceFilter === "not_applied" && !row.balance_applied);
+      const matchesFrom = !dateFrom || rowDate >= dateFrom;
+      const matchesTo = !dateTo || rowDate <= dateTo;
+
+      return (
+        matchesTab &&
+        matchesSearch &&
+        matchesType &&
+        matchesStatus &&
+        matchesBalance &&
+        matchesFrom &&
+        matchesTo
+      );
+    });
+
+    rows = [...rows].sort((a, b) => {
+      if (sortKey === "oldest") {
+        return String(a.transaction_date || a.created_at || "").localeCompare(
+          String(b.transaction_date || b.created_at || ""),
+        );
+      }
+
+      if (sortKey === "amount_high") return b.net_amount - a.net_amount;
+      if (sortKey === "amount_low") return a.net_amount - b.net_amount;
+      if (sortKey === "number") return a.transaction_number.localeCompare(b.transaction_number);
+
+      return String(b.transaction_date || b.created_at || "").localeCompare(
+        String(a.transaction_date || a.created_at || ""),
+      );
+    });
+
+    return rows;
+  }, [
+    activeTab,
+    balanceFilter,
+    dateFrom,
+    dateTo,
+    searchInput,
+    sortKey,
+    statusFilter,
+    transactionTypeFilter,
+    transactions,
+  ]);
+
+  const visibleRowsCount =
+    activeTab === "accounts" ? filteredAccounts.length : filteredTransactions.length;
+
+  const hasFilters =
+    Boolean(searchInput.trim()) ||
+    accountTypeFilter !== "all" ||
+    transactionTypeFilter !== "all" ||
+    statusFilter !== "all" ||
+    balanceFilter !== "all" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo) ||
+    sortKey !== "newest";
+
+  function resetFilters() {
+    setSearchInput("");
+    setAccountTypeFilter("all");
+    setTransactionTypeFilter("all");
+    setStatusFilter("all");
+    setBalanceFilter("all");
+    setDateFrom("");
+    setDateTo("");
+    setSortKey("newest");
+  }
+
+  function currentTableDescription() {
+    if (activeTab === "accounts") return t.accountsTableDesc;
+    if (activeTab === "transfers") return t.transfersTableDesc;
+    return t.transactionsTableDesc;
+  }
+
+  function buildExportRows() {
+    if (activeTab === "accounts") {
+      return filteredAccounts.map((account) => ({
+        code: account.code || t.notAvailable,
+        name: account.name || t.notAvailable,
+        type: account.account_type_label || accountTypeLabel(account.account_type, locale),
+        opening: formatMoney(account.opening_balance),
+        balance: formatMoney(account.current_balance),
+        status: account.status === "active" ? t.active : t.inactive,
+        isDefault: account.is_default ? t.yes : t.no,
+      }));
+    }
+
+    return filteredTransactions.map((row) => ({
+      number: row.transaction_number || t.notAvailable,
+      date: formatDate(row.transaction_date),
+      type: row.transaction_type_label || transactionTypeLabel(row.transaction_type, locale),
+      status: row.status_label || statusLabel(row.status, locale),
+      sourceAccount: row.treasury_account_code
+        ? `${row.treasury_account_code} - ${row.treasury_account_name}`
+        : row.treasury_account_name || t.notAvailable,
+      destinationAccount: row.destination_account_code
+        ? `${row.destination_account_code} - ${row.destination_account_name}`
+        : row.destination_account_name || t.notAvailable,
+      party: row.party_name || t.notAvailable,
+      amount: formatMoney(row.amount),
+      fees: formatMoney(row.fees_amount),
+      net: formatMoney(row.net_amount),
+      reference: row.reference || row.source_number || t.notAvailable,
+      balanceApplied: row.balance_applied ? t.applied : t.notApplied,
+      accountingPosted: row.accounting_posted ? t.yes : t.no,
+    }));
   }
 
   function exportExcel() {
-    if (!canExport) return;
+    const rows = buildExportRows();
 
-    if (filteredAccounts.length === 0 && filteredTransactions.length === 0) {
+    if (!rows.length) {
       toast.error(t.exportEmpty);
       return;
     }
 
-    downloadExcel({
-      filename: `primey-care-treasury-reports-${new Date()
-        .toISOString()
-        .slice(0, 10)}.xls`,
-      worksheetName: isArabic ? "تقارير الخزينة" : "Treasury Reports",
-      title: t.title,
-      locale,
-      summary: hasSearchOrFilter ? filteredSummary : summary,
-      accounts: filteredAccounts,
-      transactions: filteredTransactions,
+    const headers =
+      activeTab === "accounts"
+        ? [t.accountCode, t.accountName, t.accountKind, t.openingBalance, t.currentBalance, t.accountStatus, t.defaultAccount]
+        : [
+            t.number,
+            t.date,
+            t.movementType,
+            t.status,
+            t.sourceAccount,
+            t.destinationAccount,
+            t.party,
+            t.amount,
+            t.fees,
+            t.net,
+            t.reference,
+            t.balanceApplied,
+            t.accountingPosted,
+          ];
+
+    const htmlRows =
+      activeTab === "accounts"
+        ? (rows as Array<Record<string, string>>)
+            .map(
+              (row) => `
+                <tr>
+                  <td>${escapeHtml(row.code)}</td>
+                  <td>${escapeHtml(row.name)}</td>
+                  <td>${escapeHtml(row.type)}</td>
+                  <td>${escapeHtml(row.opening)}</td>
+                  <td>${escapeHtml(row.balance)}</td>
+                  <td>${escapeHtml(row.status)}</td>
+                  <td>${escapeHtml(row.isDefault)}</td>
+                </tr>
+              `,
+            )
+            .join("")
+        : (rows as Array<Record<string, string>>)
+            .map(
+              (row) => `
+                <tr>
+                  <td>${escapeHtml(row.number)}</td>
+                  <td>${escapeHtml(row.date)}</td>
+                  <td>${escapeHtml(row.type)}</td>
+                  <td>${escapeHtml(row.status)}</td>
+                  <td>${escapeHtml(row.sourceAccount)}</td>
+                  <td>${escapeHtml(row.destinationAccount)}</td>
+                  <td>${escapeHtml(row.party)}</td>
+                  <td>${escapeHtml(row.amount)}</td>
+                  <td>${escapeHtml(row.fees)}</td>
+                  <td>${escapeHtml(row.net)}</td>
+                  <td>${escapeHtml(row.reference)}</td>
+                  <td>${escapeHtml(row.balanceApplied)}</td>
+                  <td>${escapeHtml(row.accountingPosted)}</td>
+                </tr>
+              `,
+            )
+            .join("");
+
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(t.printTitle)}</h1>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+          <table>
+            <thead>
+              <tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>
+            </thead>
+            <tbody>${htmlRows}</tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
     });
 
-    toast.success(t.exportSuccess);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-treasury-report-${activeTab}-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
   function printPage() {
-    if (!canPrint) return;
+    const rows = buildExportRows();
 
-    if (filteredAccounts.length === 0) {
-      toast.error(t.exportEmpty);
+    if (!rows.length) {
+      toast.error(t.printEmpty);
       return;
     }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.printError);
+      toast.error(t.printEmpty);
       return;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: t.title,
-        summary: hasSearchOrFilter ? filteredSummary : summary,
-        accounts: filteredAccounts,
-      }),
-    );
-    printWindow.document.close();
+    const tableHeader =
+      activeTab === "accounts"
+        ? `
+          <tr>
+            <th>${escapeHtml(t.accountCode)}</th>
+            <th>${escapeHtml(t.accountName)}</th>
+            <th>${escapeHtml(t.accountKind)}</th>
+            <th>${escapeHtml(t.currentBalance)}</th>
+            <th>${escapeHtml(t.accountStatus)}</th>
+          </tr>
+        `
+        : `
+          <tr>
+            <th>${escapeHtml(t.number)}</th>
+            <th>${escapeHtml(t.date)}</th>
+            <th>${escapeHtml(t.movementType)}</th>
+            <th>${escapeHtml(t.sourceAccount)}</th>
+            <th>${escapeHtml(t.amount)}</th>
+            <th>${escapeHtml(t.net)}</th>
+            <th>${escapeHtml(t.balanceApplied)}</th>
+          </tr>
+        `;
 
-    toast.success(t.printSuccess);
+    const tableRows =
+      activeTab === "accounts"
+        ? (rows as Array<Record<string, string>>)
+            .map(
+              (row) => `
+                <tr>
+                  <td>${escapeHtml(row.code)}</td>
+                  <td>${escapeHtml(row.name)}</td>
+                  <td>${escapeHtml(row.type)}</td>
+                  <td>${escapeHtml(row.balance)}</td>
+                  <td>${escapeHtml(row.status)}</td>
+                </tr>
+              `,
+            )
+            .join("")
+        : (rows as Array<Record<string, string>>)
+            .map(
+              (row) => `
+                <tr>
+                  <td>${escapeHtml(row.number)}</td>
+                  <td>${escapeHtml(row.date)}</td>
+                  <td>${escapeHtml(row.type)}</td>
+                  <td>${escapeHtml(row.sourceAccount)}</td>
+                  <td>${escapeHtml(row.amount)}</td>
+                  <td>${escapeHtml(row.net)}</td>
+                  <td>${escapeHtml(row.balanceApplied)}</td>
+                </tr>
+              `,
+            )
+            .join("");
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+              margin-bottom: 18px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+            <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+          </div>
+
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.totalBalance)}</span><strong>${escapeHtml(formatMoney(reportStats.totalBalance))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.transactions)}</span><strong>${escapeHtml(reportStats.transactionsCount)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.receipts)}</span><strong>${escapeHtml(formatMoney(reportStats.receiptsTotal))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.payments)}</span><strong>${escapeHtml(formatMoney(reportStats.paymentsTotal))}</strong></div>
+          </div>
+
+          <table>
+            <thead>${tableHeader}</thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadReports(false);
-  }, [authResolving, loadReports]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [query, accountTypeFilter, transactionTypeFilter, transactionStatusFilter]);
-
-  if (!authResolving && !canView) {
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="w-full space-y-4" dir={dir}>
+        <PageSkeleton />
       </div>
     );
   }
 
-  const activeSummary = hasSearchOrFilter ? filteredSummary : summary;
-
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link href="/system/treasury">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury">
+              <BackIcon className="h-4 w-4" />
+              {t.treasury}
+            </Link>
+          </Button>
 
-          <Link href="/system/treasury/accounts">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <Wallet className="h-4 w-4" />
-              <span>{t.accounts}</span>
-            </Button>
-          </Link>
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury/transactions">
+              <WalletCards className="h-4 w-4" />
+              {t.transactionsPage}
+            </Link>
+          </Button>
 
-          <Link href="/system/treasury/transactions">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <CreditCard className="h-4 w-4" />
-              <span>{t.transactions}</span>
-            </Button>
-          </Link>
-
-          <Link href="/system/treasury/transfers">
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <BarChart3 className="h-4 w-4" />
-              <span>{t.transfers}</span>
-            </Button>
-          </Link>
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/treasury/statement">
+              <ReceiptText className="h-4 w-4" />
+              {t.statement}
+            </Link>
+          </Button>
 
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadReports(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadReports({ silent: true })}
+            disabled={refreshing}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canExport ? (
-            <Button
-              className="h-10 rounded-xl"
-              onClick={exportExcel}
-              disabled={isLoading || Boolean(errorMessage)}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
 
-          {canPrint ? (
-            <Button
-              variant="outline"
-              className="h-10 rounded-xl"
-              onClick={printPage}
-              disabled={isLoading || Boolean(errorMessage)}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.totalBalance}
+          value={<MoneyValue value={reportStats.totalBalance} label={t.sar} />}
+          trend={`${t.applied}: ${formatInteger(reportStats.appliedCount)}`}
+          icon={CircleDollarSign}
+        />
 
+        <KpiCard
+          title={t.cashboxes}
+          value={formatInteger(reportStats.cashboxCount)}
+          trend={t.cashbox}
+          icon={Banknote}
+        />
+
+        <KpiCard
+          title={t.banks}
+          value={formatInteger(reportStats.bankCount)}
+          trend={t.bank}
+          icon={Landmark}
+        />
+
+        <KpiCard
+          title={t.transactions}
+          value={formatInteger(reportStats.transactionsCount)}
+          trend={`${t.confirmed}: ${formatInteger(reportStats.confirmedCount)}`}
+          icon={ReceiptText}
+        />
+
+        <KpiCard
+          title={t.receipts}
+          value={<MoneyValue value={reportStats.receiptsTotal} label={t.sar} />}
+          trend={t.income}
+          icon={Banknote}
+        />
+
+        <KpiCard
+          title={t.payments}
+          value={<MoneyValue value={reportStats.paymentsTotal} label={t.sar} />}
+          trend={t.expense}
+          icon={CreditCard}
+        />
+
+        <KpiCard
+          title={t.transfers}
+          value={<MoneyValue value={reportStats.transfersTotal} label={t.sar} />}
+          trend={t.transfer}
+          icon={Repeat2}
+        />
+
+        <KpiCard
+          title={t.fees}
+          value={<MoneyValue value={reportStats.feesTotal} label={t.sar} />}
+          trend={t.fee}
+          icon={CalendarDays}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
               </div>
             </div>
 
             <Button
               variant="outline"
-              className="rounded-xl"
-              onClick={() => loadReports(true)}
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadReports()}
             >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {isLoading ? (
-        <KpiSkeleton />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    <MoneyText value={activeSummary.total_balance} />
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.totalBalance}
-                  </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300">
-                  <Wallet className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    {formatNumber(activeSummary.total_accounts)}
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.totalAccounts}
-                  </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-                  <ShieldCheck className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    {formatNumber(activeSummary.total_transactions)}
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.totalTransactions}
-                  </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-50 text-violet-700 dark:bg-violet-950/30 dark:text-violet-300">
-                  <CreditCard className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-bold">
-                    <MoneyText value={activeSummary.net_total} />
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t.netTotal}
-                  </p>
-                </div>
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-50 text-teal-700 dark:bg-teal-950/30 dark:text-teal-300">
-                  <BarChart3 className="h-5 w-5" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base font-bold">
-              <Landmark className="h-4 w-4" />
-              {t.summaryTitle}
-            </CardTitle>
-            <CardDescription>{t.summaryDesc}</CardDescription>
-          </CardHeader>
-
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.cashboxes}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.cashbox_accounts)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.banks}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.bank_accounts)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.activeAccounts}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.active_accounts)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.openingBalanceTotal}</span>
-              <MoneyText value={activeSummary.opening_balance_total} />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base font-bold">
-              <Receipt className="h-4 w-4" />
-              {t.movementsTitle}
-            </CardTitle>
-            <CardDescription>{t.movementsDesc}</CardDescription>
-          </CardHeader>
-
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.receipts}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.receipts_count)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.payments}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.payments_count)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.transfersCount}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.transfers_count)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.receiptsTotal}</span>
-              <MoneyText value={activeSummary.receipts_total} />
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.paymentsTotal}</span>
-              <MoneyText value={activeSummary.payments_total} />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border bg-card shadow-sm xl:col-span-1">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base font-bold">
-              <ShieldCheck className="h-4 w-4" />
-              {t.treasuryPosted}
-            </CardTitle>
-            <CardDescription>{t.movementsDesc}</CardDescription>
-          </CardHeader>
-
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.treasuryPosted}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.treasury_posted_count)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.accountingPosted}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.accounting_posted_count)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.unposted}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.unposted_count)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.confirmedTransactions}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.confirmed_transactions)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border bg-background px-3 py-2 text-sm">
-              <span>{t.cancelledTransactions}</span>
-              <span className="font-semibold">
-                {formatNumber(activeSummary.cancelled_transactions)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardHeader className="space-y-4 pb-3">
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardHeader className="px-6 py-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <CardTitle className="text-base font-bold">
-                {t.accountsTitle}
-              </CardTitle>
-              <CardDescription className="mt-1">{t.accountsDesc}</CardDescription>
+            <div className="space-y-1">
+              <CardTitle>{t.reportTable}</CardTitle>
+              <CardDescription>{currentTableDescription()}</CardDescription>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
-                variant="outline"
-                className="h-10 rounded-xl"
-                onClick={() => loadReports(true)}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="h-4 w-4" />
+                variant={activeTab === "accounts" ? "default" : "outline"}
+                className={cn(
+                  "h-9 rounded-lg",
+                  activeTab === "accounts" && "bg-black text-white hover:bg-black/90",
                 )}
-                {t.refresh}
+                onClick={() => setActiveTab("accounts")}
+              >
+                <Building2 className="h-4 w-4" />
+                {t.accountsTab}
               </Button>
 
-              {hasSearchOrFilter ? (
-                <Button
-                  variant="outline"
-                  className="h-10 rounded-xl"
-                  onClick={clearFilters}
-                >
-                  {t.clearFilters}
-                </Button>
-              ) : null}
+              <Button
+                variant={activeTab === "transactions" ? "default" : "outline"}
+                className={cn(
+                  "h-9 rounded-lg",
+                  activeTab === "transactions" && "bg-black text-white hover:bg-black/90",
+                )}
+                onClick={() => setActiveTab("transactions")}
+              >
+                <ReceiptText className="h-4 w-4" />
+                {t.transactionsTab}
+              </Button>
+
+              <Button
+                variant={activeTab === "transfers" ? "default" : "outline"}
+                className={cn(
+                  "h-9 rounded-lg",
+                  activeTab === "transfers" && "bg-black text-white hover:bg-black/90",
+                )}
+                onClick={() => setActiveTab("transfers")}
+              >
+                <Repeat2 className="h-4 w-4" />
+                {t.transfersTab}
+              </Button>
             </div>
           </div>
         </CardHeader>
 
-        <CardContent className="space-y-4">
-          <div className="relative w-full">
-            <Search
-              className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${
-                isArabic ? "right-3" : "left-3"
-              }`}
-            />
+        <CardContent className="space-y-3 p-4">
+          <div className="grid gap-2 xl:grid-cols-[1fr_160px_160px]">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
+            </div>
+
             <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t.searchPlaceholder}
-              className={`h-11 rounded-xl ${isArabic ? "pr-10" : "pl-10"}`}
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="h-10 rounded-lg bg-background"
+              title={t.from}
+              disabled={activeTab === "accounts"}
+            />
+
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="h-10 rounded-lg bg-background"
+              title={t.to}
+              disabled={activeTab === "accounts"}
             />
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-10 rounded-xl">
-                    <Filter className="h-4 w-4" />
-                    {t.filters}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent
-                  align={isArabic ? "start" : "end"}
-                  className="w-80 rounded-2xl"
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              {activeTab === "accounts" ? (
+                <Select
+                  value={accountTypeFilter}
+                  onValueChange={(value) => setAccountTypeFilter(value as AccountTypeFilter)}
                 >
-                  <div dir={isArabic ? "rtl" : "ltr"}>
-                    <DropdownMenuLabel>{t.allAccountTypes}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[170px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.accountType}: {t.all}</SelectItem>
+                    <SelectItem value="cashbox">{t.cashbox}</SelectItem>
+                    <SelectItem value="bank">{t.bank}</SelectItem>
+                    <SelectItem value="wallet">{t.wallet}</SelectItem>
+                    <SelectItem value="other">{t.other}</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <>
+                  <Select
+                    value={transactionTypeFilter}
+                    onValueChange={(value) =>
+                      setTransactionTypeFilter(value as TransactionTypeFilter)
+                    }
+                    disabled={activeTab === "transfers"}
+                  >
+                    <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t.transactionType}: {t.all}</SelectItem>
+                      <SelectItem value="income">{t.income}</SelectItem>
+                      <SelectItem value="expense">{t.expense}</SelectItem>
+                      <SelectItem value="transfer">{t.transfer}</SelectItem>
+                      <SelectItem value="deposit">{t.deposit}</SelectItem>
+                      <SelectItem value="withdraw">{t.withdraw}</SelectItem>
+                      <SelectItem value="opening_balance">{t.openingBalanceType}</SelectItem>
+                      <SelectItem value="refund">{t.refund}</SelectItem>
+                      <SelectItem value="fee">{t.fee}</SelectItem>
+                      <SelectItem value="adjustment">{t.adjustment}</SelectItem>
+                    </SelectContent>
+                  </Select>
 
-                    {accountTypeOptions.map((item) => (
-                      <DropdownMenuCheckboxItem
-                        key={item.value}
-                        checked={accountTypeFilter === item.value}
-                        onCheckedChange={() => setAccountTypeFilter(item.value)}
-                      >
-                        {item.label} ({formatNumber(item.count)})
-                      </DropdownMenuCheckboxItem>
-                    ))}
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+                  >
+                    <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[155px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t.status}: {t.all}</SelectItem>
+                      <SelectItem value="draft">{t.draft}</SelectItem>
+                      <SelectItem value="confirmed">{t.confirmed}</SelectItem>
+                      <SelectItem value="cancelled">{t.cancelled}</SelectItem>
+                    </SelectContent>
+                  </Select>
 
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel>{t.allTransactionTypes}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
+                  <Select
+                    value={balanceFilter}
+                    onValueChange={(value) => setBalanceFilter(value as BalanceFilter)}
+                  >
+                    <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[160px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t.balanceImpact}: {t.all}</SelectItem>
+                      <SelectItem value="applied">{t.applied}</SelectItem>
+                      <SelectItem value="not_applied">{t.notApplied}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
+            </div>
 
-                    {transactionTypeOptions.map((item) => (
-                      <DropdownMenuCheckboxItem
-                        key={item.value}
-                        checked={transactionTypeFilter === item.value}
-                        onCheckedChange={() => setTransactionTypeFilter(item.value)}
-                      >
-                        {item.label} ({formatNumber(item.count)})
-                      </DropdownMenuCheckboxItem>
-                    ))}
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={sortKey} onValueChange={(value) => setSortKey(value as SortKey)}>
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[165px]">
+                  <ArrowUpDown className="h-4 w-4" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newest">{t.newest}</SelectItem>
+                  <SelectItem value="oldest">{t.oldest}</SelectItem>
+                  <SelectItem value="amount_high">{t.amountHigh}</SelectItem>
+                  <SelectItem value="amount_low">{t.amountLow}</SelectItem>
+                  <SelectItem value="number">{t.numberSort}</SelectItem>
+                </SelectContent>
+              </Select>
 
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel>{t.allStatuses}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    {transactionStatusOptions.map((item) => (
-                      <DropdownMenuCheckboxItem
-                        key={item.value}
-                        checked={transactionStatusFilter === item.value}
-                        onCheckedChange={() =>
-                          setTransactionStatusFilter(item.value)
-                        }
-                      >
-                        {item.label} ({formatNumber(item.count)})
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-10 rounded-xl">
-                    <Columns3 className="h-4 w-4" />
-                    {t.columns}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent
-                  align={isArabic ? "start" : "end"}
-                  className="w-64 rounded-2xl"
-                >
-                  <div dir={isArabic ? "rtl" : "ltr"}>
-                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-
-                    {columnOptions.map((column) => {
-                      if (column.key === "actions" && !canViewAccounts) {
-                        return null;
-                      }
-
-                      return (
-                        <DropdownMenuCheckboxItem
-                          key={column.key}
-                          checked={visibleColumns[column.key]}
-                          onCheckedChange={(checked) =>
-                            setVisibleColumns((current) => ({
-                              ...current,
-                              [column.key]: Boolean(checked),
-                            }))
-                          }
-                        >
-                          {column.label}
-                        </DropdownMenuCheckboxItem>
-                      );
-                    })}
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                onClick={resetFilters}
+              >
+                <RotateCcw className="h-4 w-4" />
+                {t.reset}
+              </Button>
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border">
+          <div className="overflow-hidden rounded-lg border bg-background">
             <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {visibleColumns.code ? (
-                      <TableHead className="min-w-[120px]">
-                        {t.table.code}
+              {activeTab === "accounts" ? (
+                <Table className="min-w-[1100px] table-fixed">
+                  <TableHeader>
+                    <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                      <TableHead className="h-11 w-[140px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.accountCode}
                       </TableHead>
-                    ) : null}
-
-                    {visibleColumns.account ? (
-                      <TableHead className="min-w-[220px]">
-                        {t.table.account}
+                      <TableHead className="h-11 w-[260px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.accountName}
                       </TableHead>
-                    ) : null}
-
-                    {visibleColumns.type ? (
-                      <TableHead className="min-w-[120px]">
-                        {t.table.type}
+                      <TableHead className="h-11 w-[150px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.accountKind}
                       </TableHead>
-                    ) : null}
-
-                    {visibleColumns.status ? (
-                      <TableHead className="min-w-[120px]">
-                        {t.table.status}
+                      <TableHead className="h-11 w-[160px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.openingBalance}
                       </TableHead>
-                    ) : null}
-
-                    {visibleColumns.balance ? (
-                      <TableHead className="min-w-[150px]">
-                        {t.table.balance}
+                      <TableHead className="h-11 w-[160px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.currentBalance}
                       </TableHead>
-                    ) : null}
-
-                    {visibleColumns.openingBalance ? (
-                      <TableHead className="min-w-[160px]">
-                        {t.table.openingBalance}
+                      <TableHead className="h-11 w-[120px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.accountStatus}
                       </TableHead>
-                    ) : null}
-
-                    {visibleColumns.defaultAccount ? (
-                      <TableHead className="min-w-[110px]">
-                        {t.table.defaultAccount}
+                      <TableHead className="h-11 w-[120px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.defaultAccount}
                       </TableHead>
-                    ) : null}
-
-                    {visibleColumns.bankInfo ? (
-                      <TableHead className="min-w-[260px]">
-                        {t.table.bankInfo}
-                      </TableHead>
-                    ) : null}
-
-                    {visibleColumns.actions && canViewAccounts ? (
-                      <TableHead className="min-w-[100px]">
-                        {t.table.action}
-                      </TableHead>
-                    ) : null}
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {isLoading ? (
-                    <TableSkeleton columnsCount={visibleColumnCount || 1} />
-                  ) : paginatedAccounts.length > 0 ? (
-                    paginatedAccounts.map((item) => (
-                      <TableRow key={`${item.id}-${item.code}`}>
-                        {visibleColumns.code ? (
-                          <TableCell className="font-semibold" dir="ltr">
-                            {item.code || "-"}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.account ? (
-                          <TableCell>
-                            <div className="min-w-[200px]">
-                              <p className="font-medium">{item.name || "-"}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {item.is_default
-                                  ? t.defaultAccount
-                                  : t.regularAccount}
-                              </p>
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.type ? (
-                          <TableCell>
-                            {accountTypeBadge(item.account_type, locale)}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.status ? (
-                          <TableCell>
-                            {accountStatusBadge(item.status, locale)}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.balance ? (
-                          <TableCell>
-                            <MoneyText value={item.current_balance} />
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.openingBalance ? (
-                          <TableCell>
-                            <MoneyText value={item.opening_balance} />
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.defaultAccount ? (
-                          <TableCell>
-                            {item.is_default ? (
-                              <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-                                {t.defaultAccount}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="rounded-full px-3 py-1">
-                                {t.regularAccount}
-                              </Badge>
-                            )}
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.bankInfo ? (
-                          <TableCell>
-                            <div className="min-w-[240px] text-sm">
-                              <p className="font-medium">{item.bank_name || "-"}</p>
-                              <p className="text-xs text-muted-foreground" dir="ltr">
-                                {item.account_number || "-"}
-                              </p>
-                              <p
-                                className="line-clamp-1 text-xs text-muted-foreground"
-                                dir="ltr"
-                              >
-                                {item.iban || "-"}
-                              </p>
-                            </div>
-                          </TableCell>
-                        ) : null}
-
-                        {visibleColumns.actions && canViewAccounts ? (
-                          <TableCell>
-                            {isValidId(item.id) ? (
-                              <Link href={`/system/treasury/accounts/${item.id}`}>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-8 rounded-lg"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  <span className="sr-only">{t.view}</span>
-                                </Button>
-                              </Link>
-                            ) : (
-                              <span className="text-sm text-muted-foreground">
-                                -
-                              </span>
-                            )}
-                          </TableCell>
-                        ) : null}
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell
-                        colSpan={visibleColumnCount || 1}
-                        className="h-44 text-center"
-                      >
-                        <div className="flex flex-col items-center justify-center gap-2">
-                          <Building2 className="h-10 w-10 text-muted-foreground/40" />
-                          <p className="font-semibold">
-                            {hasSearchOrFilter ? t.noResultsTitle : t.emptyTitle}
-                          </p>
-                          <p className="max-w-md text-sm text-muted-foreground">
-                            {hasSearchOrFilter ? t.noResultsText : t.emptyText}
-                          </p>
-
-                          {hasSearchOrFilter ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="mt-2 rounded-xl"
-                              onClick={clearFilters}
-                            >
-                              {t.clearFilters}
-                            </Button>
-                          ) : null}
-                        </div>
-                      </TableCell>
                     </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+
+                  <TableBody>
+                    {filteredAccounts.length ? (
+                      filteredAccounts.map((account) => (
+                        <TableRow key={account.id || account.code} className="h-[62px]">
+                          <TableCell className="h-[62px] px-4 text-right align-middle font-semibold tabular-nums">
+                            {account.code || t.notAvailable}
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <span className="block truncate text-sm font-medium text-foreground">
+                              {account.name || t.notAvailable}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {account.account_type_label || accountTypeLabel(account.account_type, locale)}
+                            </span>
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <Badge
+                              variant="outline"
+                              className="rounded-full border-blue-500/30 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                            >
+                              {account.account_type_label || accountTypeLabel(account.account_type, locale)}
+                            </Badge>
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <MoneyValue value={account.opening_balance} label={t.sar} />
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <MoneyValue value={account.current_balance} label={t.sar} />
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <BooleanBadge
+                              value={account.status === "active"}
+                              trueLabel={t.active}
+                              falseLabel={t.inactive}
+                            />
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <BooleanBadge
+                              value={account.is_default}
+                              trueLabel={t.yes}
+                              falseLabel={t.no}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={7} className="h-72">
+                          <div className="flex flex-col items-center justify-center gap-3 text-center">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                              <Search className="h-6 w-6 text-muted-foreground" />
+                            </div>
+                            <div className="space-y-1">
+                              <p className="font-semibold text-foreground">
+                                {hasFilters ? t.noResultsTitle : t.noDataTitle}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {hasFilters ? t.noResultsDesc : t.noDataDesc}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              ) : (
+                <Table className="min-w-[1450px] table-fixed">
+                  <TableHeader>
+                    <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                      <TableHead className="h-11 w-[170px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.number}
+                      </TableHead>
+                      <TableHead className="h-11 w-[140px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.date}
+                      </TableHead>
+                      <TableHead className="h-11 w-[120px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.movementType}
+                      </TableHead>
+                      <TableHead className="h-11 w-[115px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.status}
+                      </TableHead>
+                      <TableHead className="h-11 w-[220px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.sourceAccount}
+                      </TableHead>
+                      <TableHead className="h-11 w-[220px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.destinationAccount}
+                      </TableHead>
+                      <TableHead className="h-11 w-[140px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.party}
+                      </TableHead>
+                      <TableHead className="h-11 w-[125px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.amount}
+                      </TableHead>
+                      <TableHead className="h-11 w-[125px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.net}
+                      </TableHead>
+                      <TableHead className="h-11 w-[120px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.balanceImpact}
+                      </TableHead>
+                      <TableHead className="h-11 w-[120px] px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.accountingPosted}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+
+                  <TableBody>
+                    {filteredTransactions.length ? (
+                      filteredTransactions.map((row) => (
+                        <TableRow key={row.id || row.transaction_number} className="h-[62px]">
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <Link
+                              href={`/system/treasury/transactions/${encodeURIComponent(row.id)}`}
+                              className="block truncate text-sm font-semibold text-foreground tabular-nums hover:underline"
+                            >
+                              {row.transaction_number || t.notAvailable}
+                            </Link>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {row.reference || row.source_number || t.notAvailable}
+                            </span>
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle text-sm text-muted-foreground tabular-nums">
+                            {formatDate(row.transaction_date)}
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <TypeBadge type={row.transaction_type} locale={locale} />
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <StatusBadge status={row.status} locale={locale} />
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <span className="block truncate text-sm font-medium text-foreground">
+                              {row.treasury_account_name || t.notAvailable}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground tabular-nums">
+                              {row.treasury_account_code || t.notAvailable}
+                            </span>
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <span className="block truncate text-sm font-medium text-foreground">
+                              {row.destination_account_name || t.notAvailable}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground tabular-nums">
+                              {row.destination_account_code || t.notAvailable}
+                            </span>
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <span className="block truncate text-sm text-muted-foreground">
+                              {row.party_name || t.notAvailable}
+                            </span>
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <MoneyValue value={row.amount} label={t.sar} />
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <MoneyValue value={row.net_amount} label={t.sar} />
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <BooleanBadge
+                              value={row.balance_applied}
+                              trueLabel={t.applied}
+                              falseLabel={t.notApplied}
+                            />
+                          </TableCell>
+
+                          <TableCell className="h-[62px] px-4 text-right align-middle">
+                            <BooleanBadge
+                              value={row.accounting_posted}
+                              trueLabel={t.yes}
+                              falseLabel={t.no}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={11} className="h-72">
+                          <div className="flex flex-col items-center justify-center gap-3 text-center">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                              <Search className="h-6 w-6 text-muted-foreground" />
+                            </div>
+                            <div className="space-y-1">
+                              <p className="font-semibold text-foreground">
+                                {hasFilters ? t.noResultsTitle : t.noDataTitle}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {hasFilters ? t.noResultsDesc : t.noDataDesc}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              )}
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              {t.showing} {formatNumber(paginatedAccounts.length)} {t.from}{" "}
-              {formatNumber(filteredAccounts.length)}
-            </span>
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl"
-                disabled={page <= 1 || isLoading}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-              >
-                {t.previous}
-              </Button>
-
-              <Badge variant="outline" className="rounded-full px-3 py-1">
-                {formatNumber(Math.min(page, totalPages))} /{" "}
-                {formatNumber(totalPages)}
-              </Badge>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl"
-                disabled={page >= totalPages || isLoading}
-                onClick={() =>
-                  setPage((current) => Math.min(totalPages, current + 1))
-                }
-              >
-                {t.next}
-              </Button>
-            </div>
+          <div className="text-sm text-muted-foreground">
+            {t.showing}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(visibleRowsCount)}
+            </span>{" "}
+            {t.of}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(activeTab === "accounts" ? accounts.length : transactions.length)}
+            </span>{" "}
+            {t.rows}
           </div>
         </CardContent>
       </Card>

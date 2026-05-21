@@ -1,13 +1,15 @@
 # ============================================================
 # 📂 api/treasury/list.py
-# 🧠 Primey Care | Treasury API - List/Create V2
+# 🧠 Primey Care | Treasury API - List/Create V3
 # ------------------------------------------------------------
 # ✅ قائمة حسابات الخزينة
 # ✅ إنشاء حساب خزينة / بنك / بوابة دفع / محفظة
 # ✅ aliases للصناديق والبنوك
 # ✅ قائمة حركات الخزينة
 # ✅ إنشاء حركة خزينة
-# ✅ متوافق مع Treasury Backend الجديد
+# ✅ دعم الحساب المحاسبي المقابل counterparty_ledger_account
+# ✅ دعم post_to_accounting عند إنشاء حركة مؤكدة
+# ✅ متوافق مع Treasury + Accounting Backend الجديد
 # ✅ يدعم:
 #    - source
 #    - source_type / source_id / source_number
@@ -16,6 +18,7 @@
 #    - balance_before / balance_after
 #    - balance_applied / balance_reversed
 #    - journal_entry / journal_entry_reference
+#    - counterparty_ledger_account
 #    - provider_name / merchant_id / settlement_days
 #    - allow_negative_balance
 #    - metadata
@@ -111,6 +114,22 @@ ALLOWED_TRANSACTION_ORDERING = {
 # Helpers
 # ============================================================
 
+def _decimal_to_string(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+
+    if isinstance(value, dict):
+        return {key: _decimal_to_string(val) for key, val in value.items()}
+
+    if isinstance(value, list):
+        return [_decimal_to_string(item) for item in value]
+
+    if isinstance(value, tuple):
+        return tuple(_decimal_to_string(item) for item in value)
+
+    return value
+
+
 def _json_response(
     *,
     success: bool,
@@ -134,22 +153,6 @@ def _json_response(
         status=status,
         json_dumps_params={"ensure_ascii": False},
     )
-
-
-def _decimal_to_string(value: Any) -> Any:
-    if isinstance(value, Decimal):
-        return str(value)
-
-    if isinstance(value, dict):
-        return {key: _decimal_to_string(val) for key, val in value.items()}
-
-    if isinstance(value, list):
-        return [_decimal_to_string(item) for item in value]
-
-    if isinstance(value, tuple):
-        return tuple(_decimal_to_string(item) for item in value)
-
-    return value
 
 
 def _read_json_body(request: HttpRequest) -> dict[str, Any]:
@@ -298,25 +301,49 @@ def _safe_attr(obj: Any, attr_name: str, default: Any = None) -> Any:
         return default
 
 
-def _resolve_ledger_account(value: Any) -> Account | None:
+def _model_has_field(model_or_instance: Any, field_name: str) -> bool:
+    try:
+        model_or_instance._meta.get_field(field_name)
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_actor(request: HttpRequest):
+    user = getattr(request, "user", None)
+
+    if user is not None and getattr(user, "is_authenticated", False):
+        return user
+
+    return None
+
+
+def _resolve_ledger_account(
+    value: Any,
+    *,
+    field_name: str = "ledger_account_id",
+    required: bool = False,
+) -> Account | None:
     if value in (None, "", 0, "0"):
+        if required:
+            raise ValidationError({field_name: "الحساب المحاسبي مطلوب."})
         return None
 
     try:
         account_id = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValidationError({"ledger_account_id": "معرّف الحساب المحاسبي غير صحيح."}) from exc
+        raise ValidationError({field_name: "معرّف الحساب المحاسبي غير صحيح."}) from exc
 
     account = Account.objects.filter(pk=account_id).first()
 
     if not account:
-        raise ValidationError({"ledger_account_id": "الحساب المحاسبي غير موجود."})
+        raise ValidationError({field_name: "الحساب المحاسبي غير موجود."})
 
     if getattr(account, "is_group", False):
-        raise ValidationError({"ledger_account_id": "لا يمكن ربط حساب خزينة بحساب محاسبي تجميعي."})
+        raise ValidationError({field_name: "لا يمكن استخدام حساب محاسبي تجميعي."})
 
     if not getattr(account, "is_active", True):
-        raise ValidationError({"ledger_account_id": "لا يمكن ربط حساب خزينة بحساب محاسبي غير نشط."})
+        raise ValidationError({field_name: "لا يمكن استخدام حساب محاسبي غير نشط."})
 
     return account
 
@@ -365,6 +392,73 @@ def _parse_metadata(value: Any) -> dict[str, Any]:
     return value
 
 
+def _optional_bool_from_payload(payload: dict[str, Any], key: str) -> bool | None:
+    if key not in payload:
+        return None
+
+    return _parse_optional_bool(payload.get(key))
+
+
+def _transaction_queryset():
+    queryset = TreasuryTransaction.objects.select_related(
+        "treasury_account",
+        "treasury_account__ledger_account",
+        "destination_account",
+        "destination_account__ledger_account",
+        "journal_entry",
+        "created_by",
+        "confirmed_by",
+        "cancelled_by",
+    )
+
+    if _model_has_field(TreasuryTransaction, "counterparty_ledger_account"):
+        queryset = queryset.select_related("counterparty_ledger_account")
+
+    return queryset
+
+
+def _validate_transaction_accounts(
+    *,
+    transaction_type: str,
+    treasury_account: TreasuryAccount,
+    destination_account: TreasuryAccount | None,
+    counterparty_ledger_account: Account | None,
+    post_to_accounting: bool | None,
+) -> None:
+    if not treasury_account:
+        raise ValidationError({"treasury_account_id": "حساب الخزينة مطلوب."})
+
+    if treasury_account.status != TreasuryAccountStatus.ACTIVE:
+        raise ValidationError({"treasury_account_id": "حساب الخزينة غير نشط."})
+
+    if transaction_type == TreasuryTransactionType.TRANSFER:
+        if not destination_account:
+            raise ValidationError({"destination_account_id": "حساب الوجهة مطلوب للتحويل."})
+
+        if destination_account.pk == treasury_account.pk:
+            raise ValidationError({"destination_account_id": "لا يمكن التحويل إلى نفس حساب الخزينة."})
+
+        if destination_account.status != TreasuryAccountStatus.ACTIVE:
+            raise ValidationError({"destination_account_id": "حساب الوجهة غير نشط."})
+
+        if post_to_accounting is True:
+            source_ledger = getattr(treasury_account, "ledger_account", None)
+            destination_ledger = getattr(destination_account, "ledger_account", None)
+
+            if not source_ledger:
+                raise ValidationError({"treasury_account_id": "حساب الخزينة غير مربوط بحساب محاسبي."})
+
+            if not destination_ledger:
+                raise ValidationError({"destination_account_id": "حساب الوجهة غير مربوط بحساب محاسبي."})
+
+        return
+
+    if post_to_accounting is True and not counterparty_ledger_account:
+        raise ValidationError({
+            "counterparty_ledger_account_id": "الحساب المحاسبي المقابل مطلوب عند الترحيل المحاسبي."
+        })
+
+
 # ============================================================
 # Serializers
 # ============================================================
@@ -381,6 +475,7 @@ def _serialize_ledger_account(account: Account | None) -> dict[str, Any] | None:
         "name_en": getattr(account, "name_en", ""),
         "account_type": getattr(account, "account_type", ""),
         "nature": getattr(account, "nature", ""),
+        "purpose": getattr(account, "purpose", ""),
         "is_group": bool(getattr(account, "is_group", False)),
         "is_active": bool(getattr(account, "is_active", True)),
         "currency": getattr(account, "currency", "SAR"),
@@ -468,6 +563,13 @@ def serialize_treasury_transaction(
     *,
     include_metadata: bool = True,
 ) -> dict[str, Any]:
+    counterparty_ledger_account = None
+    counterparty_ledger_account_id = None
+
+    if _model_has_field(TreasuryTransaction, "counterparty_ledger_account"):
+        counterparty_ledger_account = _safe_attr(txn, "counterparty_ledger_account")
+        counterparty_ledger_account_id = _safe_attr(txn, "counterparty_ledger_account_id")
+
     payload = {
         "id": txn.pk,
         "transaction_number": txn.transaction_number,
@@ -486,6 +588,8 @@ def serialize_treasury_transaction(
             else None
         ),
         "destination_account_id": txn.destination_account_id,
+        "counterparty_ledger_account": _serialize_ledger_account(counterparty_ledger_account),
+        "counterparty_ledger_account_id": counterparty_ledger_account_id,
         "amount": txn.amount,
         "fees_amount": txn.fees_amount,
         "net_amount": txn.net_amount,
@@ -615,6 +719,8 @@ def _apply_transaction_filters(queryset, request: HttpRequest):
     destination_account_id = request.GET.get("destination_account_id", "").strip()
     account_id = request.GET.get("account_id", "").strip()
 
+    counterparty_ledger_account_id = request.GET.get("counterparty_ledger_account_id", "").strip()
+
     source_type = request.GET.get("source_type", "").strip()
     source_id = request.GET.get("source_id", "").strip()
     source_number = request.GET.get("source_number", "").strip()
@@ -625,6 +731,8 @@ def _apply_transaction_filters(queryset, request: HttpRequest):
 
     external_reference = request.GET.get("external_reference", "").strip()
     journal_entry_id = request.GET.get("journal_entry_id", "").strip()
+    has_journal_entry = _parse_optional_bool(request.GET.get("has_journal_entry"))
+    has_counterparty_ledger_account = _parse_optional_bool(request.GET.get("has_counterparty_ledger_account"))
     balance_applied = _parse_optional_bool(request.GET.get("balance_applied"))
     balance_reversed = _parse_optional_bool(request.GET.get("balance_reversed"))
 
@@ -644,7 +752,7 @@ def _apply_transaction_filters(queryset, request: HttpRequest):
         raise ValidationError({"date_range": "لا يمكن أن يكون date_from أكبر من date_to."})
 
     if search:
-        queryset = queryset.filter(
+        search_q = (
             Q(transaction_number__icontains=search)
             | Q(reference__icontains=search)
             | Q(external_reference__icontains=search)
@@ -663,6 +771,11 @@ def _apply_transaction_filters(queryset, request: HttpRequest):
             | Q(destination_account__name__icontains=search)
             | Q(destination_account__code__icontains=search)
         )
+
+        if _model_has_field(TreasuryTransaction, "counterparty_ledger_account"):
+            search_q = search_q | Q(counterparty_ledger_account__code__icontains=search) | Q(counterparty_ledger_account__name__icontains=search)
+
+        queryset = queryset.filter(search_q)
 
     if transaction_type:
         _validate_choice(
@@ -706,6 +819,9 @@ def _apply_transaction_filters(queryset, request: HttpRequest):
     if destination_account_id:
         queryset = queryset.filter(destination_account_id=destination_account_id)
 
+    if counterparty_ledger_account_id and _model_has_field(TreasuryTransaction, "counterparty_ledger_account"):
+        queryset = queryset.filter(counterparty_ledger_account_id=counterparty_ledger_account_id)
+
     if source_type:
         queryset = queryset.filter(source_type__icontains=source_type)
 
@@ -729,6 +845,19 @@ def _apply_transaction_filters(queryset, request: HttpRequest):
 
     if journal_entry_id:
         queryset = queryset.filter(journal_entry_id=journal_entry_id)
+
+    if has_journal_entry is True:
+        queryset = queryset.filter(journal_entry__isnull=False)
+
+    if has_journal_entry is False:
+        queryset = queryset.filter(journal_entry__isnull=True)
+
+    if _model_has_field(TreasuryTransaction, "counterparty_ledger_account"):
+        if has_counterparty_ledger_account is True:
+            queryset = queryset.filter(counterparty_ledger_account__isnull=False)
+
+        if has_counterparty_ledger_account is False:
+            queryset = queryset.filter(counterparty_ledger_account__isnull=True)
 
     if balance_applied is not None:
         queryset = queryset.filter(balance_applied=balance_applied)
@@ -763,6 +892,8 @@ def _build_account_summary(queryset, *, currency: str = "SAR") -> dict[str, Any]
         "wallet_accounts": queryset.filter(account_type=TreasuryAccountType.WALLET).count(),
         "default_accounts": queryset.filter(is_default=True).count(),
         "negative_balance_allowed_accounts": queryset.filter(allow_negative_balance=True).count(),
+        "with_ledger_account_accounts": queryset.filter(ledger_account__isnull=False).count(),
+        "without_ledger_account_accounts": queryset.filter(ledger_account__isnull=True).count(),
         "total_opening_balance": total_opening_balance,
         "total_current_balance": total_current_balance,
         "currency": currency or "SAR",
@@ -802,7 +933,7 @@ def _build_transaction_summary(queryset, *, currency: str = "SAR") -> dict[str, 
     gross_total = confirmed_qs.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
     net_total = confirmed_qs.aggregate(total=Sum("net_amount"))["total"] or Decimal("0.00")
 
-    return {
+    payload = {
         "total_transactions": queryset.count(),
         "draft_transactions": queryset.filter(status=TreasuryTransactionStatus.DRAFT).count(),
         "confirmed_transactions": confirmed_qs.count(),
@@ -817,8 +948,19 @@ def _build_transaction_summary(queryset, *, currency: str = "SAR") -> dict[str, 
         "balance_applied_transactions": queryset.filter(balance_applied=True).count(),
         "balance_reversed_transactions": queryset.filter(balance_reversed=True).count(),
         "with_journal_entry_transactions": queryset.filter(journal_entry__isnull=False).count(),
+        "without_journal_entry_transactions": queryset.filter(journal_entry__isnull=True).count(),
         "currency": currency or "SAR",
     }
+
+    if _model_has_field(TreasuryTransaction, "counterparty_ledger_account"):
+        payload["with_counterparty_ledger_account_transactions"] = queryset.filter(
+            counterparty_ledger_account__isnull=False
+        ).count()
+        payload["without_counterparty_ledger_account_transactions"] = queryset.filter(
+            counterparty_ledger_account__isnull=True
+        ).count()
+
+    return payload
 
 
 def _choices_payload() -> dict[str, Any]:
@@ -869,10 +1011,7 @@ def treasury_accounts(request: HttpRequest) -> JsonResponse:
 
 def _list_treasury_accounts(request: HttpRequest) -> JsonResponse:
     try:
-        queryset = (
-            TreasuryAccount.objects.select_related("ledger_account")
-            .all()
-        )
+        queryset = TreasuryAccount.objects.select_related("ledger_account").all()
         queryset = _apply_account_filters(queryset, request)
 
         ordering = _parse_ordering(
@@ -980,6 +1119,11 @@ def _create_treasury_account(request: HttpRequest) -> JsonResponse:
             default=str(opening_balance),
         )
 
+        settlement_days = _get_int(payload.get("settlement_days"), default=0)
+
+        if settlement_days < 0:
+            raise ValidationError({"settlement_days": "أيام التسوية لا يمكن أن تكون سالبة."})
+
         is_default = _to_bool(payload.get("is_default"), default=False)
 
         if is_default:
@@ -1001,7 +1145,7 @@ def _create_treasury_account(request: HttpRequest) -> JsonResponse:
             branch_name=_clean_text(payload.get("branch_name")),
             provider_name=_clean_text(payload.get("provider_name")),
             merchant_id=_clean_text(payload.get("merchant_id")),
-            settlement_days=int(payload.get("settlement_days") or 0),
+            settlement_days=settlement_days,
             allow_negative_balance=_to_bool(
                 payload.get("allow_negative_balance"),
                 default=False,
@@ -1089,19 +1233,7 @@ def treasury_transactions(request: HttpRequest) -> JsonResponse:
 
 def _list_treasury_transactions(request: HttpRequest) -> JsonResponse:
     try:
-        queryset = (
-            TreasuryTransaction.objects.select_related(
-                "treasury_account",
-                "treasury_account__ledger_account",
-                "destination_account",
-                "destination_account__ledger_account",
-                "journal_entry",
-                "created_by",
-                "confirmed_by",
-                "cancelled_by",
-            )
-            .all()
-        )
+        queryset = _transaction_queryset().all()
         queryset = _apply_transaction_filters(queryset, request)
 
         ordering = _parse_ordering(
@@ -1211,6 +1343,7 @@ def _create_treasury_transaction(request: HttpRequest) -> JsonResponse:
             payload.get("treasury_account_id"),
             field_name="treasury_account_id",
         )
+
         if not treasury_account:
             raise ValidationError({"treasury_account_id": "حساب الخزينة مطلوب."})
 
@@ -1218,6 +1351,13 @@ def _create_treasury_transaction(request: HttpRequest) -> JsonResponse:
             payload.get("destination_account_id"),
             field_name="destination_account_id",
         )
+
+        counterparty_ledger_account = None
+        if _model_has_field(TreasuryTransaction, "counterparty_ledger_account"):
+            counterparty_ledger_account = _resolve_ledger_account(
+                payload.get("counterparty_ledger_account_id"),
+                field_name="counterparty_ledger_account_id",
+            )
 
         amount = _to_decimal(payload.get("amount"), field_name="amount")
         fees_amount = _to_decimal(
@@ -1231,8 +1371,17 @@ def _create_treasury_transaction(request: HttpRequest) -> JsonResponse:
         )
 
         journal_entry = _resolve_journal_entry(payload.get("journal_entry_id"))
+        post_to_accounting = _optional_bool_from_payload(payload, "post_to_accounting")
 
-        actor = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+        _validate_transaction_accounts(
+            transaction_type=transaction_type,
+            treasury_account=treasury_account,
+            destination_account=destination_account,
+            counterparty_ledger_account=counterparty_ledger_account,
+            post_to_accounting=post_to_accounting,
+        )
+
+        actor = _resolve_actor(request)
 
         txn = create_treasury_transaction(
             transaction_number=transaction_number,
@@ -1246,6 +1395,7 @@ def _create_treasury_transaction(request: HttpRequest) -> JsonResponse:
             currency=_clean_text(payload.get("currency") or treasury_account.currency or "SAR").upper(),
             status=status_value,
             destination_account=destination_account,
+            counterparty_ledger_account=counterparty_ledger_account,
             reference=_clean_text(payload.get("reference")),
             external_reference=_clean_text(payload.get("external_reference")),
             description=_clean_text(payload.get("description")),
@@ -1263,6 +1413,7 @@ def _create_treasury_transaction(request: HttpRequest) -> JsonResponse:
             party_name=_clean_text(payload.get("party_name")),
             metadata=_parse_metadata(payload.get("metadata")),
             actor=actor,
+            post_to_accounting=post_to_accounting,
         )
 
         return _json_response(

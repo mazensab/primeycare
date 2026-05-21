@@ -1,204 +1,552 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/profile/page.tsx
-   🧠 Primey Care | System Profile Page
-
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ نفس النمط المعتمد
+   📂 primey_frontend/app/system/profile/page.tsx
+   👤 Primey Care — Current Login Profile V2
+   ------------------------------------------------------------
+   ✅ ملف حساب الدخول الحالي فقط
+   ✅ لا يغير بيانات Provider / Customer / Agent / Broker
+   ✅ GET/POST /api/auth/profile/
+   ✅ POST /api/auth/change-password/
+   ✅ يعرض workspace / role / user_type / linked actor للقراءة
+   ✅ يدعم entity / actor / linked_actor / actor_context من الباكند
+   ✅ تعديل بيانات البروفايل فقط
+   ✅ Same approved Primey Care pattern
    ✅ w-full space-y-4
-   ✅ بدون main / min-h-screen / max-w
-   ✅ صفحة ملف المستخدم الحالي
-   ✅ Skeleton Loading
-   ✅ Error State مستقل
-   ✅ Empty State ذكي
-   ✅ Web PDF Print
+   ✅ Web Print
    ✅ sonner
-   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
-   ✅ بدون localhost hardcoded
-   ✅ لا توجد نصوص تقنية ظاهرة في الواجهة
+   ✅ RTL/LTR through primey-locale
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
+import * as React from "react";
 import Link from "next/link";
 import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import {
+  ArrowLeft,
+  ArrowRight,
   BadgeCheck,
-  Briefcase,
   Building2,
-  CalendarClock,
+  CheckCircle2,
   Copy,
-  FileText,
+  Eye,
   KeyRound,
   Loader2,
+  LockKeyhole,
   Mail,
+  Pencil,
   Phone,
   Printer,
-  RefreshCcw,
-  Settings,
+  RefreshCw,
+  Save,
   ShieldCheck,
+  TriangleAlert,
   UserCog,
-  UserRound,
-  Users,
-  XCircle,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableRow,
-} from "@/components/ui/table";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type ProfileStatus = "ACTIVE" | "INACTIVE" | "PENDING" | "BLOCKED" | "UNKNOWN";
-
-type ProfileRole =
-  | "SYSTEM_ADMIN"
-  | "PROVIDER_ADMIN"
-  | "CUSTOMER_USER"
-  | "AGENT_USER"
-  | "ACCOUNTANT"
-  | "SUPPORT"
-  | "VIEWER"
-  | "UNKNOWN";
-
-type ProfileData = {
-  id: string;
-  full_name: string;
-  username: string;
+type ProfileForm = {
+  first_name: string;
+  last_name: string;
   email: string;
-  phone: string;
-  role: ProfileRole;
-  user_type: string;
-  workspace: string;
-  status: ProfileStatus;
-  is_active: boolean;
-  is_staff: boolean;
-  is_superuser: boolean;
-  permissions: string[];
-  permissions_count: number;
-  last_login: string;
-  date_joined: string;
+  display_name: string;
+  phone_number: string;
+  whatsapp_number: string;
+  alternate_email: string;
+  preferred_language: Locale;
+  timezone: string;
+  bio: string;
+  avatar_url: string;
 };
 
-type ApiEnvelope<T> = {
+type PasswordForm = {
+  current_password: string;
+  new_password: string;
+  confirm_password: string;
+};
+
+type CurrentProfile = {
+  authenticated: boolean;
+  workspace: string;
+  dashboard_path: string;
+  redirect_to: string;
+  home_path: string;
+
+  role: string;
+  user_type: string;
+  entity_type: string;
+  entity_id: number | null;
+  actor_type: string;
+  actor_id: number | null;
+  actor_name: string;
+  actor_code: string;
+
+  company_id: number | null;
+  provider_id: number | null;
+  center_id: number | null;
+  customer_id: number | null;
+  agent_id: number | null;
+  broker_id: number | null;
+
+  permission_codes: string[];
+  permissions: ApiRecord;
+  profile_permissions: ApiRecord;
+
+  user: {
+    id: number;
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    full_name: string;
+    is_active: boolean;
+    is_staff: boolean;
+    is_superuser: boolean;
+    last_login: string | null;
+    date_joined: string | null;
+  };
+
+  profile: {
+    id: number;
+    display_name: string;
+    avatar_url: string;
+    bio: string;
+    phone_number: string;
+    whatsapp_number: string;
+    alternate_email: string;
+    preferred_language: string;
+    timezone: string;
+    user_type: string;
+    role: string;
+    workspace: string;
+    is_phone_verified: boolean;
+    is_whatsapp_verified: boolean;
+    is_email_verified: boolean;
+    is_profile_completed: boolean;
+    tags: string[];
+    extra_data: ApiRecord;
+    last_profile_update_at: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+  };
+};
+
+type ProfileApiResponse = {
   ok?: boolean;
   success?: boolean;
   message?: string;
-  detail?: string;
-  error?: string;
-  data?: T;
+  data?: unknown;
+  authenticated?: unknown;
+  workspace?: unknown;
+  dashboard_path?: unknown;
+  redirect_to?: unknown;
+  home_path?: unknown;
+  role?: unknown;
+  user_type?: unknown;
+  entity_type?: unknown;
+  entity_id?: unknown;
+  actor_type?: unknown;
+  actor_id?: unknown;
+  actor_name?: unknown;
+  actor_code?: unknown;
+  company_id?: unknown;
+  provider_id?: unknown;
+  center_id?: unknown;
+  customer_id?: unknown;
+  agent_id?: unknown;
+  broker_id?: unknown;
+  permission_codes?: unknown;
+  permissions?: unknown;
+  profile_permissions?: unknown;
   user?: unknown;
   profile?: unknown;
-  account?: unknown;
+  entity?: unknown;
+  actor?: unknown;
+  linked_actor?: unknown;
+  actor_context?: unknown;
+  ignored_account_fields?: unknown;
 };
 
-const EMPTY_PROFILE: ProfileData = {
-  id: "",
-  full_name: "-",
-  username: "-",
-  email: "",
-  phone: "",
-  role: "UNKNOWN",
-  user_type: "",
+type PasswordApiResponse = {
+  ok?: boolean;
+  success?: boolean;
+  message?: string;
+  data?: unknown;
+  session?: unknown;
+};
+
+const translations = {
+  ar: {
+    title: "ملفي الشخصي",
+    subtitle:
+      "إدارة بيانات حساب الدخول الحالي فقط. نوع الحساب والدور والكيان المرتبط تظهر للقراءة ولا يتم تعديل بياناتها التشغيلية من هنا.",
+    refresh: "تحديث",
+    print: "طباعة",
+    edit: "تعديل البيانات",
+    cancel: "إلغاء",
+    save: "حفظ التعديلات",
+    saving: "جاري الحفظ",
+    backDashboard: "لوحة التحكم",
+    copied: "تم النسخ",
+    copy: "نسخ",
+
+    overview: "نظرة عامة",
+    account: "الحساب",
+    editProfile: "تعديل الملف",
+    security: "الأمان",
+    permissions: "الصلاحيات",
+
+    accountInfo: "بيانات حساب الدخول",
+    profileInfo: "بيانات الملف الشخصي",
+    contactInfo: "بيانات التواصل",
+    actorInfo: "الكيان المرتبط",
+    permissionsInfo: "الصلاحيات والدور",
+    securityInfo: "تغيير كلمة المرور",
+
+    username: "اسم المستخدم",
+    email: "البريد الإلكتروني",
+    firstName: "الاسم الأول",
+    lastName: "اسم العائلة",
+    fullName: "الاسم الكامل",
+    displayName: "اسم العرض",
+    phone: "الجوال",
+    whatsapp: "واتساب",
+    alternateEmail: "البريد البديل",
+    preferredLanguage: "اللغة المفضلة",
+    timezone: "المنطقة الزمنية",
+    bio: "نبذة",
+    avatarUrl: "رابط الصورة",
+
+    status: "الحالة",
+    active: "نشط",
+    inactive: "غير نشط",
+    staff: "إداري",
+    superuser: "سوبر أدمن",
+    normal: "عادي",
+
+    workspace: "المساحة",
+    role: "الدور",
+    userType: "نوع الحساب",
+    actor: "الكيان المرتبط",
+    actorType: "نوع الكيان",
+    actorId: "معرّف الكيان",
+    actorName: "اسم الكيان",
+    actorCode: "كود الكيان",
+    dashboardPath: "مسار لوحة التحكم",
+
+    system: "النظام",
+    provider: "مقدم خدمة",
+    center: "مركز",
+    customer: "عميل",
+    agent: "مندوب",
+    broker: "وسيط",
+    other: "أخرى",
+    notLinked: "غير مرتبط",
+
+    systemAdmin: "مدير النظام",
+    providerAdmin: "مدير مقدم خدمة",
+    customerUser: "مستخدم عميل",
+    agentUser: "مستخدم مندوب",
+    brokerUser: "مستخدم وسيط",
+    accountant: "محاسب",
+    support: "الدعم",
+    viewer: "مشاهد",
+
+    verified: "موثق",
+    notVerified: "غير موثق",
+    profileCompleted: "الملف مكتمل",
+    lastLogin: "آخر دخول",
+    dateJoined: "تاريخ الإنشاء",
+    lastUpdated: "آخر تحديث",
+
+    currentPassword: "كلمة المرور الحالية",
+    newPassword: "كلمة المرور الجديدة",
+    confirmPassword: "تأكيد كلمة المرور",
+    changePassword: "تغيير كلمة المرور",
+    passwordHint: "يتم تطبيق قواعد قوة كلمة المرور من Django.",
+    passwordChanged: "تم تغيير كلمة المرور بنجاح.",
+    currentPasswordRequired: "كلمة المرور الحالية مطلوبة.",
+    newPasswordRequired: "كلمة المرور الجديدة مطلوبة.",
+    confirmPasswordRequired: "تأكيد كلمة المرور مطلوب.",
+    passwordMismatch: "كلمة المرور الجديدة وتأكيدها غير متطابقين.",
+    passwordTooShort: "كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف.",
+
+    invalidEmail: "صيغة البريد الإلكتروني غير صحيحة.",
+    invalidAlternateEmail: "صيغة البريد البديل غير صحيحة.",
+    saved: "تم حفظ بيانات الملف الشخصي.",
+    errorTitle: "تعذر تحميل الملف الشخصي",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    operationFailed: "تعذر تنفيذ العملية.",
+    readonlyNotice:
+      "الربط التشغيلي يظهر للقراءة فقط. بيانات العميل أو مقدم الخدمة أو المندوب أو الوسيط تدار من صفحاتها.",
+    noPermissions: "لا توجد صلاحيات ظاهرة.",
+    printTitle: "تقرير الملف الشخصي",
+    generatedAt: "تاريخ الطباعة",
+    yes: "نعم",
+    no: "لا",
+    unknown: "غير محدد",
+  },
+  en: {
+    title: "My Profile",
+    subtitle:
+      "Manage the current login account profile only. Account type, role, and linked actor are read-only here; operational data is managed from its own pages.",
+    refresh: "Refresh",
+    print: "Print",
+    edit: "Edit profile",
+    cancel: "Cancel",
+    save: "Save changes",
+    saving: "Saving",
+    backDashboard: "Dashboard",
+    copied: "Copied",
+    copy: "Copy",
+
+    overview: "Overview",
+    account: "Account",
+    editProfile: "Edit profile",
+    security: "Security",
+    permissions: "Permissions",
+
+    accountInfo: "Login account data",
+    profileInfo: "Profile data",
+    contactInfo: "Contact data",
+    actorInfo: "Linked actor",
+    permissionsInfo: "Role & permissions",
+    securityInfo: "Change password",
+
+    username: "Username",
+    email: "Email",
+    firstName: "First name",
+    lastName: "Last name",
+    fullName: "Full name",
+    displayName: "Display name",
+    phone: "Phone",
+    whatsapp: "WhatsApp",
+    alternateEmail: "Alternate email",
+    preferredLanguage: "Preferred language",
+    timezone: "Timezone",
+    bio: "Bio",
+    avatarUrl: "Avatar URL",
+
+    status: "Status",
+    active: "Active",
+    inactive: "Inactive",
+    staff: "Staff",
+    superuser: "Superuser",
+    normal: "Normal",
+
+    workspace: "Workspace",
+    role: "Role",
+    userType: "Account type",
+    actor: "Linked actor",
+    actorType: "Actor type",
+    actorId: "Actor ID",
+    actorName: "Actor name",
+    actorCode: "Actor code",
+    dashboardPath: "Dashboard path",
+
+    system: "System",
+    provider: "Provider",
+    center: "Center",
+    customer: "Customer",
+    agent: "Agent",
+    broker: "Broker",
+    other: "Other",
+    notLinked: "Not linked",
+
+    systemAdmin: "System admin",
+    providerAdmin: "Provider admin",
+    customerUser: "Customer user",
+    agentUser: "Agent user",
+    brokerUser: "Broker user",
+    accountant: "Accountant",
+    support: "Support",
+    viewer: "Viewer",
+
+    verified: "Verified",
+    notVerified: "Not verified",
+    profileCompleted: "Profile completed",
+    lastLogin: "Last login",
+    dateJoined: "Created at",
+    lastUpdated: "Last updated",
+
+    currentPassword: "Current password",
+    newPassword: "New password",
+    confirmPassword: "Confirm password",
+    changePassword: "Change password",
+    passwordHint: "Django password strength rules are applied.",
+    passwordChanged: "Password changed successfully.",
+    currentPasswordRequired: "Current password is required.",
+    newPasswordRequired: "New password is required.",
+    confirmPasswordRequired: "Confirm password is required.",
+    passwordMismatch: "New password and confirmation do not match.",
+    passwordTooShort: "New password must be at least 8 characters.",
+
+    invalidEmail: "Email format is invalid.",
+    invalidAlternateEmail: "Alternate email format is invalid.",
+    saved: "Profile data saved.",
+    errorTitle: "Unable to load profile",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    operationFailed: "Unable to complete operation.",
+    readonlyNotice:
+      "Operational linking is read-only here. Customer, provider, agent, and broker data is managed from its own pages.",
+    noPermissions: "No visible permissions.",
+    printTitle: "Profile report",
+    generatedAt: "Generated at",
+    yes: "Yes",
+    no: "No",
+    unknown: "Unknown",
+  },
+} as const;
+
+const EMPTY_PROFILE: CurrentProfile = {
+  authenticated: false,
   workspace: "",
-  status: "UNKNOWN",
-  is_active: false,
-  is_staff: false,
-  is_superuser: false,
-  permissions: [],
-  permissions_count: 0,
-  last_login: "",
-  date_joined: "",
+  dashboard_path: "/system",
+  redirect_to: "/system",
+  home_path: "/system",
+
+  role: "",
+  user_type: "",
+  entity_type: "",
+  entity_id: null,
+  actor_type: "",
+  actor_id: null,
+  actor_name: "",
+  actor_code: "",
+
+  company_id: null,
+  provider_id: null,
+  center_id: null,
+  customer_id: null,
+  agent_id: null,
+  broker_id: null,
+
+  permission_codes: [],
+  permissions: {},
+  profile_permissions: {},
+
+  user: {
+    id: 0,
+    username: "",
+    email: "",
+    first_name: "",
+    last_name: "",
+    full_name: "",
+    is_active: false,
+    is_staff: false,
+    is_superuser: false,
+    last_login: null,
+    date_joined: null,
+  },
+
+  profile: {
+    id: 0,
+    display_name: "",
+    avatar_url: "",
+    bio: "",
+    phone_number: "",
+    whatsapp_number: "",
+    alternate_email: "",
+    preferred_language: "ar",
+    timezone: "Asia/Riyadh",
+    user_type: "",
+    role: "",
+    workspace: "",
+    is_phone_verified: false,
+    is_whatsapp_verified: false,
+    is_email_verified: false,
+    is_profile_completed: false,
+    tags: [],
+    extra_data: {},
+    last_profile_update_at: null,
+    created_at: null,
+    updated_at: null,
+  },
 };
 
-/* ============================================================
-   Locale / API
-============================================================ */
+const EMPTY_PASSWORD: PasswordForm = {
+  current_password: "",
+  new_password: "",
+  confirm_password: "",
+};
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
-
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
 
-    if (value && typeof value === "object") return value as Dict;
+function toBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "on", "active", "نشط"].includes(value.toLowerCase());
   }
 
-  return {};
+  return Boolean(value);
 }
 
-function uniqueStrings(values: unknown[]): string[] {
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  return fallback;
+}
+
+function toNullableNumber(value: unknown) {
+  const parsed = toNumber(value, 0);
+  return parsed > 0 ? parsed : null;
+}
+
+function uniqueStrings(values: unknown[]) {
   return Array.from(
     new Set(
       values
@@ -208,302 +556,70 @@ function uniqueStrings(values: unknown[]): string[] {
           if (typeof value === "string") return [value];
 
           if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
+            return value
+              .map((item) => {
+                if (typeof item === "string") return item;
+                if (isRecord(item)) {
+                  return normalizeText(
+                    item.code || item.codename || item.permission || item.name,
+                  );
+                }
+                return "";
+              })
+              .filter(Boolean);
           }
 
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
+          if (isRecord(value)) {
+            return Object.values(value)
+              .flatMap((item) => {
+                if (typeof item === "string") return [item];
+                if (Array.isArray(item)) {
+                  return item.map((entry) => normalizeText(entry)).filter(Boolean);
+                }
+                return [];
+              })
+              .filter(Boolean);
           }
 
           return [];
         })
-        .map((item) => String(item).trim())
+        .map((item) => normalizeText(item))
         .filter(Boolean),
     ),
   );
 }
 
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasAnyPermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-          "provider_admin",
-          "customer_user",
-          "agent_user",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "support"].includes(role),
-    );
-  }
-
-  return true;
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "الملف الشخصي" : "Profile",
-    subtitle: isArabic
-      ? "عرض بيانات الحساب الحالي والدور والصلاحيات وحالة الوصول."
-      : "View current account details, role, permissions, and access status.",
-
-    refresh: isArabic ? "تحديث" : "Refresh",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-    copied: isArabic ? "تم النسخ." : "Copied.",
-    copyFailed: isArabic ? "تعذر النسخ." : "Copy failed.",
-
-    profileSummary: isArabic ? "ملخص الحساب" : "Account Summary",
-    accountDetails: isArabic ? "بيانات الحساب" : "Account Details",
-    accessDetails: isArabic ? "الوصول والصلاحيات" : "Access & Permissions",
-    quickActions: isArabic ? "اختصارات الحساب" : "Account Shortcuts",
-
-    fullName: isArabic ? "الاسم الكامل" : "Full Name",
-    username: isArabic ? "اسم المستخدم" : "Username",
-    email: isArabic ? "البريد الإلكتروني" : "Email",
-    phone: isArabic ? "الجوال" : "Phone",
-    role: isArabic ? "الدور" : "Role",
-    workspace: isArabic ? "المساحة" : "Workspace",
-    userType: isArabic ? "نوع المستخدم" : "User Type",
-    status: isArabic ? "الحالة" : "Status",
-    permissions: isArabic ? "الصلاحيات" : "Permissions",
-    lastLogin: isArabic ? "آخر دخول" : "Last Login",
-    joinedAt: isArabic ? "تاريخ الانضمام" : "Joined At",
-
-    active: isArabic ? "نشط" : "Active",
-    inactive: isArabic ? "غير نشط" : "Inactive",
-    pending: isArabic ? "بانتظار التفعيل" : "Pending",
-    blocked: isArabic ? "محظور" : "Blocked",
-    unknown: isArabic ? "غير محدد" : "Unknown",
-
-    systemAdmin: isArabic ? "مدير النظام" : "System Admin",
-    providerAdmin: isArabic ? "مدير مقدم خدمة" : "Provider Admin",
-    customerUser: isArabic ? "عميل" : "Customer",
-    agentUser: isArabic ? "مندوب" : "Agent",
-    accountant: isArabic ? "محاسب" : "Accountant",
-    support: isArabic ? "دعم" : "Support",
-    viewer: isArabic ? "مشاهد" : "Viewer",
-
-    staff: isArabic ? "داخلي" : "Staff",
-    superuser: isArabic ? "صلاحية عليا" : "Superuser",
-    noPermissions: isArabic
-      ? "لا توجد صلاحيات مفصلة ظاهرة لهذا الحساب."
-      : "No detailed permissions are visible for this account.",
-
-    users: isArabic ? "مستخدمو النظام" : "System Users",
-    settings: isArabic ? "الإعدادات" : "Settings",
-    dashboard: isArabic ? "لوحة التحكم" : "Dashboard",
-
-    usersDesc: isArabic
-      ? "الانتقال لإدارة المستخدمين والصلاحيات."
-      : "Open user and permissions management.",
-    settingsDesc: isArabic
-      ? "الانتقال لإعدادات النظام."
-      : "Open system settings.",
-    dashboardDesc: isArabic
-      ? "العودة إلى لوحة النظام الرئيسية."
-      : "Back to the main system dashboard.",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الملف" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض هذا الملف."
-      : "You do not have permission to view this profile.",
-
-    loadError: isArabic ? "تعذر تحميل بيانات الملف." : "Unable to load profile.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال ثم أعد المحاولة."
-      : "Check the connection, then try again.",
-    loadSuccess: isArabic ? "تم تحديث بيانات الملف." : "Profile refreshed.",
-
-    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
-    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: unknown): string {
+function formatInteger(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(toNumber(value));
 }
 
-function formatDate(value: string, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const parsed = new Date(value);
 
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).slice(0, 10);
+  }
+
+  return parsed.toISOString().slice(0, 10);
 }
 
-function escapeHtml(value: string | number) {
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).replace("T", " ").slice(0, 16);
+  }
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -512,425 +628,715 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function getNestedValue(obj: Dict, keys: string[]): unknown {
-  for (const key of keys) {
-    const value = obj[key];
+function isValidEmail(value: string) {
+  if (!value.trim()) return true;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
 
-    if (value !== undefined && value !== null && value !== "") return value;
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
+
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
   }
 
-  for (const container of ["user", "account", "profile", "data", "session"]) {
-    const nested = obj[container];
+  return envBase;
+}
 
-    if (nested && typeof nested === "object") {
-      const value = getNestedValue(nested as Dict, keys);
+function makeApiUrl(path: string) {
+  return `${getApiBaseUrl()}${path}`;
+}
 
-      if (value !== undefined && value !== null && value !== "") return value;
+function getCookie(name: string) {
+  if (typeof document === "undefined") return "";
+
+  const found = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${name}=`));
+
+  return found ? decodeURIComponent(found.split("=").slice(1).join("=")) : "";
+}
+
+async function fetchJson<T>(
+  url: string,
+  options?: {
+    signal?: AbortSignal;
+    method?: "GET" | "POST";
+    body?: unknown;
+  },
+): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
+
+  const response = await fetch(url, {
+    method: options?.method || "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal: options?.signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options?.method === "POST" ? { "Content-Type": "application/json" } : {}),
+      ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
+    },
+    body:
+      options?.method === "POST"
+        ? JSON.stringify(options.body || {})
+        : undefined,
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
   }
 
-  return undefined;
-}
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
 
-function normalizeStatus(value: unknown, isActive: boolean): ProfileStatus {
-  const clean = String(value || "").toUpperCase();
-
-  if (["ACTIVE", "ENABLED", "APPROVED"].includes(clean)) return "ACTIVE";
-  if (["INACTIVE", "DISABLED"].includes(clean)) return "INACTIVE";
-  if (["PENDING", "INVITED", "NEW"].includes(clean)) return "PENDING";
-  if (["BLOCKED", "SUSPENDED", "BANNED"].includes(clean)) return "BLOCKED";
-
-  return isActive ? "ACTIVE" : "INACTIVE";
-}
-
-function normalizeRole(value: unknown): ProfileRole {
-  const clean = String(value || "").toLowerCase();
-
-  if (["system_admin", "super_admin", "superadmin", "admin"].includes(clean)) {
-    return "SYSTEM_ADMIN";
+    throw new Error(message);
   }
 
-  if (["provider_admin", "provider"].includes(clean)) return "PROVIDER_ADMIN";
-  if (["customer_user", "customer"].includes(clean)) return "CUSTOMER_USER";
-  if (["agent_user", "agent"].includes(clean)) return "AGENT_USER";
-  if (["accountant", "finance"].includes(clean)) return "ACCOUNTANT";
-  if (["support", "support_user"].includes(clean)) return "SUPPORT";
-  if (["viewer", "read_only", "readonly"].includes(clean)) return "VIEWER";
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
 
-  return "UNKNOWN";
+  return payload as T;
 }
 
-function normalizeProfile(payload: unknown, authValue: unknown): ProfileData {
-  const auth = asDict(authValue);
-  const authUser = getAuthUser(authValue);
-  const obj = asDict(payload);
+function getRecordName(record: ApiRecord) {
+  return normalizeText(
+    record.name ||
+      record.full_name ||
+      record.display_name ||
+      record.company_name ||
+      record.title ||
+      record.provider_name ||
+      record.customer_name ||
+      record.agent_name ||
+      record.broker_name,
+  );
+}
 
-  const source =
-    Object.keys(obj).length > 0
-      ? {
-          ...asDict(obj.user),
-          ...asDict(obj.account),
-          ...asDict(obj.profile),
-          ...asDict(obj.data),
-          ...obj,
-        }
-      : {
-          ...authUser,
-          ...auth,
-        };
+function getRecordCode(record: ApiRecord) {
+  return normalizeText(
+    record.code ||
+      record.agent_code ||
+      record.broker_code ||
+      record.customer_code ||
+      record.provider_code ||
+      record.referral_code ||
+      record.external_reference,
+  );
+}
 
-  const isActive = Boolean(
-    getNestedValue(source, ["is_active", "active", "isActive"]) ?? true,
+function normalizeCurrentProfile(payload: ProfileApiResponse): CurrentProfile {
+  const data = asRecord(payload.data);
+
+  const user = asRecord(payload.user || data.user);
+  const profile = asRecord(payload.profile || data.profile);
+  const permissions = asRecord(payload.permissions || data.permissions);
+  const profilePermissions = asRecord(
+    payload.profile_permissions || data.profile_permissions,
   );
 
-  const roleValue =
-    getNestedValue(source, ["role", "user_role", "user_type", "type"]) ||
-    getAuthRoles(authValue)[0] ||
-    "";
+  const entityRecord = asRecord(
+    payload.entity ||
+      data.entity ||
+      payload.actor ||
+      data.actor ||
+      payload.linked_actor ||
+      data.linked_actor ||
+      payload.actor_context ||
+      data.actor_context,
+  );
 
-  const permissions = uniqueStrings([
-    getNestedValue(source, ["permission_codes"]),
-    getNestedValue(source, ["permissions"]),
-    getNestedValue(source, ["profile_permissions"]),
-    getAuthPermissionCodes(authValue),
+  const rawCodes = uniqueStrings([
+    payload.permission_codes,
+    data.permission_codes,
+    permissions.codes,
+    permissions.permission_codes,
+    profilePermissions.codes,
+    profilePermissions.permission_codes,
   ]);
 
-  const fullName =
-    getNestedValue(source, ["full_name", "name", "display_name"]) ||
-    [
-      getNestedValue(source, ["first_name"]),
-      getNestedValue(source, ["last_name"]),
-    ]
-      .filter(Boolean)
-      .join(" ");
+  const extraData = asRecord(profile.extra_data);
+
+  const role = normalizeText(payload.role || data.role || profile.role);
+  const userType = normalizeText(payload.user_type || data.user_type || profile.user_type);
+  const workspace = normalizeText(
+    payload.workspace || data.workspace || profile.workspace || extraData.workspace,
+    "system",
+  );
+
+  const entityType = normalizeText(
+    payload.entity_type ||
+      data.entity_type ||
+      entityRecord.entity_type ||
+      entityRecord.type ||
+      payload.actor_type ||
+      data.actor_type ||
+      extraData.entity_type ||
+      extraData.actor_type,
+  ).toLowerCase();
+
+  const entityId = toNullableNumber(
+    payload.entity_id ||
+      data.entity_id ||
+      entityRecord.entity_id ||
+      entityRecord.id ||
+      payload.actor_id ||
+      data.actor_id ||
+      extraData.entity_id ||
+      extraData.actor_id,
+  );
+
+  const actorName = normalizeText(
+    payload.actor_name ||
+      data.actor_name ||
+      entityRecord.actor_name ||
+      getRecordName(entityRecord),
+  );
+
+  const actorCode = normalizeText(
+    payload.actor_code ||
+      data.actor_code ||
+      entityRecord.actor_code ||
+      getRecordCode(entityRecord),
+  );
+
+  const tags = asArray(profile.tags).map((tag) => normalizeText(tag)).filter(Boolean);
 
   return {
-    id: String(getNestedValue(source, ["id", "uuid", "pk"]) || ""),
-    full_name: String(fullName || "-"),
-    username: String(getNestedValue(source, ["username", "login"]) || "-"),
-    email: String(getNestedValue(source, ["email"]) || ""),
-    phone: String(getNestedValue(source, ["phone", "mobile", "phone_number"]) || ""),
-    role: normalizeRole(roleValue),
-    user_type: String(getNestedValue(source, ["user_type", "type"]) || ""),
-    workspace: String(getNestedValue(source, ["workspace", "space"]) || ""),
-    status: normalizeStatus(getNestedValue(source, ["status", "state"]), isActive),
-    is_active: isActive,
-    is_staff: Boolean(getNestedValue(source, ["is_staff", "staff", "isStaff"])),
-    is_superuser:
-      Boolean(getNestedValue(source, ["is_superuser", "superuser", "isSuperuser"])) ||
-      isSystemAdmin(authValue),
-    permissions,
-    permissions_count: permissions.length,
-    last_login: String(getNestedValue(source, ["last_login", "lastLogin"]) || ""),
-    date_joined: String(
-      getNestedValue(source, ["date_joined", "joined_at", "created_at"]) || "",
+    authenticated: toBoolean(payload.authenticated ?? data.authenticated ?? true),
+    workspace,
+    dashboard_path: normalizeText(
+      payload.dashboard_path || data.dashboard_path || "/system",
+      "/system",
     ),
+    redirect_to: normalizeText(
+      payload.redirect_to ||
+        data.redirect_to ||
+        payload.dashboard_path ||
+        data.dashboard_path ||
+        "/system",
+      "/system",
+    ),
+    home_path: normalizeText(
+      payload.home_path ||
+        data.home_path ||
+        payload.dashboard_path ||
+        data.dashboard_path ||
+        "/system",
+      "/system",
+    ),
+
+    role,
+    user_type: userType,
+    entity_type: entityType,
+    entity_id: entityId,
+    actor_type: normalizeText(payload.actor_type || data.actor_type || entityType).toLowerCase(),
+    actor_id: toNullableNumber(payload.actor_id || data.actor_id || entityId),
+    actor_name: actorName,
+    actor_code: actorCode,
+
+    company_id: toNullableNumber(payload.company_id || data.company_id || extraData.company_id),
+    provider_id: toNullableNumber(payload.provider_id || data.provider_id || extraData.provider_id),
+    center_id: toNullableNumber(payload.center_id || data.center_id || extraData.center_id),
+    customer_id: toNullableNumber(payload.customer_id || data.customer_id || extraData.customer_id),
+    agent_id: toNullableNumber(payload.agent_id || data.agent_id || extraData.agent_id),
+    broker_id: toNullableNumber(payload.broker_id || data.broker_id || extraData.broker_id),
+
+    permission_codes: rawCodes,
+    permissions,
+    profile_permissions: profilePermissions,
+
+    user: {
+      id: toNumber(user.id),
+      username: normalizeText(user.username),
+      email: normalizeText(user.email),
+      first_name: normalizeText(user.first_name),
+      last_name: normalizeText(user.last_name),
+      full_name: normalizeText(user.full_name),
+      is_active: toBoolean(user.is_active),
+      is_staff: toBoolean(user.is_staff),
+      is_superuser: toBoolean(user.is_superuser),
+      last_login: normalizeText(user.last_login) || null,
+      date_joined: normalizeText(user.date_joined) || null,
+    },
+
+    profile: {
+      id: toNumber(profile.id),
+      display_name: normalizeText(profile.display_name),
+      avatar_url: normalizeText(profile.avatar_url),
+      bio: normalizeText(profile.bio),
+      phone_number: normalizeText(profile.phone_number),
+      whatsapp_number: normalizeText(profile.whatsapp_number),
+      alternate_email: normalizeText(profile.alternate_email),
+      preferred_language: normalizeText(profile.preferred_language || "ar"),
+      timezone: normalizeText(profile.timezone || "Asia/Riyadh"),
+      user_type: normalizeText(profile.user_type || userType),
+      role: normalizeText(profile.role || role),
+      workspace: normalizeText(profile.workspace || workspace),
+      is_phone_verified: toBoolean(profile.is_phone_verified),
+      is_whatsapp_verified: toBoolean(profile.is_whatsapp_verified),
+      is_email_verified: toBoolean(profile.is_email_verified),
+      is_profile_completed: toBoolean(profile.is_profile_completed),
+      tags,
+      extra_data: extraData,
+      last_profile_update_at: normalizeText(profile.last_profile_update_at) || null,
+      created_at: normalizeText(profile.created_at) || null,
+      updated_at: normalizeText(profile.updated_at) || null,
+    },
   };
 }
 
-function statusLabel(status: ProfileStatus, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<ProfileStatus, string> = {
-    ACTIVE: t.active,
-    INACTIVE: t.inactive,
-    PENDING: t.pending,
-    BLOCKED: t.blocked,
-    UNKNOWN: t.unknown,
+function profileToForm(profile: CurrentProfile): ProfileForm {
+  return {
+    first_name: profile.user.first_name,
+    last_name: profile.user.last_name,
+    email: profile.user.email,
+    display_name:
+      profile.profile.display_name ||
+      profile.user.full_name ||
+      profile.user.username ||
+      profile.user.email,
+    phone_number: profile.profile.phone_number,
+    whatsapp_number: profile.profile.whatsapp_number,
+    alternate_email: profile.profile.alternate_email,
+    preferred_language: profile.profile.preferred_language === "en" ? "en" : "ar",
+    timezone: profile.profile.timezone || "Asia/Riyadh",
+    bio: profile.profile.bio,
+    avatar_url: profile.profile.avatar_url,
   };
-
-  return labels[status];
 }
 
-function roleLabel(role: ProfileRole, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  const labels: Record<ProfileRole, string> = {
-    SYSTEM_ADMIN: t.systemAdmin,
-    PROVIDER_ADMIN: t.providerAdmin,
-    CUSTOMER_USER: t.customerUser,
-    AGENT_USER: t.agentUser,
-    ACCOUNTANT: t.accountant,
-    SUPPORT: t.support,
-    VIEWER: t.viewer,
-    UNKNOWN: t.unknown,
-  };
-
-  return labels[role];
+function getDisplayName(profile: CurrentProfile) {
+  return (
+    profile.profile.display_name ||
+    profile.user.full_name ||
+    [profile.user.first_name, profile.user.last_name].filter(Boolean).join(" ") ||
+    profile.user.username ||
+    profile.user.email ||
+    `#${profile.user.id}`
+  );
 }
 
-function statusBadge(status: ProfileStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
+function getWorkspaceLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(value).toLowerCase();
 
-  if (status === "ACTIVE") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        {label}
-      </Badge>
-    );
+  if (normalized === "system") return t.system;
+  if (normalized === "provider") return t.provider;
+  if (normalized === "center") return t.center;
+  if (normalized === "customer") return t.customer;
+  if (normalized === "agent") return t.agent;
+  if (normalized === "broker") return t.broker;
+
+  return normalized || t.unknown;
+}
+
+function getRoleLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(value).toLowerCase();
+
+  if (normalized === "system_admin" || normalized === "admin" || normalized === "super_admin") return t.systemAdmin;
+  if (normalized === "provider_admin" || normalized === "center_admin") return t.providerAdmin;
+  if (normalized === "customer_user" || normalized === "customer") return t.customerUser;
+  if (normalized === "agent_user" || normalized === "agent") return t.agentUser;
+  if (normalized === "broker_user" || normalized === "broker") return t.brokerUser;
+  if (normalized === "accountant" || normalized === "finance") return t.accountant;
+  if (normalized === "support") return t.support;
+  if (normalized === "viewer") return t.viewer;
+
+  return normalized || t.unknown;
+}
+
+function getUserTypeLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(value).toUpperCase();
+
+  if (normalized === "SUPER_ADMIN") return t.superuser;
+  if (normalized === "SYSTEM") return t.system;
+  if (normalized === "STAFF") return t.support;
+  if (normalized === "ACCOUNTANT") return t.accountant;
+  if (normalized === "PROVIDER") return t.provider;
+  if (normalized === "CENTER") return t.center;
+  if (normalized === "CUSTOMER") return t.customer;
+  if (normalized === "AGENT") return t.agent;
+  if (normalized === "BROKER") return t.broker;
+  if (normalized === "OTHER") return t.other;
+
+  return normalized || t.unknown;
+}
+
+function getActorType(profile: CurrentProfile) {
+  if (profile.provider_id) return "provider";
+  if (profile.center_id) return "center";
+  if (profile.customer_id) return "customer";
+  if (profile.agent_id) return "agent";
+  if (profile.broker_id) return "broker";
+  if (profile.entity_type) return profile.entity_type;
+  if (profile.actor_type) return profile.actor_type;
+  return "system";
+}
+
+function getActorId(profile: CurrentProfile) {
+  return (
+    profile.provider_id ||
+    profile.center_id ||
+    profile.customer_id ||
+    profile.agent_id ||
+    profile.broker_id ||
+    profile.entity_id ||
+    profile.actor_id ||
+    null
+  );
+}
+
+function getActorTypeLabel(actorType: string, locale: Locale) {
+  const t = translations[locale];
+
+  if (actorType === "provider") return t.provider;
+  if (actorType === "center") return t.center;
+  if (actorType === "customer") return t.customer;
+  if (actorType === "agent") return t.agent;
+  if (actorType === "broker") return t.broker;
+  if (actorType === "system") return t.system;
+
+  return actorType || t.notLinked;
+}
+
+function getActorLabel(profile: CurrentProfile, locale: Locale) {
+  const actorType = getActorType(profile);
+  const actorId = getActorId(profile);
+  const actorName = normalizeText(profile.actor_name);
+  const actorCode = normalizeText(profile.actor_code);
+  const label = getActorTypeLabel(actorType, locale);
+
+  if (actorName && actorCode) return `${label}: ${actorName} · ${actorCode}`;
+  if (actorName) return `${label}: ${actorName}`;
+  if (actorCode) return `${label}: ${actorCode}`;
+  if (actorType === "system") return label;
+  if (actorId) return `${label} #${actorId}`;
+
+  return label || translations[locale].notLinked;
+}
+
+function getActorHref(profile: CurrentProfile) {
+  const actorType = getActorType(profile);
+  const actorId = getActorId(profile);
+
+  if (!actorId) return "";
+
+  if (actorType === "provider") return `/system/providers/${actorId}`;
+  if (actorType === "center") return `/system/centers/${actorId}`;
+  if (actorType === "customer") return `/system/customers/${actorId}`;
+  if (actorType === "agent") return `/system/agents/${actorId}`;
+  if (actorType === "broker") return `/system/brokers/${actorId}`;
+
+  return "";
+}
+
+function getActorBadgeClass(profile: CurrentProfile) {
+  const actorType = getActorType(profile);
+
+  if (actorType === "provider" || actorType === "center") {
+    return "border-violet-500/30 bg-violet-50 text-violet-700";
   }
 
-  if (status === "PENDING") {
-    return (
-      <Badge className="rounded-full border-amber-200 bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-        {label}
-      </Badge>
-    );
+  if (actorType === "customer") {
+    return "border-blue-500/30 bg-blue-50 text-blue-700";
   }
 
-  if (status === "INACTIVE" || status === "BLOCKED") {
-    return (
-      <Badge className="rounded-full border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:bg-rose-50 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-300">
-        {label}
-      </Badge>
-    );
+  if (actorType === "agent") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700";
   }
+
+  if (actorType === "broker") {
+    return "border-amber-500/30 bg-amber-50 text-amber-700";
+  }
+
+  return "border-slate-500/30 bg-slate-50 text-slate-700";
+}
+
+function getStatusClass(isActive: boolean) {
+  if (isActive) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+}
+
+function buildProfilePayload(form: ProfileForm) {
+  return {
+    first_name: form.first_name.trim(),
+    last_name: form.last_name.trim(),
+    email: form.email.trim().toLowerCase(),
+    display_name: form.display_name.trim(),
+    phone_number: form.phone_number.trim(),
+    whatsapp_number: form.whatsapp_number.trim(),
+    alternate_email: form.alternate_email.trim().toLowerCase(),
+    preferred_language: form.preferred_language,
+    timezone: form.timezone.trim() || "Asia/Riyadh",
+    bio: form.bio.trim(),
+    avatar_url: form.avatar_url.trim(),
+  };
+}
+
+function StatusBadge({
+  active,
+  locale,
+}: {
+  active: boolean;
+  locale: Locale;
+}) {
+  const t = translations[locale];
 
   return (
-    <Badge variant="outline" className="rounded-full px-3 py-1">
-      {label}
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full px-2.5 py-1 text-xs font-medium",
+        getStatusClass(active),
+      )}
+    >
+      {active ? t.active : t.inactive}
     </Badge>
   );
 }
 
-function getInitials(profile: ProfileData) {
-  const name = profile.full_name && profile.full_name !== "-" ? profile.full_name : profile.username;
-
-  return String(name || "P")
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part.charAt(0))
-    .join("")
-    .toUpperCase();
-}
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function PageSkeleton() {
+function KpiCard({
+  title,
+  value,
+  trend,
+  icon: Icon,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
   return (
-    <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
-      <Card className="rounded-2xl border bg-card shadow-sm">
-        <CardContent className="space-y-4 p-5">
-          <SkeletonLine className="mx-auto h-24 w-24 rounded-full" />
-          <SkeletonLine className="mx-auto h-7 w-40" />
-          <SkeletonLine className="mx-auto h-4 w-28" />
-          <SkeletonLine className="h-12 w-full rounded-xl" />
-          <SkeletonLine className="h-12 w-full rounded-xl" />
-          <SkeletonLine className="h-12 w-full rounded-xl" />
-        </CardContent>
-      </Card>
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-      <div className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-              <CardContent className="p-5">
-                <SkeletonLine className="h-8 w-28" />
-                <SkeletonLine className="mt-3 h-4 w-24" />
-              </CardContent>
-            </Card>
-          ))}
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="max-w-full rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            <span className="truncate">{trend}</span>
+          </Badge>
         </div>
+      </CardHeader>
+    </Card>
+  );
+}
 
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="space-y-3 p-5">
-            <SkeletonLine className="h-7 w-48" />
-            {Array.from({ length: 7 }).map((_, index) => (
-              <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
-            ))}
-          </CardContent>
-        </Card>
+function InfoRow({
+  label,
+  value,
+  children,
+}: {
+  label: string;
+  value?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b py-3 last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="min-w-0 text-left text-sm font-medium text-foreground">
+        {children || value || "—"}
       </div>
     </div>
   );
 }
 
-/* ============================================================
-   Print
-============================================================ */
-
-function buildPrintHtml({
-  locale,
-  profile,
-}: {
-  locale: AppLocale;
-  profile: ProfileData;
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(t.title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 5px 12px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-          th { background: #f3f4f6; font-weight: 700; width: 240px; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 9px;
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          @page { size: A4; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <h1>${escapeHtml(t.title)}</h1>
-            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
-          </div>
-          <div class="badge">Primey Care</div>
-        </div>
-
-        <table>
-          <tbody>
-            <tr><th>${escapeHtml(t.fullName)}</th><td>${escapeHtml(profile.full_name)}</td></tr>
-            <tr><th>${escapeHtml(t.username)}</th><td>${escapeHtml(profile.username)}</td></tr>
-            <tr><th>${escapeHtml(t.email)}</th><td>${escapeHtml(profile.email || "-")}</td></tr>
-            <tr><th>${escapeHtml(t.phone)}</th><td>${escapeHtml(profile.phone || "-")}</td></tr>
-            <tr><th>${escapeHtml(t.role)}</th><td>${escapeHtml(roleLabel(profile.role, locale))}</td></tr>
-            <tr><th>${escapeHtml(t.workspace)}</th><td>${escapeHtml(profile.workspace || "-")}</td></tr>
-            <tr><th>${escapeHtml(t.status)}</th><td>${escapeHtml(statusLabel(profile.status, locale))}</td></tr>
-            <tr><th>${escapeHtml(t.permissions)}</th><td>${escapeHtml(formatNumber(profile.permissions_count))}</td></tr>
-            <tr><th>${escapeHtml(t.lastLogin)}</th><td>${escapeHtml(formatDate(profile.last_login, locale))}</td></tr>
-            <tr><th>${escapeHtml(t.joinedAt)}</th><td>${escapeHtml(formatDate(profile.date_joined, locale))}</td></tr>
-          </tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label className="text-sm font-medium text-foreground">{children}</label>;
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function LoadingState() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-52" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardHeader className="space-y-3">
+            <Skeleton className="h-16 w-16 rounded-lg" />
+            <Skeleton className="h-6 w-44" />
+            <Skeleton className="h-4 w-32" />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {Array.from({ length: 7 }).map((_, index) => (
+              <Skeleton key={index} className="h-10 w-full" />
+            ))}
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Card key={index} className="rounded-lg border bg-card shadow-none">
+                <CardHeader className="min-h-[112px] px-6 py-5">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-8 w-28" />
+                  <Skeleton className="h-5 w-20" />
+                </CardHeader>
+              </Card>
+            ))}
+          </div>
+
+          <Card className="rounded-lg border bg-card shadow-none">
+            <CardContent className="space-y-3 p-4">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-80 w-full" />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function SystemProfilePage() {
-  const auth = useAuth() as unknown;
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [profile, setProfile] = React.useState<CurrentProfile>(EMPTY_PROFILE);
+  const [form, setForm] = React.useState<ProfileForm>(profileToForm(EMPTY_PROFILE));
+  const [passwordForm, setPasswordForm] = React.useState<PasswordForm>(EMPTY_PASSWORD);
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [profile, setProfile] = useState<ProfileData>(EMPTY_PROFILE);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [changingPassword, setChangingPassword] = React.useState(false);
+  const [error, setError] = React.useState("");
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const canView = hasAnyPermission(
-    auth,
-    ["system.view", "profile.view", "users.view"],
-    "view",
-  );
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const canViewUsers = hasAnyPermission(auth, ["users.view"], "view");
-  const canViewSettings = hasAnyPermission(
-    auth,
-    ["settings.view", "system.settings"],
-    "view",
-  );
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-  const visiblePermissions = useMemo(
-    () => profile.permissions.slice(0, 24),
-    [profile.permissions],
-  );
+    applyLocale();
 
-  const loadProfile = useCallback(
-    async (showToast = false) => {
-      if (!canView) {
-        setProfile(EMPTY_PROFILE);
-        setIsLoading(false);
-        return;
-      }
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
+
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
+
+  const loadProfile = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
 
       try {
-        setIsLoading(true);
-        setErrorMessage("");
+        if (!silent) setLoading(true);
 
-        const response = await fetch(apiUrl("/api/auth/whoami/"), {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-        });
+        setRefreshing(true);
+        setError("");
 
-        const payload = (await response.json().catch(() => null)) as
-          | ApiEnvelope<unknown>
-          | null;
+        const payload = await fetchJson<ProfileApiResponse>(
+          makeApiUrl("/api/auth/profile/"),
+          { signal: controller.signal },
+        );
 
-        if (!response.ok || payload?.ok === false || payload?.success === false) {
-          throw new Error(payload?.message || payload?.detail || t.loadError);
-        }
+        const normalized = normalizeCurrentProfile(payload);
 
-        setProfile(normalizeProfile(payload, auth));
+        setProfile(normalized);
+        setForm(profileToForm(normalized));
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
 
-        if (showToast) toast.success(t.loadSuccess);
-      } catch (error) {
-        console.error("Profile load error:", error);
-        setProfile(normalizeProfile(null, auth));
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
+        setError(message);
       } finally {
-        setIsLoading(false);
+        setLoading(false);
+        setRefreshing(false);
       }
+
+      return () => controller.abort();
     },
-    [auth, canView, t.loadError, t.loadSuccess],
+    [t.errorDesc],
   );
 
-  function printPage() {
-    const printWindow = window.open("", "_blank", "width=900,height=800");
+  React.useEffect(() => {
+    void loadProfile();
+  }, [loadProfile]);
 
-    if (!printWindow) {
-      toast.error(t.printError);
-      return;
-    }
+  function updateForm<T extends keyof ProfileForm>(key: T, value: ProfileForm[T]) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
 
-    printWindow.document.open();
-    printWindow.document.write(buildPrintHtml({ locale, profile }));
-    printWindow.document.close();
+  function updatePasswordForm<T extends keyof PasswordForm>(key: T, value: PasswordForm[T]) {
+    setPasswordForm((current) => ({ ...current, [key]: value }));
+  }
 
-    toast.success(t.printSuccess);
+  function cancelEdit() {
+    setForm(profileToForm(profile));
+    setEditing(false);
   }
 
   async function copyValue(value: string) {
@@ -939,58 +1345,297 @@ export default function SystemProfilePage() {
     try {
       await navigator.clipboard.writeText(value);
       toast.success(t.copied);
-    } catch (error) {
-      console.error("Copy profile value error:", error);
-      toast.error(t.copyFailed);
+    } catch {
+      toast.error(t.operationFailed);
     }
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
+  function validateProfileForm() {
+    if (form.email.trim() && !isValidEmail(form.email)) {
+      toast.error(t.invalidEmail);
+      return false;
+    }
 
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
+    if (form.alternate_email.trim() && !isValidEmail(form.alternate_email)) {
+      toast.error(t.invalidAlternateEmail);
+      return false;
+    }
 
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
+    return true;
+  }
 
-    syncAfterPaint();
+  async function saveProfile() {
+    if (!validateProfileForm()) return;
 
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+    setSaving(true);
+    setError("");
 
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
+    try {
+      const payload = await fetchJson<ProfileApiResponse>(
+        makeApiUrl("/api/auth/profile/"),
+        {
+          method: "POST",
+          body: buildProfilePayload(form),
+        },
+      );
 
-  useEffect(() => {
-    if (authResolving) return;
-    loadProfile(false);
-  }, [authResolving, loadProfile]);
+      const normalized = normalizeCurrentProfile(payload);
 
-  if (!authResolving && !canView) {
-    return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
+      setProfile(normalized);
+      setForm(profileToForm(normalized));
+      setEditing(false);
+      toast.success(t.saved);
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.operationFailed;
 
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function validatePasswordForm() {
+    if (!passwordForm.current_password.trim()) {
+      toast.error(t.currentPasswordRequired);
+      return false;
+    }
+
+    if (!passwordForm.new_password.trim()) {
+      toast.error(t.newPasswordRequired);
+      return false;
+    }
+
+    if (!passwordForm.confirm_password.trim()) {
+      toast.error(t.confirmPasswordRequired);
+      return false;
+    }
+
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      toast.error(t.passwordMismatch);
+      return false;
+    }
+
+    if (passwordForm.new_password.trim().length < 8) {
+      toast.error(t.passwordTooShort);
+      return false;
+    }
+
+    return true;
+  }
+
+  async function changePassword() {
+    if (!validatePasswordForm()) return;
+
+    setChangingPassword(true);
+
+    try {
+      await fetchJson<PasswordApiResponse>(makeApiUrl("/api/auth/change-password/"), {
+        method: "POST",
+        body: {
+          current_password: passwordForm.current_password,
+          new_password: passwordForm.new_password,
+          confirm_password: passwordForm.confirm_password,
+        },
+      });
+
+      setPasswordForm(EMPTY_PASSWORD);
+      toast.success(t.passwordChanged);
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.operationFailed;
+
+      toast.error(message);
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
+  function printPage() {
+    const displayName = getDisplayName(profile);
+    const actorLabel = getActorLabel(profile, locale);
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(t.operationFailed);
+      return;
+    }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)} - ${escapeHtml(displayName)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            h2 { margin: 18px 0 8px; font-size: 16px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+              margin-bottom: 16px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
             <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
             </div>
+            <div>
+              <p>${escapeHtml(t.username)}: <strong>${escapeHtml(profile.user.username || "—")}</strong></p>
+              <p>${escapeHtml(t.status)}: ${escapeHtml(profile.user.is_active ? t.active : t.inactive)}</p>
+              <p>${escapeHtml(t.role)}: ${escapeHtml(getRoleLabel(profile.role, locale))}</p>
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.workspace)}</span><strong>${escapeHtml(getWorkspaceLabel(profile.workspace, locale))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.userType)}</span><strong>${escapeHtml(getUserTypeLabel(profile.user_type, locale))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.role)}</span><strong>${escapeHtml(getRoleLabel(profile.role, locale))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.actor)}</span><strong>${escapeHtml(actorLabel)}</strong></div>
+          </div>
+
+          <h2>${escapeHtml(t.accountInfo)}</h2>
+          <table>
+            <tbody>
+              <tr><th>${escapeHtml(t.displayName)}</th><td>${escapeHtml(displayName)}</td></tr>
+              <tr><th>${escapeHtml(t.fullName)}</th><td>${escapeHtml(profile.user.full_name || "—")}</td></tr>
+              <tr><th>${escapeHtml(t.username)}</th><td>${escapeHtml(profile.user.username || "—")}</td></tr>
+              <tr><th>${escapeHtml(t.email)}</th><td>${escapeHtml(profile.user.email || "—")}</td></tr>
+              <tr><th>${escapeHtml(t.phone)}</th><td>${escapeHtml(profile.profile.phone_number || "—")}</td></tr>
+              <tr><th>${escapeHtml(t.whatsapp)}</th><td>${escapeHtml(profile.profile.whatsapp_number || "—")}</td></tr>
+              <tr><th>${escapeHtml(t.workspace)}</th><td>${escapeHtml(getWorkspaceLabel(profile.workspace, locale))}</td></tr>
+              <tr><th>${escapeHtml(t.actor)}</th><td>${escapeHtml(actorLabel)}</td></tr>
+              <tr><th>${escapeHtml(t.actorName)}</th><td>${escapeHtml(profile.actor_name || "—")}</td></tr>
+              <tr><th>${escapeHtml(t.actorCode)}</th><td>${escapeHtml(profile.actor_code || "—")}</td></tr>
+              <tr><th>${escapeHtml(t.lastLogin)}</th><td>${escapeHtml(formatDateTime(profile.user.last_login))}</td></tr>
+              <tr><th>${escapeHtml(t.dateJoined)}</th><td>${escapeHtml(formatDate(profile.user.date_joined))}</td></tr>
+            </tbody>
+          </table>
+
+          <h2>${escapeHtml(t.permissionsInfo)}</h2>
+          <table>
+            <tbody>
+              <tr><th>${escapeHtml(t.role)}</th><td>${escapeHtml(getRoleLabel(profile.role, locale))}</td></tr>
+              <tr><th>${escapeHtml(t.userType)}</th><td>${escapeHtml(getUserTypeLabel(profile.user_type, locale))}</td></tr>
+              <tr><th>${escapeHtml(t.permissions)}</th><td>${escapeHtml(profile.permission_codes.join(", ") || "—")}</td></tr>
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+  }
+
+  const displayName = getDisplayName(profile);
+  const initials = displayName.slice(0, 2).toUpperCase();
+  const actorHref = getActorHref(profile);
+  const actorLabel = getActorLabel(profile, locale);
+  const actorType = getActorType(profile);
+  const actorId = getActorId(profile);
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <LoadingState />
+      </div>
+    );
+  }
+
+  if (error && !profile.user.id) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1 text-right">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+              {t.title}
+            </h1>
+            <p className="text-sm text-muted-foreground">{t.subtitle}</p>
+          </div>
+        </div>
+
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col items-center justify-center gap-4 p-10 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-red-200 bg-white">
+              <TriangleAlert className="h-6 w-6 text-red-600" />
+            </div>
+
+            <div className="space-y-1">
+              <p className="font-semibold text-red-900">{t.errorTitle}</p>
+              <p className="text-sm text-red-700">{error || t.errorDesc}</p>
+            </div>
+
+            <Button
+              variant="outline"
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadProfile()}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -998,424 +1643,718 @@ export default function SystemProfilePage() {
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="max-w-3xl text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadProfile(true)}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            <span>{t.refresh}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href={profile.dashboard_path || "/system"}>
+              <BackIcon className="h-4 w-4" />
+              {t.backDashboard}
+            </Link>
           </Button>
 
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={printPage}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadProfile({ silent: true })}
+            disabled={refreshing}
           >
-            <Printer className="h-4 w-4" />
-            <span>{t.print}</span>
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            {t.refresh}
           </Button>
+
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
+
+          {editing ? (
+            <>
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={cancelEdit}
+                disabled={saving}
+              >
+                <X className="h-4 w-4" />
+                {t.cancel}
+              </Button>
+
+              <Button
+                className="h-9 rounded-lg bg-black px-4 text-white hover:bg-black/90"
+                disabled={saving}
+                onClick={() => void saveProfile()}
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                {saving ? t.saving : t.save}
+              </Button>
+            </>
+          ) : (
+            <Button
+              className="h-9 rounded-lg bg-black px-4 text-white hover:bg-black/90"
+              onClick={() => setEditing(true)}
+            >
+              <Pencil className="h-4 w-4" />
+              {t.edit}
+            </Button>
+          )}
         </div>
       </div>
 
-      {!isLoading && errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-                <XCircle className="h-5 w-5" />
-              </div>
-
-              <div>
-                <p className="font-semibold text-destructive">{errorMessage}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t.loadErrorHint}
-                </p>
-              </div>
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4 text-right">
+            <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+            <div>
+              <p className="font-semibold text-red-900">{t.errorTitle}</p>
+              <p className="text-sm text-red-700">{error}</p>
             </div>
-
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => loadProfile(true)}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              {t.retry}
-            </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      {isLoading ? (
-        <PageSkeleton />
-      ) : (
-        <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-5 p-5">
-              <div className="flex flex-col items-center text-center">
-                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-primary/10 text-3xl font-bold text-primary">
-                  {getInitials(profile)}
-                </div>
-
-                <h2 className="mt-4 text-lg font-bold">{profile.full_name}</h2>
-
-                <p className="mt-1 text-sm text-muted-foreground" dir="ltr">
-                  {profile.username}
-                </p>
-
-                <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-                  {statusBadge(profile.status, locale)}
-
-                  <Badge variant="outline" className="rounded-full">
-                    <KeyRound className="h-3.5 w-3.5" />
-                    {roleLabel(profile.role, locale)}
-                  </Badge>
-                </div>
-              </div>
-
-              <div className="space-y-3 rounded-2xl border bg-background/70 p-4">
-                <InfoLine
-                  icon={<Mail className="h-4 w-4" />}
-                  label={t.email}
-                  value={profile.email || "-"}
-                  onCopy={profile.email ? () => copyValue(profile.email) : undefined}
+      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardHeader className="space-y-4 px-6 py-5">
+            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-lg border bg-muted/40">
+              {profile.profile.avatar_url ? (
+                <img
+                  src={profile.profile.avatar_url}
+                  alt={displayName}
+                  className="h-full w-full object-cover"
                 />
+              ) : (
+                <span className="text-lg font-bold text-muted-foreground">
+                  {initials}
+                </span>
+              )}
+            </div>
 
-                <InfoLine
-                  icon={<Phone className="h-4 w-4" />}
-                  label={t.phone}
-                  value={profile.phone || "-"}
-                  onCopy={profile.phone ? () => copyValue(profile.phone) : undefined}
-                />
+            <div className="min-w-0 space-y-1">
+              <CardTitle className="truncate text-xl font-bold">
+                {displayName}
+              </CardTitle>
+              <CardDescription className="truncate">
+                {profile.user.username || profile.user.email || `#${profile.user.id}`}
+              </CardDescription>
+            </div>
 
-                <InfoLine
-                  icon={<Briefcase className="h-4 w-4" />}
-                  label={t.workspace}
-                  value={profile.workspace || "-"}
-                />
-              </div>
+            <div className="flex flex-wrap gap-2">
+              <StatusBadge active={profile.user.is_active} locale={locale} />
 
-              <div className="grid gap-3">
-                <Link href="/system">
-                  <Button variant="outline" className="h-10 w-full rounded-xl">
+              <Badge
+                variant="outline"
+                className="rounded-full bg-muted/40 px-2.5 py-1 text-xs font-medium"
+              >
+                {getWorkspaceLabel(profile.workspace, locale)}
+              </Badge>
+
+              <Badge
+                variant="outline"
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-xs font-medium",
+                  getActorBadgeClass(profile),
+                )}
+              >
+                {actorLabel}
+              </Badge>
+
+              {profile.user.is_superuser ? (
+                <Badge
+                  variant="outline"
+                  className="rounded-full border-violet-500/30 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700"
+                >
+                  {t.superuser}
+                </Badge>
+              ) : null}
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-2 px-6 pb-6">
+            <InfoRow label={t.role} value={getRoleLabel(profile.role, locale)} />
+            <InfoRow label={t.userType} value={getUserTypeLabel(profile.user_type, locale)} />
+            <InfoRow label={t.workspace} value={getWorkspaceLabel(profile.workspace, locale)} />
+            <InfoRow label={t.actor} value={actorLabel} />
+            <InfoRow label={t.email} value={profile.user.email || "—"} />
+            <InfoRow label={t.phone} value={profile.profile.phone_number || "—"} />
+            <InfoRow label={t.whatsapp} value={profile.profile.whatsapp_number || "—"} />
+            <InfoRow
+              label={t.profileCompleted}
+              value={profile.profile.is_profile_completed ? t.yes : t.no}
+            />
+            <InfoRow label={t.lastLogin} value={formatDateTime(profile.user.last_login)} />
+
+            <div className="grid gap-2 pt-3">
+              {actorHref ? (
+                <Button asChild variant="outline" className="h-9 rounded-lg">
+                  <Link href={actorHref}>
                     <Building2 className="h-4 w-4" />
-                    {t.dashboard}
-                  </Button>
-                </Link>
-
-                {canViewUsers ? (
-                  <Link href="/system/users">
-                    <Button variant="outline" className="h-10 w-full rounded-xl">
-                      <Users className="h-4 w-4" />
-                      {t.users}
-                    </Button>
+                    {t.actor}
                   </Link>
-                ) : null}
+                </Button>
+              ) : null}
 
-                {canViewSettings ? (
-                  <Link href="/system/settings">
-                    <Button variant="outline" className="h-10 w-full rounded-xl">
-                      <Settings className="h-4 w-4" />
-                      {t.settings}
-                    </Button>
-                  </Link>
-                ) : null}
-              </div>
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() => void copyValue(profile.user.username)}
+              >
+                <Copy className="h-4 w-4" />
+                {t.copy} {t.username}
+              </Button>
+
+              {profile.user.email ? (
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg"
+                  onClick={() => void copyValue(profile.user.email)}
+                >
+                  <Mail className="h-4 w-4" />
+                  {t.copy} {t.email}
+                </Button>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              title={t.status}
+              value={profile.user.is_active ? t.active : t.inactive}
+              trend={profile.profile.is_profile_completed ? t.profileCompleted : t.notVerified}
+              icon={CheckCircle2}
+            />
+
+            <KpiCard
+              title={t.workspace}
+              value={getWorkspaceLabel(profile.workspace, locale)}
+              trend={profile.dashboard_path || "/system"}
+              icon={Building2}
+            />
+
+            <KpiCard
+              title={t.role}
+              value={getRoleLabel(profile.role, locale)}
+              trend={getUserTypeLabel(profile.user_type, locale)}
+              icon={ShieldCheck}
+            />
+
+            <KpiCard
+              title={t.permissions}
+              value={formatInteger(profile.permission_codes.length)}
+              trend={t.permissions}
+              icon={BadgeCheck}
+            />
+          </div>
+
+          <Card className="rounded-lg border border-amber-200 bg-amber-50 shadow-none">
+            <CardContent className="flex items-start gap-3 p-4 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+              <p className="text-sm text-amber-800">{t.readonlyNotice}</p>
             </CardContent>
           </Card>
 
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <KpiCard
-                title={t.status}
-                value={statusLabel(profile.status, locale)}
-                icon={<BadgeCheck className="h-5 w-5" />}
-              />
-              <KpiCard
-                title={t.role}
-                value={roleLabel(profile.role, locale)}
-                icon={<ShieldCheck className="h-5 w-5" />}
-              />
-              <KpiCard
-                title={t.permissions}
-                value={formatNumber(profile.permissions_count)}
-                icon={<KeyRound className="h-5 w-5" />}
-              />
-              <KpiCard
-                title={t.userType}
-                value={profile.user_type || "-"}
-                icon={<UserCog className="h-5 w-5" />}
-              />
-            </div>
+          <Tabs defaultValue="overview" className="space-y-4">
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardContent className="p-4">
+                <TabsList className="h-auto flex-wrap justify-start rounded-lg bg-muted/40 p-1">
+                  <TabsTrigger value="overview" className="rounded-md">
+                    <Eye className="h-4 w-4" />
+                    {t.overview}
+                  </TabsTrigger>
 
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base font-bold">
-                  {t.accountDetails}
-                </CardTitle>
-                <CardDescription>{t.profileSummary}</CardDescription>
-              </CardHeader>
+                  <TabsTrigger value="account" className="rounded-md">
+                    <UserCog className="h-4 w-4" />
+                    {t.account}
+                  </TabsTrigger>
 
-              <CardContent>
-                <div className="overflow-hidden rounded-xl border">
-                  <Table>
-                    <TableBody>
-                      <DetailRow label={t.fullName} value={profile.full_name} />
-                      <DetailRow label={t.username} value={profile.username} dir="ltr" />
-                      <DetailRow label={t.email} value={profile.email || "-"} dir="ltr" />
-                      <DetailRow label={t.phone} value={profile.phone || "-"} dir="ltr" />
-                      <DetailRow label={t.role} value={roleLabel(profile.role, locale)} />
-                      <DetailRow label={t.workspace} value={profile.workspace || "-"} />
-                      <DetailRow label={t.userType} value={profile.user_type || "-"} />
-                      <TableRow>
-                        <TableCell className="w-[220px] bg-muted/30 font-semibold">
-                          {t.status}
-                        </TableCell>
-                        <TableCell>{statusBadge(profile.status, locale)}</TableCell>
-                      </TableRow>
-                      <DetailRow
-                        label={t.lastLogin}
-                        value={formatDate(profile.last_login, locale)}
-                      />
-                      <DetailRow
-                        label={t.joinedAt}
-                        value={formatDate(profile.date_joined, locale)}
-                      />
-                    </TableBody>
-                  </Table>
-                </div>
+                  <TabsTrigger value="edit" className="rounded-md">
+                    <Pencil className="h-4 w-4" />
+                    {t.editProfile}
+                  </TabsTrigger>
+
+                  <TabsTrigger value="security" className="rounded-md">
+                    <LockKeyhole className="h-4 w-4" />
+                    {t.security}
+                  </TabsTrigger>
+
+                  <TabsTrigger value="permissions" className="rounded-md">
+                    <ShieldCheck className="h-4 w-4" />
+                    {t.permissions}
+                  </TabsTrigger>
+                </TabsList>
               </CardContent>
             </Card>
 
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base font-bold">
-                  {t.accessDetails}
-                </CardTitle>
-                <CardDescription>
-                  {formatNumber(profile.permissions_count)} {t.permissions}
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap gap-2">
-                  {profile.is_superuser ? (
-                    <Badge variant="outline" className="rounded-full">
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                      {t.superuser}
-                    </Badge>
-                  ) : null}
-
-                  {profile.is_staff ? (
-                    <Badge variant="outline" className="rounded-full">
-                      <UserRound className="h-3.5 w-3.5" />
-                      {t.staff}
-                    </Badge>
-                  ) : null}
-
-                  <Badge variant="outline" className="rounded-full">
-                    <KeyRound className="h-3.5 w-3.5" />
-                    {roleLabel(profile.role, locale)}
-                  </Badge>
-                </div>
-
-                {visiblePermissions.length > 0 ? (
-                  <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                    {visiblePermissions.map((permission) => (
-                      <div
-                        key={permission}
-                        className="rounded-xl border bg-background/70 px-3 py-2 text-sm"
-                        dir="ltr"
-                      >
-                        {permission}
+            <TabsContent value="overview" className="space-y-4">
+              <div className="grid gap-4 xl:grid-cols-2">
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.accountInfo}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.displayName} value={displayName} />
+                    <InfoRow label={t.fullName} value={profile.user.full_name || "—"} />
+                    <InfoRow label={t.username}>
+                      <div className="flex items-center gap-2">
+                        <span className="truncate">{profile.user.username || "—"}</span>
+                        {profile.user.username ? (
+                          <button
+                            type="button"
+                            onClick={() => void copyValue(profile.user.username)}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                        ) : null}
                       </div>
-                    ))}
+                    </InfoRow>
+                    <InfoRow label={t.email} value={profile.user.email || "—"} />
+                    <InfoRow label={t.status}>
+                      <StatusBadge active={profile.user.is_active} locale={locale} />
+                    </InfoRow>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.contactInfo}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.phone} value={profile.profile.phone_number || "—"} />
+                    <InfoRow label={t.whatsapp} value={profile.profile.whatsapp_number || "—"} />
+                    <InfoRow label={t.alternateEmail} value={profile.profile.alternate_email || "—"} />
+                    <InfoRow label={t.preferredLanguage} value={profile.profile.preferred_language || "—"} />
+                    <InfoRow label={t.timezone} value={profile.profile.timezone || "—"} />
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.actorInfo}</CardTitle>
+                    <CardDescription>{t.readonlyNotice}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.actor} value={actorLabel} />
+                    <InfoRow label={t.actorType} value={actorType || "—"} />
+                    <InfoRow label={t.actorId} value={actorId ? `#${actorId}` : "—"} />
+                    <InfoRow label={t.actorName} value={profile.actor_name || "—"} />
+                    <InfoRow label={t.actorCode} value={profile.actor_code || "—"} />
+                    <InfoRow label={t.workspace} value={getWorkspaceLabel(profile.workspace, locale)} />
+                    <InfoRow label={t.dashboardPath} value={profile.dashboard_path || "—"} />
+
+                    <div className="pt-3">
+                      {actorHref ? (
+                        <Button asChild variant="outline" className="h-9 rounded-lg">
+                          <Link href={actorHref}>
+                            <Building2 className="h-4 w-4" />
+                            {t.actor}
+                          </Link>
+                        </Button>
+                      ) : (
+                        <Badge variant="outline" className="rounded-full bg-muted/40 px-2.5 py-1 text-xs">
+                          {t.notLinked}
+                        </Badge>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.profileInfo}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.profileCompleted} value={profile.profile.is_profile_completed ? t.yes : t.no} />
+                    <InfoRow label={t.verified} value={profile.profile.is_email_verified ? t.verified : t.notVerified} />
+                    <InfoRow label={t.lastLogin} value={formatDateTime(profile.user.last_login)} />
+                    <InfoRow label={t.dateJoined} value={formatDate(profile.user.date_joined)} />
+                    <InfoRow label={t.lastUpdated} value={formatDateTime(profile.profile.last_profile_update_at || profile.profile.updated_at)} />
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none xl:col-span-2">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.bio}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <div className="min-h-[120px] rounded-lg border bg-background p-4">
+                      <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                        {profile.profile.bio || "—"}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="account" className="space-y-4">
+              <div className="grid gap-4 xl:grid-cols-2">
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.accountInfo}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.status} value={profile.user.is_active ? t.active : t.inactive} />
+                    <InfoRow label={t.staff} value={profile.user.is_staff ? t.yes : t.no} />
+                    <InfoRow label={t.superuser} value={profile.user.is_superuser ? t.yes : t.no} />
+                    <InfoRow label={t.dateJoined} value={formatDate(profile.user.date_joined)} />
+                    <InfoRow label={t.lastLogin} value={formatDateTime(profile.user.last_login)} />
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.permissionsInfo}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.userType} value={getUserTypeLabel(profile.user_type, locale)} />
+                    <InfoRow label={t.role} value={getRoleLabel(profile.role, locale)} />
+                    <InfoRow label={t.workspace} value={getWorkspaceLabel(profile.workspace, locale)} />
+                    <InfoRow label={t.dashboardPath} value={profile.dashboard_path || "—"} />
+                    <InfoRow label={t.permissions} value={formatInteger(profile.permission_codes.length)} />
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="edit" className="space-y-4">
+              <Card className="rounded-lg border bg-card shadow-none">
+                <CardHeader className="px-5 py-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <CardTitle className="text-base">{t.editProfile}</CardTitle>
+                      <CardDescription>{displayName}</CardDescription>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {editing ? (
+                        <>
+                          <Button
+                            variant="outline"
+                            className="h-9 rounded-lg"
+                            onClick={cancelEdit}
+                            disabled={saving}
+                          >
+                            <X className="h-4 w-4" />
+                            {t.cancel}
+                          </Button>
+
+                          <Button
+                            className="h-9 rounded-lg bg-black text-white hover:bg-black/90"
+                            disabled={saving}
+                            onClick={() => void saveProfile()}
+                          >
+                            {saving ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Save className="h-4 w-4" />
+                            )}
+                            {saving ? t.saving : t.save}
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          className="h-9 rounded-lg"
+                          onClick={() => setEditing(true)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                          {t.edit}
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border bg-background/70 p-8 text-center">
-                    <FileText className="h-10 w-10 text-muted-foreground/40" />
-                    <p className="text-sm text-muted-foreground">
-                      {t.noPermissions}
-                    </p>
+                </CardHeader>
+
+                <CardContent className="space-y-5 px-5 pb-5">
+                  <div className="rounded-lg border bg-muted/30 p-4">
+                    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-foreground">
+                          {t.actorInfo}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {t.readonlyNotice}
+                        </p>
+                      </div>
+
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "w-fit rounded-full px-2.5 py-1 text-xs font-medium",
+                          getActorBadgeClass(profile),
+                        )}
+                      >
+                        {actorLabel}
+                      </Badge>
+                    </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
 
-            <Card className="rounded-2xl border bg-card shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base font-bold">
-                  {t.quickActions}
-                </CardTitle>
-              </CardHeader>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="space-y-2">
+                      <FieldLabel>{t.firstName}</FieldLabel>
+                      <Input
+                        value={form.first_name}
+                        onChange={(event) => updateForm("first_name", event.target.value)}
+                        disabled={!editing || saving}
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
 
-              <CardContent>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <ShortcutCard
-                    href="/system"
-                    icon={<Building2 className="h-5 w-5" />}
-                    title={t.dashboard}
-                    description={t.dashboardDesc}
-                  />
+                    <div className="space-y-2">
+                      <FieldLabel>{t.lastName}</FieldLabel>
+                      <Input
+                        value={form.last_name}
+                        onChange={(event) => updateForm("last_name", event.target.value)}
+                        disabled={!editing || saving}
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
 
-                  {canViewUsers ? (
-                    <ShortcutCard
-                      href="/system/users"
-                      icon={<Users className="h-5 w-5" />}
-                      title={t.users}
-                      description={t.usersDesc}
-                    />
-                  ) : null}
+                    <div className="space-y-2 md:col-span-2">
+                      <FieldLabel>{t.displayName}</FieldLabel>
+                      <Input
+                        value={form.display_name}
+                        onChange={(event) => updateForm("display_name", event.target.value)}
+                        disabled={!editing || saving}
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
 
-                  {canViewSettings ? (
-                    <ShortcutCard
-                      href="/system/settings"
-                      icon={<Settings className="h-5 w-5" />}
-                      title={t.settings}
-                      description={t.settingsDesc}
-                    />
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+                    <div className="space-y-2 md:col-span-2">
+                      <FieldLabel>{t.email}</FieldLabel>
+                      <Input
+                        value={form.email}
+                        onChange={(event) => updateForm("email", event.target.value)}
+                        disabled={!editing || saving}
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
 
-/* ============================================================
-   Small Components
-============================================================ */
+                    <div className="space-y-2">
+                      <FieldLabel>{t.phone}</FieldLabel>
+                      <Input
+                        value={form.phone_number}
+                        onChange={(event) => updateForm("phone_number", event.target.value)}
+                        disabled={!editing || saving}
+                        className="h-10 rounded-lg bg-background text-right tabular-nums"
+                      />
+                    </div>
 
-function InfoLine({
-  icon,
-  label,
-  value,
-  onCopy,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  onCopy?: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="text-muted-foreground">{icon}</span>
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="truncate text-sm font-medium">{value}</p>
+                    <div className="space-y-2">
+                      <FieldLabel>{t.whatsapp}</FieldLabel>
+                      <Input
+                        value={form.whatsapp_number}
+                        onChange={(event) => updateForm("whatsapp_number", event.target.value)}
+                        disabled={!editing || saving}
+                        className="h-10 rounded-lg bg-background text-right tabular-nums"
+                      />
+                    </div>
+
+                    <div className="space-y-2 md:col-span-2">
+                      <FieldLabel>{t.alternateEmail}</FieldLabel>
+                      <Input
+                        value={form.alternate_email}
+                        onChange={(event) => updateForm("alternate_email", event.target.value)}
+                        disabled={!editing || saving}
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <FieldLabel>{t.preferredLanguage}</FieldLabel>
+                      <Select
+                        value={form.preferred_language}
+                        disabled={!editing || saving}
+                        onValueChange={(value) => updateForm("preferred_language", value as Locale)}
+                      >
+                        <SelectTrigger className="h-10 rounded-lg bg-background">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ar">العربية</SelectItem>
+                          <SelectItem value="en">English</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <FieldLabel>{t.timezone}</FieldLabel>
+                      <Input
+                        value={form.timezone}
+                        onChange={(event) => updateForm("timezone", event.target.value)}
+                        disabled={!editing || saving}
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
+
+                    <div className="space-y-2 md:col-span-2">
+                      <FieldLabel>{t.avatarUrl}</FieldLabel>
+                      <Input
+                        value={form.avatar_url}
+                        onChange={(event) => updateForm("avatar_url", event.target.value)}
+                        disabled={!editing || saving}
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
+
+                    <div className="space-y-2 md:col-span-2 xl:col-span-4">
+                      <FieldLabel>{t.bio}</FieldLabel>
+                      <textarea
+                        value={form.bio}
+                        onChange={(event) => updateForm("bio", event.target.value)}
+                        disabled={!editing || saving}
+                        className="min-h-[120px] w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60"
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="security" className="space-y-4">
+              <div className="grid gap-4 xl:grid-cols-2">
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.securityInfo}</CardTitle>
+                    <CardDescription>{t.passwordHint}</CardDescription>
+                  </CardHeader>
+
+                  <CardContent className="space-y-4 px-5 pb-5">
+                    <div className="space-y-2">
+                      <FieldLabel>{t.currentPassword}</FieldLabel>
+                      <Input
+                        type="password"
+                        value={passwordForm.current_password}
+                        onChange={(event) =>
+                          updatePasswordForm("current_password", event.target.value)
+                        }
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <FieldLabel>{t.newPassword}</FieldLabel>
+                      <Input
+                        type="password"
+                        value={passwordForm.new_password}
+                        onChange={(event) =>
+                          updatePasswordForm("new_password", event.target.value)
+                        }
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <FieldLabel>{t.confirmPassword}</FieldLabel>
+                      <Input
+                        type="password"
+                        value={passwordForm.confirm_password}
+                        onChange={(event) =>
+                          updatePasswordForm("confirm_password", event.target.value)
+                        }
+                        className="h-10 rounded-lg bg-background"
+                      />
+                    </div>
+
+                    <Button
+                      className="h-10 rounded-lg bg-black text-white hover:bg-black/90"
+                      disabled={changingPassword}
+                      onClick={() => void changePassword()}
+                    >
+                      {changingPassword ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <KeyRound className="h-4 w-4" />
+                      )}
+                      {t.changePassword}
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.accountInfo}</CardTitle>
+                  </CardHeader>
+
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.username} value={profile.user.username || "—"} />
+                    <InfoRow label={t.email} value={profile.user.email || "—"} />
+                    <InfoRow label={t.lastLogin} value={formatDateTime(profile.user.last_login)} />
+                    <InfoRow label={t.status} value={profile.user.is_active ? t.active : t.inactive} />
+                    <InfoRow label={t.staff} value={profile.user.is_staff ? t.yes : t.no} />
+                    <InfoRow label={t.superuser} value={profile.user.is_superuser ? t.yes : t.no} />
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="permissions" className="space-y-4">
+              <div className="grid gap-4 xl:grid-cols-2">
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.permissionsInfo}</CardTitle>
+                  </CardHeader>
+
+                  <CardContent className="px-5 pb-5">
+                    <InfoRow label={t.userType} value={getUserTypeLabel(profile.user_type, locale)} />
+                    <InfoRow label={t.role} value={getRoleLabel(profile.role, locale)} />
+                    <InfoRow label={t.workspace} value={getWorkspaceLabel(profile.workspace, locale)} />
+                    <InfoRow label={t.dashboardPath} value={profile.dashboard_path || "—"} />
+                    <InfoRow label={t.actor} value={actorLabel} />
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-lg border bg-card shadow-none">
+                  <CardHeader className="px-5 py-4">
+                    <CardTitle className="text-base">{t.permissions}</CardTitle>
+                    <CardDescription>
+                      {formatInteger(profile.permission_codes.length)}
+                    </CardDescription>
+                  </CardHeader>
+
+                  <CardContent className="px-5 pb-5">
+                    {profile.permission_codes.length ? (
+                      <div className="flex flex-wrap gap-2">
+                        {profile.permission_codes.map((permission) => (
+                          <Badge
+                            key={permission}
+                            variant="outline"
+                            className="rounded-full bg-muted/40 px-2.5 py-1 text-xs font-medium"
+                          >
+                            {permission}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex min-h-[120px] items-center justify-center rounded-lg border bg-background p-4 text-center text-sm text-muted-foreground">
+                        {t.noPermissions}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
-
-      {onCopy ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0 rounded-lg"
-          onClick={onCopy}
-        >
-          <Copy className="h-4 w-4" />
-        </Button>
-      ) : null}
     </div>
-  );
-}
-
-function DetailRow({
-  label,
-  value,
-  dir,
-}: {
-  label: string;
-  value: string;
-  dir?: "ltr" | "rtl";
-}) {
-  return (
-    <TableRow>
-      <TableCell className="w-[220px] bg-muted/30 font-semibold">
-        {label}
-      </TableCell>
-      <TableCell dir={dir}>{value}</TableCell>
-    </TableRow>
-  );
-}
-
-function KpiCard({
-  title,
-  value,
-  icon,
-}: {
-  title: string;
-  value: ReactNode;
-  icon: ReactNode;
-}) {
-  return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-2xl font-bold">{value}</div>
-            <p className="mt-1 text-sm text-muted-foreground">{title}</p>
-          </div>
-
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            {icon}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ShortcutCard({
-  href,
-  icon,
-  title,
-  description,
-}: {
-  href: string;
-  icon: ReactNode;
-  title: string;
-  description: string;
-}) {
-  return (
-    <Link href={href}>
-      <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
-        <CardContent className="flex h-full items-start gap-3 p-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            {icon}
-          </div>
-
-          <div className="min-w-0">
-            <p className="font-semibold">{title}</p>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              {description}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
   );
 }

@@ -2,71 +2,82 @@
 
 /* ============================================================
    📂 primey_frontend/app/system/providers/page.tsx
-   🧠 Primey Care | Providers Dashboard
+   🏥 Primey Care — Providers
    ------------------------------------------------------------
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ لوحة مقدمي الخدمة الرئيسية
-   ✅ تحميل سريع عبر Request واحد فقط
-   ✅ الاعتماد على summary من الباكند بدل تحميل كل الصفحات
-   ✅ إزالة بطاقات البيانات النظامية / الشعار / Drive
-   ✅ إزالة أعمدة الشعار / السجل التجاري / الرقم الضريبي / Drive
-   ✅ Excel export بصيغة .xls HTML Workbook للبيانات المعروضة
-   ✅ Web PDF Print للبيانات المعروضة
-   ✅ Error State مستقل
-   ✅ Empty State ذكي
-   ✅ Skeleton Loading
-   ✅ حماية الأزرار والطلبات حسب الصلاحيات
-   ✅ fallback آمن لـ system_admin / superuser
-   ✅ دعم عربي / إنجليزي عبر primey-locale
-   ✅ استخدام toast من sonner
-   ✅ بدون localhost hardcoded
-   ✅ بدون main / min-h-screen / max-w
-   ✅ بدون نصوص تقنية ظاهرة
-   ✅ الأرقام تبقى بالإنجليزية
+   ✅ Same approved Customers / Products / Orders table pattern
+   ✅ Header buttons / KPI cards / toolbar / table unified
+   ✅ Real API only: /api/providers/
+   ✅ Server pagination: one request per page/filter
+   ✅ No loading all 9000+ providers
+   ✅ Keeps approved filters: search/status/type/region/city/featured/source/orders/columns
+   ✅ Adds network/contract filter and date range
+   ✅ No logo / CR / tax / Drive columns
+   ✅ Excel .xls + Web print for current visible rows only
+   ✅ SAR icon from /currency/sar.svg
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
+import * as React from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
-  ArrowUpRight,
+  ArrowUpDown,
   Building2,
   CheckCircle2,
-  ClipboardList,
+  ColumnsIcon,
   Copy,
-  Download,
   Eye,
-  FileText,
-  Hospital,
+  FileSpreadsheet,
+  FileUp,
+  Layers3,
   Loader2,
   MapPin,
-  PlusCircle,
+  MoreHorizontal,
+  Plus,
   Printer,
-  RefreshCcw,
+  RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
+  ShoppingCart,
   Sparkles,
-  Stethoscope,
-  TestTube2,
-  TrendingUp,
-  UploadCloud,
-  UsersRound,
+  TriangleAlert,
   XCircle,
-  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -76,59 +87,76 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type AuthRecord = Record<string, unknown>;
-
-type ProviderStatus =
-  | "ACTIVE"
-  | "INACTIVE"
-  | "SUSPENDED"
-  | "DRAFT"
-  | "UNKNOWN";
-
+type ProviderStatus = "all" | "ACTIVE" | "INACTIVE" | "SUSPENDED" | "DRAFT";
 type ProviderType =
+  | "all"
   | "HOSPITAL"
   | "MEDICAL_CENTER"
   | "PHARMACY"
-  | "PARTNER"
   | "LAB"
   | "CLINIC"
-  | "OTHER"
-  | "UNKNOWN";
+  | "PARTNER"
+  | "OTHER";
 
-type ProviderRow = {
-  id: number | string;
+type FeaturedFilter = "all" | "featured" | "not_featured";
+type SourceFilter = "all" | "imported" | "manual";
+type ContractFilter = "all" | "contracted" | "not_contracted";
+
+type SortKey =
+  | "newest"
+  | "oldest"
+  | "name"
+  | "arabic_name"
+  | "english_name"
+  | "most_orders"
+  | "highest_discount"
+  | "contracted";
+
+type ColumnKey =
+  | "select"
+  | "provider"
+  | "type"
+  | "region"
+  | "city"
+  | "source"
+  | "orders"
+  | "contracts"
+  | "products"
+  | "discount"
+  | "featured"
+  | "status"
+  | "createdAt"
+  | "actions";
+
+type ProviderRecord = {
+  id: number;
   name: string;
-  nameAr: string;
-  nameEn: string;
-  displayNameAr: string;
-  displayNameEn: string;
+  name_ar: string;
+  name_en: string;
   code: string;
-  providerType: ProviderType;
-  status: ProviderStatus;
-  contactPerson: string;
+  provider_type: string;
+  status: string;
+  region: string;
+  area: string;
+  city: string;
+  source_category: string;
+  import_source: string;
+  external_reference: string;
+  is_featured: boolean;
   phone: string;
-  mobile: string;
   email: string;
   website: string;
-  region: string;
-  city: string;
-  area: string;
-  street: string;
   address: string;
-  googleMapsLink: string;
-  sourceCategory: string;
-  importSource: string;
-  externalReference: string;
-  ordersCount: number;
-  notes: string;
-  isFeatured: boolean;
-  createdAt: string;
-  updatedAt: string;
+  orders_count: number;
+  active_contracts_count: number;
+  contracted_products_count: number;
+  highest_discount_percent: number;
+  has_active_contract: boolean;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 type ProvidersSummary = {
@@ -148,649 +176,319 @@ type ProvidersSummary = {
   imported_providers: number;
   manual_providers: number;
   total_orders: number;
+  contracted_providers: number;
+  contracted_products_count: number;
+  highest_discount_percent: number;
+  providers_with_discounts: number;
 };
 
-type ProvidersApiEnvelope = {
+type PaginationState = {
+  count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+};
+
+type ProvidersApiResponse = {
   ok?: boolean;
+  success?: boolean;
   message?: string;
-  detail?: string;
-  error?: string;
   results?: unknown[];
-  providers?: unknown[];
   items?: unknown[];
-  data?:
-    | unknown[]
-    | {
-        results?: unknown[];
-        providers?: unknown[];
-        items?: unknown[];
-      };
-  summary?: Partial<ProvidersSummary>;
-  stats?: Partial<ProvidersSummary>;
-};
-
-const DEFAULT_SUMMARY: ProvidersSummary = {
-  total_providers: 0,
-  active_providers: 0,
-  inactive_providers: 0,
-  suspended_providers: 0,
-  draft_providers: 0,
-  hospitals_count: 0,
-  medical_centers_count: 0,
-  pharmacies_count: 0,
-  labs_count: 0,
-  clinics_count: 0,
-  partners_count: 0,
-  others_count: 0,
-  featured_providers: 0,
-  imported_providers: 0,
-  manual_providers: 0,
-  total_orders: 0,
-};
-
-/* ============================================================
-   Locale / API Helpers
-============================================================ */
-
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const savedLocale = window.localStorage.getItem("primey-locale");
-
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
-}
-
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch {
-    // ignore
-  }
-}
-
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
-
-  if (!base) return path;
-
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-/* ============================================================
-   Permission Helpers
-============================================================ */
-
-function asRecord(value: unknown): AuthRecord {
-  return value && typeof value === "object" ? (value as AuthRecord) : {};
-}
-
-function getNestedRecord(source: AuthRecord, keys: string[]): AuthRecord {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as AuthRecord;
-    }
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as AuthRecord;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as AuthRecord;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown): AuthRecord {
-  const auth = asRecord(authValue);
-
-  return getNestedRecord(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asRecord(auth.permissions);
-  const userPermissions = asRecord(user.permissions);
-  const authProfilePermissions = asRecord(auth.profile_permissions);
-  const userProfilePermissions = asRecord(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asRecord(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asRecord(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasKnownPermissionSignal(authValue: unknown) {
-  return (
-    getAuthRoles(authValue).length > 0 ||
-    getAuthPermissionCodes(authValue).length > 0
-  );
-}
-
-function hasPermissionCode(authValue: unknown, codes: string[]) {
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length === 0) return undefined;
-
-  return codes.some((code) => permissions.includes(code));
-}
-
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const explicitPermission = hasPermissionCode(authValue, codes);
-
-  if (typeof explicitPermission === "boolean") {
-    return explicitPermission;
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "support",
-          "accountant",
-          "viewer",
-        ].includes(role),
-      );
-    }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin"].includes(role),
-    );
-  }
-
-  if (!hasKnownPermissionSignal(authValue)) {
-    return true;
-  }
-
-  return mode === "view";
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "مقدمو الخدمة" : "Providers",
-    subtitle: isArabic
-      ? "لوحة تشغيلية لإدارة مقدمي الخدمة والمراكز الطبية والعقود المرتبطة بهم."
-      : "Operational dashboard for providers, medical centers, and linked contracts.",
-
-    refresh: isArabic ? "تحديث" : "Refresh",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة" : "Print",
-    createProvider: isArabic ? "إضافة مقدم خدمة" : "Create Provider",
-    providersList: isArabic ? "قائمة مقدمي الخدمة" : "Providers List",
-    importProviders: isArabic ? "استيراد الشبكة الطبية" : "Import Medical Network",
-    contracts: isArabic ? "العقود" : "Contracts",
-    centers: isArabic ? "المراكز" : "Centers",
-
-    search: isArabic ? "بحث سريع" : "Quick Search",
-    searchPlaceholder: isArabic
-      ? "ابحث بالاسم العربي أو الإنجليزي، الكود، المدينة، الجوال..."
-      : "Search by Arabic/English name, code, city, phone...",
-    viewAll: isArabic ? "عرض الكل" : "View All",
-    details: isArabic ? "التفاصيل" : "Details",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بعرض الصفحة" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية عرض لوحة مقدمي الخدمة."
-      : "You do not have permission to view the providers dashboard.",
-
-    loadError: isArabic
-      ? "تعذر تحميل بيانات مقدمي الخدمة."
-      : "Unable to load providers.",
-    loadErrorHint: isArabic
-      ? "تحقق من الاتصال أو الصلاحيات ثم أعد المحاولة."
-      : "Check the connection or permissions, then try again.",
-    retry: isArabic ? "إعادة المحاولة" : "Retry",
-    refreshSuccess: isArabic
-      ? "تم تحديث بيانات مقدمي الخدمة."
-      : "Providers refreshed successfully.",
-    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
-    printReady: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
-    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
-    copied: isArabic ? "تم النسخ." : "Copied.",
-
-    emptyTitle: isArabic ? "لا يوجد مقدمو خدمة" : "No providers found",
-    emptyText: isArabic
-      ? "ابدأ بإضافة مقدم خدمة جديد أو استيراد الشبكة الطبية من ملف Excel."
-      : "Start by creating a provider or importing the medical network from Excel.",
-    noSearchTitle: isArabic ? "لا توجد نتائج مطابقة" : "No matching results",
-    noSearchText: isArabic
-      ? "جرّب تعديل كلمات البحث لعرض نتائج أكثر."
-      : "Try changing the search terms to show more results.",
-
-    overview: isArabic ? "ملخص مقدمي الخدمة" : "Providers Overview",
-    overviewDesc: isArabic
-      ? "نظرة تشغيلية على مقدمي الخدمة حسب الحالة والتصنيف والطلبات."
-      : "Operational overview by status, type, and orders.",
-    recentProviders: isArabic ? "أحدث مقدمي الخدمة" : "Recent Providers",
-    recentProvidersDesc: isArabic
-      ? "آخر الجهات المسجلة أو المحدثة في النظام."
-      : "Latest providers registered or updated in the system.",
-    typeDistribution: isArabic ? "توزيع التصنيفات" : "Type Distribution",
-    typeDistributionDesc: isArabic
-      ? "تصنيف مقدمي الخدمة المسجلين."
-      : "Classification of registered providers.",
-    quickActions: isArabic ? "إجراءات سريعة" : "Quick Actions",
-    quickActionsDesc: isArabic
-      ? "انتقل إلى صفحات إدارة مقدمي الخدمة."
-      : "Navigate to provider management pages.",
-
-    totalProviders: isArabic ? "إجمالي مقدمي الخدمة" : "Total Providers",
-    activeProviders: isArabic ? "النشطون" : "Active",
-    inactiveProviders: isArabic ? "غير النشطين" : "Inactive",
-    suspendedProviders: isArabic ? "الموقوفون" : "Suspended",
-    draftProviders: isArabic ? "المسودات" : "Drafts",
-    featuredProviders: isArabic ? "المميزون" : "Featured",
-    importedProviders: isArabic ? "مستوردة من الشبكة" : "Imported",
-    manualProviders: isArabic ? "إدخال يدوي" : "Manual",
-    ordersCount: isArabic ? "عدد الطلبات" : "Orders Count",
-
-    hospitals: isArabic ? "المستشفيات" : "Hospitals",
-    medicalCenters: isArabic ? "المراكز الطبية" : "Medical Centers",
-    clinics: isArabic ? "العيادات" : "Clinics",
-    labs: isArabic ? "المختبرات" : "Labs",
-    pharmacies: isArabic ? "الصيدليات" : "Pharmacies",
-    partners: isArabic ? "الشركاء" : "Partners",
-    others: isArabic ? "أخرى" : "Others",
-
-    table: {
-      code: isArabic ? "الكود" : "Code",
-      provider: isArabic ? "مقدم الخدمة" : "Provider",
-      nameAr: isArabic ? "الاسم العربي" : "Arabic Name",
-      nameEn: isArabic ? "الاسم الإنجليزي" : "English Name",
-      type: isArabic ? "التصنيف" : "Type",
-      status: isArabic ? "الحالة" : "Status",
-      location: isArabic ? "الموقع" : "Location",
-      contact: isArabic ? "التواصل" : "Contact",
-      orders: isArabic ? "الطلبات" : "Orders",
-      actions: isArabic ? "الإجراءات" : "Actions",
-    },
-
-    statuses: {
-      ACTIVE: isArabic ? "نشط" : "Active",
-      INACTIVE: isArabic ? "غير نشط" : "Inactive",
-      SUSPENDED: isArabic ? "موقوف" : "Suspended",
-      DRAFT: isArabic ? "مسودة" : "Draft",
-      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
-    } satisfies Record<ProviderStatus, string>,
-
-    types: {
-      HOSPITAL: isArabic ? "مستشفى" : "Hospital",
-      MEDICAL_CENTER: isArabic ? "مركز طبي" : "Medical Center",
-      PHARMACY: isArabic ? "صيدلية" : "Pharmacy",
-      PARTNER: isArabic ? "شريك" : "Partner",
-      LAB: isArabic ? "مختبر" : "Lab",
-      CLINIC: isArabic ? "عيادة" : "Clinic",
-      OTHER: isArabic ? "أخرى" : "Other",
-      UNKNOWN: isArabic ? "غير محدد" : "Unknown",
-    } satisfies Record<ProviderType, string>,
-
-    yes: isArabic ? "نعم" : "Yes",
-    no: isArabic ? "لا" : "No",
-    notAvailable: isArabic ? "غير متوفر" : "Not available",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
+  data?: {
+    results?: unknown[];
+    items?: unknown[];
+    summary?: unknown;
+    pagination?: unknown;
   };
+  summary?: unknown;
+  pagination?: unknown;
+  count?: number;
+};
+
+const SAR_ICON = "/currency/sar.svg";
+const PAGE_SIZE = 10;
+
+const DEFAULT_VISIBLE_COLUMNS: Record<ColumnKey, boolean> = {
+  select: true,
+  provider: true,
+  type: true,
+  region: true,
+  city: true,
+  source: true,
+  orders: true,
+  contracts: true,
+  products: true,
+  discount: true,
+  featured: true,
+  status: true,
+  createdAt: true,
+  actions: true,
+};
+
+const translations = {
+  ar: {
+    title: "مقدمو الخدمة",
+    subtitle: "إدارة شبكة مقدمي الخدمة، التصنيفات، التعاقدات، والطلبات.",
+    create: "إضافة مقدم خدمة",
+    import: "استيراد الشبكة",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    searchPlaceholder: "ابحث باسم مقدم الخدمة أو المدينة أو الكود...",
+    totalProviders: "إجمالي النتائج",
+    activeProviders: "النشطون",
+    featuredProviders: "المميزون",
+    importedProviders: "مستوردة من الشبكة",
+    totalOrders: "عدد الطلبات",
+    provider: "مقدم الخدمة",
+    type: "التصنيف",
+    region: "المنطقة",
+    city: "المدينة",
+    source: "المصدر",
+    orders: "الطلبات",
+    contracts: "العقود",
+    products: "المنتجات",
+    discount: "الخصم",
+    featured: "مميز",
+    status: "الحالة",
+    createdAt: "تاريخ الإنشاء",
+    actions: "الإجراءات",
+    columns: "الأعمدة",
+    sort: "الترتيب",
+    selected: "محدد",
+    allStatuses: "كل الحالات",
+    active: "نشط",
+    inactive: "غير نشط",
+    suspended: "موقوف",
+    draft: "مسودة",
+    allTypes: "كل التصنيفات",
+    hospital: "مستشفى",
+    medicalCenter: "مركز طبي",
+    pharmacy: "صيدلية",
+    lab: "مختبر",
+    clinic: "عيادة",
+    partner: "شريك",
+    other: "أخرى",
+    allRegions: "كل المناطق",
+    allCities: "كل المدن",
+    allFeatured: "كل المميز",
+    featuredOnly: "المميز فقط",
+    notFeatured: "غير المميز",
+    allSources: "كل المصادر",
+    imported: "مستوردة من الشبكة",
+    manual: "إدخال يدوي",
+    allContracts: "كل التعاقد",
+    contracted: "متعاقد",
+    notContracted: "غير متعاقد",
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    nameSort: "الاسم",
+    arabicName: "الاسم العربي",
+    englishName: "الاسم الإنجليزي",
+    mostOrders: "الأكثر طلبات",
+    highestDiscount: "الأعلى خصمًا",
+    contractedSort: "الأكثر تعاقدًا",
+    from: "من",
+    to: "إلى",
+    activeFilters: "فلاتر مفعلة",
+    clearSelection: "إلغاء التحديد",
+    view: "عرض التفاصيل",
+    copyName: "نسخ الاسم",
+    copyCode: "نسخ الكود",
+    copied: "تم النسخ",
+    yes: "نعم",
+    no: "لا",
+    noDataTitle: "لا يوجد مقدمو خدمة بعد",
+    noDataDesc: "عند إضافة أو استيراد مقدمي الخدمة سيظهرون هنا.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+    errorTitle: "تعذر تحميل مقدمي الخدمة",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير مقدمي الخدمة",
+    generatedAt: "تاريخ الطباعة",
+    showing: "عرض",
+    rows: "صفوف",
+    page: "صفحة",
+    of: "من",
+    next: "التالي",
+    previous: "السابق",
+    unknown: "غير محدد",
+    network: "الشبكة الطبية",
+    maxDiscount: "أعلى خصم",
+  },
+  en: {
+    title: "Providers",
+    subtitle: "Manage service providers, categories, contracts, and orders.",
+    create: "Add Provider",
+    import: "Import Network",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    searchPlaceholder: "Search provider name, city, or code...",
+    totalProviders: "Total results",
+    activeProviders: "Active",
+    featuredProviders: "Featured",
+    importedProviders: "Imported network",
+    totalOrders: "Orders",
+    provider: "Provider",
+    type: "Type",
+    region: "Region",
+    city: "City",
+    source: "Source",
+    orders: "Orders",
+    contracts: "Contracts",
+    products: "Products",
+    discount: "Discount",
+    featured: "Featured",
+    status: "Status",
+    createdAt: "Created at",
+    actions: "Actions",
+    columns: "Columns",
+    sort: "Sort",
+    selected: "Selected",
+    allStatuses: "All statuses",
+    active: "Active",
+    inactive: "Inactive",
+    suspended: "Suspended",
+    draft: "Draft",
+    allTypes: "All types",
+    hospital: "Hospital",
+    medicalCenter: "Medical center",
+    pharmacy: "Pharmacy",
+    lab: "Lab",
+    clinic: "Clinic",
+    partner: "Partner",
+    other: "Other",
+    allRegions: "All regions",
+    allCities: "All cities",
+    allFeatured: "All featured",
+    featuredOnly: "Featured only",
+    notFeatured: "Not featured",
+    allSources: "All sources",
+    imported: "Imported network",
+    manual: "Manual entry",
+    allContracts: "All contracts",
+    contracted: "Contracted",
+    notContracted: "Not contracted",
+    newest: "Newest",
+    oldest: "Oldest",
+    nameSort: "Name",
+    arabicName: "Arabic name",
+    englishName: "English name",
+    mostOrders: "Most orders",
+    highestDiscount: "Highest discount",
+    contractedSort: "Most contracted",
+    from: "From",
+    to: "To",
+    activeFilters: "Active filters",
+    clearSelection: "Clear selection",
+    view: "View details",
+    copyName: "Copy name",
+    copyCode: "Copy code",
+    copied: "Copied",
+    yes: "Yes",
+    no: "No",
+    noDataTitle: "No providers yet",
+    noDataDesc: "Added or imported providers will appear here.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other results.",
+    errorTitle: "Unable to load providers",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "Providers report",
+    generatedAt: "Generated at",
+    showing: "Showing",
+    rows: "Rows",
+    page: "Page",
+    of: "of",
+    next: "Next",
+    previous: "Previous",
+    unknown: "Unknown",
+    network: "Medical network",
+    maxDiscount: "Max discount",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-/* ============================================================
-   Data Helpers
-============================================================ */
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-function pickString(...values: unknown[]): string {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
+}
 
-    const text = String(value).trim();
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
 
-    if (text) return text;
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
-  return "";
+  return fallback;
 }
 
-function pickNumber(...values: unknown[]): number {
-  for (const value of values) {
-    const numericValue = Number(value);
-
-    if (Number.isFinite(numericValue)) return numericValue;
-  }
-
-  return 0;
-}
-
-function pickBoolean(value: unknown): boolean {
+function toBoolean(value: unknown) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
 
-  const text = String(value || "").trim().toLowerCase();
-
-  return ["1", "true", "yes", "on", "نعم"].includes(text);
-}
-
-function normalizeStatus(value: unknown): ProviderStatus {
-  const status = String(value || "").trim().toUpperCase();
-
-  if (["ACTIVE", "INACTIVE", "SUSPENDED", "DRAFT"].includes(status)) {
-    return status as ProviderStatus;
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "on", "نعم"].includes(value.toLowerCase());
   }
 
-  return "UNKNOWN";
+  return false;
 }
 
-function normalizeProviderType(value: unknown): ProviderType {
-  const type = String(value || "").trim().toUpperCase();
-
-  if (
-    [
-      "HOSPITAL",
-      "MEDICAL_CENTER",
-      "PHARMACY",
-      "PARTNER",
-      "LAB",
-      "CLINIC",
-      "OTHER",
-    ].includes(type)
-  ) {
-    return type as ProviderType;
-  }
-
-  return "UNKNOWN";
-}
-
-function normalizeProvider(item: unknown): ProviderRow {
-  const obj = asRecord(item);
-
-  const name = pickString(obj.name, obj.provider_name, obj.title);
-  const nameAr = pickString(obj.name_ar, obj.arabic_name, obj.nameAr);
-  const nameEn = pickString(obj.name_en, obj.english_name, obj.nameEn);
-
-  return {
-    id: pickString(obj.id, obj.pk, obj.provider_id),
-    name,
-    nameAr,
-    nameEn,
-    displayNameAr: pickString(obj.display_name_ar, nameAr, name),
-    displayNameEn: pickString(obj.display_name_en, nameEn, name),
-    code: pickString(obj.code, obj.provider_code),
-    providerType: normalizeProviderType(obj.provider_type ?? obj.type),
-    status: normalizeStatus(obj.status),
-    contactPerson: pickString(obj.contact_person, obj.contactPerson),
-    phone: pickString(obj.phone),
-    mobile: pickString(obj.mobile),
-    email: pickString(obj.email),
-    website: pickString(obj.website),
-    region: pickString(obj.region),
-    city: pickString(obj.city),
-    area: pickString(obj.area),
-    street: pickString(obj.street),
-    address: pickString(obj.address),
-    googleMapsLink: pickString(obj.google_maps_link, obj.googleMapsLink),
-    sourceCategory: pickString(obj.source_category, obj.sourceCategory),
-    importSource: pickString(obj.import_source, obj.importSource),
-    externalReference: pickString(obj.external_reference, obj.externalReference),
-    ordersCount: pickNumber(
-      obj.orders_count,
-      obj.order_count,
-      obj.total_orders,
-      obj.requests_count,
-      obj.completed_orders_count,
-    ),
-    notes: pickString(obj.notes),
-    isFeatured: pickBoolean(obj.is_featured ?? obj.isFeatured),
-    createdAt: pickString(obj.created_at, obj.createdAt),
-    updatedAt: pickString(obj.updated_at, obj.updatedAt),
-  };
-}
-
-function extractProviders(payload: ProvidersApiEnvelope | null): ProviderRow[] {
-  if (!payload) return [];
-
-  const data = asRecord(payload.data);
-
-  const source =
-    payload.results ||
-    payload.items ||
-    payload.providers ||
-    (Array.isArray(payload.data) ? payload.data : undefined) ||
-    (Array.isArray(data.results) ? data.results : undefined) ||
-    (Array.isArray(data.items) ? data.items : undefined) ||
-    (Array.isArray(data.providers) ? data.providers : undefined) ||
-    [];
-
-  return source
-    .map(normalizeProvider)
-    .filter(
-      (provider) =>
-        provider.id || provider.name || provider.nameAr || provider.nameEn,
-    );
-}
-
-function buildSummary(
-  providers: ProviderRow[],
-  remoteSummary?: Partial<ProvidersSummary>,
-): ProvidersSummary {
-  return {
-    total_providers: Number(remoteSummary?.total_providers) || providers.length,
-    active_providers:
-      Number(remoteSummary?.active_providers) ||
-      providers.filter((provider) => provider.status === "ACTIVE").length,
-    inactive_providers:
-      Number(remoteSummary?.inactive_providers) ||
-      providers.filter((provider) => provider.status === "INACTIVE").length,
-    suspended_providers:
-      Number(remoteSummary?.suspended_providers) ||
-      providers.filter((provider) => provider.status === "SUSPENDED").length,
-    draft_providers:
-      Number(remoteSummary?.draft_providers) ||
-      providers.filter((provider) => provider.status === "DRAFT").length,
-    hospitals_count:
-      Number(remoteSummary?.hospitals_count) ||
-      providers.filter((provider) => provider.providerType === "HOSPITAL")
-        .length,
-    medical_centers_count:
-      Number(remoteSummary?.medical_centers_count) ||
-      providers.filter(
-        (provider) => provider.providerType === "MEDICAL_CENTER",
-      ).length,
-    pharmacies_count:
-      Number(remoteSummary?.pharmacies_count) ||
-      providers.filter((provider) => provider.providerType === "PHARMACY")
-        .length,
-    labs_count:
-      Number(remoteSummary?.labs_count) ||
-      providers.filter((provider) => provider.providerType === "LAB").length,
-    clinics_count:
-      Number(remoteSummary?.clinics_count) ||
-      providers.filter((provider) => provider.providerType === "CLINIC").length,
-    partners_count:
-      Number(remoteSummary?.partners_count) ||
-      providers.filter((provider) => provider.providerType === "PARTNER")
-        .length,
-    others_count:
-      Number(remoteSummary?.others_count) ||
-      providers.filter((provider) => provider.providerType === "OTHER").length,
-    featured_providers:
-      Number(remoteSummary?.featured_providers) ||
-      providers.filter((provider) => provider.isFeatured).length,
-    imported_providers:
-      Number(remoteSummary?.imported_providers) ||
-      providers.filter((provider) => provider.importSource).length,
-    manual_providers:
-      Number(remoteSummary?.manual_providers) ||
-      providers.filter((provider) => !provider.importSource).length,
-    total_orders:
-      Number(remoteSummary?.total_orders) ||
-      providers.reduce((total, provider) => total + provider.ordersCount, 0),
-  };
-}
-
-function formatNumber(value: number | string): string {
-  const numericValue = Number(value);
-
-  if (!Number.isFinite(numericValue)) return "0";
-
+function formatInteger(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(numericValue);
+  }).format(toNumber(value));
 }
 
-function escapeHtml(value: string | number) {
+function formatMoney(value: unknown) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(toNumber(value));
+}
+
+function formatPercent(value: unknown) {
+  return `${formatMoney(value)}%`;
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).slice(0, 10);
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -799,759 +497,948 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function providerTypeLabel(type: ProviderType, locale: AppLocale) {
-  return dictionary(locale).types[type] || dictionary(locale).types.UNKNOWN;
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
+  }
+
+  return envBase;
 }
 
-function providerStatusLabel(status: ProviderStatus, locale: AppLocale) {
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const base = getApiBaseUrl();
+  const query = params?.toString();
+
+  return `${base}${path}${query ? `?${query}` : ""}`;
+}
+
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
+
+async function fetchJson<T>(
+  url: string,
+  options?: {
+    signal?: AbortSignal;
+  },
+): Promise<T> {
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal: options?.signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  if (!payload) {
+    throw new Error("Unexpected non-JSON response from server.");
+  }
+
+  return payload as T;
+}
+
+function extractProviders(payload: ProvidersApiResponse) {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+
+  if (payload.data && typeof payload.data === "object") {
+    if (Array.isArray(payload.data.results)) return payload.data.results;
+    if (Array.isArray(payload.data.items)) return payload.data.items;
+  }
+
+  return [];
+}
+
+function extractSummary(payload: ProvidersApiResponse) {
+  if (payload.summary && typeof payload.summary === "object") return payload.summary;
+
+  if (
+    payload.data &&
+    typeof payload.data === "object" &&
+    payload.data.summary &&
+    typeof payload.data.summary === "object"
+  ) {
+    return payload.data.summary;
+  }
+
+  return {};
+}
+
+function extractPagination(payload: ProvidersApiResponse): PaginationState {
+  const rootPagination = asRecord(payload.pagination);
+  const dataPagination = asRecord(asRecord(payload.data).pagination);
+  const pagination = Object.keys(dataPagination).length ? dataPagination : rootPagination;
+
+  const count = toNumber(
+    pagination.count ??
+      pagination.total_count ??
+      pagination.total ??
+      payload.count,
+    0,
+  );
+
+  const page = toNumber(pagination.page ?? pagination.current_page, 1);
+  const pageSize = toNumber(pagination.page_size ?? pagination.per_page, PAGE_SIZE);
+  const totalPages = Math.max(
+    toNumber(
+      pagination.total_pages ??
+        pagination.pages ??
+        Math.ceil(count / Math.max(pageSize, 1)),
+      1,
+    ),
+    1,
+  );
+
+  return {
+    count,
+    page,
+    page_size: pageSize,
+    total_pages: totalPages,
+    has_next: toBoolean(pagination.has_next) || page < totalPages,
+    has_previous: toBoolean(pagination.has_previous) || page > 1,
+  };
+}
+
+function normalizeProvider(value: unknown): ProviderRecord {
+  const item = asRecord(value);
+
+  const nameAr = normalizeText(item.name_ar);
+  const nameEn = normalizeText(item.name_en);
+  const name = normalizeText(
+    item.name || item.display_name || nameAr || nameEn,
+    `#${normalizeText(item.id)}`,
+  );
+
+  return {
+    id: toNumber(item.id),
+    name,
+    name_ar: nameAr,
+    name_en: nameEn,
+    code: normalizeText(item.code || item.provider_code),
+    provider_type: normalizeText(item.provider_type || item.type).toUpperCase(),
+    status: normalizeText(item.status).toUpperCase(),
+    region: normalizeText(item.region),
+    area: normalizeText(item.area),
+    city: normalizeText(item.city),
+    source_category: normalizeText(item.source_category),
+    import_source: normalizeText(item.import_source),
+    external_reference: normalizeText(item.external_reference),
+    is_featured: toBoolean(item.is_featured),
+    phone: normalizeText(item.phone || item.phone_number || item.mobile),
+    email: normalizeText(item.email),
+    website: normalizeText(item.website),
+    address: normalizeText(item.address),
+    orders_count: toNumber(item.orders_count || item.order_count || item.total_orders),
+    active_contracts_count: toNumber(item.active_contracts_count),
+    contracted_products_count: toNumber(item.contracted_products_count),
+    highest_discount_percent: toNumber(
+      item.highest_discount_percent ||
+        item.max_discount_percent ||
+        item.discount_percent ||
+        item.discount_percentage,
+    ),
+    has_active_contract: toBoolean(item.has_active_contract || item.has_active_contracts),
+    created_at: normalizeText(item.created_at) || null,
+    updated_at: normalizeText(item.updated_at) || null,
+  };
+}
+
+function normalizeSummary(value: unknown): ProvidersSummary {
+  const item = asRecord(value);
+
+  return {
+    total_providers: toNumber(item.total_providers),
+    active_providers: toNumber(item.active_providers),
+    inactive_providers: toNumber(item.inactive_providers),
+    suspended_providers: toNumber(item.suspended_providers),
+    draft_providers: toNumber(item.draft_providers),
+    hospitals_count: toNumber(item.hospitals_count),
+    medical_centers_count: toNumber(item.medical_centers_count),
+    pharmacies_count: toNumber(item.pharmacies_count),
+    labs_count: toNumber(item.labs_count),
+    clinics_count: toNumber(item.clinics_count),
+    partners_count: toNumber(item.partners_count),
+    others_count: toNumber(item.others_count),
+    featured_providers: toNumber(item.featured_providers),
+    imported_providers: toNumber(item.imported_providers),
+    manual_providers: toNumber(item.manual_providers),
+    total_orders: toNumber(item.total_orders),
+    contracted_providers: toNumber(
+      item.contracted_providers ||
+        item.providers_with_active_contracts ||
+        item.active_contracts_providers,
+    ),
+    contracted_products_count: toNumber(item.contracted_products_count),
+    highest_discount_percent: toNumber(
+      item.highest_discount_percent || item.max_discount_percent,
+    ),
+    providers_with_discounts: toNumber(item.providers_with_discounts),
+  };
+}
+
+function getStatusLabel(status: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(status).toUpperCase();
+
+  if (normalized === "ACTIVE") return t.active;
+  if (normalized === "INACTIVE") return t.inactive;
+  if (normalized === "SUSPENDED") return t.suspended;
+  if (normalized === "DRAFT") return t.draft;
+
+  return normalized || t.unknown;
+}
+
+function getStatusClass(status: string) {
+  const normalized = normalizeText(status).toUpperCase();
+
+  if (normalized === "ACTIVE") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  if (normalized === "SUSPENDED") {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+  }
+
+  if (normalized === "INACTIVE" || normalized === "DRAFT") {
+    return "border-muted bg-muted/40 text-muted-foreground hover:bg-muted/40";
+  }
+
+  return "border-muted bg-muted/40 text-muted-foreground hover:bg-muted/40";
+}
+
+function getProviderTypeLabel(type: string, locale: Locale) {
+  const t = translations[locale];
+  const normalized = normalizeText(type).toUpperCase();
+
+  if (normalized === "HOSPITAL") return t.hospital;
+  if (normalized === "MEDICAL_CENTER") return t.medicalCenter;
+  if (normalized === "PHARMACY") return t.pharmacy;
+  if (normalized === "LAB") return t.lab;
+  if (normalized === "CLINIC") return t.clinic;
+  if (normalized === "PARTNER") return t.partner;
+  if (normalized === "OTHER") return t.other;
+
+  return normalized || t.unknown;
+}
+
+function SarIcon({ className }: { className?: string }) {
   return (
-    dictionary(locale).statuses[status] || dictionary(locale).statuses.UNKNOWN
+    <Image
+      src={SAR_ICON}
+      alt="SAR"
+      width={14}
+      height={14}
+      className={cn("inline-block h-3.5 w-3.5 object-contain", className)}
+      unoptimized
+    />
   );
 }
 
-function getProviderIcon(type: ProviderType): LucideIcon {
-  if (type === "HOSPITAL") return Hospital;
-  if (type === "MEDICAL_CENTER") return Stethoscope;
-  if (type === "LAB") return TestTube2;
-  if (type === "CLINIC") return Stethoscope;
-  if (type === "PHARMACY") return ShieldCheck;
-
-  return Building2;
-}
-
-function getStatusBadgeClass(status: ProviderStatus) {
-  if (status === "ACTIVE") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
-  }
-
-  if (status === "SUSPENDED") {
-    return "border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-50";
-  }
-
-  if (status === "DRAFT") {
-    return "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-50";
-  }
-
-  if (status === "INACTIVE") {
-    return "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-50";
-  }
-
-  return "border-slate-200 bg-white text-slate-700";
-}
-
-function copyText(value: string, successMessage: string) {
-  if (!value) return;
-
-  navigator.clipboard
-    ?.writeText(value)
-    .then(() => toast.success(successMessage))
-    .catch(() => toast.success(successMessage));
-}
-
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function buildExcelWorkbook({
-  locale,
-  providers,
-  summary,
-}: {
-  locale: AppLocale;
-  providers: ProviderRow[];
-  summary: ProvidersSummary;
-}) {
-  const t = dictionary(locale);
-  const isArabic = locale === "ar";
-
-  const summaryRows: Array<[string, string | number]> = [
-    [t.totalProviders, summary.total_providers],
-    [t.activeProviders, summary.active_providers],
-    [t.featuredProviders, summary.featured_providers],
-    [t.importedProviders, summary.imported_providers],
-    [t.ordersCount, summary.total_orders],
-  ];
-
-  const summaryHtml = summaryRows
-    .map(
-      ([label, value]) => `
-        <tr>
-          <td style="font-weight:700;background:#f3f4f6;">${escapeHtml(label)}</td>
-          <td>${escapeHtml(value)}</td>
-        </tr>
-      `,
-    )
-    .join("");
-
-  const rows = providers
-    .map(
-      (provider) => `
-        <tr>
-          <td>${escapeHtml(provider.code || "-")}</td>
-          <td>${escapeHtml(provider.nameAr || provider.displayNameAr || "-")}</td>
-          <td>${escapeHtml(provider.nameEn || provider.displayNameEn || "-")}</td>
-          <td>${escapeHtml(providerTypeLabel(provider.providerType, locale))}</td>
-          <td>${escapeHtml([provider.region, provider.city, provider.area].filter(Boolean).join(" - ") || "-")}</td>
-          <td>${escapeHtml(provider.mobile || provider.phone || provider.email || "-")}</td>
-          <td>${escapeHtml(provider.ordersCount)}</td>
-          <td>${escapeHtml(providerStatusLabel(provider.status, locale))}</td>
-          <td>${escapeHtml(provider.isFeatured ? t.yes : t.no)}</td>
-        </tr>
-      `,
-    )
-    .join("");
-
-  return `
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-      </head>
-      <body>
-        <h2>${escapeHtml(t.title)}</h2>
-        <table border="1">
-          <tbody>${summaryHtml}</tbody>
-        </table>
-        <br />
-        <table border="1">
-          <thead>
-            <tr>
-              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.code)}</th>
-              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.nameAr)}</th>
-              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.nameEn)}</th>
-              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.type)}</th>
-              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.location)}</th>
-              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.contact)}</th>
-              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.orders)}</th>
-              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.table.status)}</th>
-              <th style="background:#432a58;color:#ffffff;">${escapeHtml(t.featuredProviders)}</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </body>
-    </html>
-  `;
-}
-
-function downloadExcelFile(options: {
-  locale: AppLocale;
-  providers: ProviderRow[];
-  summary: ProvidersSummary;
-}) {
-  const html = buildExcelWorkbook(options);
-  const blob = new Blob(["\ufeff", html], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-
-  link.href = url;
-  link.download = `primey-care-providers-${new Date()
-    .toISOString()
-    .slice(0, 10)}.xls`;
-
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  providers,
-  summary,
-}: {
-  locale: AppLocale;
-  providers: ProviderRow[];
-  summary: ProvidersSummary;
-}) {
-  const t = dictionary(locale);
-  const isArabic = locale === "ar";
-  const now = new Date().toLocaleString("en-US");
-
-  const rows = providers
-    .map(
-      (provider) => `
-        <tr>
-          <td>${escapeHtml(provider.code || "-")}</td>
-          <td>${escapeHtml(provider.nameAr || provider.displayNameAr || "-")}</td>
-          <td>${escapeHtml(provider.nameEn || provider.displayNameEn || "-")}</td>
-          <td>${escapeHtml(providerTypeLabel(provider.providerType, locale))}</td>
-          <td>${escapeHtml([provider.region, provider.city, provider.area].filter(Boolean).join(" - ") || "-")}</td>
-          <td>${escapeHtml(provider.mobile || provider.phone || provider.email || "-")}</td>
-          <td>${escapeHtml(provider.ordersCount)}</td>
-          <td>${escapeHtml(providerStatusLabel(provider.status, locale))}</td>
-        </tr>
-      `,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(t.title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #ffffff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-          }
-          h1 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: 800;
-          }
-          .meta {
-            margin-top: 8px;
-            color: #6b7280;
-            font-size: 12px;
-          }
-          .cards {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            margin-bottom: 18px;
-          }
-          .card {
-            border: 1px solid #e5e7eb;
-            border-radius: 14px;
-            padding: 12px;
-          }
-          .card span {
-            display: block;
-            color: #6b7280;
-            font-size: 11px;
-          }
-          .card strong {
-            display: block;
-            margin-top: 6px;
-            font-size: 18px;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 11px;
-          }
-          th,
-          td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-            text-align: ${isArabic ? "right" : "left"};
-            vertical-align: top;
-          }
-          th { background: #f3f4f6; }
-          @page { size: A4 landscape; margin: 10mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-
-      <body>
-        <div class="header">
-          <div>
-            <h1>${escapeHtml(t.title)}</h1>
-            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(now)}</div>
-          </div>
-          <strong>Primey Care</strong>
-        </div>
-
-        <div class="cards">
-          <div class="card">
-            <span>${escapeHtml(t.totalProviders)}</span>
-            <strong>${escapeHtml(formatNumber(summary.total_providers))}</strong>
-          </div>
-          <div class="card">
-            <span>${escapeHtml(t.activeProviders)}</span>
-            <strong>${escapeHtml(formatNumber(summary.active_providers))}</strong>
-          </div>
-          <div class="card">
-            <span>${escapeHtml(t.importedProviders)}</span>
-            <strong>${escapeHtml(formatNumber(summary.imported_providers))}</strong>
-          </div>
-          <div class="card">
-            <span>${escapeHtml(t.ordersCount)}</span>
-            <strong>${escapeHtml(formatNumber(summary.total_orders))}</strong>
-          </div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>${escapeHtml(t.table.code)}</th>
-              <th>${escapeHtml(t.table.nameAr)}</th>
-              <th>${escapeHtml(t.table.nameEn)}</th>
-              <th>${escapeHtml(t.table.type)}</th>
-              <th>${escapeHtml(t.table.location)}</th>
-              <th>${escapeHtml(t.table.contact)}</th>
-              <th>${escapeHtml(t.table.orders)}</th>
-              <th>${escapeHtml(t.table.status)}</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
-}
-
-/* ============================================================
-   UI Helpers
-============================================================ */
-
-function SkeletonLine({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-full bg-muted ${className}`} />;
-}
-
-function DashboardSkeleton() {
+function MoneyValue({ value }: { value: unknown }) {
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        {Array.from({ length: 5 }).map((_, index) => (
-          <Card key={index} className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <SkeletonLine className="h-4 w-28" />
-              <SkeletonLine className="h-8 w-20" />
-              <SkeletonLine className="h-3 w-36" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="space-y-3 p-5">
-            {Array.from({ length: 8 }).map((_, index) => (
-              <SkeletonLine key={index} className="h-12 w-full rounded-xl" />
-            ))}
-          </CardContent>
-        </Card>
-        <Card className="rounded-2xl border bg-card shadow-sm">
-          <CardContent className="space-y-3 p-5">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <SkeletonLine key={index} className="h-10 w-full rounded-xl" />
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <span className="inline-flex items-center gap-1 whitespace-nowrap font-medium tabular-nums text-foreground">
+      <span>{formatMoney(value)}</span>
+      <SarIcon />
+    </span>
   );
 }
 
 function KpiCard({
-  icon: Icon,
   title,
   value,
-  description,
+  trend,
+  icon: Icon,
 }: {
-  icon: LucideIcon;
   title: string;
-  value: number;
-  description: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <Card className="rounded-2xl border bg-card shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm text-muted-foreground">{title}</p>
-            <p className="mt-2 text-2xl font-bold tracking-tight">
-              {formatNumber(value)}
-            </p>
-            <p className="mt-1 truncate text-xs text-muted-foreground">
-              {description}
-            </p>
-          </div>
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-muted">
-            <Icon className="h-5 w-5" />
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
+
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
           </div>
+        </CardAction>
+
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
         </div>
-      </CardContent>
+      </CardHeader>
     </Card>
   );
 }
 
-function ActionCard({
-  href,
-  icon: Icon,
-  title,
-  description,
-}: {
-  href: string;
-  icon: LucideIcon;
-  title: string;
-  description: string;
-}) {
+function StatusBadge({ status, locale }: { status: string; locale: Locale }) {
   return (
-    <Link
-      href={href}
-      className="group block rounded-2xl border bg-background p-4 transition hover:border-primary/40 hover:bg-muted/30"
+    <Badge
+      variant="outline"
+      className={cn(
+        "max-w-full rounded-full px-2.5 py-1 text-xs font-medium",
+        getStatusClass(status),
+      )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-            <Icon className="h-5 w-5" />
-          </div>
-
-          <div>
-            <p className="font-semibold">{title}</p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              {description}
-            </p>
-          </div>
-        </div>
-
-        <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:text-primary" />
-      </div>
-    </Link>
+      <span className="truncate">{getStatusLabel(status, locale)}</span>
+    </Badge>
   );
 }
 
-function TypeDistributionRow({
-  icon: Icon,
-  label,
-  value,
-  total,
+function HeaderSortButton({
+  children,
+  active,
+  onClick,
 }: {
-  icon: LucideIcon;
-  label: string;
-  value: number;
-  total: number;
+  children: React.ReactNode;
+  active?: boolean;
+  onClick: () => void;
 }) {
-  const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
-
   return (
-    <div className="space-y-2 rounded-xl border bg-background p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
-            <Icon className="h-4 w-4" />
-          </div>
-          <span className="text-sm font-medium">{label}</span>
-        </div>
-
-        <span className="text-sm font-bold">{formatNumber(value)}</span>
-      </div>
-
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-primary"
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex w-full items-center justify-start gap-1 truncate text-xs font-semibold transition hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      <span className="truncate">{children}</span>
+      <ArrowUpDown className="h-3.5 w-3.5 shrink-0" />
+    </button>
   );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function TableHeaderCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <TableHead
+      className={cn(
+        "h-11 whitespace-nowrap px-4 text-right align-middle text-xs font-semibold text-muted-foreground",
+        className,
+      )}
+    >
+      {children}
+    </TableHead>
+  );
+}
+
+function TableBodyCell({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className: string;
+}) {
+  return (
+    <TableCell
+      className={cn(
+        "h-[62px] overflow-hidden px-4 text-right align-middle",
+        className,
+      )}
+    >
+      {children}
+    </TableCell>
+  );
+}
 
 export default function SystemProvidersPage() {
-  const auth = useAuth() as unknown;
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [providers, setProviders] = React.useState<ProviderRecord[]>([]);
+  const [summary, setSummary] = React.useState<ProvidersSummary>(() => normalizeSummary({}));
+  const [pagination, setPagination] = React.useState<PaginationState>({
+    count: 0,
+    page: 1,
+    page_size: PAGE_SIZE,
+    total_pages: 1,
+    has_next: false,
+    has_previous: false,
+  });
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [providers, setProviders] = useState<ProviderRow[]>([]);
-  const [summary, setSummary] = useState<ProvidersSummary>(DEFAULT_SUMMARY);
-  const [search, setSearch] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState("");
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const [searchInput, setSearchInput] = React.useState("");
+  const [search, setSearch] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState<ProviderStatus>("all");
+  const [typeFilter, setTypeFilter] = React.useState<ProviderType>("all");
+  const [regionFilter, setRegionFilter] = React.useState("all");
+  const [cityFilter, setCityFilter] = React.useState("all");
+  const [featuredFilter, setFeaturedFilter] = React.useState<FeaturedFilter>("all");
+  const [sourceFilter, setSourceFilter] = React.useState<SourceFilter>("all");
+  const [contractFilter, setContractFilter] = React.useState<ContractFilter>("all");
+  const [sortKey, setSortKey] = React.useState<SortKey>("newest");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
+  const [selectedIds, setSelectedIds] = React.useState<Array<number>>([]);
+  const [visibleColumns, setVisibleColumns] =
+    React.useState<Record<ColumnKey, boolean>>(DEFAULT_VISIBLE_COLUMNS);
+  const [page, setPage] = React.useState(1);
 
-  const canViewProviders = hasSafePermission(
-    auth,
-    ["providers.view", "providers.list"],
-    "view",
-  );
+  const didLoadRef = React.useRef(false);
 
-  const canCreateProviders = hasSafePermission(
-    auth,
-    ["providers.create"],
-    "action",
-  );
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
 
-  const canImportProviders = hasSafePermission(
-    auth,
-    ["providers.import", "providers.create"],
-    "action",
-  );
+  React.useEffect(() => {
+    const applyLocale = () => setLocale(getInitialLocale());
 
-  const canExportProviders = hasSafePermission(
-    auth,
-    ["providers.export", "reports.export"],
-    "action",
-  );
+    applyLocale();
 
-  const canPrintProviders = hasSafePermission(
-    auth,
-    ["providers.print", "reports.print"],
-    "action",
-  );
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-  const canViewContracts = hasSafePermission(
-    auth,
-    ["contracts.view", "contracts.list"],
-    "view",
-  );
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
 
-  const loadProviders = useCallback(
-    async (showToast = false) => {
-      if (!canViewProviders) {
-        setIsLoading(false);
-        setProviders([]);
-        setSummary(DEFAULT_SUMMARY);
-        return;
-      }
+  React.useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 450);
+
+    return () => window.clearTimeout(timeout);
+  }, [searchInput]);
+
+  const loadProviders = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
 
       try {
-        setIsLoading(true);
-        setErrorMessage("");
+        if (!silent) setLoading(true);
 
-        const response = await fetch(
-          apiUrl("/api/providers/?page=1&page_size=8&ordering=-created_at"),
-          {
-            method: "GET",
-            credentials: "include",
-            headers: {
-              Accept: "application/json",
-            },
-          },
+        setRefreshing(true);
+        setError("");
+
+        const params = new URLSearchParams({
+          page: String(page),
+          page_size: String(PAGE_SIZE),
+        });
+
+        if (search) {
+          params.set("search", search);
+          params.set("q", search);
+        }
+
+        if (statusFilter !== "all") params.set("status", statusFilter);
+        if (typeFilter !== "all") params.set("provider_type", typeFilter);
+        if (regionFilter !== "all") params.set("region", regionFilter);
+        if (cityFilter !== "all") params.set("city", cityFilter);
+
+        if (featuredFilter === "featured") params.set("is_featured", "true");
+        if (featuredFilter === "not_featured") params.set("is_featured", "false");
+
+        if (sourceFilter !== "all") params.set("source", sourceFilter);
+
+        if (contractFilter === "contracted") params.set("has_active_contract", "true");
+        if (contractFilter === "not_contracted") params.set("has_active_contract", "false");
+
+        if (dateFrom) {
+          params.set("date_from", dateFrom);
+          params.set("created_from", dateFrom);
+        }
+
+        if (dateTo) {
+          params.set("date_to", dateTo);
+          params.set("created_to", dateTo);
+        }
+
+        if (sortKey === "most_orders") {
+          params.set("sort", "most_orders");
+          params.set("ordering", "-orders_count");
+        } else if (sortKey === "highest_discount") {
+          params.set("sort", "highest_discount");
+        } else if (sortKey === "contracted") {
+          params.set("sort", "contracted");
+        } else {
+          params.set("sort", sortKey);
+        }
+
+        const payload = await fetchJson<ProvidersApiResponse>(
+          makeApiUrl("/api/providers/", params),
+          { signal: controller.signal },
         );
 
-        const payload = (await response.json().catch(() => null)) as
-          | ProvidersApiEnvelope
-          | null;
+        const nextProviders = extractProviders(payload).map(normalizeProvider);
+        const nextSummary = normalizeSummary(extractSummary(payload));
+        const nextPagination = extractPagination(payload);
 
-        if (!response.ok || payload?.ok === false) {
-          throw new Error(
-            payload?.message ||
-              payload?.detail ||
-              payload?.error ||
-              `HTTP ${response.status}`,
-          );
-        }
+        setProviders(nextProviders);
+        setSummary(nextSummary);
+        setPagination(nextPagination);
+        setSelectedIds([]);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
 
-        const rows = extractProviders(payload);
-        const remoteSummary = payload?.summary || payload?.stats;
-
-        setProviders(rows);
-        setSummary(buildSummary(rows, remoteSummary));
-
-        if (showToast) {
-          toast.success(t.refreshSuccess);
-        }
-      } catch (error) {
-        console.error("Failed to load providers:", error);
         setProviders([]);
-        setSummary(DEFAULT_SUMMARY);
-        setErrorMessage(t.loadError);
-        toast.error(t.loadError);
+        setSummary(normalizeSummary({}));
+        setPagination({
+          count: 0,
+          page,
+          page_size: PAGE_SIZE,
+          total_pages: 1,
+          has_next: false,
+          has_previous: false,
+        });
+        setSelectedIds([]);
+        setError(message);
       } finally {
-        setIsLoading(false);
+        setLoading(false);
+        setRefreshing(false);
       }
+
+      return () => controller.abort();
     },
-    [canViewProviders, t.loadError, t.refreshSuccess],
+    [
+      cityFilter,
+      contractFilter,
+      dateFrom,
+      dateTo,
+      featuredFilter,
+      page,
+      regionFilter,
+      search,
+      sortKey,
+      sourceFilter,
+      statusFilter,
+      t.errorDesc,
+      typeFilter,
+    ],
   );
 
-  const filteredProviders = useMemo(() => {
-    const query = search.trim().toLowerCase();
+  React.useEffect(() => {
+    if (!didLoadRef.current) {
+      didLoadRef.current = true;
+      void loadProviders();
+      return;
+    }
 
-    if (!query) return providers;
+    void loadProviders({ silent: true });
+  }, [loadProviders]);
 
-    return providers.filter((provider) => {
-      const haystack = [
-        provider.name,
-        provider.nameAr,
-        provider.nameEn,
-        provider.displayNameAr,
-        provider.displayNameEn,
-        provider.code,
-        provider.region,
-        provider.city,
-        provider.area,
-        provider.street,
-        provider.address,
-        provider.phone,
-        provider.mobile,
-        provider.email,
-        provider.contactPerson,
-        provider.sourceCategory,
-        provider.externalReference,
-        providerTypeLabel(provider.providerType, locale),
-        providerStatusLabel(provider.status, locale),
-      ]
-        .join(" ")
-        .toLowerCase();
+  const visibleColumnCount = Object.values(visibleColumns).filter(Boolean).length || 1;
 
-      return haystack.includes(query);
+  const availableRegions = React.useMemo(() => {
+    const values = new Set<string>();
+    providers.forEach((provider) => {
+      if (provider.region) values.add(provider.region);
     });
-  }, [locale, providers, search]);
-
-  const recentProviders = useMemo(() => {
-    return [...filteredProviders]
-      .sort((a, b) => {
-        const left = new Date(a.createdAt || a.updatedAt).getTime() || 0;
-        const right = new Date(b.createdAt || b.updatedAt).getTime() || 0;
-        return right - left;
-      })
-      .slice(0, 8);
-  }, [filteredProviders]);
-
-  const topProvidersByOrders = useMemo(() => {
-    return [...providers]
-      .sort((a, b) => b.ordersCount - a.ordersCount)
-      .slice(0, 5);
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [providers]);
 
-  const typeRows = useMemo(
-    () => [
-      {
-        label: t.hospitals,
-        value: summary.hospitals_count,
-        icon: Hospital,
-      },
-      {
-        label: t.medicalCenters,
-        value: summary.medical_centers_count,
-        icon: Stethoscope,
-      },
-      {
-        label: t.clinics,
-        value: summary.clinics_count,
-        icon: Stethoscope,
-      },
-      {
-        label: t.labs,
-        value: summary.labs_count,
-        icon: TestTube2,
-      },
-      {
-        label: t.pharmacies,
-        value: summary.pharmacies_count,
-        icon: ShieldCheck,
-      },
-      {
-        label: t.partners,
-        value: summary.partners_count,
-        icon: UsersRound,
-      },
-      {
-        label: t.others,
-        value: summary.others_count,
-        icon: Building2,
-      },
-    ],
-    [summary, t],
-  );
-
-  function handleExportExcel() {
-    if (!canExportProviders) return;
-
-    downloadExcelFile({
-      locale,
-      providers: filteredProviders,
-      summary,
+  const availableCities = React.useMemo(() => {
+    const values = new Set<string>();
+    providers.forEach((provider) => {
+      if (provider.city) values.add(provider.city);
     });
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [providers]);
 
-    toast.success(t.exportSuccess);
+  const hasActiveFilters =
+    Boolean(search.trim()) ||
+    statusFilter !== "all" ||
+    typeFilter !== "all" ||
+    regionFilter !== "all" ||
+    cityFilter !== "all" ||
+    featuredFilter !== "all" ||
+    sourceFilter !== "all" ||
+    contractFilter !== "all" ||
+    sortKey !== "newest" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
+
+  const allPageSelected =
+    providers.length > 0 && providers.every((provider) => selectedIds.includes(provider.id));
+
+  function resetFilters() {
+    setSearchInput("");
+    setSearch("");
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setRegionFilter("all");
+    setCityFilter("all");
+    setFeaturedFilter("all");
+    setSourceFilter("all");
+    setContractFilter("all");
+    setSortKey("newest");
+    setDateFrom("");
+    setDateTo("");
+    setSelectedIds([]);
+    setPage(1);
   }
 
-  function handlePrint() {
-    if (!canPrintProviders) return;
+  function toggleSelectAllPage(checked: boolean) {
+    if (!checked) {
+      setSelectedIds([]);
+      return;
+    }
+
+    setSelectedIds(providers.map((provider) => provider.id));
+  }
+
+  function toggleSelectProvider(id: number, checked: boolean) {
+    setSelectedIds((current) => {
+      if (checked) return Array.from(new Set([...current, id]));
+      return current.filter((item) => item !== id);
+    });
+  }
+
+  async function copyValue(value: string) {
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t.copied);
+    } catch {
+      toast.error(t.errorDesc);
+    }
+  }
+
+  function buildExportRows() {
+    return providers.map((provider) => ({
+      provider: provider.name,
+      code: provider.code,
+      type: getProviderTypeLabel(provider.provider_type, locale),
+      region: provider.region || provider.area || "—",
+      city: provider.city || "—",
+      source: provider.import_source ? t.imported : t.manual,
+      orders: provider.orders_count,
+      contracts: provider.active_contracts_count,
+      products: provider.contracted_products_count,
+      discount: provider.highest_discount_percent,
+      featured: provider.is_featured ? t.yes : t.no,
+      status: getStatusLabel(provider.status, locale),
+      createdAt: formatDate(provider.created_at),
+    }));
+  }
+
+  function exportExcel() {
+    const rows = buildExportRows();
+
+    if (!rows.length) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+            .num { mso-number-format: "0"; }
+            .money { mso-number-format: "0.00"; }
+          </style>
+        </head>
+        <body>
+          <h2>${escapeHtml(t.printTitle)}</h2>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.provider)}</th>
+                <th>${escapeHtml("Code")}</th>
+                <th>${escapeHtml(t.type)}</th>
+                <th>${escapeHtml(t.region)}</th>
+                <th>${escapeHtml(t.city)}</th>
+                <th>${escapeHtml(t.source)}</th>
+                <th>${escapeHtml(t.orders)}</th>
+                <th>${escapeHtml(t.contracts)}</th>
+                <th>${escapeHtml(t.products)}</th>
+                <th>${escapeHtml(t.discount)}</th>
+                <th>${escapeHtml(t.featured)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.provider)}</td>
+                      <td>${escapeHtml(row.code)}</td>
+                      <td>${escapeHtml(row.type)}</td>
+                      <td>${escapeHtml(row.region)}</td>
+                      <td>${escapeHtml(row.city)}</td>
+                      <td>${escapeHtml(row.source)}</td>
+                      <td class="num">${escapeHtml(row.orders)}</td>
+                      <td class="num">${escapeHtml(row.contracts)}</td>
+                      <td class="num">${escapeHtml(row.products)}</td>
+                      <td class="money">${escapeHtml(row.discount)}</td>
+                      <td>${escapeHtml(row.featured)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-providers-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
+
+  function printPage() {
+    const rows = buildExportRows();
+
+    if (!rows.length) {
+      toast.error(t.printEmpty);
+      return;
+    }
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
 
     if (!printWindow) {
-      toast.error(t.printError);
+      toast.error(t.errorDesc);
       return;
     }
 
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        providers: filteredProviders,
-        summary,
-      }),
-    );
-    printWindow.document.close();
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(5, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            .num { direction: ltr; unicode-bidi: embed; white-space: nowrap; }
+            @media print {
+              body { padding: 16px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.showing)}: ${escapeHtml(rows.length)}</p>
+            </div>
+          </div>
 
-    toast.success(t.printReady);
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.totalProviders)}</span><strong>${escapeHtml(summary.total_providers)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.activeProviders)}</span><strong>${escapeHtml(summary.active_providers)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.featuredProviders)}</span><strong>${escapeHtml(summary.featured_providers)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.importedProviders)}</span><strong>${escapeHtml(summary.imported_providers)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.totalOrders)}</span><strong>${escapeHtml(summary.total_orders)}</strong></div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.provider)}</th>
+                <th>${escapeHtml(t.type)}</th>
+                <th>${escapeHtml(t.region)}</th>
+                <th>${escapeHtml(t.city)}</th>
+                <th>${escapeHtml(t.source)}</th>
+                <th>${escapeHtml(t.orders)}</th>
+                <th>${escapeHtml(t.contracts)}</th>
+                <th>${escapeHtml(t.products)}</th>
+                <th>${escapeHtml(t.discount)}</th>
+                <th>${escapeHtml(t.status)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.provider)}</td>
+                      <td>${escapeHtml(row.type)}</td>
+                      <td>${escapeHtml(row.region)}</td>
+                      <td>${escapeHtml(row.city)}</td>
+                      <td>${escapeHtml(row.source)}</td>
+                      <td class="num">${escapeHtml(row.orders)}</td>
+                      <td class="num">${escapeHtml(row.contracts)}</td>
+                      <td class="num">${escapeHtml(row.products)}</td>
+                      <td class="num">${escapeHtml(formatPercent(row.discount))}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
-
-    const syncAfterPaint = () => {
-      syncLocale();
-
-      window.setTimeout(() => {
-        syncLocale();
-      }, 0);
-    };
-
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
-
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authResolving) return;
-    loadProviders(false);
-  }, [authResolving, loadProviders]);
-
-  if (!authResolving && !canViewProviders) {
+  if (loading) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
+      <div className="w-full space-y-4" dir={dir}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-52" />
+            <Skeleton className="h-4 w-96" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-9 w-28" />
+          </div>
+        </div>
 
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <Card key={index} className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="min-h-[112px] px-6 py-5">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-8 w-32" />
+                <Skeleton className="h-5 w-20" />
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
+
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-80 w-full" />
           </CardContent>
         </Card>
       </div>
@@ -1559,467 +1446,813 @@ export default function SystemProvidersPage() {
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
-            className="h-10 rounded-xl"
-            onClick={() => loadProviders(true)}
-            disabled={isLoading}
+            className="h-9 rounded-lg"
+            onClick={() => void loadProviders({ silent: true })}
+            disabled={refreshing}
           >
-            {isLoading ? (
+            {refreshing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
-            <span>{t.refresh}</span>
+            {t.refresh}
           </Button>
 
-          {canExportProviders ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 rounded-xl"
-              disabled={isLoading || filteredProviders.length === 0}
-              onClick={handleExportExcel}
-            >
-              <Download className="h-4 w-4" />
-              <span>{t.exportExcel}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
 
-          {canPrintProviders ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 rounded-xl"
-              disabled={isLoading || filteredProviders.length === 0}
-              onClick={handlePrint}
-            >
-              <Printer className="h-4 w-4" />
-              <span>{t.print}</span>
-            </Button>
-          ) : null}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
 
-          {canImportProviders ? (
-            <Button asChild variant="outline" className="h-10 rounded-xl">
-              <Link href="/system/providers/import">
-                <UploadCloud className="h-4 w-4" />
-                <span>{t.importProviders}</span>
-              </Link>
-            </Button>
-          ) : null}
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/providers/import">
+              <FileUp className="h-4 w-4" />
+              {t.import}
+            </Link>
+          </Button>
 
-          {canCreateProviders ? (
-            <Button asChild className="h-10 rounded-xl">
-              <Link href="/system/providers/create">
-                <PlusCircle className="h-4 w-4" />
-                <span>{t.createProvider}</span>
-              </Link>
-            </Button>
-          ) : null}
+          <Button asChild className="h-9 rounded-lg bg-black px-4 text-white hover:bg-black/90">
+            <Link href="/system/providers/create">
+              <Plus className="h-4 w-4" />
+              {t.create}
+            </Link>
+          </Button>
         </div>
       </div>
 
-      {isLoading || authResolving ? (
-        <DashboardSkeleton />
-      ) : errorMessage ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-            <div>
-              <p className="font-semibold text-destructive">{errorMessage}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.loadErrorHint}
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-4 rounded-xl"
-                onClick={() => loadProviders(true)}
-              >
-                <RefreshCcw className="h-4 w-4" />
-                <span>{t.retry}</span>
-              </Button>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <KpiCard
+          title={t.totalProviders}
+          value={formatInteger(summary.total_providers || pagination.count)}
+          trend={`${t.showing} ${formatInteger(providers.length)}`}
+          icon={Building2}
+        />
+
+        <KpiCard
+          title={t.activeProviders}
+          value={formatInteger(summary.active_providers)}
+          trend={t.active}
+          icon={CheckCircle2}
+        />
+
+        <KpiCard
+          title={t.featuredProviders}
+          value={formatInteger(summary.featured_providers)}
+          trend={t.featured}
+          icon={Sparkles}
+        />
+
+        <KpiCard
+          title={t.importedProviders}
+          value={formatInteger(summary.imported_providers)}
+          trend={t.network}
+          icon={Layers3}
+        />
+
+        <KpiCard
+          title={t.totalOrders}
+          value={formatInteger(summary.total_orders)}
+          trend={t.orders}
+          icon={ShoppingCart}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+              <div>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
+              </div>
             </div>
+
+            <Button
+              variant="outline"
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadProviders()}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
+            </Button>
           </CardContent>
         </Card>
-      ) : (
-        <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <KpiCard
-              icon={Building2}
-              title={t.totalProviders}
-              value={summary.total_providers}
-              description={t.overview}
-            />
-            <KpiCard
-              icon={CheckCircle2}
-              title={t.activeProviders}
-              value={summary.active_providers}
-              description={t.statuses.ACTIVE}
-            />
-            <KpiCard
-              icon={Sparkles}
-              title={t.featuredProviders}
-              value={summary.featured_providers}
-              description={t.featuredProviders}
-            />
-            <KpiCard
-              icon={UploadCloud}
-              title={t.importedProviders}
-              value={summary.imported_providers}
-              description={t.importProviders}
-            />
-            <KpiCard
-              icon={TrendingUp}
-              title={t.ordersCount}
-              value={summary.total_orders}
-              description={t.ordersCount}
-            />
+      ) : null}
+
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-col gap-3">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    setStatusFilter(value as ProviderStatus);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[135px]">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <SelectValue placeholder={t.status} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allStatuses}</SelectItem>
+                    <SelectItem value="ACTIVE">{t.active}</SelectItem>
+                    <SelectItem value="INACTIVE">{t.inactive}</SelectItem>
+                    <SelectItem value="SUSPENDED">{t.suspended}</SelectItem>
+                    <SelectItem value="DRAFT">{t.draft}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={typeFilter}
+                  onValueChange={(value) => {
+                    setTypeFilter(value as ProviderType);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[155px]">
+                    <Building2 className="h-4 w-4" />
+                    <SelectValue placeholder={t.type} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allTypes}</SelectItem>
+                    <SelectItem value="HOSPITAL">{t.hospital}</SelectItem>
+                    <SelectItem value="MEDICAL_CENTER">{t.medicalCenter}</SelectItem>
+                    <SelectItem value="PHARMACY">{t.pharmacy}</SelectItem>
+                    <SelectItem value="LAB">{t.lab}</SelectItem>
+                    <SelectItem value="CLINIC">{t.clinic}</SelectItem>
+                    <SelectItem value="PARTNER">{t.partner}</SelectItem>
+                    <SelectItem value="OTHER">{t.other}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={regionFilter}
+                  onValueChange={(value) => {
+                    setRegionFilter(value);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[140px]">
+                    <MapPin className="h-4 w-4" />
+                    <SelectValue placeholder={t.region} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allRegions}</SelectItem>
+                    {availableRegions.map((region) => (
+                      <SelectItem key={region} value={region}>
+                        {region}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={cityFilter}
+                  onValueChange={(value) => {
+                    setCityFilter(value);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[140px]">
+                    <MapPin className="h-4 w-4" />
+                    <SelectValue placeholder={t.city} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allCities}</SelectItem>
+                    {availableCities.map((city) => (
+                      <SelectItem key={city} value={city}>
+                        {city}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={featuredFilter}
+                  onValueChange={(value) => {
+                    setFeaturedFilter(value as FeaturedFilter);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[140px]">
+                    <Sparkles className="h-4 w-4" />
+                    <SelectValue placeholder={t.featured} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allFeatured}</SelectItem>
+                    <SelectItem value="featured">{t.featuredOnly}</SelectItem>
+                    <SelectItem value="not_featured">{t.notFeatured}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={sourceFilter}
+                  onValueChange={(value) => {
+                    setSourceFilter(value as SourceFilter);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[165px]">
+                    <Layers3 className="h-4 w-4" />
+                    <SelectValue placeholder={t.source} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allSources}</SelectItem>
+                    <SelectItem value="imported">{t.imported}</SelectItem>
+                    <SelectItem value="manual">{t.manual}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={contractFilter}
+                  onValueChange={(value) => {
+                    setContractFilter(value as ContractFilter);
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[150px]">
+                    <ShieldCheck className="h-4 w-4" />
+                    <SelectValue placeholder={t.contracts} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.allContracts}</SelectItem>
+                    <SelectItem value="contracted">{t.contracted}</SelectItem>
+                    <SelectItem value="not_contracted">{t.notContracted}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <span className="text-xs text-muted-foreground">{t.from}</span>
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(event) => {
+                      setDateFrom(event.target.value);
+                      setPage(1);
+                    }}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
+
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <span className="text-xs text-muted-foreground">{t.to}</span>
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(event) => {
+                      setDateTo(event.target.value);
+                      setPage(1);
+                    }}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background">
+                      <ColumnsIcon className="h-4 w-4" />
+                      {t.columns}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                    <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {(
+                      [
+                        ["select", t.selected],
+                        ["provider", t.provider],
+                        ["type", t.type],
+                        ["region", t.region],
+                        ["city", t.city],
+                        ["source", t.source],
+                        ["orders", t.orders],
+                        ["contracts", t.contracts],
+                        ["products", t.products],
+                        ["discount", t.discount],
+                        ["featured", t.featured],
+                        ["status", t.status],
+                        ["createdAt", t.createdAt],
+                        ["actions", t.actions],
+                      ] as [ColumnKey, string][]
+                    ).map(([key, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={visibleColumns[key]}
+                        onCheckedChange={(checked) =>
+                          setVisibleColumns((current) => ({
+                            ...current,
+                            [key]: Boolean(checked),
+                          }))
+                        }
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg bg-background"
+                  onClick={resetFilters}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t.reset}
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="h-9 rounded-lg bg-background">
+                      <ArrowUpDown className="h-4 w-4" />
+                      {t.sort}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={locale === "ar" ? "start" : "end"} className="w-56">
+                    {(
+                      [
+                        ["newest", t.newest],
+                        ["oldest", t.oldest],
+                        ["name", t.nameSort],
+                        ["arabic_name", t.arabicName],
+                        ["english_name", t.englishName],
+                        ["most_orders", t.mostOrders],
+                        ["highest_discount", t.highestDiscount],
+                        ["contracted", t.contractedSort],
+                      ] as [SortKey, string][]
+                    ).map(([key, label]) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={sortKey === key}
+                        onCheckedChange={() => {
+                          setSortKey(key);
+                          setPage(1);
+                        }}
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {selectedIds.length > 0 ? (
+                  <Button
+                    variant="outline"
+                    className="h-9 rounded-lg bg-background"
+                    onClick={() => setSelectedIds([])}
+                  >
+                    <XCircle className="h-4 w-4" />
+                    {t.clearSelection} ({formatInteger(selectedIds.length)})
+                  </Button>
+                ) : null}
+
+                {hasActiveFilters ? (
+                  <Badge variant="secondary" className="h-9 rounded-lg px-3 text-xs font-semibold">
+                    {t.activeFilters}
+                  </Badge>
+                ) : null}
+              </div>
+            </div>
           </div>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Search className="h-5 w-5" />
-                {t.search}
-              </CardTitle>
-              <CardDescription>{t.overviewDesc}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="relative">
-                <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  placeholder={t.searchPlaceholder}
-                  className="h-11 rounded-xl ps-10"
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-              </div>
-            </CardContent>
-          </Card>
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1240px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    {visibleColumns.select ? (
+                      <TableHeaderCell className="w-[46px] px-3">
+                        <Checkbox
+                          checked={allPageSelected}
+                          onCheckedChange={(checked) =>
+                            toggleSelectAllPage(Boolean(checked))
+                          }
+                          aria-label={t.selected}
+                        />
+                      </TableHeaderCell>
+                    ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-            <div className="space-y-4">
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <ClipboardList className="h-5 w-5" />
-                      {t.recentProviders}
-                    </CardTitle>
-                    <CardDescription>{t.recentProvidersDesc}</CardDescription>
-                  </div>
+                    {visibleColumns.provider ? (
+                      <TableHeaderCell className="w-[250px]">
+                        <HeaderSortButton
+                          active={["name", "arabic_name", "english_name"].includes(sortKey)}
+                          onClick={() => {
+                            setSortKey("name");
+                            setPage(1);
+                          }}
+                        >
+                          {t.provider}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
 
-                  <Button asChild variant="outline" className="rounded-xl">
-                    <Link href="/system/providers/list">
-                      <Eye className="h-4 w-4" />
-                      <span>{t.viewAll}</span>
-                    </Link>
-                  </Button>
-                </CardHeader>
+                    {visibleColumns.type ? (
+                      <TableHeaderCell className="w-[135px]">{t.type}</TableHeaderCell>
+                    ) : null}
 
-                <CardContent>
-                  {filteredProviders.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed p-10 text-center">
-                      <Building2 className="h-10 w-10 text-muted-foreground" />
-                      <div>
-                        <p className="font-semibold">
-                          {search.trim() ? t.noSearchTitle : t.emptyTitle}
-                        </p>
-                        <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-                          {search.trim() ? t.noSearchText : t.emptyText}
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>{t.table.provider}</TableHead>
-                            <TableHead>{t.table.type}</TableHead>
-                            <TableHead>{t.table.location}</TableHead>
-                            <TableHead>{t.table.contact}</TableHead>
-                            <TableHead>{t.table.orders}</TableHead>
-                            <TableHead>{t.table.status}</TableHead>
-                            <TableHead className="text-end">
-                              {t.table.actions}
-                            </TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {recentProviders.map((provider) => {
-                            const Icon = getProviderIcon(provider.providerType);
+                    {visibleColumns.region ? (
+                      <TableHeaderCell className="w-[125px]">{t.region}</TableHeaderCell>
+                    ) : null}
 
-                            return (
-                              <TableRow key={`${provider.id}-${provider.code}`}>
-                                <TableCell>
-                                  <div className="min-w-[230px]">
-                                    <button
-                                      type="button"
-                                      className="inline-flex items-center gap-2 font-mono text-xs font-semibold text-muted-foreground hover:text-primary"
-                                      onClick={() =>
-                                        copyText(provider.code, t.copied)
-                                      }
-                                    >
-                                      <span>{provider.code || "-"}</span>
-                                      {provider.code ? (
-                                        <Copy className="h-3.5 w-3.5" />
-                                      ) : null}
-                                    </button>
+                    {visibleColumns.city ? (
+                      <TableHeaderCell className="w-[125px]">{t.city}</TableHeaderCell>
+                    ) : null}
 
-                                    <p className="mt-1 font-semibold">
-                                      {provider.nameAr ||
-                                        provider.displayNameAr ||
-                                        provider.name ||
-                                        "-"}
-                                    </p>
+                    {visibleColumns.source ? (
+                      <TableHeaderCell className="w-[140px]">{t.source}</TableHeaderCell>
+                    ) : null}
 
-                                    <p className="mt-1 text-xs text-muted-foreground">
-                                      {provider.nameEn ||
-                                        provider.displayNameEn ||
-                                        provider.sourceCategory ||
-                                        "-"}
-                                    </p>
-                                  </div>
-                                </TableCell>
+                    {visibleColumns.orders ? (
+                      <TableHeaderCell className="w-[95px]">
+                        <HeaderSortButton
+                          active={sortKey === "most_orders"}
+                          onClick={() => {
+                            setSortKey("most_orders");
+                            setPage(1);
+                          }}
+                        >
+                          {t.orders}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
 
-                                <TableCell>
-                                  <Badge
-                                    variant="outline"
-                                    className="rounded-full"
+                    {visibleColumns.contracts ? (
+                      <TableHeaderCell className="w-[95px]">{t.contracts}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.products ? (
+                      <TableHeaderCell className="w-[95px]">{t.products}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.discount ? (
+                      <TableHeaderCell className="w-[100px]">
+                        <HeaderSortButton
+                          active={sortKey === "highest_discount"}
+                          onClick={() => {
+                            setSortKey("highest_discount");
+                            setPage(1);
+                          }}
+                        >
+                          {t.discount}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.featured ? (
+                      <TableHeaderCell className="w-[90px]">{t.featured}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.status ? (
+                      <TableHeaderCell className="w-[110px]">{t.status}</TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.createdAt ? (
+                      <TableHeaderCell className="w-[120px]">
+                        <HeaderSortButton
+                          active={sortKey === "newest" || sortKey === "oldest"}
+                          onClick={() => {
+                            setSortKey("newest");
+                            setPage(1);
+                          }}
+                        >
+                          {t.createdAt}
+                        </HeaderSortButton>
+                      </TableHeaderCell>
+                    ) : null}
+
+                    {visibleColumns.actions ? (
+                      <TableHeaderCell className="w-[72px] text-center">
+                        {t.actions}
+                      </TableHeaderCell>
+                    ) : null}
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {providers.length ? (
+                    providers.map((provider) => (
+                      <TableRow key={provider.id} className="h-[62px]">
+                        {visibleColumns.select ? (
+                          <TableBodyCell className="w-[46px] px-3">
+                            <Checkbox
+                              checked={selectedIds.includes(provider.id)}
+                              onCheckedChange={(checked) =>
+                                toggleSelectProvider(provider.id, Boolean(checked))
+                              }
+                              aria-label={provider.name}
+                            />
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.provider ? (
+                          <TableBodyCell className="w-[250px]">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40">
+                                <Building2 className="h-4 w-4 text-muted-foreground" />
+                              </div>
+
+                              <div className="min-w-0 flex-1">
+                                <Link
+                                  href={`/system/providers/${provider.id}`}
+                                  className="block truncate text-sm font-semibold text-foreground hover:underline"
+                                >
+                                  {provider.name_ar || provider.name || provider.name_en}
+                                </Link>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {provider.code || provider.name_en || provider.external_reference || "—"}
+                                </p>
+                              </div>
+                            </div>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.type ? (
+                          <TableBodyCell className="w-[135px]">
+                            <Badge
+                              variant="outline"
+                              className="max-w-full rounded-full bg-muted/40 px-2.5 py-1 text-xs font-medium"
+                            >
+                              <span className="truncate">
+                                {getProviderTypeLabel(provider.provider_type, locale)}
+                              </span>
+                            </Badge>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.region ? (
+                          <TableBodyCell className="w-[125px]">
+                            <span className="block truncate text-sm text-muted-foreground">
+                              {provider.region || provider.area || "—"}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.city ? (
+                          <TableBodyCell className="w-[125px]">
+                            <span className="block truncate text-sm text-muted-foreground">
+                              {provider.city || "—"}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.source ? (
+                          <TableBodyCell className="w-[140px]">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "max-w-full rounded-full px-2.5 py-1 text-xs font-medium",
+                                provider.import_source
+                                  ? "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50"
+                                  : "border-muted bg-muted/40 text-muted-foreground hover:bg-muted/40",
+                              )}
+                            >
+                              <span className="truncate">
+                                {provider.import_source ? t.imported : t.manual}
+                              </span>
+                            </Badge>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.orders ? (
+                          <TableBodyCell className="w-[95px]">
+                            <Link
+                              href={`/system/orders?provider_id=${provider.id}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                            >
+                              <ShoppingCart className="h-3.5 w-3.5" />
+                              {formatInteger(provider.orders_count)}
+                            </Link>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.contracts ? (
+                          <TableBodyCell className="w-[95px]">
+                            <span className="block truncate text-sm font-medium tabular-nums">
+                              {formatInteger(provider.active_contracts_count)}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.products ? (
+                          <TableBodyCell className="w-[95px]">
+                            <span className="block truncate text-sm font-medium tabular-nums">
+                              {formatInteger(provider.contracted_products_count)}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.discount ? (
+                          <TableBodyCell className="w-[100px]">
+                            <Badge
+                              variant="outline"
+                              className="rounded-full border-violet-500/30 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 hover:bg-violet-50"
+                            >
+                              {formatPercent(provider.highest_discount_percent)}
+                            </Badge>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.featured ? (
+                          <TableBodyCell className="w-[90px]">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "rounded-full px-2.5 py-1 text-xs font-medium",
+                                provider.is_featured
+                                  ? "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50"
+                                  : "border-muted bg-muted/40 text-muted-foreground hover:bg-muted/40",
+                              )}
+                            >
+                              {provider.is_featured ? t.yes : t.no}
+                            </Badge>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.status ? (
+                          <TableBodyCell className="w-[110px]">
+                            <StatusBadge status={provider.status} locale={locale} />
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.createdAt ? (
+                          <TableBodyCell className="w-[120px]">
+                            <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                              {formatDate(provider.created_at)}
+                            </span>
+                          </TableBodyCell>
+                        ) : null}
+
+                        {visibleColumns.actions ? (
+                          <TableBodyCell className="w-[72px] text-center">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+
+                              <DropdownMenuContent
+                                align={locale === "ar" ? "start" : "end"}
+                                className="w-52"
+                              >
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/system/providers/${provider.id}`}>
+                                    <Eye className="h-4 w-4" />
+                                    {t.view}
+                                  </Link>
+                                </DropdownMenuItem>
+
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    void copyValue(provider.name_ar || provider.name || provider.name_en)
+                                  }
+                                >
+                                  <Copy className="h-4 w-4" />
+                                  {t.copyName}
+                                </DropdownMenuItem>
+
+                                {provider.code ? (
+                                  <DropdownMenuItem
+                                    onClick={() => void copyValue(provider.code)}
                                   >
-                                    <Icon className="me-1 h-3.5 w-3.5" />
-                                    {providerTypeLabel(
-                                      provider.providerType,
-                                      locale,
-                                    )}
-                                  </Badge>
-                                </TableCell>
-
-                                <TableCell>
-                                  <div className="min-w-[160px]">
-                                    <p className="font-medium">
-                                      {[provider.region, provider.city]
-                                        .filter(Boolean)
-                                        .join(" / ") || "-"}
-                                    </p>
-                                    <p className="mt-1 text-xs text-muted-foreground">
-                                      {provider.area || provider.street || "-"}
-                                    </p>
-                                  </div>
-                                </TableCell>
-
-                                <TableCell>
-                                  <div className="min-w-[160px] text-xs">
-                                    <p className="font-medium">
-                                      {provider.mobile ||
-                                        provider.phone ||
-                                        provider.email ||
-                                        "-"}
-                                    </p>
-                                    <p className="mt-1 text-muted-foreground">
-                                      {provider.contactPerson || "-"}
-                                    </p>
-                                  </div>
-                                </TableCell>
-
-                                <TableCell>
-                                  <Badge
-                                    variant="secondary"
-                                    className="rounded-full"
-                                  >
-                                    {formatNumber(provider.ordersCount)}
-                                  </Badge>
-                                </TableCell>
-
-                                <TableCell>
-                                  <Badge
-                                    className={`rounded-full border px-3 py-1 ${getStatusBadgeClass(
-                                      provider.status,
-                                    )}`}
-                                  >
-                                    {providerStatusLabel(
-                                      provider.status,
-                                      locale,
-                                    )}
-                                  </Badge>
-                                </TableCell>
-
-                                <TableCell className="text-end">
-                                  <div className="flex justify-end gap-2">
-                                    {provider.googleMapsLink ? (
-                                      <Button
-                                        asChild
-                                        size="icon"
-                                        variant="outline"
-                                        className="h-9 w-9 rounded-xl"
-                                      >
-                                        <a
-                                          href={provider.googleMapsLink}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                        >
-                                          <MapPin className="h-4 w-4" />
-                                        </a>
-                                      </Button>
-                                    ) : null}
-
-                                    <Button
-                                      asChild
-                                      size="sm"
-                                      variant="outline"
-                                      className="rounded-xl"
-                                    >
-                                      <Link
-                                        href={`/system/providers/${provider.id}`}
-                                      >
-                                        <Eye className="me-2 h-4 w-4" />
-                                        {t.details}
-                                      </Link>
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5" />
-                    {t.ordersCount}
-                  </CardTitle>
-                  <CardDescription>{t.ordersCount}</CardDescription>
-                </CardHeader>
-
-                <CardContent className="space-y-3">
-                  {topProvidersByOrders.length > 0 ? (
-                    topProvidersByOrders.map((provider, index) => (
-                      <div
-                        key={`${provider.id}-orders-${index}`}
-                        className="flex items-center justify-between gap-3 rounded-xl border bg-background p-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">
-                            {provider.nameAr ||
-                              provider.displayNameAr ||
-                              provider.name ||
-                              "-"}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {provider.city ||
-                              provider.region ||
-                              provider.code ||
-                              "-"}
-                          </p>
-                        </div>
-
-                        <Badge variant="secondary" className="rounded-full">
-                          {formatNumber(provider.ordersCount)}
-                        </Badge>
-                      </div>
+                                    <ShieldCheck className="h-4 w-4" />
+                                    {t.copyCode}
+                                  </DropdownMenuItem>
+                                ) : null}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableBodyCell>
+                        ) : null}
+                      </TableRow>
                     ))
                   ) : (
-                    <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                      {t.notAvailable}
-                    </div>
+                    <TableRow>
+                      <TableCell colSpan={visibleColumnCount} className="h-72">
+                        <div className="flex flex-col items-center justify-center gap-3 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                            <Building2 className="h-6 w-6 text-muted-foreground" />
+                          </div>
+
+                          <div className="space-y-1">
+                            <p className="font-semibold text-foreground">
+                              {hasActiveFilters ? t.noResultsTitle : t.noDataTitle}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {hasActiveFilters ? t.noResultsDesc : t.noDataDesc}
+                            </p>
+                          </div>
+
+                          {hasActiveFilters ? (
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-lg"
+                              onClick={resetFilters}
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              {t.reset}
+                            </Button>
+                          ) : (
+                            <Button
+                              asChild
+                              className="h-9 rounded-lg bg-black text-white hover:bg-black/90"
+                            >
+                              <Link href="/system/providers/create">
+                                <Plus className="h-4 w-4" />
+                                {t.create}
+                              </Link>
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
                   )}
-                </CardContent>
-              </Card>
-            </div>
-
-            <div className="space-y-4">
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardHeader>
-                  <CardTitle>{t.quickActions}</CardTitle>
-                  <CardDescription>{t.quickActionsDesc}</CardDescription>
-                </CardHeader>
-
-                <CardContent className="space-y-3">
-                  <ActionCard
-                    href="/system/providers/list"
-                    icon={ClipboardList}
-                    title={t.providersList}
-                    description={t.recentProvidersDesc}
-                  />
-
-                  {canCreateProviders ? (
-                    <ActionCard
-                      href="/system/providers/create"
-                      icon={PlusCircle}
-                      title={t.createProvider}
-                      description={t.emptyText}
-                    />
-                  ) : null}
-
-                  {canImportProviders ? (
-                    <ActionCard
-                      href="/system/providers/import"
-                      icon={UploadCloud}
-                      title={t.importProviders}
-                      description={t.importedProviders}
-                    />
-                  ) : null}
-
-                  {canViewContracts ? (
-                    <ActionCard
-                      href="/system/contracts"
-                      icon={FileText}
-                      title={t.contracts}
-                      description={t.contracts}
-                    />
-                  ) : null}
-
-                  <ActionCard
-                    href="/system/centers"
-                    icon={Building2}
-                    title={t.centers}
-                    description={t.centers}
-                  />
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-2xl border bg-card shadow-sm">
-                <CardHeader>
-                  <CardTitle>{t.typeDistribution}</CardTitle>
-                  <CardDescription>{t.typeDistributionDesc}</CardDescription>
-                </CardHeader>
-
-                <CardContent className="space-y-3">
-                  {typeRows.map((row) => (
-                    <TypeDistributionRow
-                      key={row.label}
-                      icon={row.icon}
-                      label={row.label}
-                      value={row.value}
-                      total={summary.total_providers}
-                    />
-                  ))}
-                </CardContent>
-              </Card>
+                </TableBody>
+              </Table>
             </div>
           </div>
-        </>
-      )}
+
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-muted-foreground">
+              {t.showing}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(providers.length)}
+              </span>{" "}
+              {t.of}{" "}
+              <span className="font-medium text-foreground tabular-nums">
+                {formatInteger(pagination.count || summary.total_providers)}
+              </span>{" "}
+              {t.rows}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                disabled={!pagination.has_previous || refreshing}
+                onClick={() => setPage((current) => Math.max(current - 1, 1))}
+              >
+                {t.previous}
+              </Button>
+
+              <div className="rounded-lg border bg-background px-3 py-2 text-sm tabular-nums">
+                {t.page} {formatInteger(page)} {t.of}{" "}
+                {formatInteger(pagination.total_pages)}
+              </div>
+
+              <Button
+                variant="outline"
+                className="h-9 rounded-lg bg-background"
+                disabled={!pagination.has_next || refreshing}
+                onClick={() =>
+                  setPage((current) =>
+                    Math.min(current + 1, pagination.total_pages),
+                  )
+                }
+              >
+                {t.next}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -11,6 +11,7 @@
 # ✅ دعم السجل التجاري والرقم الضريبي
 # ✅ دعم شعار وصورة مقدم الخدمة عبر Google Drive
 # ✅ دعم ملفات ومرفقات مقدم الخدمة ProviderDocument
+# ✅ Customer medical network fields from active marketing contracts
 # ------------------------------------------------------------
 # ملاحظات مهمة:
 # - name يبقى موجودًا للتوافق الخلفي مع الاستيراد والواجهات القديمة.
@@ -27,6 +28,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -407,6 +409,270 @@ def parse_int(value: Any, default: int | None = None) -> int | None:
         return default
 
 
+def _money(value: Any, default: Decimal | None = None) -> Decimal:
+    if default is None:
+        default = Decimal("0.00")
+
+    if value in (None, ""):
+        return default.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception:
+        return default.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _percent(value: Any, default: Decimal | None = None) -> Decimal:
+    if default is None:
+        default = Decimal("0.00")
+
+    if value in (None, ""):
+        return default.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    try:
+        parsed = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception:
+        return default.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    if parsed < Decimal("0.00"):
+        return Decimal("0.00")
+
+    if parsed > Decimal("100.00"):
+        return Decimal("100.00")
+
+    return parsed
+
+
+def _decimal_to_str(value: Any) -> str:
+    return str(_money(value))
+
+
+def _percent_to_str(value: Any) -> str:
+    return str(_percent(value))
+
+
+def _iso_date(value: Any) -> str | None:
+    if not value:
+        return None
+
+    try:
+        return value.isoformat()
+    except Exception:
+        return str(value)
+
+
+# ============================================================
+# 🔹 Contract / Medical Network Helpers
+# ============================================================
+
+def _active_contract_filter(prefix: str = "contracts") -> Q:
+    today = timezone.localdate()
+
+    return (
+        Q(**{f"{prefix}__status": "ACTIVE"})
+        & (
+            Q(**{f"{prefix}__start_date__isnull": True})
+            | Q(**{f"{prefix}__start_date__lte": today})
+        )
+        & (
+            Q(**{f"{prefix}__end_date__isnull": True})
+            | Q(**{f"{prefix}__end_date__gte": today})
+        )
+    )
+
+
+def _active_contract_product_filter() -> Q:
+    today = timezone.localdate()
+
+    return (
+        Q(contracts__status="ACTIVE")
+        & Q(contracts__contract_products__is_active=True)
+        & (
+            Q(contracts__start_date__isnull=True)
+            | Q(contracts__start_date__lte=today)
+        )
+        & (
+            Q(contracts__end_date__isnull=True)
+            | Q(contracts__end_date__gte=today)
+        )
+    )
+
+
+def _calculate_discount_from_special_price(
+    *,
+    before_price: Decimal,
+    after_price: Decimal,
+) -> Decimal:
+    before_price = _money(before_price)
+    after_price = _money(after_price)
+
+    if before_price <= Decimal("0.00"):
+        return Decimal("0.00")
+
+    if after_price >= before_price:
+        return Decimal("0.00")
+
+    return _percent(((before_price - after_price) * Decimal("100.00")) / before_price)
+
+
+def _get_provider_contract_queryset(provider: Provider):
+    try:
+        from contracts.models import Contract
+    except Exception:
+        return None
+
+    today = timezone.localdate()
+
+    return (
+        Contract.objects
+        .filter(provider_id=provider.pk, status="ACTIVE")
+        .filter(
+            Q(start_date__isnull=True) | Q(start_date__lte=today),
+            Q(end_date__isnull=True) | Q(end_date__gte=today),
+        )
+        .prefetch_related("contract_products", "contract_products__product")
+        .order_by("-created_at", "-id")
+    )
+
+
+def _serialize_active_contract(contract: Any) -> dict[str, Any]:
+    return {
+        "id": getattr(contract, "id", None),
+        "contract_number": getattr(contract, "contract_number", ""),
+        "title": getattr(contract, "title", ""),
+        "status": getattr(contract, "status", ""),
+        "start_date": _iso_date(getattr(contract, "start_date", None)),
+        "end_date": _iso_date(getattr(contract, "end_date", None)),
+        "signed_at": _iso_date(getattr(contract, "signed_at", None)),
+        "pricing_model": getattr(contract, "pricing_model", ""),
+        "discount_percentage": _percent_to_str(
+            getattr(contract, "discount_percentage", Decimal("0.00"))
+        ),
+        "system_commission_percentage": _percent_to_str(
+            getattr(contract, "system_commission_percentage", Decimal("0.00"))
+        ),
+    }
+
+
+def _calculate_provider_network_context(provider: Provider) -> dict[str, Any]:
+    """
+    يحسب بيانات الشبكة الطبية للعميل من العقود النشطة.
+
+    الحقول الناتجة تستخدم في:
+    - /customer/network
+    - /customer/page
+    - أي عرض عام لمقدمي الخدمة المتعاقدين
+    """
+
+    default_context = {
+        "has_active_contract": False,
+        "has_active_contracts": False,
+        "active_contracts_count": 0,
+        "contracted_products_count": 0,
+        "highest_discount_percent": Decimal("0.00"),
+        "max_discount_percent": Decimal("0.00"),
+        "discount_percent": Decimal("0.00"),
+        "active_contract": None,
+        "active_contracts": [],
+    }
+
+    if not provider or not getattr(provider, "pk", None):
+        return default_context
+
+    queryset = _get_provider_contract_queryset(provider)
+
+    if queryset is None:
+        return default_context
+
+    contracts = list(queryset)
+
+    if not contracts:
+        return default_context
+
+    active_contracts: list[dict[str, Any]] = []
+    product_ids: set[int] = set()
+    highest_discount = Decimal("0.00")
+
+    for contract in contracts:
+        serialized_contract = _serialize_active_contract(contract)
+        contract_level_discount = _percent(
+            getattr(contract, "discount_percentage", Decimal("0.00"))
+        )
+        highest_discount = max(highest_discount, contract_level_discount)
+
+        active_contract_products = []
+
+        try:
+            contract_products = contract.contract_products.all()
+        except Exception:
+            contract_products = []
+
+        for contract_product in contract_products:
+            if not getattr(contract_product, "is_active", False):
+                continue
+
+            product = getattr(contract_product, "product", None)
+            product_id = getattr(contract_product, "product_id", None)
+
+            if product_id:
+                product_ids.add(int(product_id))
+
+            product_price = _money(getattr(product, "price", Decimal("0.00"))) if product else Decimal("0.00")
+            product_discount = _percent(
+                getattr(contract_product, "discount_percentage", Decimal("0.00"))
+            )
+            special_price = getattr(contract_product, "special_price", None)
+
+            if special_price is not None:
+                special_price_discount = _calculate_discount_from_special_price(
+                    before_price=product_price,
+                    after_price=_money(special_price),
+                )
+                product_discount = max(product_discount, special_price_discount)
+
+            effective_discount = max(product_discount, contract_level_discount)
+            highest_discount = max(highest_discount, effective_discount)
+
+            active_contract_products.append(
+                {
+                    "id": getattr(contract_product, "id", None),
+                    "product_id": product_id,
+                    "product_name": getattr(product, "name", "") if product else "",
+                    "product_code": getattr(product, "code", "") if product else "",
+                    "product_type": getattr(product, "product_type", "") if product else "",
+                    "is_active": getattr(contract_product, "is_active", False),
+                    "special_price": (
+                        _decimal_to_str(special_price)
+                        if special_price is not None
+                        else None
+                    ),
+                    "discount_percentage": _percent_to_str(
+                        getattr(contract_product, "discount_percentage", Decimal("0.00"))
+                    ),
+                    "effective_discount_percent": _percent_to_str(effective_discount),
+                    "coverage_notes": getattr(contract_product, "coverage_notes", ""),
+                }
+            )
+
+        serialized_contract["contracted_products_count"] = len(active_contract_products)
+        serialized_contract["contract_products"] = active_contract_products[:10]
+        active_contracts.append(serialized_contract)
+
+    has_active = bool(active_contracts)
+
+    return {
+        "has_active_contract": has_active,
+        "has_active_contracts": has_active,
+        "active_contracts_count": len(active_contracts),
+        "contracted_products_count": len(product_ids),
+        "highest_discount_percent": highest_discount,
+        "max_discount_percent": highest_discount,
+        "discount_percent": highest_discount,
+        "active_contract": active_contracts[0] if active_contracts else None,
+        "active_contracts": active_contracts[:5],
+    }
+
+
 # ============================================================
 # 🔹 Query Helpers
 # ============================================================
@@ -432,19 +698,25 @@ def paginate_queryset(queryset: QuerySet, page: int = 1, page_size: int = 20) ->
 
 
 def apply_provider_filters(queryset: QuerySet[Provider], params) -> QuerySet[Provider]:
-    q = normalize_text(params.get("q"))
+    q = normalize_text(params.get("q") or params.get("search"))
     provider_type = normalize_text(params.get("provider_type"))
     status = normalize_text(params.get("status"))
     region = normalize_text(params.get("region"))
     city = normalize_text(params.get("city"))
     area = normalize_text(params.get("area"))
-    source_category = normalize_text(params.get("source_category"))
+    source_category = normalize_text(params.get("source_category") or params.get("category"))
     import_source = normalize_text(params.get("import_source"))
     is_featured = parse_bool(params.get("is_featured"))
+    is_active = parse_bool(params.get("is_active"))
 
     has_logo = parse_bool(params.get("has_logo"))
     has_image = parse_bool(params.get("has_image"))
     has_drive_folder = parse_bool(params.get("has_drive_folder"))
+
+    has_active_contract = parse_bool(params.get("has_active_contract"))
+    has_active_contracts = parse_bool(params.get("has_active_contracts"))
+    has_contract = parse_bool(params.get("has_contract"))
+    contracted = parse_bool(params.get("contracted"))
 
     if q:
         queryset = queryset.filter(
@@ -471,6 +743,12 @@ def apply_provider_filters(queryset: QuerySet[Provider], params) -> QuerySet[Pro
             | Q(image_drive_file_id__icontains=q)
             | Q(notes__icontains=q)
         )
+
+    if is_active is True:
+        queryset = queryset.filter(status=ProviderStatus.ACTIVE)
+
+    if is_active is False:
+        queryset = queryset.exclude(status=ProviderStatus.ACTIVE)
 
     if provider_type:
         queryset = queryset.filter(provider_type=provider_type)
@@ -514,7 +792,41 @@ def apply_provider_filters(queryset: QuerySet[Provider], params) -> QuerySet[Pro
     if has_drive_folder is False:
         queryset = queryset.filter(drive_folder_id="")
 
-    return queryset
+    contract_filter_value = (
+        has_active_contract
+        if has_active_contract is not None
+        else has_active_contracts
+        if has_active_contracts is not None
+        else has_contract
+        if has_contract is not None
+        else contracted
+    )
+
+    if contract_filter_value is True:
+        queryset = queryset.filter(_active_contract_product_filter())
+
+    if contract_filter_value is False:
+        queryset = queryset.exclude(_active_contract_product_filter())
+
+    ordering = normalize_text(params.get("ordering") or params.get("order_by"))
+
+    allowed_ordering = {
+        "name": "name",
+        "-name": "-name",
+        "city": "city",
+        "-city": "-city",
+        "region": "region",
+        "-region": "-region",
+        "created_at": "created_at",
+        "-created_at": "-created_at",
+        "updated_at": "updated_at",
+        "-updated_at": "-updated_at",
+    }
+
+    if ordering in allowed_ordering:
+        queryset = queryset.order_by(allowed_ordering[ordering], "-id")
+
+    return queryset.distinct()
 
 
 # ============================================================
@@ -719,6 +1031,11 @@ def serialize_provider_documents(provider: Provider) -> list[dict[str, Any]]:
 # ============================================================
 
 def serialize_provider(obj: Provider, *, include_documents: bool = False) -> dict[str, Any]:
+    network_context = _calculate_provider_network_context(obj)
+
+    highest_discount_percent = network_context["highest_discount_percent"]
+    has_active_contract = bool(network_context["has_active_contract"])
+
     data = {
         "id": obj.id,
         "name": obj.name,
@@ -728,14 +1045,19 @@ def serialize_provider(obj: Provider, *, include_documents: bool = False) -> dic
         "display_name_en": getattr(obj, "display_name_en", "") or getattr(obj, "name_en", "") or obj.name,
         "code": obj.code,
         "provider_type": obj.provider_type,
+        "category": getattr(obj, "source_category", "") or obj.provider_type,
+        "classification": getattr(obj, "source_category", "") or obj.provider_type,
         "status": obj.status,
+        "is_active": obj.status == ProviderStatus.ACTIVE,
 
         "commercial_registration": getattr(obj, "commercial_registration", ""),
         "tax_number": getattr(obj, "tax_number", ""),
 
         "logo_url": getattr(obj, "logo_url", ""),
+        "logo": getattr(obj, "logo_url", ""),
         "logo_drive_file_id": getattr(obj, "logo_drive_file_id", ""),
         "image_url": getattr(obj, "image_url", ""),
+        "image": getattr(obj, "image_url", ""),
         "image_drive_file_id": getattr(obj, "image_drive_file_id", ""),
 
         "drive_folder_id": getattr(obj, "drive_folder_id", ""),
@@ -743,24 +1065,44 @@ def serialize_provider(obj: Provider, *, include_documents: bool = False) -> dic
 
         "contact_person": obj.contact_person,
         "phone": obj.phone,
+        "phone_number": obj.phone,
         "mobile": obj.mobile,
+        "whatsapp_number": obj.mobile or obj.phone,
         "email": obj.email,
         "website": obj.website,
         "region": getattr(obj, "region", ""),
+        "region_name": getattr(obj, "region", ""),
         "city": obj.city,
+        "city_name": obj.city,
         "area": obj.area,
         "street": getattr(obj, "street", ""),
         "address": obj.address,
         "google_maps_link": obj.google_maps_link,
         "source_category": getattr(obj, "source_category", ""),
+        "provider_category": getattr(obj, "source_category", ""),
         "import_key": getattr(obj, "import_key", None),
         "import_source": getattr(obj, "import_source", ""),
         "external_reference": getattr(obj, "external_reference", ""),
         "notes": obj.notes,
         "is_featured": obj.is_featured,
+        "featured": obj.is_featured,
         "has_logo": bool(getattr(obj, "logo_url", "") or getattr(obj, "logo_drive_file_id", "")),
         "has_image": bool(getattr(obj, "image_url", "") or getattr(obj, "image_drive_file_id", "")),
         "has_drive_folder": bool(getattr(obj, "drive_folder_id", "")),
+
+        # Customer medical network fields
+        "has_active_contract": has_active_contract,
+        "has_active_contracts": has_active_contract,
+        "active_contract": network_context["active_contract"],
+        "active_contracts": network_context["active_contracts"],
+        "active_contracts_count": network_context["active_contracts_count"],
+        "contracted_products_count": network_context["contracted_products_count"],
+        "highest_discount_percent": _percent_to_str(highest_discount_percent),
+        "max_discount_percent": _percent_to_str(network_context["max_discount_percent"]),
+        "discount_percent": _percent_to_str(network_context["discount_percent"]),
+        "discount_percentage": _percent_to_str(network_context["discount_percent"]),
+        "discount_rate": _percent_to_str(network_context["discount_percent"]),
+
         "last_imported_at": obj.last_imported_at.isoformat() if getattr(obj, "last_imported_at", None) else None,
         "created_at": obj.created_at.isoformat() if obj.created_at else None,
         "updated_at": obj.updated_at.isoformat() if obj.updated_at else None,

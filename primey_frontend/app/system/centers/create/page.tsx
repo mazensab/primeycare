@@ -126,31 +126,19 @@ type ProviderCreateResponse = {
 ============================================================ */
 
 function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+  if (typeof window === "undefined") return "ar";
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
+  const stored = window.localStorage.getItem("primey-locale");
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
-    return "ar";
-  }
+  return stored === "en" ? "en" : "ar";
 }
 
 function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+  if (typeof document === "undefined") return;
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+  document.documentElement.lang = locale;
+  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+  document.body.dir = locale === "ar" ? "rtl" : "ltr";
 }
 
 /* ============================================================
@@ -158,160 +146,129 @@ function applyDocumentLocale(locale: AppLocale) {
 ============================================================ */
 
 function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
+  const ar = locale === "ar";
 
   return {
-    title: isArabic ? "إنشاء مركز جديد" : "Create New Center",
-    subtitle: isArabic
-      ? "إضافة مركز أو مقدم خدمة جديد وربطه لاحقًا بالعقود والخدمات والطلبات."
-      : "Create a new center/provider and later connect it with contracts, services, and orders.",
-
-    back: isArabic ? "العودة للمراكز" : "Back to Centers",
-    saveDraft: isArabic ? "حفظ كمسودة" : "Save Draft",
-    create: isArabic ? "إنشاء المركز" : "Create Center",
-    saving: isArabic ? "جاري الحفظ..." : "Saving...",
-
-    stepsTitle: isArabic ? "إرشادات قبل الحفظ" : "Before Saving",
-    summaryTitle: isArabic ? "ملخص المركز" : "Center Summary",
-    summaryDesc: isArabic
+    title: ar ? "إنشاء مركز" : "Create Center",
+    subtitle: ar
+      ? "أضف مركزًا أو مقدم خدمة جديدًا داخل شبكة برايمي كير مع بيانات التواصل والموقع."
+      : "Add a new center or provider to the Primey Care network with contact and location details.",
+    back: ar ? "رجوع" : "Back",
+    create: ar ? "إنشاء المركز" : "Create center",
+    saveDraft: ar ? "حفظ كمسودة" : "Save as draft",
+    saving: ar ? "جاري الحفظ..." : "Saving...",
+    apiErrorTitle: ar ? "تعذر حفظ المركز" : "Could not save center",
+    apiError: ar
+      ? "حدث خطأ أثناء حفظ المركز. حاول مرة أخرى."
+      : "An error occurred while saving the center. Please try again.",
+    success: ar ? "تم إنشاء المركز بنجاح" : "Center created successfully",
+    draftSuccess: ar ? "تم حفظ المركز كمسودة" : "Center saved as draft",
+    validationToast: ar
+      ? "راجع الحقول المطلوبة قبل المتابعة."
+      : "Review the required fields before continuing.",
+    confirmLeave: ar
+      ? "لديك تغييرات غير محفوظة. هل تريد المغادرة؟"
+      : "You have unsaved changes. Do you want to leave?",
+    basicInfo: ar ? "البيانات الأساسية" : "Basic information",
+    basicDesc: ar
+      ? "اسم المركز والكود ونوع مقدم الخدمة وحالة السجل."
+      : "Center name, code, provider type, and record status.",
+    contactInfo: ar ? "بيانات التواصل" : "Contact information",
+    contactDesc: ar
+      ? "بيانات المسؤول وأرقام التواصل والبريد والموقع الإلكتروني."
+      : "Contact person, phone numbers, email, and website.",
+    locationInfo: ar ? "بيانات الموقع" : "Location information",
+    locationDesc: ar
+      ? "المدينة والمنطقة والعنوان ورابط الخرائط."
+      : "City, area, address, and maps link.",
+    operationalInfo: ar ? "الإعدادات التشغيلية" : "Operational settings",
+    operationalDesc: ar
+      ? "إعدادات تمييز المركز وملاحظات داخلية."
+      : "Featured status and internal notes.",
+    summaryTitle: ar ? "ملخص المركز" : "Center summary",
+    summaryDesc: ar
       ? "مراجعة سريعة للبيانات قبل الحفظ."
       : "Quick review before saving.",
-
-    basicInfo: isArabic ? "البيانات الأساسية" : "Basic Information",
-    basicDesc: isArabic
-      ? "اسم المركز، الكود، النوع، وحالة التشغيل."
-      : "Center name, code, type, and operational status.",
-
-    contactInfo: isArabic ? "بيانات التواصل" : "Contact Information",
-    contactDesc: isArabic
-      ? "المسؤول، الهاتف، الجوال، البريد، والموقع الإلكتروني."
-      : "Contact person, phone, mobile, email, and website.",
-
-    locationInfo: isArabic ? "بيانات الموقع" : "Location Information",
-    locationDesc: isArabic
-      ? "المدينة، المنطقة، العنوان، ورابط خرائط جوجل."
-      : "City, area, address, and Google Maps link.",
-
-    operationalInfo: isArabic ? "بيانات تشغيلية" : "Operational Information",
-    operationalDesc: isArabic
-      ? "تمييز المركز والملاحظات التشغيلية."
-      : "Featured status and operational notes.",
-
-    labels: {
-      name: isArabic ? "اسم المركز" : "Center Name",
-      code: isArabic ? "كود المركز" : "Center Code",
-      providerType: isArabic ? "نوع الجهة" : "Provider Type",
-      status: isArabic ? "الحالة" : "Status",
-      contactPerson: isArabic ? "الشخص المسؤول" : "Contact Person",
-      phone: isArabic ? "رقم الهاتف" : "Phone",
-      mobile: isArabic ? "رقم الجوال" : "Mobile",
-      email: isArabic ? "البريد الإلكتروني" : "Email",
-      website: isArabic ? "الموقع الإلكتروني" : "Website",
-      city: isArabic ? "المدينة" : "City",
-      area: isArabic ? "الحي / المنطقة" : "Area",
-      address: isArabic ? "العنوان" : "Address",
-      googleMaps: isArabic ? "رابط خرائط جوجل" : "Google Maps Link",
-      notes: isArabic ? "ملاحظات" : "Notes",
-      featured: isArabic ? "مركز مميز" : "Featured Center",
-    },
-
-    placeholders: {
-      name: isArabic
-        ? "مثال: مركز برايمي كير جدة"
-        : "Example: Primey Care Jeddah",
-      code: isArabic ? "مثال: CTR-001" : "Example: CTR-001",
-      contactPerson: isArabic ? "مثال: محمد أحمد" : "Example: Mohammed Ahmed",
-      phone: isArabic ? "011xxxxxxx" : "011xxxxxxx",
-      mobile: isArabic ? "05xxxxxxxx" : "05xxxxxxxx",
-      email: isArabic ? "center@example.com" : "center@example.com",
-      website: isArabic ? "https://example.com" : "https://example.com",
-      city: isArabic ? "مثال: جدة" : "Example: Jeddah",
-      area: isArabic ? "مثال: الروضة" : "Example: Al Rawdah",
-      address: isArabic ? "اكتب العنوان التفصيلي" : "Enter full address",
-      googleMaps: isArabic
-        ? "https://maps.google.com/..."
-        : "https://maps.google.com/...",
-      notes: isArabic
-        ? "أي ملاحظات تشغيلية عن المركز..."
-        : "Any operational notes about the center...",
-    },
-
-    providerTypes: {
-      HOSPITAL: isArabic ? "مستشفى" : "Hospital",
-      MEDICAL_CENTER: isArabic ? "مركز طبي" : "Medical Center",
-      PHARMACY: isArabic ? "صيدلية" : "Pharmacy",
-      PARTNER: isArabic ? "شريك" : "Partner",
-      LAB: isArabic ? "مختبر" : "Lab",
-      CLINIC: isArabic ? "عيادة" : "Clinic",
-      OTHER: isArabic ? "أخرى" : "Other",
-    } satisfies Record<ProviderType, string>,
-
-    statuses: {
-      ACTIVE: isArabic ? "نشط" : "Active",
-      INACTIVE: isArabic ? "غير نشط" : "Inactive",
-      SUSPENDED: isArabic ? "موقوف" : "Suspended",
-      DRAFT: isArabic ? "مسودة" : "Draft",
-    } satisfies Record<ProviderStatus, string>,
-
+    completion: ar ? "اكتمال البيانات" : "Completion",
+    ready: ar ? "البيانات الأساسية جاهزة للحفظ." : "Basic data is ready to save.",
+    missingData: ar
+      ? "أكمل الاسم والكود قبل الحفظ النهائي."
+      : "Complete name and code before final save.",
+    stepsTitle: ar ? "إرشادات الإدخال" : "Entry guidance",
+    featuredSummary: ar
+      ? "سيظهر المركز كمميز في القوائم عند دعم ذلك."
+      : "This center will appear as featured where supported.",
+    quickNotes: ar
+      ? [
+          "استخدم كودًا واضحًا ومختصرًا للمركز.",
+          "تأكد من صحة أرقام التواصل قبل الحفظ.",
+          "رابط الخرائط اختياري لكنه يساعد فريق التشغيل.",
+          "يمكن حفظ السجل كمسودة إذا لم تكتمل البيانات.",
+        ]
+      : [
+          "Use a clear and short center code.",
+          "Verify contact numbers before saving.",
+          "The maps link is optional but useful for operations.",
+          "You can save as draft if the record is not complete.",
+        ],
     validation: {
-      name: isArabic ? "اسم المركز مطلوب." : "Center name is required.",
-      code: isArabic ? "كود المركز مطلوب." : "Center code is required.",
-      email: isArabic ? "صيغة البريد غير صحيحة." : "Invalid email format.",
-      website: isArabic
-        ? "رابط الموقع يجب أن يبدأ بـ https:// أو http://"
-        : "Website URL must start with https:// or http://",
-      maps: isArabic
-        ? "رابط الخرائط يجب أن يبدأ بـ https:// أو http://"
-        : "Google Maps URL must start with https:// or http://",
+      name: ar ? "اسم المركز مطلوب." : "Center name is required.",
+      code: ar ? "كود المركز مطلوب." : "Center code is required.",
+      email: ar ? "صيغة البريد الإلكتروني غير صحيحة." : "Invalid email address.",
+      website: ar ? "رابط الموقع غير صحيح." : "Invalid website URL.",
+      maps: ar ? "رابط الخرائط غير صحيح." : "Invalid maps URL.",
     },
-
-    success: isArabic
-      ? "تم إنشاء المركز بنجاح."
-      : "Center created successfully.",
-    draftSuccess: isArabic
-      ? "تم حفظ المركز كمسودة بنجاح."
-      : "Center saved as draft successfully.",
-    apiError: isArabic
-      ? "تعذر إنشاء المركز. تحقق من البيانات وحاول مرة أخرى."
-      : "Unable to create center. Please check the data and try again.",
-    apiErrorTitle: isArabic ? "تعذر حفظ البيانات" : "Unable to save data",
-
-    validationToast: isArabic
-      ? "يرجى تصحيح الحقول المطلوبة قبل المتابعة."
-      : "Please fix the required fields before continuing.",
-
-    confirmLeave: isArabic
-      ? "لديك بيانات غير محفوظة. هل تريد المغادرة؟"
-      : "You have unsaved changes. Do you want to leave?",
-
-    completion: isArabic ? "نسبة الاكتمال" : "Completion",
-    ready: isArabic ? "جاهز للحفظ" : "Ready to save",
-    missingData: isArabic ? "ينقصه بيانات أساسية" : "Missing required data",
-
-    featuredHelp: isArabic
-      ? "يستخدم لإبراز المركز في القوائم والصفحات التشغيلية."
-      : "Used to highlight this center in operational lists and pages.",
-    featuredSummary: isArabic ? "سيظهر كمركز مميز." : "Will appear as featured.",
-
-    quickNotes: [
-      isArabic
-        ? "تأكد أن كود المركز واضح وفريد لتسهيل البحث والربط."
-        : "Make sure the center code is clear and unique for easier search and linking.",
-      isArabic
-        ? "يمكن حفظ المركز كمسودة ثم استكمال بياناته لاحقًا."
-        : "You can save the center as a draft and complete it later.",
-      isArabic
-        ? "أضف وسيلة تواصل صحيحة لتسهيل المتابعة التشغيلية."
-        : "Add accurate contact details for smoother operational follow-up.",
-      isArabic
-        ? "سيتم استخدام بيانات المدينة والعنوان لاحقًا في التقارير والفرز."
-        : "City and address details will be useful later for reports and filtering.",
-    ],
+    labels: {
+      name: ar ? "اسم المركز" : "Center name",
+      code: ar ? "كود المركز" : "Center code",
+      providerType: ar ? "نوع مقدم الخدمة" : "Provider type",
+      status: ar ? "الحالة" : "Status",
+      contactPerson: ar ? "مسؤول التواصل" : "Contact person",
+      phone: ar ? "الهاتف" : "Phone",
+      mobile: ar ? "الجوال" : "Mobile",
+      email: ar ? "البريد الإلكتروني" : "Email",
+      website: ar ? "الموقع الإلكتروني" : "Website",
+      city: ar ? "المدينة" : "City",
+      area: ar ? "المنطقة / الحي" : "Area / District",
+      address: ar ? "العنوان" : "Address",
+      googleMaps: ar ? "رابط خرائط Google" : "Google Maps link",
+      notes: ar ? "ملاحظات" : "Notes",
+      featured: ar ? "مركز مميز" : "Featured center",
+    },
+    placeholders: {
+      name: ar ? "مثال: مركز برايمي الطبي" : "Example: Primey Medical Center",
+      code: ar ? "مثال: CTR-001" : "Example: CTR-001",
+      contactPerson: ar ? "اسم مسؤول التواصل" : "Contact person name",
+      phone: ar ? "0123456789" : "0123456789",
+      mobile: ar ? "05xxxxxxxx" : "05xxxxxxxx",
+      email: ar ? "center@example.com" : "center@example.com",
+      website: ar ? "https://example.com" : "https://example.com",
+      city: ar ? "مثال: جدة" : "Example: Jeddah",
+      area: ar ? "مثال: السلامة" : "Example: Al Salamah",
+      address: ar ? "العنوان التفصيلي للمركز" : "Detailed center address",
+      googleMaps: ar ? "https://maps.google.com/..." : "https://maps.google.com/...",
+      notes: ar ? "ملاحظات داخلية..." : "Internal notes...",
+    },
+    providerTypes: {
+      HOSPITAL: ar ? "مستشفى" : "Hospital",
+      MEDICAL_CENTER: ar ? "مركز طبي" : "Medical center",
+      PHARMACY: ar ? "صيدلية" : "Pharmacy",
+      PARTNER: ar ? "شريك" : "Partner",
+      LAB: ar ? "مختبر" : "Lab",
+      CLINIC: ar ? "عيادة" : "Clinic",
+      OTHER: ar ? "أخرى" : "Other",
+    } satisfies Record<ProviderType, string>,
+    statuses: {
+      ACTIVE: ar ? "نشط" : "Active",
+      INACTIVE: ar ? "غير نشط" : "Inactive",
+      SUSPENDED: ar ? "موقوف" : "Suspended",
+      DRAFT: ar ? "مسودة" : "Draft",
+    } satisfies Record<ProviderStatus, string>,
   };
 }
 
 /* ============================================================
-   Defaults / Validation
+   Constants
 ============================================================ */
 
 const initialFormData: CenterFormData = {
@@ -332,15 +289,9 @@ const initialFormData: CenterFormData = {
   is_featured: false,
 };
 
-function isValidEmail(value: string) {
-  if (!value.trim()) return true;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function isValidOptionalUrl(value: string) {
-  if (!value.trim()) return true;
-  return value.startsWith("https://") || value.startsWith("http://");
-}
+/* ============================================================
+   Normalizers / Validators
+============================================================ */
 
 function normalizeCenterCode(value: string) {
   return value
@@ -351,24 +302,44 @@ function normalizeCenterCode(value: string) {
 }
 
 function normalizePhoneValue(value: string) {
-  return value.replace(/[^\d+]/g, "");
+  return value.replace(/[^\d+]/g, "").slice(0, 20);
 }
 
-function normalizePayload(formData: CenterFormData, status?: ProviderStatus) {
+function isValidEmail(value: string) {
+  if (!value.trim()) return true;
+
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function isValidUrl(value: string) {
+  if (!value.trim()) return true;
+
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function normalizePayload(formData: CenterFormData, nextStatus: ProviderStatus) {
+  const normalizedWebsite = formData.website.trim();
+  const normalizedMaps = formData.google_maps_link.trim();
+
   return {
     name: formData.name.trim(),
     code: normalizeCenterCode(formData.code),
     provider_type: formData.provider_type,
-    status: status || formData.status,
+    status: nextStatus,
     contact_person: formData.contact_person.trim(),
-    phone: normalizePhoneValue(formData.phone),
-    mobile: normalizePhoneValue(formData.mobile),
+    phone: formData.phone.trim(),
+    mobile: formData.mobile.trim(),
     email: formData.email.trim().toLowerCase(),
-    website: formData.website.trim(),
+    website: normalizedWebsite,
     city: formData.city.trim(),
     area: formData.area.trim(),
     address: formData.address.trim(),
-    google_maps_link: formData.google_maps_link.trim(),
+    google_maps_link: normalizedMaps,
     notes: formData.notes.trim(),
     is_featured: formData.is_featured,
   };
@@ -462,23 +433,24 @@ export default function SystemCreateCenterPage() {
       nextErrors.name = t.validation.name;
     }
 
-    if (!formData.code.trim()) {
+    if (!formData.code.trim() && !isDraft) {
       nextErrors.code = t.validation.code;
     }
 
-    if (!isDraft && !isValidEmail(formData.email)) {
+    if (!isValidEmail(formData.email)) {
       nextErrors.email = t.validation.email;
     }
 
-    if (!isValidOptionalUrl(formData.website)) {
+    if (!isValidUrl(formData.website)) {
       nextErrors.website = t.validation.website;
     }
 
-    if (!isValidOptionalUrl(formData.google_maps_link)) {
+    if (!isValidUrl(formData.google_maps_link)) {
       nextErrors.google_maps_link = t.validation.maps;
     }
 
     setErrors(nextErrors);
+
     return Object.keys(nextErrors).length === 0;
   }
 
@@ -620,7 +592,7 @@ export default function SystemCreateCenterPage() {
           </Button>
 
           <Button
-            className="h-10 rounded-xl"
+            className="h-10 rounded-xl bg-black text-white hover:bg-black/90"
             onClick={() => submitForm("CREATE")}
             disabled={isSubmitting}
           >
@@ -894,8 +866,8 @@ export default function SystemCreateCenterPage() {
 
                 <div>
                   <p className="text-sm font-semibold">{t.labels.featured}</p>
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    {t.featuredHelp}
+                  <p className="text-muted-foreground mt-1 text-sm">
+                    {t.featuredSummary}
                   </p>
                 </div>
               </label>
@@ -940,7 +912,7 @@ export default function SystemCreateCenterPage() {
 
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-full rounded-full bg-primary transition-all"
+                    className="h-full rounded-full bg-black transition-all"
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
@@ -978,7 +950,7 @@ export default function SystemCreateCenterPage() {
               />
 
               <SummaryItem
-                icon={CheckCircle2}
+                icon={BadgeCheck}
                 label={t.labels.status}
                 value={t.statuses[formData.status]}
               />
@@ -1051,7 +1023,7 @@ export default function SystemCreateCenterPage() {
           <Card className="rounded-2xl border bg-card shadow-sm">
             <CardContent className="grid gap-2 p-4">
               <Button
-                className="h-10 rounded-xl"
+                className="h-10 rounded-xl bg-black text-white hover:bg-black/90"
                 onClick={() => submitForm("CREATE")}
                 disabled={isSubmitting}
               >
@@ -1103,9 +1075,9 @@ function FieldBlock({
 }) {
   return (
     <div className="space-y-2">
-      <Label className="text-sm font-medium">
-        {label}
-        {required ? <span className="text-destructive ms-1">*</span> : null}
+      <Label className="flex items-center gap-1 text-sm font-medium">
+        <span>{label}</span>
+        {required ? <span className="text-destructive">*</span> : null}
       </Label>
 
       {children}

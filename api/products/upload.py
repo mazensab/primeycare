@@ -1,17 +1,26 @@
 # ============================================================
 # 📂 api/products/upload.py
-# 🧭 Primey Care — Products Image Upload API
+# 🧭 Primey Care — Products Image Upload API V2.7
 # ------------------------------------------------------------
 # ✅ Upload product thumbnail image
-# ✅ Upload product marketing image
-# ✅ Provider-aware Google Drive upload
+# ✅ Upload product general marketing image
+# ✅ Provider-aware Google Drive upload for legacy products only
 # ✅ General product Google Drive upload fallback
 # ✅ Lazy Google Drive import to avoid breaking runserver
+# ✅ Unified response: ok / success / data / product / upload
+# ------------------------------------------------------------
+# القاعدة المعتمدة:
+# - Product = كتالوج ثابت.
+# - هذه API ترفع صور المنتج العامة فقط:
+#   thumbnail / marketing
+# - صورة عرض مقدم الخدمة المختلفة حسب العقد تكون في ContractProduct.
+# - عروض مقدمي الخدمة تعرض من /api/offers/.
 # ============================================================
 
 from __future__ import annotations
 
 import logging
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -21,6 +30,7 @@ from django.views.decorators.http import require_http_methods
 
 from products.models import Product
 from products.services import serialize_product
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,25 +56,74 @@ ALLOWED_IMAGE_TYPES = {
 
 
 # ============================================================
-# 🔹 Internal Helpers
+# 🔹 JSON Helpers
 # ============================================================
+
+def _decimal_to_string(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+    if isinstance(value, dict):
+        return {key: _decimal_to_string(val) for key, val in value.items()}
+
+    if isinstance(value, list):
+        return [_decimal_to_string(item) for item in value]
+
+    if isinstance(value, tuple):
+        return tuple(_decimal_to_string(item) for item in value)
+
+    return value
+
 
 def _json_error(
     message: str,
     status: int = 400,
     *,
-    errors=None,
+    errors: Any = None,
 ) -> JsonResponse:
-    payload = {
+    payload: dict[str, Any] = {
         "ok": False,
+        "success": False,
         "message": message,
     }
 
     if errors is not None:
-        payload["errors"] = errors
+        payload["errors"] = _decimal_to_string(errors)
 
-    return JsonResponse(payload, status=status)
+    return JsonResponse(
+        payload,
+        status=status,
+        json_dumps_params={"ensure_ascii": False},
+    )
 
+
+def _json_success(
+    data: dict[str, Any],
+    *,
+    message: str = "تم تنفيذ العملية بنجاح.",
+    status: int = 200,
+    extra: dict[str, Any] | None = None,
+) -> JsonResponse:
+    payload: dict[str, Any] = {
+        "ok": True,
+        "success": True,
+        "message": message,
+        "data": _decimal_to_string(data),
+    }
+
+    if extra:
+        payload.update(_decimal_to_string(extra))
+
+    return JsonResponse(
+        payload,
+        status=status,
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+# ============================================================
+# 🔹 Internal Helpers
+# ============================================================
 
 def _ensure_authenticated(request):
     if not getattr(request, "user", None) or not request.user.is_authenticated:
@@ -219,6 +278,9 @@ def _upload_product_image(
 ) -> dict[str, str]:
     helpers = _get_google_drive_helpers()
 
+    # توافق قديم فقط:
+    # إذا كان المنتج مربوطًا بمقدم خدمة من بيانات قديمة، نحافظ على نفس سلوك الرفع.
+    # التطوير الجديد لا يربط Product بمقدم الخدمة مباشرة.
     if product.provider_id:
         return helpers["upload_provider_file"](
             provider=product.provider,
@@ -295,9 +357,6 @@ def _update_product_image_fields(
         product.thumbnail_image_folder_id = folder_id
         product.thumbnail_image_folder_url = folder_url
 
-        if alt_text:
-            product.thumbnail_image_alt_text = alt_text
-
         update_fields.extend(
             [
                 "thumbnail_image_url",
@@ -305,9 +364,12 @@ def _update_product_image_fields(
                 "thumbnail_image_drive_view_url",
                 "thumbnail_image_folder_id",
                 "thumbnail_image_folder_url",
-                "thumbnail_image_alt_text",
             ]
         )
+
+        if alt_text:
+            product.thumbnail_image_alt_text = alt_text
+            update_fields.append("thumbnail_image_alt_text")
 
     if image_type == "marketing":
         product.marketing_image_url = file_url
@@ -316,9 +378,6 @@ def _update_product_image_fields(
         product.marketing_image_folder_id = folder_id
         product.marketing_image_folder_url = folder_url
 
-        if alt_text:
-            product.marketing_image_alt_text = alt_text
-
         update_fields.extend(
             [
                 "marketing_image_url",
@@ -326,9 +385,12 @@ def _update_product_image_fields(
                 "marketing_image_drive_view_url",
                 "marketing_image_folder_id",
                 "marketing_image_folder_url",
-                "marketing_image_alt_text",
             ]
         )
+
+        if alt_text:
+            product.marketing_image_alt_text = alt_text
+            update_fields.append("marketing_image_alt_text")
 
     update_fields.append("updated_at")
 
@@ -347,6 +409,64 @@ def _product_queryset():
             "pricing_tiers",
             "service_items",
         )
+    )
+
+
+def _enhance_product_payload(product: Product, payload: dict[str, Any]) -> dict[str, Any]:
+    enhanced = dict(payload or {})
+
+    enhanced.update(
+        {
+            "id": product.id,
+            "product_id": product.id,
+            "code": product.code,
+            "name": product.name,
+            "slug": product.slug,
+            "product_type": product.product_type,
+            "category_id": product.category_id,
+            "status": product.status,
+            "currency_code": product.currency_code,
+            "thumbnail_image_url": product.thumbnail_image_url,
+            "thumbnail_image_drive_file_id": product.thumbnail_image_drive_file_id,
+            "thumbnail_image_drive_view_url": product.thumbnail_image_drive_view_url,
+            "thumbnail_image_folder_id": product.thumbnail_image_folder_id,
+            "thumbnail_image_folder_url": product.thumbnail_image_folder_url,
+            "thumbnail_image_alt_text": product.thumbnail_image_alt_text,
+            "marketing_image_url": product.marketing_image_url,
+            "marketing_image_drive_file_id": product.marketing_image_drive_file_id,
+            "marketing_image_drive_view_url": product.marketing_image_drive_view_url,
+            "marketing_image_folder_id": product.marketing_image_folder_id,
+            "marketing_image_folder_url": product.marketing_image_folder_url,
+            "marketing_image_alt_text": product.marketing_image_alt_text,
+            "has_thumbnail_image": product.has_thumbnail_image,
+            "has_marketing_image": product.has_marketing_image,
+            "is_catalog_product": product.is_catalog_product,
+            "is_provider_product": product.is_provider_product,
+            "legacy_provider_id": product.provider_id,
+            "offers_endpoint": "/api/offers/",
+            "provider_offers_endpoint": f"/api/offers/?product_id={product.id}",
+        }
+    )
+
+    if hasattr(product, "catalog_payload"):
+        enhanced["catalog_payload"] = product.catalog_payload
+
+    if hasattr(product, "checkout_payload"):
+        enhanced["checkout_payload"] = product.checkout_payload
+
+    if product.requires_provider:
+        enhanced["checkout_source"] = "offers"
+        enhanced["checkout_note"] = "Use /api/offers/ with product_id to select provider-specific offer."
+    else:
+        enhanced["checkout_source"] = "product"
+
+    return enhanced
+
+
+def _serialize_product_payload(product: Product) -> dict[str, Any]:
+    return _enhance_product_payload(
+        product=product,
+        payload=serialize_product(product),
     )
 
 
@@ -404,16 +524,22 @@ def product_image_upload_api(request, product_id: int):
         )
 
         product = _product_queryset().get(pk=product.pk)
+        serialized = _serialize_product_payload(product)
 
-        return JsonResponse(
+        return _json_success(
             {
-                "ok": True,
-                "message": "Product image uploaded successfully.",
-                "image_type": image_type,
+                "product": serialized,
                 "upload": upload_result,
-                "data": serialize_product(product),
+                "image_type": image_type,
             },
-            status=200,
+            message="Product image uploaded successfully.",
+            extra={
+                # توافق خلفي مع الفرونت الحالي
+                "data": serialized,
+                "product": serialized,
+                "upload": upload_result,
+                "image_type": image_type,
+            },
         )
 
     except ValidationError as exc:

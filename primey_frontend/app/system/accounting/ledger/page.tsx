@@ -1,48 +1,66 @@
 "use client";
 
-import Image from "next/image";
+/* ============================================================
+   📂 app/system/accounting/ledger/page.tsx
+   🧾 Primey Care — General Ledger
+   ------------------------------------------------------------
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Real API only:
+      GET /api/accounting/ledger/
+      GET /api/accounting/accounts/
+   ✅ Account selector / search / dates / movement / sort / columns
+   ✅ Excel .xls + Web print
+   ✅ Skeleton loading
+   ✅ Error / Empty states
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
+============================================================ */
+
+import * as React from "react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowDownUp,
   ArrowLeft,
-  BarChart3,
-  BookOpenCheck,
-  ColumnsIcon,
-  Download,
-  Filter,
-  Layers3,
+  ArrowRight,
+  ArrowUpDown,
+  BookOpen,
+  CalendarDays,
+  Eye,
+  FileSpreadsheet,
+  Landmark,
   Loader2,
-  RefreshCcw,
+  Printer,
+  ReceiptText,
+  RefreshCw,
+  RotateCcw,
   Search,
-  ShieldCheck,
-  TrendingDown,
-  TrendingUp,
+  Settings2,
+  TriangleAlert,
   WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Can } from "@/components/guards/Can";
-import { PermissionGuard } from "@/components/guards/PermissionGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -51,1573 +69,1603 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { PERMISSIONS } from "@/lib/permissions";
 
-/* ============================================================
-   📂 app/system/accounting/ledger/page.tsx
-   🧠 Primey Care | General Ledger
-   ------------------------------------------------------------
-   ✅ بيانات حقيقية من Accounting Ledger API
-   ✅ بحث + فلاتر + أعمدة + فرز + صفحات
-   ✅ تصدير Excel من API
-   ✅ حماية الصفحة accounting.view
-   ✅ حماية التصدير accounting.export / reports.export
-   ✅ دعم عربي / إنجليزي
-   ✅ أرقام إنجليزية دائمًا
-   ✅ رمز العملة الرسمي
-   ✅ بدون dir داخل DropdownMenuContent
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
+type ApiResponse = {
+  ok?: boolean;
+  success?: boolean;
+  count?: number;
+  total?: number;
+  total_count?: number;
+  results?: unknown[];
+  items?: unknown[];
+  data?: unknown;
+  summary?: unknown;
+  meta?: unknown;
+};
 
-type SortKey =
-  | "entry_date"
-  | "journal_entry_number"
-  | "account_code"
-  | "account_name"
-  | "posting_source"
-  | "reference"
-  | "description"
-  | "debit_amount"
-  | "credit_amount"
-  | "movement_amount"
-  | "running_balance";
+type AccountOption = {
+  id: string;
+  code: string;
+  name: string;
+  account_type: string;
+  account_type_label: string;
+  is_active: boolean;
+  can_post: boolean;
+  is_group: boolean;
+};
 
-type SortDirection = "asc" | "desc";
-
-type LedgerTransaction = {
-  id: number;
-  journal_entry_id: number | null;
-  journal_entry_number: string | null;
-  entry_date: string | null;
-  posting_source: string | null;
-  reference: string | null;
-  external_reference: string | null;
-  entry_description: string | null;
-  account_id: number | null;
-  account_code: string | null;
-  account_name: string | null;
-  account_type: string | null;
-  normal_balance: string | null;
-  line_description: string | null;
-  debit_amount: string;
-  credit_amount: string;
-  movement_amount: string;
-  running_balance: string;
-  sort_order: number;
+type LedgerRecord = {
+  id: string;
+  date: string | null;
+  entry_id: string;
+  entry_number: string;
+  line_id: string;
+  account_id: string;
+  account_code: string;
+  account_name: string;
+  cost_center_id: string;
+  cost_center_code: string;
+  cost_center_name: string;
+  description: string;
+  reference: string;
+  source: string;
+  source_label: string;
+  debit: number;
+  credit: number;
+  balance: number;
+  movement_type: "debit" | "credit" | "opening" | "empty";
+  status: string;
   created_at: string | null;
 };
 
-type LedgerPayload = {
-  filters?: {
-    account_id?: number | null;
-    date_from?: string | null;
-    date_to?: string | null;
-    posted_only?: boolean;
-    include_opening?: boolean;
-    ordering?: string;
-  };
-  account?: {
-    id: number;
-    code: string | null;
-    name: string | null;
-    name_ar: string | null;
-    name_en: string | null;
-    account_type: string | null;
-    normal_balance: string | null;
-    is_group: boolean;
-    is_active: boolean;
-    parent_id: number | null;
-  } | null;
-  summary?: {
-    transaction_count?: number;
-    opening_debit?: string;
-    opening_credit?: string;
-    opening_balance?: string;
-    total_debit?: string;
-    total_credit?: string;
-    closing_balance?: string;
-  };
-  pagination?: {
-    page?: number;
-    page_size?: number;
-    total_pages?: number;
-    total_items?: number;
-    has_next?: boolean;
-    has_previous?: boolean;
-    next_page?: number | null;
-    previous_page?: number | null;
-  };
-  transactions?: LedgerTransaction[];
+type LedgerSummary = {
+  opening_balance: number;
+  total_debit: number;
+  total_credit: number;
+  closing_balance: number;
+  movements_count: number;
 };
 
-type ApiEnvelope<T> = {
-  ok?: boolean;
-  data?: T;
-  message?: string;
+type MovementFilter = "all" | "debit" | "credit" | "opening" | "empty";
+type SortKey =
+  | "newest"
+  | "oldest"
+  | "debit_high"
+  | "credit_high"
+  | "balance_high"
+  | "balance_low"
+  | "account";
+
+type ColumnKey =
+  | "date"
+  | "entry"
+  | "account"
+  | "costCenter"
+  | "description"
+  | "reference"
+  | "source"
+  | "debit"
+  | "credit"
+  | "balance"
+  | "movement"
+  | "actions";
+
+const DEFAULT_COLUMNS: Record<ColumnKey, boolean> = {
+  date: true,
+  entry: true,
+  account: true,
+  costCenter: true,
+  description: true,
+  reference: true,
+  source: true,
+  debit: true,
+  credit: true,
+  balance: true,
+  movement: true,
+  actions: true,
 };
 
-type VisibleColumns = {
-  entry_date: boolean;
-  journal_entry_number: boolean;
-  account_code: boolean;
-  account_name: boolean;
-  posting_source: boolean;
-  reference: boolean;
-  description: boolean;
-  debit_amount: boolean;
-  credit_amount: boolean;
-  movement_amount: boolean;
-  running_balance: boolean;
-  actions: boolean;
-};
+const translations = {
+  ar: {
+    title: "دفتر الأستاذ",
+    subtitle:
+      "استعراض حركة الحسابات المحاسبية مع المدين والدائن والرصيد الجاري حسب الحساب والفترة.",
+    back: "المحاسبة",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    openJournal: "فتح القيد",
+    openAccount: "فتح الحساب",
 
-const CURRENCY_ICON_PATH = "/currency/sar.svg";
+    account: "الحساب",
+    allAccounts: "كل الحسابات",
+    searchAccount: "ابحث عن حساب...",
+    from: "من",
+    to: "إلى",
+    all: "الكل",
+    movementType: "نوع الحركة",
+    sort: "الترتيب",
+    columns: "الأعمدة",
+    searchPlaceholder: "ابحث برقم القيد أو الحساب أو الوصف أو المرجع أو المصدر...",
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://127.0.0.1:8000";
+    openingBalance: "الرصيد الافتتاحي",
+    totalDebit: "إجمالي المدين",
+    totalCredit: "إجمالي الدائن",
+    closingBalance: "الرصيد الختامي",
+    movementsCount: "عدد الحركات",
 
-/* ============================================================
-   Locale
-============================================================ */
+    date: "التاريخ",
+    entry: "القيد",
+    costCenter: "مركز التكلفة",
+    description: "الوصف",
+    reference: "المرجع",
+    source: "المصدر",
+    debit: "مدين",
+    credit: "دائن",
+    balance: "الرصيد",
+    movement: "الحركة",
+    status: "الحالة",
+    actions: "الإجراءات",
 
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+    opening: "افتتاحي",
+    empty: "فارغ",
+    posted: "مرحل",
+    draft: "مسودة",
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    debitHigh: "الأعلى مدين",
+    creditHigh: "الأعلى دائن",
+    balanceHigh: "الأعلى رصيدًا",
+    balanceLow: "الأقل رصيدًا",
+    accountSort: "الحساب",
 
-    const savedLocale = window.localStorage.getItem("primey-locale");
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+    showing: "عرض",
+    of: "من",
+    rows: "صفوف",
+    noDataTitle: "لا توجد حركات",
+    noDataDesc: "ستظهر حركة دفتر الأستاذ هنا بعد وجود قيود محاسبية.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+    errorTitle: "تعذر تحميل دفتر الأستاذ",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    refreshed: "تم تحديث دفتر الأستاذ.",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير دفتر الأستاذ",
+    generatedAt: "تاريخ الطباعة",
+    sar: "ر.س",
+    unknown: "غير محدد",
+  },
+  en: {
+    title: "General Ledger",
+    subtitle:
+      "Review account movements with debit, credit, and running balance by account and period.",
+    back: "Accounting",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    openJournal: "Open journal",
+    openAccount: "Open account",
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
+    account: "Account",
+    allAccounts: "All accounts",
+    searchAccount: "Search account...",
+    from: "From",
+    to: "To",
+    all: "All",
+    movementType: "Movement type",
+    sort: "Sort",
+    columns: "Columns",
+    searchPlaceholder: "Search by journal, account, description, reference, or source...",
+
+    openingBalance: "Opening balance",
+    totalDebit: "Total debit",
+    totalCredit: "Total credit",
+    closingBalance: "Closing balance",
+    movementsCount: "Movements count",
+
+    date: "Date",
+    entry: "Journal",
+    costCenter: "Cost center",
+    description: "Description",
+    reference: "Reference",
+    source: "Source",
+    debit: "Debit",
+    credit: "Credit",
+    balance: "Balance",
+    movement: "Movement",
+    status: "Status",
+    actions: "Actions",
+
+    opening: "Opening",
+    empty: "Empty",
+    posted: "Posted",
+    draft: "Draft",
+    newest: "Newest",
+    oldest: "Oldest",
+    debitHigh: "Highest debit",
+    creditHigh: "Highest credit",
+    balanceHigh: "Highest balance",
+    balanceLow: "Lowest balance",
+    accountSort: "Account",
+
+    showing: "Showing",
+    of: "of",
+    rows: "rows",
+    noDataTitle: "No movements",
+    noDataDesc: "General ledger movements will appear here once journal entries exist.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other results.",
+    errorTitle: "Unable to load general ledger",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    refreshed: "General ledger refreshed.",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "General ledger report",
+    generatedAt: "Generated at",
+    sar: "SAR",
+    unknown: "Unknown",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
+}
+
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
+
+  return fallback;
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch {
-    // ignore
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (["1", "true", "yes", "on", "active", "posting", "posted"].includes(normalized)) return true;
+    if (["0", "false", "no", "off", "inactive", "draft"].includes(normalized)) return false;
   }
+
+  return fallback;
 }
 
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: string | number | null | undefined): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: string | number | null | undefined): string {
+function formatInteger(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(toNumber(value));
 }
 
-function formatMoney(value: string | number | null | undefined): string {
+function formatMoney(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(toNumber(value));
 }
 
-function formatPercent(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 1,
-  }).format(value);
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10);
+
+  return parsed.toISOString().slice(0, 10);
 }
 
-function formatDate(value: string | null | undefined, locale: AppLocale): string {
-  if (!value) return locale === "ar" ? "غير محدد" : "Not set";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function getApiUrl(path: string): string {
-  const cleanBase = API_BASE_URL.replace(/\/$/, "");
-  const cleanPath = path.startsWith("/") ? path : `/${path}`;
-  return `${cleanBase}${cleanPath}`;
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-function buildQuery(
-  params: Record<string, string | number | boolean | null | undefined>,
-) {
-  const searchParams = new URLSearchParams();
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
 
-  Object.entries(params).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === "") return;
-    searchParams.set(key, String(value));
-  });
-
-  const query = searchParams.toString();
-  return query ? `?${query}` : "";
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
 }
 
-function buildLedgerPath({
-  accountId,
-  dateFrom,
-  dateTo,
-  postedOnly,
-  includeOpening,
-  page,
-  pageSize,
-  ordering,
-  excel = false,
-}: {
-  accountId: string;
-  dateFrom: string;
-  dateTo: string;
-  postedOnly: boolean;
-  includeOpening: boolean;
-  page: number;
-  pageSize: number;
-  ordering: string;
-  excel?: boolean;
-}) {
-  const basePath = excel
-    ? "/api/accounting/ledger/excel/"
-    : "/api/accounting/ledger/";
-
-  return `${basePath}${buildQuery({
-    account_id: accountId || null,
-    date_from: dateFrom || null,
-    date_to: dateTo || null,
-    posted_only: postedOnly,
-    include_opening: includeOpening,
-    page,
-    page_size: pageSize,
-    ordering,
-  })}`;
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const query = params?.toString();
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
 }
 
-function normalizeTransaction(item: unknown): LedgerTransaction {
-  const row = (item || {}) as Record<string, unknown>;
-
-  return {
-    id: Number(row.id || 0),
-    journal_entry_id:
-      row.journal_entry_id === null || row.journal_entry_id === undefined
-        ? null
-        : Number(row.journal_entry_id),
-    journal_entry_number: row.journal_entry_number
-      ? String(row.journal_entry_number)
-      : null,
-    entry_date: row.entry_date ? String(row.entry_date) : null,
-    posting_source: row.posting_source ? String(row.posting_source) : null,
-    reference: row.reference ? String(row.reference) : null,
-    external_reference: row.external_reference
-      ? String(row.external_reference)
-      : null,
-    entry_description: row.entry_description
-      ? String(row.entry_description)
-      : null,
-    account_id:
-      row.account_id === null || row.account_id === undefined
-        ? null
-        : Number(row.account_id),
-    account_code: row.account_code ? String(row.account_code) : null,
-    account_name: row.account_name ? String(row.account_name) : null,
-    account_type: row.account_type ? String(row.account_type) : null,
-    normal_balance: row.normal_balance ? String(row.normal_balance) : null,
-    line_description: row.line_description ? String(row.line_description) : null,
-    debit_amount: String(row.debit_amount || "0.00"),
-    credit_amount: String(row.credit_amount || "0.00"),
-    movement_amount: String(row.movement_amount || "0.00"),
-    running_balance: String(row.running_balance || "0.00"),
-    sort_order: Number(row.sort_order || 0),
-    created_at: row.created_at ? String(row.created_at) : null,
-  };
-}
-
-function normalizeLedgerPayload(payload: LedgerPayload): LedgerPayload {
-  return {
-    filters: {
-      account_id: payload.filters?.account_id ?? null,
-      date_from: payload.filters?.date_from ?? null,
-      date_to: payload.filters?.date_to ?? null,
-      posted_only: payload.filters?.posted_only ?? true,
-      include_opening: payload.filters?.include_opening ?? true,
-      ordering: payload.filters?.ordering ?? "entry_date",
-    },
-    account: payload.account ?? null,
-    summary: {
-      transaction_count: payload.summary?.transaction_count ?? 0,
-      opening_debit: payload.summary?.opening_debit ?? "0.00",
-      opening_credit: payload.summary?.opening_credit ?? "0.00",
-      opening_balance: payload.summary?.opening_balance ?? "0.00",
-      total_debit: payload.summary?.total_debit ?? "0.00",
-      total_credit: payload.summary?.total_credit ?? "0.00",
-      closing_balance: payload.summary?.closing_balance ?? "0.00",
-    },
-    pagination: {
-      page: payload.pagination?.page ?? 1,
-      page_size: payload.pagination?.page_size ?? 20,
-      total_pages: payload.pagination?.total_pages ?? 1,
-      total_items: payload.pagination?.total_items ?? 0,
-      has_next: payload.pagination?.has_next ?? false,
-      has_previous: payload.pagination?.has_previous ?? false,
-      next_page: payload.pagination?.next_page ?? null,
-      previous_page: payload.pagination?.previous_page ?? null,
-    },
-    transactions: Array.isArray(payload.transactions)
-      ? payload.transactions.map(normalizeTransaction)
-      : [],
-  };
-}
-
-async function fetchLedger(path: string): Promise<LedgerPayload> {
-  const response = await fetch(getApiUrl(path), {
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, {
     method: "GET",
     credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal,
     headers: {
       Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
     },
-    cache: "no-store",
   });
 
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  let payload: any = null;
+
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
+
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
   }
 
-  const payload = (await response.json()) as
-    | ApiEnvelope<LedgerPayload>
-    | LedgerPayload;
-
-  const envelope = payload as ApiEnvelope<LedgerPayload>;
-
-  if (envelope.ok === false) {
-    throw new Error(envelope.message || "Ledger request failed");
-  }
-
-  const data = envelope.data || (payload as LedgerPayload);
-
-  return normalizeLedgerPayload(data);
+  return (payload || {}) as T;
 }
 
-function openExport(path: string) {
-  if (typeof window === "undefined") return;
-  window.open(getApiUrl(path), "_blank", "noopener,noreferrer");
+function extractArray(payload: ApiResponse) {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
+
+  const data = asRecord(payload.data);
+
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.rows)) return data.rows;
+  if (Array.isArray(data.ledger)) return data.ledger;
+  if (Array.isArray(data.movements)) return data.movements;
+  if (Array.isArray(data.entries)) return data.entries;
+  if (Array.isArray(data.accounts)) return data.accounts;
+
+  return [];
 }
 
-function getDescription(row: LedgerTransaction) {
-  return row.line_description || row.entry_description || "";
-}
-
-function getSortText(row: LedgerTransaction, key: SortKey) {
-  if (key === "description") return getDescription(row);
-  if (key === "entry_date") return row.entry_date || "";
-  if (key === "journal_entry_number") return row.journal_entry_number || "";
-  if (key === "account_code") return row.account_code || "";
-  if (key === "account_name") return row.account_name || "";
-  if (key === "posting_source") return row.posting_source || "";
-  if (key === "reference") return row.reference || "";
-  return "";
-}
-
-function getSortNumber(row: LedgerTransaction, key: SortKey) {
-  if (key === "debit_amount") return toNumber(row.debit_amount);
-  if (key === "credit_amount") return toNumber(row.credit_amount);
-  if (key === "movement_amount") return toNumber(row.movement_amount);
-  if (key === "running_balance") return toNumber(row.running_balance);
-  return 0;
-}
-
-function compareValues(
-  a: LedgerTransaction,
-  b: LedgerTransaction,
-  key: SortKey,
-  direction: SortDirection,
-) {
-  const multiplier = direction === "asc" ? 1 : -1;
-
-  if (
-    key === "debit_amount" ||
-    key === "credit_amount" ||
-    key === "movement_amount" ||
-    key === "running_balance"
-  ) {
-    return (getSortNumber(a, key) - getSortNumber(b, key)) * multiplier;
-  }
-
-  return getSortText(a, key).localeCompare(getSortText(b, key)) * multiplier;
-}
-
-/* ============================================================
-   Dictionary
-============================================================ */
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
+function extractSummary(payload: ApiResponse, rows: LedgerRecord[]): LedgerSummary {
+  const data = asRecord(payload.data);
+  const summary = asRecord(payload.summary || data.summary || data.totals || data);
 
   return {
-    title: isArabic ? "دفتر الأستاذ" : "General Ledger",
-    subtitle: isArabic
-      ? "عرض جميع الحركات المحاسبية حسب الحساب والفترة مع الرصيد الجاري."
-      : "View all accounting movements by account and period with running balance.",
-
-    back: isArabic ? "لوحة المحاسبة" : "Accounting Overview",
-    reports: isArabic ? "تقارير المحاسبة" : "Accounting Reports",
-    accounts: isArabic ? "دليل الحسابات" : "Chart of Accounts",
-    refresh: isArabic ? "تحديث" : "Refresh",
-    export: isArabic ? "تصدير Excel" : "Export Excel",
-
-    statusTitle: isArabic ? "حالة دفتر الأستاذ" : "Ledger Status",
-    statusDesc: isArabic
-      ? "مؤشرات دفتر الأستاذ حسب الفترة والفلاتر المحددة."
-      : "Ledger indicators based on the selected filters.",
-
-    summaryTitle: isArabic ? "ملخص دفتر الأستاذ" : "Ledger Summary",
-    summaryDesc: isArabic
-      ? "أهم الأرصدة والحركات المحاسبية الحالية."
-      : "Key current accounting balances and movements.",
-
-    openingBalance: isArabic ? "الرصيد الافتتاحي" : "Opening Balance",
-    totalDebit: isArabic ? "إجمالي المدين" : "Total Debit",
-    totalCredit: isArabic ? "إجمالي الدائن" : "Total Credit",
-    closingBalance: isArabic ? "الرصيد الختامي" : "Closing Balance",
-    transactionCount: isArabic ? "عدد الحركات" : "Transactions",
-
-    searchPlaceholder: isArabic
-      ? "ابحث في رقم القيد، الحساب، المرجع، الوصف..."
-      : "Search journal number, account, reference, description...",
-
-    columns: isArabic ? "الأعمدة" : "Columns",
-    filters: isArabic ? "الفلاتر" : "Filters",
-    accountId: isArabic ? "رقم الحساب" : "Account ID",
-    dateFrom: isArabic ? "من تاريخ" : "Date From",
-    dateTo: isArabic ? "إلى تاريخ" : "Date To",
-    postedOnly: isArabic ? "قيود مرحلة فقط" : "Posted only",
-    includeOpening: isArabic ? "إظهار الرصيد الافتتاحي" : "Include opening",
-
-    entryDate: isArabic ? "التاريخ" : "Date",
-    journalNumber: isArabic ? "رقم القيد" : "Journal No.",
-    accountCode: isArabic ? "كود الحساب" : "Account Code",
-    accountName: isArabic ? "اسم الحساب" : "Account Name",
-    source: isArabic ? "المصدر" : "Source",
-    reference: isArabic ? "المرجع" : "Reference",
-    description: isArabic ? "الوصف" : "Description",
-    debit: isArabic ? "مدين" : "Debit",
-    credit: isArabic ? "دائن" : "Credit",
-    movement: isArabic ? "الحركة" : "Movement",
-    runningBalance: isArabic ? "الرصيد الجاري" : "Running Balance",
-    action: isArabic ? "الإجراء" : "Action",
-
-    viewJournal: isArabic ? "عرض القيد" : "View Journal",
-    viewAccount: isArabic ? "عرض الحساب" : "View Account",
-    previous: isArabic ? "السابق" : "Previous",
-    next: isArabic ? "التالي" : "Next",
-
-    noRows: isArabic ? "لا توجد حركات" : "No transactions found",
-    noRowsDesc: isArabic
-      ? "غيّر الفلاتر أو تأكد من وجود قيود محاسبية مرحلة."
-      : "Change filters or make sure posted accounting entries exist.",
-
-    loadSuccess: isArabic ? "تم تحديث دفتر الأستاذ" : "Ledger refreshed",
-    loadError: isArabic ? "تعذر تحميل دفتر الأستاذ" : "Unable to load ledger",
-    invalidDate: isArabic
-      ? "لا يمكن أن يكون تاريخ البداية أكبر من تاريخ النهاية"
-      : "Date from cannot be greater than date to",
+    opening_balance: toNumber(summary.opening_balance),
+    total_debit: toNumber(
+      summary.total_debit,
+      rows.reduce((sum, row) => sum + row.debit, 0),
+    ),
+    total_credit: toNumber(
+      summary.total_credit,
+      rows.reduce((sum, row) => sum + row.credit, 0),
+    ),
+    closing_balance: toNumber(
+      summary.closing_balance ?? summary.current_balance ?? summary.balance,
+      rows.length ? rows[rows.length - 1]?.balance : 0,
+    ),
+    movements_count: toNumber(
+      summary.movements_count ??
+        summary.total_count ??
+        payload.count ??
+        payload.total ??
+        payload.total_count,
+      rows.length,
+    ),
   };
 }
 
-/* ============================================================
-   UI Helpers
-============================================================ */
+function normalizeAccount(value: unknown): AccountOption {
+  const item = asRecord(value);
+  const id = normalizeText(item.id || item.pk || item.uuid);
 
-function MoneyValue({
-  value,
-  className = "",
-}: {
-  value: string | number | null | undefined;
-  className?: string;
-}) {
-  return (
-    <span className={`inline-flex items-center gap-1 ${className}`} dir="ltr">
-      <span>{formatMoney(value)}</span>
-      <Image
-        src={CURRENCY_ICON_PATH}
-        alt="SAR"
-        width={15}
-        height={15}
-        className="shrink-0"
-      />
-    </span>
-  );
+  return {
+    id,
+    code: normalizeText(item.code),
+    name: normalizeText(item.name || item.name_ar || item.name_en || `#${id}`),
+    account_type: normalizeText(item.account_type || item.type),
+    account_type_label: normalizeText(item.account_type_label || item.account_type || item.type),
+    is_active: toBoolean(item.is_active, true),
+    can_post: toBoolean(item.can_post || item.is_posting),
+    is_group: toBoolean(item.is_group),
+  };
 }
 
-function SortButton({
-  label,
-  sortKey,
-  activeKey,
-  direction,
-  onClick,
-}: {
-  label: string;
-  sortKey: SortKey;
-  activeKey: SortKey;
-  direction: SortDirection;
-  onClick: () => void;
-}) {
-  const active = sortKey === activeKey;
+function normalizeLedger(value: unknown): LedgerRecord {
+  const item = asRecord(value);
+  const entry = asRecord(item.entry || item.journal || item.journal_entry);
+  const account = asRecord(item.account);
+  const costCenter = asRecord(item.cost_center || item.costCenter);
 
+  const id = normalizeText(item.id || item.pk || item.uuid);
+  const debit = toNumber(item.debit ?? item.debit_amount ?? item.total_debit);
+  const credit = toNumber(item.credit ?? item.credit_amount ?? item.total_credit);
+
+  let movementType: LedgerRecord["movement_type"] = "empty";
+
+  if (normalizeText(item.movement_type).toLowerCase() === "opening") {
+    movementType = "opening";
+  } else if (debit > 0) {
+    movementType = "debit";
+  } else if (credit > 0) {
+    movementType = "credit";
+  }
+
+  return {
+    id,
+    date:
+      normalizeText(item.date || item.entry_date || item.posting_date || entry.entry_date) ||
+      null,
+    entry_id: normalizeText(item.entry_id || item.journal_entry_id || entry.id),
+    entry_number: normalizeText(
+      item.entry_number ||
+        item.journal_number ||
+        item.journal_entry_number ||
+        entry.entry_number ||
+        entry.number,
+    ),
+    line_id: normalizeText(item.line_id || item.journal_line_id),
+    account_id: normalizeText(item.account_id || account.id),
+    account_code: normalizeText(item.account_code || account.code),
+    account_name: normalizeText(item.account_name || account.name || account.name_ar || account.name_en),
+    cost_center_id: normalizeText(item.cost_center_id || costCenter.id),
+    cost_center_code: normalizeText(item.cost_center_code || costCenter.code),
+    cost_center_name: normalizeText(
+      item.cost_center_name || costCenter.name || costCenter.name_ar || costCenter.name_en,
+    ),
+    description: normalizeText(item.description || item.notes || entry.description),
+    reference: normalizeText(item.reference || item.source_number || entry.source_number),
+    source: normalizeText(item.source || item.posting_source || entry.posting_source),
+    source_label: normalizeText(item.source_label || item.posting_source_label || item.source || entry.posting_source),
+    debit,
+    credit,
+    balance: toNumber(item.balance ?? item.running_balance ?? item.current_balance),
+    movement_type: movementType,
+    status: normalizeText(item.status || entry.status || "posted"),
+    created_at: normalizeText(item.created_at || entry.created_at) || null,
+  };
+}
+
+function movementLabel(value: LedgerRecord["movement_type"], locale: Locale) {
+  const t = translations[locale];
+
+  if (value === "debit") return t.debit;
+  if (value === "credit") return t.credit;
+  if (value === "opening") return t.opening;
+
+  return t.empty;
+}
+
+function getBadgeClass(value: string) {
+  const normalized = value.toLowerCase();
+
+  if (["posted", "debit", "active"].includes(normalized)) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  if (["cancelled", "canceled", "void"].includes(normalized)) {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+  }
+
+  if (["credit", "opening"].includes(normalized)) {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function StatusBadge({ value, label }: { value: string; label: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1 font-semibold hover:text-slate-950"
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-xs font-medium", getBadgeClass(value))}
     >
-      {label}
-      <ArrowDownUp
-        className={`h-3.5 w-3.5 ${
-          active ? "text-slate-950" : "text-slate-400"
-        } ${active && direction === "desc" ? "rotate-180" : ""}`}
-      />
-    </button>
+      {label || value || "—"}
+    </Badge>
   );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function MoneyValue({ value, label }: { value: number; label: string }) {
+  return (
+    <div className="flex items-center justify-start gap-1 text-sm font-semibold tabular-nums">
+      <span>{formatMoney(value)}</span>
+      <img src="/currency/sar.svg" alt={label} className="h-3.5 w-3.5" />
+    </div>
+  );
+}
 
-export default function GeneralLedgerPage() {
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [loading, setLoading] = useState(true);
+function KpiCard({
+  title,
+  value,
+  trend,
+  icon: Icon,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
+  return (
+    <Card className="rounded-lg border bg-card shadow-none">
+      <CardHeader className="relative min-h-[112px] px-6 py-5">
+        <CardDescription className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardDescription>
 
-  const [payload, setPayload] = useState<LedgerPayload | null>(null);
+        <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+          {value}
+        </CardTitle>
 
-  const [accountId, setAccountId] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [postedOnly, setPostedOnly] = useState(true);
-  const [includeOpening, setIncludeOpening] = useState(true);
+        <CardAction>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+            <Icon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        </CardAction>
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("entry_date");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+        <div className="pt-1">
+          <Badge
+            variant="outline"
+            className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+          >
+            {trend}
+          </Badge>
+        </div>
+      </CardHeader>
+    </Card>
+  );
+}
 
-  const [page, setPage] = useState(1);
-  const pageSize = 12;
+function LedgerSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-96" />
+        </div>
 
-  const [visibleColumns, setVisibleColumns] = useState<VisibleColumns>({
-    entry_date: true,
-    journal_entry_number: true,
-    account_code: true,
-    account_name: true,
-    posting_source: true,
-    reference: true,
-    description: true,
-    debit_amount: true,
-    credit_amount: true,
-    movement_amount: true,
-    running_balance: true,
-    actions: true,
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index} className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="min-h-[112px] px-6 py-5">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-5 w-20" />
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-80 w-full" />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+export default function AccountingLedgerPage() {
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [accounts, setAccounts] = React.useState<AccountOption[]>([]);
+  const [ledgerRows, setLedgerRows] = React.useState<LedgerRecord[]>([]);
+  const [summary, setSummary] = React.useState<LedgerSummary>({
+    opening_balance: 0,
+    total_debit: 0,
+    total_credit: 0,
+    closing_balance: 0,
+    movements_count: 0,
   });
 
-  const t = dictionary(locale);
-  const isArabic = locale === "ar";
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState("");
 
-  function validateInputs() {
-    if (dateFrom && dateTo && dateFrom > dateTo) {
-      toast.error(t.invalidDate);
-      return false;
-    }
+  const [accountSearch, setAccountSearch] = React.useState("");
+  const [selectedAccountId, setSelectedAccountId] = React.useState("all");
+  const [searchInput, setSearchInput] = React.useState("");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
+  const [movementFilter, setMovementFilter] = React.useState<MovementFilter>("all");
+  const [sortKey, setSortKey] = React.useState<SortKey>("newest");
+  const [columns, setColumns] = React.useState<Record<ColumnKey, boolean>>(DEFAULT_COLUMNS);
 
-    return true;
-  }
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  async function loadLedger(showToast = false) {
-    try {
-      if (!validateInputs()) return;
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-      setLoading(true);
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
 
-      const path = buildLedgerPath({
-        accountId: accountId.trim(),
-        dateFrom,
-        dateTo,
-        postedOnly,
-        includeOpening,
-        page: 1,
-        pageSize: 500,
-        ordering: sortDirection === "desc" ? `-${sortKey}` : sortKey,
-      });
+    applyLocale();
 
-      const data = await fetchLedger(path);
-      setPayload(data);
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
-      if (showToast) {
-        toast.success(t.loadSuccess);
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
+
+  const loadLedger = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
+
+      try {
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setError("");
+
+        const accountsParams = new URLSearchParams({
+          page: "1",
+          page_size: "500",
+        });
+
+        const ledgerParams = new URLSearchParams({
+          page: "1",
+          page_size: "500",
+        });
+
+        if (selectedAccountId !== "all") {
+          ledgerParams.set("account_id", selectedAccountId);
+        }
+
+        if (dateFrom) ledgerParams.set("date_from", dateFrom);
+        if (dateTo) ledgerParams.set("date_to", dateTo);
+
+        const [accountsResult, ledgerResult] = await Promise.allSettled([
+          fetchJson<ApiResponse>(
+            makeApiUrl("/api/accounting/accounts/", accountsParams),
+            controller.signal,
+          ),
+          fetchJson<ApiResponse>(
+            makeApiUrl("/api/accounting/ledger/", ledgerParams),
+            controller.signal,
+          ),
+        ]);
+
+        if (accountsResult.status === "fulfilled") {
+          setAccounts(
+            extractArray(accountsResult.value)
+              .map(normalizeAccount)
+              .filter((account) => account.is_active)
+              .sort((a, b) => a.code.localeCompare(b.code)),
+          );
+        } else {
+          setAccounts([]);
+        }
+
+        if (ledgerResult.status === "rejected") {
+          throw ledgerResult.reason;
+        }
+
+        const rows = extractArray(ledgerResult.value).map(normalizeLedger);
+
+        setLedgerRows(rows);
+        setSummary(extractSummary(ledgerResult.value, rows));
+
+        if (silent) toast.success(t.refreshed);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-    } catch (error) {
-      console.error("Ledger load error:", error);
-      toast.error(t.loadError);
-      setPayload(null);
-    } finally {
-      setLoading(false);
-    }
-  }
 
-  function handleExport() {
-    if (!validateInputs()) return;
+      return () => controller.abort();
+    },
+    [dateFrom, dateTo, selectedAccountId, t.errorDesc, t.refreshed],
+  );
 
-    const path = buildLedgerPath({
-      accountId: accountId.trim(),
-      dateFrom,
-      dateTo,
-      postedOnly,
-      includeOpening,
-      page: 1,
-      pageSize: 500,
-      ordering: sortDirection === "desc" ? `-${sortKey}` : sortKey,
-      excel: true,
+  React.useEffect(() => {
+    void loadLedger();
+  }, [loadLedger]);
+
+  const filteredAccounts = React.useMemo(() => {
+    const query = accountSearch.trim().toLowerCase();
+
+    if (!query) return accounts;
+
+    return accounts.filter(
+      (account) =>
+        account.code.toLowerCase().includes(query) ||
+        account.name.toLowerCase().includes(query) ||
+        account.account_type_label.toLowerCase().includes(query),
+    );
+  }, [accountSearch, accounts]);
+
+  const selectedAccount = React.useMemo(() => {
+    if (selectedAccountId === "all") return null;
+    return accounts.find((account) => account.id === selectedAccountId) || null;
+  }, [accounts, selectedAccountId]);
+
+  const filteredRows = React.useMemo(() => {
+    const query = searchInput.trim().toLowerCase();
+
+    let rows = ledgerRows.filter((row) => {
+      const matchesSearch =
+        !query ||
+        row.entry_number.toLowerCase().includes(query) ||
+        row.account_code.toLowerCase().includes(query) ||
+        row.account_name.toLowerCase().includes(query) ||
+        row.cost_center_code.toLowerCase().includes(query) ||
+        row.cost_center_name.toLowerCase().includes(query) ||
+        row.description.toLowerCase().includes(query) ||
+        row.reference.toLowerCase().includes(query) ||
+        row.source_label.toLowerCase().includes(query) ||
+        row.source.toLowerCase().includes(query);
+
+      const date = formatDate(row.date || row.created_at);
+      const matchesFrom = !dateFrom || (date !== "—" && date >= dateFrom);
+      const matchesTo = !dateTo || (date !== "—" && date <= dateTo);
+
+      const matchesMovement =
+        movementFilter === "all" || row.movement_type === movementFilter;
+
+      return matchesSearch && matchesFrom && matchesTo && matchesMovement;
     });
 
-    openExport(path);
+    rows = [...rows].sort((a, b) => {
+      if (sortKey === "oldest") {
+        return String(a.date || a.created_at || "").localeCompare(
+          String(b.date || b.created_at || ""),
+        );
+      }
+
+      if (sortKey === "debit_high") return b.debit - a.debit;
+      if (sortKey === "credit_high") return b.credit - a.credit;
+      if (sortKey === "balance_high") return b.balance - a.balance;
+      if (sortKey === "balance_low") return a.balance - b.balance;
+      if (sortKey === "account") {
+        return `${a.account_code} ${a.account_name}`.localeCompare(
+          `${b.account_code} ${b.account_name}`,
+        );
+      }
+
+      return String(b.date || b.created_at || "").localeCompare(
+        String(a.date || a.created_at || ""),
+      );
+    });
+
+    return rows;
+  }, [dateFrom, dateTo, ledgerRows, movementFilter, searchInput, sortKey]);
+
+  const hasActiveFilters =
+    Boolean(searchInput.trim()) ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo) ||
+    selectedAccountId !== "all" ||
+    movementFilter !== "all" ||
+    sortKey !== "newest";
+
+  const visibleColumnCount = Object.values(columns).filter(Boolean).length;
+
+  function resetFilters() {
+    setSearchInput("");
+    setDateFrom("");
+    setDateTo("");
+    setSelectedAccountId("all");
+    setMovementFilter("all");
+    setSortKey("newest");
+    setAccountSearch("");
   }
 
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+  function columnLabel(key: ColumnKey) {
+    if (key === "date") return t.date;
+    if (key === "entry") return t.entry;
+    if (key === "account") return t.account;
+    if (key === "costCenter") return t.costCenter;
+    if (key === "description") return t.description;
+    if (key === "reference") return t.reference;
+    if (key === "source") return t.source;
+    if (key === "debit") return t.debit;
+    if (key === "credit") return t.credit;
+    if (key === "balance") return t.balance;
+    if (key === "movement") return t.movement;
+    return t.actions;
+  }
+
+  function buildExportRows() {
+    return filteredRows.map((row) => ({
+      date: formatDate(row.date || row.created_at),
+      entry: row.entry_number,
+      account: `${row.account_code ? `${row.account_code} — ` : ""}${row.account_name || "—"}`,
+      costCenter: `${row.cost_center_code ? `${row.cost_center_code} — ` : ""}${row.cost_center_name || "—"}`,
+      description: row.description,
+      reference: row.reference,
+      source: row.source_label || row.source,
+      debit: formatMoney(row.debit),
+      credit: formatMoney(row.credit),
+      balance: formatMoney(row.balance),
+      movement: movementLabel(row.movement_type, locale),
+    }));
+  }
+
+  function exportExcel() {
+    const rows = buildExportRows();
+
+    if (!rows.length) {
+      toast.error(t.exportEmpty);
       return;
     }
 
-    setSortKey(key);
-    setSortDirection("asc");
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(t.printTitle)}</h1>
+          <p>${escapeHtml(t.account)}: ${escapeHtml(selectedAccount ? `${selectedAccount.code} - ${selectedAccount.name}` : t.allAccounts)}</p>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.date)}</th>
+                <th>${escapeHtml(t.entry)}</th>
+                <th>${escapeHtml(t.account)}</th>
+                <th>${escapeHtml(t.costCenter)}</th>
+                <th>${escapeHtml(t.description)}</th>
+                <th>${escapeHtml(t.reference)}</th>
+                <th>${escapeHtml(t.source)}</th>
+                <th>${escapeHtml(t.debit)}</th>
+                <th>${escapeHtml(t.credit)}</th>
+                <th>${escapeHtml(t.balance)}</th>
+                <th>${escapeHtml(t.movement)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.date)}</td>
+                      <td>${escapeHtml(row.entry)}</td>
+                      <td>${escapeHtml(row.account)}</td>
+                      <td>${escapeHtml(row.costCenter)}</td>
+                      <td>${escapeHtml(row.description)}</td>
+                      <td>${escapeHtml(row.reference)}</td>
+                      <td>${escapeHtml(row.source)}</td>
+                      <td>${escapeHtml(row.debit)}</td>
+                      <td>${escapeHtml(row.credit)}</td>
+                      <td>${escapeHtml(row.balance)}</td>
+                      <td>${escapeHtml(row.movement)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-general-ledger-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
-  useEffect(() => {
-    const currentLocale = readLocale();
-    setLocale(currentLocale);
-    applyDocumentLocale(currentLocale);
-  }, []);
+  function printPage() {
+    const rows = buildExportRows();
 
-  useEffect(() => {
-    loadLedger(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!rows.length) {
+      toast.error(t.printEmpty);
+      return;
+    }
 
-  useEffect(() => {
-    setPage(1);
-  }, [searchTerm, accountId, dateFrom, dateTo, postedOnly, includeOpening]);
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
 
-  const transactions = payload?.transactions || [];
+    if (!printWindow) {
+      toast.error(t.printEmpty);
+      return;
+    }
 
-  const summary = useMemo(() => {
-    const totalDebit = payload?.summary?.total_debit || "0.00";
-    const totalCredit = payload?.summary?.total_credit || "0.00";
-    const openingBalance = payload?.summary?.opening_balance || "0.00";
-    const closingBalance = payload?.summary?.closing_balance || "0.00";
-    const transactionCount =
-      payload?.summary?.transaction_count || transactions.length;
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+              margin-bottom: 18px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.account)}: ${escapeHtml(selectedAccount ? `${selectedAccount.code} - ${selectedAccount.name}` : t.allAccounts)}</p>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.showing)}: ${escapeHtml(rows.length)}</p>
+            </div>
+          </div>
 
-    const debitValue = toNumber(totalDebit);
-    const creditValue = toNumber(totalCredit);
-    const totalMovement = debitValue + creditValue;
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.openingBalance)}</span><strong>${escapeHtml(formatMoney(summary.opening_balance))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.totalDebit)}</span><strong>${escapeHtml(formatMoney(summary.total_debit))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.totalCredit)}</span><strong>${escapeHtml(formatMoney(summary.total_credit))}</strong></div>
+            <div class="box"><span>${escapeHtml(t.closingBalance)}</span><strong>${escapeHtml(formatMoney(summary.closing_balance))}</strong></div>
+          </div>
 
-    const debitPercent =
-      totalMovement > 0 ? Math.min((debitValue / totalMovement) * 100, 100) : 0;
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.date)}</th>
+                <th>${escapeHtml(t.entry)}</th>
+                <th>${escapeHtml(t.account)}</th>
+                <th>${escapeHtml(t.costCenter)}</th>
+                <th>${escapeHtml(t.description)}</th>
+                <th>${escapeHtml(t.reference)}</th>
+                <th>${escapeHtml(t.source)}</th>
+                <th>${escapeHtml(t.debit)}</th>
+                <th>${escapeHtml(t.credit)}</th>
+                <th>${escapeHtml(t.balance)}</th>
+                <th>${escapeHtml(t.movement)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.date)}</td>
+                      <td>${escapeHtml(row.entry)}</td>
+                      <td>${escapeHtml(row.account)}</td>
+                      <td>${escapeHtml(row.costCenter)}</td>
+                      <td>${escapeHtml(row.description)}</td>
+                      <td>${escapeHtml(row.reference)}</td>
+                      <td>${escapeHtml(row.source)}</td>
+                      <td>${escapeHtml(row.debit)}</td>
+                      <td>${escapeHtml(row.credit)}</td>
+                      <td>${escapeHtml(row.balance)}</td>
+                      <td>${escapeHtml(row.movement)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
 
-    const creditPercent =
-      totalMovement > 0
-        ? Math.min((creditValue / totalMovement) * 100, 100)
-        : 0;
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
 
-    return {
-      totalDebit,
-      totalCredit,
-      openingBalance,
-      closingBalance,
-      transactionCount,
-      debitPercent,
-      creditPercent,
-    };
-  }, [payload, transactions.length]);
+    printWindow.document.close();
+  }
 
-  const filteredRows = useMemo(() => {
-    const keyword = searchTerm.trim().toLowerCase();
-
-    return transactions
-      .filter((row) => {
-        if (!keyword) return true;
-
-        return [
-          row.entry_date,
-          row.journal_entry_number,
-          row.account_code,
-          row.account_name,
-          row.posting_source,
-          row.reference,
-          row.external_reference,
-          row.entry_description,
-          row.line_description,
-          row.debit_amount,
-          row.credit_amount,
-          row.movement_amount,
-          row.running_balance,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(keyword);
-      })
-      .sort((a, b) => compareValues(a, b, sortKey, sortDirection));
-  }, [transactions, searchTerm, sortKey, sortDirection]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-
-  const paginatedRows = useMemo(() => {
-    const safePage = Math.min(page, totalPages);
-    const startIndex = (safePage - 1) * pageSize;
-
-    return filteredRows.slice(startIndex, startIndex + pageSize);
-  }, [filteredRows, page, totalPages]);
-
-  const statusCards = [
-    {
-      label: t.openingBalance,
-      value: summary.openingBalance,
-      icon: Layers3,
-      percent: summary.transactionCount > 0 ? 100 : 0,
-      money: true,
-    },
-    {
-      label: t.totalDebit,
-      value: summary.totalDebit,
-      icon: TrendingUp,
-      percent: summary.debitPercent,
-      money: true,
-    },
-    {
-      label: t.totalCredit,
-      value: summary.totalCredit,
-      icon: TrendingDown,
-      percent: summary.creditPercent,
-      money: true,
-    },
-    {
-      label: t.closingBalance,
-      value: summary.closingBalance,
-      icon: ShieldCheck,
-      percent: summary.transactionCount > 0 ? 100 : 0,
-      money: true,
-    },
-  ];
-
-  const summaryCards = [
-    {
-      title: t.openingBalance,
-      value: summary.openingBalance,
-      icon: Layers3,
-      bg: "bg-emerald-50",
-      money: true,
-    },
-    {
-      title: t.totalDebit,
-      value: summary.totalDebit,
-      icon: TrendingUp,
-      bg: "bg-sky-50",
-      money: true,
-    },
-    {
-      title: t.totalCredit,
-      value: summary.totalCredit,
-      icon: TrendingDown,
-      bg: "bg-violet-50",
-      money: true,
-    },
-    {
-      title: t.transactionCount,
-      value: formatNumber(summary.transactionCount),
-      icon: WalletCards,
-      bg: "bg-teal-50",
-      money: false,
-    },
-  ];
-
-  const columnOptions: Array<{
-    key: keyof VisibleColumns;
-    label: string;
-  }> = [
-    { key: "entry_date", label: t.entryDate },
-    { key: "journal_entry_number", label: t.journalNumber },
-    { key: "account_code", label: t.accountCode },
-    { key: "account_name", label: t.accountName },
-    { key: "posting_source", label: t.source },
-    { key: "reference", label: t.reference },
-    { key: "description", label: t.description },
-    { key: "debit_amount", label: t.debit },
-    { key: "credit_amount", label: t.credit },
-    { key: "movement_amount", label: t.movement },
-    { key: "running_balance", label: t.runningBalance },
-    { key: "actions", label: t.action },
-  ];
+  if (loading) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <LedgerSkeleton />
+      </div>
+    );
+  }
 
   return (
-    <PermissionGuard
-      permission={PERMISSIONS.ACCOUNTING_VIEW}
-      workspace="system"
-      mode="fallback"
-    >
-      <div className="space-y-4 p-4 md:p-6" dir="ltr">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              asChild
-              variant="outline"
-              className="h-10 gap-2 rounded-xl bg-white px-4"
-            >
-              <Link href="/system/accounting">
-                <ArrowLeft className="h-4 w-4" />
-                {t.back}
-              </Link>
-            </Button>
-
-            <Button
-              asChild
-              variant="outline"
-              className="h-10 gap-2 rounded-xl bg-white px-4"
-            >
-              <Link href="/system/accounting/reports">
-                <BarChart3 className="h-4 w-4" />
-                {t.reports}
-              </Link>
-            </Button>
-
-            <Button
-              asChild
-              variant="outline"
-              className="h-10 gap-2 rounded-xl bg-white px-4"
-            >
-              <Link href="/system/accounting/accounts">
-                <BookOpenCheck className="h-4 w-4" />
-                {t.accounts}
-              </Link>
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 gap-2 rounded-xl bg-white px-4"
-              onClick={() => loadLedger(true)}
-              disabled={loading}
-            >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCcw className="h-4 w-4" />
-              )}
-              {t.refresh}
-            </Button>
-
-            <Can
-              anyPermissions={[
-                PERMISSIONS.ACCOUNTING_EXPORT,
-                PERMISSIONS.REPORTS_EXPORT,
-              ]}
-            >
-              <Button
-                type="button"
-                className="h-10 gap-2 rounded-xl bg-slate-950 px-4 text-white hover:bg-slate-800"
-                onClick={handleExport}
-              >
-                <Download className="h-4 w-4" />
-                {t.export}
-              </Button>
-            </Can>
-          </div>
-
-          <div
-            className={`space-y-1 ${isArabic ? "text-right" : "text-left"}`}
-            dir={isArabic ? "rtl" : "ltr"}
-          >
-            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
-              {t.title}
-            </h1>
-            <p className="text-sm leading-6 text-slate-500">{t.subtitle}</p>
-          </div>
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+            {t.title}
+          </h1>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
-          <Card
-            className="rounded-2xl border-slate-200 bg-white shadow-sm"
-            dir={isArabic ? "rtl" : "ltr"}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/accounting">
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-9 rounded-lg"
+            onClick={() => void loadLedger({ silent: true })}
+            disabled={refreshing}
           >
-            <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
-              <div>
-                <CardTitle className="text-lg font-bold text-slate-950">
-                  {t.statusTitle}
-                </CardTitle>
-                <CardDescription className="mt-1">
-                  {t.statusDesc}
-                </CardDescription>
-              </div>
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            {t.refresh}
+          </Button>
 
-              <Can
-                anyPermissions={[
-                  PERMISSIONS.ACCOUNTING_EXPORT,
-                  PERMISSIONS.REPORTS_EXPORT,
-                ]}
-              >
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9 gap-2 rounded-xl bg-white"
-                  onClick={handleExport}
-                >
-                  <Download className="h-4 w-4" />
-                  {t.export}
-                </Button>
-              </Can>
-            </CardHeader>
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
 
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-4">
-                {statusCards.map((card) => {
-                  const Icon = card.icon;
-
-                  return (
-                    <div key={card.label} className="space-y-2">
-                      <div className="flex items-center justify-between text-sm text-slate-500">
-                        <span>{card.label}</span>
-                        <Icon className="h-4 w-4 text-slate-400" />
-                      </div>
-
-                      <p className="text-2xl font-bold text-slate-950">
-                        {card.money ? (
-                          <MoneyValue value={card.value} />
-                        ) : (
-                          card.value
-                        )}
-                      </p>
-
-                      <div className="h-2 rounded-full bg-slate-100">
-                        <div
-                          className={`h-2 rounded-full ${
-                            card.label === t.totalCredit
-                              ? "bg-sky-500"
-                              : "bg-slate-950"
-                          }`}
-                          style={{ width: `${formatPercent(card.percent)}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
-                <div className="relative">
-                  <Search
-                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${
-                      isArabic ? "right-3" : "left-3"
-                    }`}
-                  />
-                  <Input
-                    value={searchTerm}
-                    onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder={t.searchPlaceholder}
-                    className={`h-11 rounded-xl border-slate-200 bg-white ${
-                      isArabic ? "pr-10" : "pl-10"
-                    }`}
-                  />
-                </div>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-11 gap-2 rounded-xl bg-white"
-                    >
-                      <Filter className="h-4 w-4" />
-                      {t.filters}
-                    </Button>
-                  </DropdownMenuTrigger>
-
-                  <DropdownMenuContent
-                    align={isArabic ? "start" : "end"}
-                    className="w-72 rounded-2xl"
-                  >
-                    <div dir={isArabic ? "rtl" : "ltr"}>
-                      <DropdownMenuLabel>{t.filters}</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-
-                      <div className="space-y-3 p-2">
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-slate-500">
-                            {t.accountId}
-                          </label>
-                          <Input
-                            value={accountId}
-                            onChange={(event) =>
-                              setAccountId(event.target.value)
-                            }
-                            placeholder="1"
-                            inputMode="numeric"
-                            className="h-9 rounded-xl"
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-slate-500">
-                            {t.dateFrom}
-                          </label>
-                          <Input
-                            type="date"
-                            value={dateFrom}
-                            onChange={(event) => setDateFrom(event.target.value)}
-                            className="h-9 rounded-xl"
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-slate-500">
-                            {t.dateTo}
-                          </label>
-                          <Input
-                            type="date"
-                            value={dateTo}
-                            onChange={(event) => setDateTo(event.target.value)}
-                            className="h-9 rounded-xl"
-                          />
-                        </div>
-
-                        <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-2 text-sm">
-                          <Checkbox
-                            checked={postedOnly}
-                            onCheckedChange={(value) =>
-                              setPostedOnly(Boolean(value))
-                            }
-                          />
-                          <span>{t.postedOnly}</span>
-                        </label>
-
-                        <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-2 text-sm">
-                          <Checkbox
-                            checked={includeOpening}
-                            onCheckedChange={(value) =>
-                              setIncludeOpening(Boolean(value))
-                            }
-                          />
-                          <span>{t.includeOpening}</span>
-                        </label>
-
-                        <Button
-                          type="button"
-                          className="h-10 w-full rounded-xl"
-                          onClick={() => {
-                            setPage(1);
-                            loadLedger(true);
-                          }}
-                        >
-                          {t.refresh}
-                        </Button>
-                      </div>
-                    </div>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-11 gap-2 rounded-xl bg-white"
-                    >
-                      <ColumnsIcon className="h-4 w-4" />
-                      {t.columns}
-                    </Button>
-                  </DropdownMenuTrigger>
-
-                  <DropdownMenuContent
-                    align={isArabic ? "start" : "end"}
-                    className="w-56 rounded-2xl"
-                  >
-                    <div dir={isArabic ? "rtl" : "ltr"}>
-                      <DropdownMenuLabel>{t.columns}</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-
-                      {columnOptions.map((column) => (
-                        <DropdownMenuCheckboxItem
-                          key={column.key}
-                          checked={visibleColumns[column.key]}
-                          onCheckedChange={(checked) =>
-                            setVisibleColumns((current) => ({
-                              ...current,
-                              [column.key]: Boolean(checked),
-                            }))
-                          }
-                        >
-                          {column.label}
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                    </div>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50 hover:bg-slate-50">
-                      {visibleColumns.entry_date ? (
-                        <TableHead>
-                          <SortButton
-                            label={t.entryDate}
-                            sortKey="entry_date"
-                            activeKey={sortKey}
-                            direction={sortDirection}
-                            onClick={() => toggleSort("entry_date")}
-                          />
-                        </TableHead>
-                      ) : null}
-
-                      {visibleColumns.journal_entry_number ? (
-                        <TableHead>
-                          <SortButton
-                            label={t.journalNumber}
-                            sortKey="journal_entry_number"
-                            activeKey={sortKey}
-                            direction={sortDirection}
-                            onClick={() => toggleSort("journal_entry_number")}
-                          />
-                        </TableHead>
-                      ) : null}
-
-                      {visibleColumns.account_code ? (
-                        <TableHead>
-                          <SortButton
-                            label={t.accountCode}
-                            sortKey="account_code"
-                            activeKey={sortKey}
-                            direction={sortDirection}
-                            onClick={() => toggleSort("account_code")}
-                          />
-                        </TableHead>
-                      ) : null}
-
-                      {visibleColumns.account_name ? (
-                        <TableHead>
-                          <SortButton
-                            label={t.accountName}
-                            sortKey="account_name"
-                            activeKey={sortKey}
-                            direction={sortDirection}
-                            onClick={() => toggleSort("account_name")}
-                          />
-                        </TableHead>
-                      ) : null}
-
-                      {visibleColumns.posting_source ? (
-                        <TableHead>{t.source}</TableHead>
-                      ) : null}
-
-                      {visibleColumns.reference ? (
-                        <TableHead>{t.reference}</TableHead>
-                      ) : null}
-
-                      {visibleColumns.description ? (
-                        <TableHead>{t.description}</TableHead>
-                      ) : null}
-
-                      {visibleColumns.debit_amount ? (
-                        <TableHead>
-                          <SortButton
-                            label={t.debit}
-                            sortKey="debit_amount"
-                            activeKey={sortKey}
-                            direction={sortDirection}
-                            onClick={() => toggleSort("debit_amount")}
-                          />
-                        </TableHead>
-                      ) : null}
-
-                      {visibleColumns.credit_amount ? (
-                        <TableHead>
-                          <SortButton
-                            label={t.credit}
-                            sortKey="credit_amount"
-                            activeKey={sortKey}
-                            direction={sortDirection}
-                            onClick={() => toggleSort("credit_amount")}
-                          />
-                        </TableHead>
-                      ) : null}
-
-                      {visibleColumns.movement_amount ? (
-                        <TableHead>{t.movement}</TableHead>
-                      ) : null}
-
-                      {visibleColumns.running_balance ? (
-                        <TableHead>
-                          <SortButton
-                            label={t.runningBalance}
-                            sortKey="running_balance"
-                            activeKey={sortKey}
-                            direction={sortDirection}
-                            onClick={() => toggleSort("running_balance")}
-                          />
-                        </TableHead>
-                      ) : null}
-
-                      {visibleColumns.actions ? (
-                        <TableHead>{t.action}</TableHead>
-                      ) : null}
-                    </TableRow>
-                  </TableHeader>
-
-                  <TableBody>
-                    {loading ? (
-                      <TableRow>
-                        <TableCell colSpan={12} className="h-40 text-center">
-                          <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            {t.refresh}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : paginatedRows.length > 0 ? (
-                      paginatedRows.map((row) => (
-                        <TableRow key={`${row.id}-${row.sort_order}`}>
-                          {visibleColumns.entry_date ? (
-                            <TableCell className="whitespace-nowrap text-slate-600">
-                              {formatDate(row.entry_date, locale)}
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.journal_entry_number ? (
-                            <TableCell className="font-semibold text-slate-950">
-                              {row.journal_entry_number || "-"}
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.account_code ? (
-                            <TableCell className="font-semibold text-slate-950">
-                              {row.account_code || "-"}
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.account_name ? (
-                            <TableCell className="min-w-[220px] text-slate-700">
-                              {row.account_name || "-"}
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.posting_source ? (
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className="rounded-full border-slate-200 bg-slate-50 text-slate-700"
-                              >
-                                {row.posting_source || "-"}
-                              </Badge>
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.reference ? (
-                            <TableCell className="max-w-[160px] truncate text-slate-600">
-                              {row.reference || row.external_reference || "-"}
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.description ? (
-                            <TableCell className="max-w-[260px] truncate text-slate-600">
-                              {getDescription(row) || "-"}
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.debit_amount ? (
-                            <TableCell className="font-semibold text-slate-950">
-                              <MoneyValue value={row.debit_amount} />
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.credit_amount ? (
-                            <TableCell className="font-semibold text-slate-950">
-                              <MoneyValue value={row.credit_amount} />
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.movement_amount ? (
-                            <TableCell className="font-semibold text-slate-950">
-                              <MoneyValue value={row.movement_amount} />
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.running_balance ? (
-                            <TableCell className="font-semibold text-slate-950">
-                              <MoneyValue value={row.running_balance} />
-                            </TableCell>
-                          ) : null}
-
-                          {visibleColumns.actions ? (
-                            <TableCell>
-                              <div className="flex flex-wrap items-center gap-2">
-                                {row.journal_entry_id ? (
-                                  <Button
-                                    asChild
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 rounded-lg px-2"
-                                  >
-                                    <Link
-                                      href={`/system/accounting/journals/${row.journal_entry_id}`}
-                                    >
-                                      {t.viewJournal}
-                                    </Link>
-                                  </Button>
-                                ) : null}
-
-                                {row.account_id ? (
-                                  <Button
-                                    asChild
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 rounded-lg px-2"
-                                  >
-                                    <Link
-                                      href={`/system/accounting/accounts/${row.account_id}`}
-                                    >
-                                      {t.viewAccount}
-                                    </Link>
-                                  </Button>
-                                ) : null}
-                              </div>
-                            </TableCell>
-                          ) : null}
-                        </TableRow>
-                      ))
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={12} className="h-48 text-center">
-                          <div className="space-y-2">
-                            <p className="font-semibold text-slate-950">
-                              {t.noRows}
-                            </p>
-                            <p className="text-sm text-slate-500">
-                              {t.noRowsDesc}
-                            </p>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="text-sm text-slate-500">
-                  {formatNumber(filteredRows.length)} /{" "}
-                  {formatNumber(transactions.length)}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-xl bg-white"
-                    disabled={page <= 1 || loading}
-                    onClick={() =>
-                      setPage((current) => Math.max(1, current - 1))
-                    }
-                  >
-                    {t.previous}
-                  </Button>
-
-                  <Badge variant="outline" className="rounded-xl bg-white px-3">
-                    {formatNumber(page)} / {formatNumber(totalPages)}
-                  </Badge>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="rounded-xl bg-white"
-                    disabled={page >= totalPages || loading}
-                    onClick={() =>
-                      setPage((current) => Math.min(totalPages, current + 1))
-                    }
-                  >
-                    {t.next}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card
-            className="rounded-2xl border-slate-200 bg-white shadow-sm"
-            dir={isArabic ? "rtl" : "ltr"}
-          >
-            <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0 pb-4">
-              <div>
-                <CardTitle className="text-lg font-bold text-slate-950">
-                  {t.summaryTitle}
-                </CardTitle>
-                <CardDescription className="mt-1">
-                  {t.summaryDesc}
-                </CardDescription>
-              </div>
-
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white">
-                <BookOpenCheck className="h-5 w-5 text-slate-700" />
-              </div>
-            </CardHeader>
-
-            <CardContent className="space-y-3">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-bold text-slate-950">
-                      {formatNumber(summary.transactionCount)}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {t.transactionCount}
-                    </p>
-                  </div>
-
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-950 text-white">
-                    <Layers3 className="h-5 w-5" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-dashed border-slate-200 p-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">{t.openingBalance}</p>
-                    <p className="mt-1 text-lg font-bold text-slate-950">
-                      <MoneyValue value={summary.openingBalance} />
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">{t.closingBalance}</p>
-                    <p className="mt-1 text-lg font-bold text-slate-950">
-                      <MoneyValue value={summary.closingBalance} />
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">{t.totalDebit}</p>
-                    <p className="mt-1 text-lg font-bold text-slate-950">
-                      <MoneyValue value={summary.totalDebit} />
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">{t.totalCredit}</p>
-                    <p className="mt-1 text-lg font-bold text-slate-950">
-                      <MoneyValue value={summary.totalCredit} />
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 justify-between rounded-xl bg-white"
-                  onClick={() => {
-                    setAccountId("");
-                    setSearchTerm("");
-                  }}
-                >
-                  <span>{isArabic ? "كل الحسابات" : "All Accounts"}</span>
-                  <Layers3 className="h-4 w-4" />
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 justify-between rounded-xl bg-white"
-                  onClick={() => {
-                    setPostedOnly(true);
-                    setIncludeOpening(true);
-                    loadLedger(true);
-                  }}
-                >
-                  <span>{t.postedOnly}</span>
-                  <ShieldCheck className="h-4 w-4" />
-                </Button>
-
-                <Can
-                  anyPermissions={[
-                    PERMISSIONS.ACCOUNTING_EXPORT,
-                    PERMISSIONS.REPORTS_EXPORT,
-                  ]}
-                >
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 justify-between rounded-xl bg-white"
-                    onClick={handleExport}
-                  >
-                    <span>{t.export}</span>
-                    <Download className="h-4 w-4" />
-                  </Button>
-                </Can>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {summaryCards.map((card) => {
-            const Icon = card.icon;
-
-            return (
-              <Card
-                key={card.title}
-                className="rounded-2xl border-slate-200 bg-white shadow-sm"
-                dir={isArabic ? "rtl" : "ltr"}
-              >
-                <CardContent className="p-5">
-                  <div className={`rounded-2xl ${card.bg} p-4`}>
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm text-slate-500">{card.title}</p>
-                        <p className="mt-2 text-2xl font-bold text-slate-950">
-                          {card.money ? (
-                            <MoneyValue value={card.value} />
-                          ) : (
-                            card.value
-                          )}
-                        </p>
-                      </div>
-
-                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-950 shadow-sm">
-                        <Icon className="h-5 w-5" />
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
         </div>
       </div>
-    </PermissionGuard>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.openingBalance}
+          value={<MoneyValue value={summary.opening_balance} label={t.sar} />}
+          trend={selectedAccount ? selectedAccount.code : t.allAccounts}
+          icon={WalletCards}
+        />
+
+        <KpiCard
+          title={t.totalDebit}
+          value={<MoneyValue value={summary.total_debit} label={t.sar} />}
+          trend={t.debit}
+          icon={ReceiptText}
+        />
+
+        <KpiCard
+          title={t.totalCredit}
+          value={<MoneyValue value={summary.total_credit} label={t.sar} />}
+          trend={t.credit}
+          icon={Landmark}
+        />
+
+        <KpiCard
+          title={t.closingBalance}
+          value={<MoneyValue value={summary.closing_balance} label={t.sar} />}
+          trend={`${t.movementsCount}: ${formatInteger(summary.movements_count || ledgerRows.length)}`}
+          icon={BookOpen}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+              <div>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadLedger()}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardContent className="space-y-3 p-4">
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_330px]">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder={t.searchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
+            </div>
+
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={accountSearch}
+                onChange={(event) => setAccountSearch(event.target.value)}
+                placeholder={t.searchAccount}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[260px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t.allAccounts}</SelectItem>
+                  {filteredAccounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.code} — {account.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">{t.from}</span>
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                  className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                />
+              </div>
+
+              <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                <span className="text-xs text-muted-foreground">{t.to}</span>
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={(event) => setDateTo(event.target.value)}
+                  className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                />
+              </div>
+
+              <Select
+                value={movementFilter}
+                onValueChange={(value) => setMovementFilter(value as MovementFilter)}
+              >
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[165px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t.movementType}: {t.all}</SelectItem>
+                  <SelectItem value="debit">{t.debit}</SelectItem>
+                  <SelectItem value="credit">{t.credit}</SelectItem>
+                  <SelectItem value="opening">{t.opening}</SelectItem>
+                  <SelectItem value="empty">{t.empty}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={sortKey} onValueChange={(value) => setSortKey(value as SortKey)}>
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[165px]">
+                  <ArrowUpDown className="h-4 w-4" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newest">{t.newest}</SelectItem>
+                  <SelectItem value="oldest">{t.oldest}</SelectItem>
+                  <SelectItem value="debit_high">{t.debitHigh}</SelectItem>
+                  <SelectItem value="credit_high">{t.creditHigh}</SelectItem>
+                  <SelectItem value="balance_high">{t.balanceHigh}</SelectItem>
+                  <SelectItem value="balance_low">{t.balanceLow}</SelectItem>
+                  <SelectItem value="account">{t.accountSort}</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select
+                value="columns"
+                onValueChange={(value) => {
+                  if (value in columns) {
+                    setColumns((current) => ({
+                      ...current,
+                      [value]: !current[value as ColumnKey],
+                    }));
+                  }
+                }}
+              >
+                <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[150px]">
+                  <Settings2 className="h-4 w-4" />
+                  <SelectValue placeholder={t.columns} />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(columns) as ColumnKey[]).map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {columns[key] ? "✓ " : ""}
+                      {columnLabel(key)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button variant="outline" className="h-9 rounded-lg bg-background" onClick={resetFilters}>
+                <RotateCcw className="h-4 w-4" />
+                {t.reset}
+              </Button>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1450px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    {columns.date ? (
+                      <TableHead className="h-11 w-[125px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.date}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.entry ? (
+                      <TableHead className="h-11 w-[145px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.entry}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.account ? (
+                      <TableHead className="h-11 w-[240px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.account}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.costCenter ? (
+                      <TableHead className="h-11 w-[180px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.costCenter}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.description ? (
+                      <TableHead className="h-11 w-[260px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.description}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.reference ? (
+                      <TableHead className="h-11 w-[140px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.reference}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.source ? (
+                      <TableHead className="h-11 w-[140px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.source}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.debit ? (
+                      <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.debit}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.credit ? (
+                      <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.credit}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.balance ? (
+                      <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.balance}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.movement ? (
+                      <TableHead className="h-11 w-[120px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                        {t.movement}
+                      </TableHead>
+                    ) : null}
+
+                    {columns.actions ? (
+                      <TableHead className="h-11 w-[90px] whitespace-nowrap px-4 text-center text-xs font-semibold text-muted-foreground">
+                        {t.actions}
+                      </TableHead>
+                    ) : null}
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {filteredRows.length ? (
+                    filteredRows.map((row, index) => (
+                      <TableRow key={row.id || `${row.entry_number}-${index}`} className="h-[62px]">
+                        {columns.date ? (
+                          <TableCell className="h-[62px] w-[125px] overflow-hidden px-4 text-right align-middle">
+                            <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                              {formatDate(row.date || row.created_at)}
+                            </span>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.entry ? (
+                          <TableCell className="h-[62px] w-[145px] overflow-hidden px-4 text-right align-middle">
+                            <span className="block truncate text-sm font-semibold text-foreground">
+                              {row.entry_number || "—"}
+                            </span>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.account ? (
+                          <TableCell className="h-[62px] w-[240px] overflow-hidden px-4 text-right align-middle">
+                            <div className="min-w-0">
+                              <span className="block truncate text-sm font-semibold text-foreground">
+                                {row.account_name || t.unknown}
+                              </span>
+                              <span className="block truncate text-xs text-muted-foreground tabular-nums">
+                                {row.account_code || "—"}
+                              </span>
+                            </div>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.costCenter ? (
+                          <TableCell className="h-[62px] w-[180px] overflow-hidden px-4 text-right align-middle">
+                            <div className="min-w-0">
+                              <span className="block truncate text-sm text-foreground">
+                                {row.cost_center_name || "—"}
+                              </span>
+                              <span className="block truncate text-xs text-muted-foreground tabular-nums">
+                                {row.cost_center_code || "—"}
+                              </span>
+                            </div>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.description ? (
+                          <TableCell className="h-[62px] w-[260px] overflow-hidden px-4 text-right align-middle">
+                            <span className="block truncate text-sm text-muted-foreground">
+                              {row.description || "—"}
+                            </span>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.reference ? (
+                          <TableCell className="h-[62px] w-[140px] overflow-hidden px-4 text-right align-middle">
+                            <span className="block truncate text-sm text-muted-foreground">
+                              {row.reference || "—"}
+                            </span>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.source ? (
+                          <TableCell className="h-[62px] w-[140px] overflow-hidden px-4 text-right align-middle">
+                            <span className="block truncate text-sm text-muted-foreground">
+                              {row.source_label || row.source || "—"}
+                            </span>
+                          </TableCell>
+                        ) : null}
+
+                        {columns.debit ? (
+                          <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                            <MoneyValue value={row.debit} label={t.sar} />
+                          </TableCell>
+                        ) : null}
+
+                        {columns.credit ? (
+                          <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                            <MoneyValue value={row.credit} label={t.sar} />
+                          </TableCell>
+                        ) : null}
+
+                        {columns.balance ? (
+                          <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                            <MoneyValue value={row.balance} label={t.sar} />
+                          </TableCell>
+                        ) : null}
+
+                        {columns.movement ? (
+                          <TableCell className="h-[62px] w-[120px] overflow-hidden px-4 text-right align-middle">
+                            <StatusBadge
+                              value={row.movement_type}
+                              label={movementLabel(row.movement_type, locale)}
+                            />
+                          </TableCell>
+                        ) : null}
+
+                        {columns.actions ? (
+                          <TableCell className="h-[62px] w-[90px] overflow-hidden px-4 text-center align-middle">
+                            <div className="flex items-center justify-center gap-1">
+                              {row.entry_id ? (
+                                <Button asChild variant="ghost" size="sm" className="h-8 rounded-lg">
+                                  <Link href={`/system/accounting/journals/${row.entry_id}`}>
+                                    <Eye className="h-4 w-4" />
+                                  </Link>
+                                </Button>
+                              ) : row.account_id ? (
+                                <Button asChild variant="ghost" size="sm" className="h-8 rounded-lg">
+                                  <Link href={`/system/accounting/accounts/${row.account_id}`}>
+                                    <Eye className="h-4 w-4" />
+                                  </Link>
+                                </Button>
+                              ) : (
+                                <span className="text-sm text-muted-foreground">—</span>
+                              )}
+                            </div>
+                          </TableCell>
+                        ) : null}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={Math.max(1, visibleColumnCount)} className="h-72">
+                        <div className="flex flex-col items-center justify-center gap-3 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+                            <Search className="h-6 w-6 text-muted-foreground" />
+                          </div>
+
+                          <div className="space-y-1">
+                            <p className="font-semibold text-foreground">
+                              {hasActiveFilters ? t.noResultsTitle : t.noDataTitle}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {hasActiveFilters ? t.noResultsDesc : t.noDataDesc}
+                            </p>
+                          </div>
+
+                          {hasActiveFilters ? (
+                            <Button variant="outline" className="h-9 rounded-lg" onClick={resetFilters}>
+                              <RotateCcw className="h-4 w-4" />
+                              {t.reset}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="text-sm text-muted-foreground">
+            {t.showing}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(filteredRows.length)}
+            </span>{" "}
+            {t.of}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(ledgerRows.length)}
+            </span>{" "}
+            {t.rows}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

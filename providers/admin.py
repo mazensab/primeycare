@@ -10,6 +10,7 @@
 # ✅ دعم السجل التجاري والرقم الضريبي
 # ✅ دعم شعار وصورة مقدم الخدمة عبر Google Drive
 # ✅ دعم مرفقات مقدم الخدمة ProviderDocument
+# ✅ دعم حساب الدخول الرئيسي لمقدم الخدمة Provider.user
 # ============================================================
 
 from django.contrib import admin
@@ -68,6 +69,8 @@ class ProviderAdmin(admin.ModelAdmin):
         "code",
         "provider_type",
         "status",
+        "has_login_user",
+        "login_user_display",
         "commercial_registration",
         "tax_number",
         "region",
@@ -89,6 +92,7 @@ class ProviderAdmin(admin.ModelAdmin):
         "provider_type",
         "status",
         "is_featured",
+        "user",
         "region",
         "city",
         "source_category",
@@ -120,13 +124,23 @@ class ProviderAdmin(admin.ModelAdmin):
         "logo_drive_file_id",
         "image_drive_file_id",
         "notes",
+        "user__username",
+        "user__email",
+        "user__first_name",
+        "user__last_name",
     )
 
     readonly_fields = (
+        "has_login_user",
+        "login_user_display",
         "import_key",
         "last_imported_at",
         "created_at",
         "updated_at",
+    )
+
+    autocomplete_fields = (
+        "user",
     )
 
     ordering = ("name", "city", "area")
@@ -134,6 +148,21 @@ class ProviderAdmin(admin.ModelAdmin):
     inlines = (ProviderDocumentInline,)
 
     fieldsets = (
+        (
+            "حساب الدخول",
+            {
+                "fields": (
+                    "user",
+                    "has_login_user",
+                    "login_user_display",
+                ),
+                "description": (
+                    "حساب الدخول الرئيسي لمقدم الخدمة. "
+                    "حسب القاعدة المعتمدة، لا يتم إنشاء الحساب عند إنشاء مقدم الخدمة، "
+                    "بل يتم إنشاؤه اختياريًا عند إنشاء أو تفعيل عقد مقدم الخدمة."
+                ),
+            },
+        ),
         (
             "البيانات الأساسية",
             {
@@ -233,9 +262,40 @@ class ProviderAdmin(admin.ModelAdmin):
         ),
     )
 
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("user")
+        )
+
     @admin.display(description="اسم مقدم الخدمة")
     def display_provider_name(self, obj: Provider) -> str:
         return obj.name_ar or obj.name or obj.name_en or "-"
+
+    @admin.display(boolean=True, description="حساب دخول")
+    def has_login_user(self, obj: Provider) -> bool:
+        return bool(obj.user_id)
+
+    @admin.display(description="مستخدم الدخول")
+    def login_user_display(self, obj: Provider) -> str:
+        user = getattr(obj, "user", None)
+
+        if not user:
+            return "-"
+
+        full_name = (
+            getattr(user, "get_full_name", lambda: "")()
+            or getattr(user, "username", "")
+            or f"User #{user.pk}"
+        )
+
+        email = getattr(user, "email", "") or ""
+
+        if email:
+            return f"{full_name} — {email}"
+
+        return full_name
 
     @admin.display(boolean=True, description="شعار")
     def has_logo(self, obj: Provider) -> bool:

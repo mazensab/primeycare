@@ -2,1240 +2,1077 @@
 
 /* ============================================================
    📂 app/system/accounting/fiscal-years/create/page.tsx
-   🧠 Primey Care | Create Accounting Fiscal Year Page
-
-   ✅ المسار:
-      app/system/accounting/fiscal-years/create/page.tsx
-
-   ✅ العمل:
-      صفحة إنشاء سنة مالية داخل مديول المحاسبة.
-      تتيح إنشاء سنة مالية جديدة مع الفترات المحاسبية، التاريخ، الحالة، وجعلها السنة الحالية عند الحاجة.
-
-   ✅ الإصدار:
-      Phase 17 UX Refinement + Accounting Fiscal Year Create Build
-
-   ✅ يعتمد على:
-      - /api/accounting/fiscal-years/
-      - /api/accounting/fiscal-years/create/ كـ fallback آمن
-      - primey-locale
-      - AuthProvider
-      - sonner
-      - /currency/sar.svg
-
-   ✅ متوافق مع:
-      - Accounting fiscal years page
-      - Accounting cost centers pages
-      - Accounting accounts pages
-      - Accounting journals approved pattern
-      - Centers / Customers approved UX standard
-
-   ✅ الوظائف:
-      - إنشاء سنة مالية جديدة.
-      - توليد اسم السنة تلقائيًا حسب سنة البداية.
-      - تحديد تاريخ البداية والنهاية.
-      - دعم سنة تقويمية أو سنة مخصصة.
-      - تحديد الحالة: مفتوحة / مغلقة / مؤرشفة.
-      - إنشاء الفترات الشهرية تلقائيًا كخيار.
-      - جعل السنة المالية هي السنة الحالية كخيار.
-      - حماية مغادرة الصفحة عند وجود تغييرات غير محفوظة.
-      - مسح النموذج بتأكيد.
-      - Error State مستقل.
-      - صلاحيات آمنة بدون كسر system_admin/superuser.
-      - أرقام إنجليزية دائمًا.
-      - استخدام sonner للتنبيهات.
-
+   🧾 Primey Care — Create Fiscal Year
    ------------------------------------------------------------
-   تحسينات هذا الإصدار:
-      - بناء الصفحة من الصفر لأن الملف المرفق كان غير مكتمل.
-      - الالتزام بالقاعدة: w-full space-y-4 بدون main/min-h-screen/max-w.
-      - إزالة أي عبارات مؤقتة أو تقنية من واجهة المستخدم.
-      - إزالة localhost و API_BASE_URL الثابت.
-      - الحفاظ على نمط صفحات الإنشاء المعتمد.
+   ✅ Approved Products / Customers / Orders form pattern
+   ✅ Real API:
+      POST /api/accounting/fiscal-years/
+      fallback:
+      POST /api/accounting/fiscal_years/
+      POST /api/accounting/years/
+   ✅ Premium form + side readiness summary
+   ✅ Auto-generate year name/code from start date
+   ✅ Calendar year helper
+   ✅ Create monthly periods option
+   ✅ CSRF
+   ✅ Field validation
+   ✅ Unsaved changes protection
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
+import * as React from "react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  ArrowRight,
   CalendarClock,
-  CalendarDays,
   CheckCircle2,
   FileText,
-  Layers3,
   Loader2,
-  LockKeyhole,
-  RefreshCcw,
+  RefreshCw,
   RotateCcw,
   Save,
   ShieldCheck,
-  UnlockKeyhole,
-  XCircle,
+  TriangleAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type FiscalYearStatus = "OPEN" | "CLOSED" | "ARCHIVED";
-type FiscalYearMode = "CALENDAR" | "CUSTOM";
-
-type FormState = {
-  year: string;
-  name: string;
-  startDate: string;
-  endDate: string;
-  status: FiscalYearStatus;
-  mode: FiscalYearMode;
-  isCurrent: boolean;
-  createMonthlyPeriods: boolean;
-  notes: string;
-};
-
-type ApiEnvelope<T> = {
+type ApiResponse = {
   ok?: boolean;
   success?: boolean;
+  id?: unknown;
+  pk?: unknown;
+  uuid?: unknown;
+  data?: unknown;
+  item?: unknown;
+  fiscal_year?: unknown;
+  year?: unknown;
+  result?: unknown;
   message?: string;
   detail?: string;
   error?: string;
-  data?: T;
 };
 
-function makeDefaultForm(): FormState {
-  const currentYear = new Date().getFullYear();
+type FiscalYearStatus = "open" | "draft" | "closed" | "locked" | "archived";
 
-  return {
-    year: String(currentYear),
-    name: `FY ${currentYear}`,
-    startDate: `${currentYear}-01-01`,
-    endDate: `${currentYear}-12-31`,
-    status: "OPEN",
-    mode: "CALENDAR",
-    isCurrent: false,
-    createMonthlyPeriods: true,
-    notes: "",
-  };
+type FormState = {
+  name: string;
+  code: string;
+  start_date: string;
+  end_date: string;
+  status: FiscalYearStatus;
+  is_current: boolean;
+  use_calendar_year: boolean;
+  create_monthly_periods: boolean;
+  notes: string;
+};
+
+type FieldErrors = Partial<Record<keyof FormState, string>>;
+
+const initialForm: FormState = {
+  name: "",
+  code: "",
+  start_date: "",
+  end_date: "",
+  status: "open",
+  is_current: false,
+  use_calendar_year: true,
+  create_monthly_periods: true,
+  notes: "",
+};
+
+const translations = {
+  ar: {
+    title: "إنشاء سنة مالية",
+    subtitle: "أضف سنة مالية جديدة وحدد نطاقها وحالة الإقفال وخيارات الفترات.",
+    back: "السنوات المالية",
+    save: "حفظ السنة المالية",
+    saving: "جاري الحفظ...",
+    clear: "تفريغ",
+    autoFill: "تعبئة تلقائية",
+
+    formTitle: "بيانات السنة المالية",
+    formDesc: "أدخل بيانات السنة المالية الأساسية ونطاق التاريخ.",
+    optionsTitle: "خيارات السنة",
+    optionsDesc: "إعدادات تساعد في تشغيل السنة المالية.",
+    summaryTitle: "ملخص الجاهزية",
+    summaryDesc: "تحقق سريع قبل الحفظ.",
+
+    name: "اسم السنة المالية",
+    namePlaceholder: "مثال: السنة المالية 2026",
+    code: "كود السنة",
+    codePlaceholder: "مثال: FY-2026",
+    startDate: "تاريخ البداية",
+    endDate: "تاريخ النهاية",
+    status: "الحالة",
+    notes: "ملاحظات",
+    notesPlaceholder: "اكتب أي ملاحظات داخلية عن السنة المالية...",
+
+    useCalendarYear: "سنة تقويمية",
+    useCalendarYearDesc: "تعبئة البداية والنهاية تلقائيًا من 1 يناير إلى 31 ديسمبر.",
+    makeCurrent: "جعلها السنة الحالية",
+    makeCurrentDesc: "تعيين هذه السنة كسنة مالية حالية عند الحفظ.",
+    createMonthlyPeriods: "إنشاء فترات شهرية",
+    createMonthlyPeriodsDesc: "إنشاء 12 فترة محاسبية شهرية تلقائيًا إن كان الباكند يدعم ذلك.",
+
+    open: "مفتوحة",
+    draft: "مسودة",
+    closed: "مغلقة",
+    locked: "مقفلة",
+    archived: "مؤرشفة",
+
+    ready: "جاهز للحفظ",
+    notReady: "بيانات مطلوبة",
+    basicData: "البيانات الأساسية",
+    dateRange: "نطاق التاريخ",
+    statusReady: "حالة السنة",
+    optionsReady: "خيارات التشغيل",
+
+    requiredName: "اسم السنة المالية مطلوب.",
+    requiredCode: "كود السنة مطلوب.",
+    requiredStartDate: "تاريخ البداية مطلوب.",
+    requiredEndDate: "تاريخ النهاية مطلوب.",
+    invalidDateRange: "تاريخ النهاية يجب أن يكون بعد أو يساوي تاريخ البداية.",
+    saveSuccess: "تم إنشاء السنة المالية بنجاح.",
+    saveError: "تعذر إنشاء السنة المالية.",
+    unsavedConfirm: "لديك تغييرات غير محفوظة. هل تريد المغادرة؟",
+    clearConfirm: "هل تريد تفريغ النموذج؟",
+    unknown: "غير محدد",
+  },
+  en: {
+    title: "Create Fiscal Year",
+    subtitle: "Add a new fiscal year and define its date range, status, and period options.",
+    back: "Fiscal years",
+    save: "Save fiscal year",
+    saving: "Saving...",
+    clear: "Clear",
+    autoFill: "Auto fill",
+
+    formTitle: "Fiscal year details",
+    formDesc: "Enter the main fiscal year information and date range.",
+    optionsTitle: "Year options",
+    optionsDesc: "Settings that help operate the fiscal year.",
+    summaryTitle: "Readiness summary",
+    summaryDesc: "Quick check before saving.",
+
+    name: "Fiscal year name",
+    namePlaceholder: "Example: Fiscal Year 2026",
+    code: "Year code",
+    codePlaceholder: "Example: FY-2026",
+    startDate: "Start date",
+    endDate: "End date",
+    status: "Status",
+    notes: "Notes",
+    notesPlaceholder: "Write internal notes about this fiscal year...",
+
+    useCalendarYear: "Calendar year",
+    useCalendarYearDesc: "Auto-fill dates from January 1 to December 31.",
+    makeCurrent: "Make current year",
+    makeCurrentDesc: "Set this year as the current fiscal year when saving.",
+    createMonthlyPeriods: "Create monthly periods",
+    createMonthlyPeriodsDesc: "Create 12 monthly accounting periods automatically if supported by backend.",
+
+    open: "Open",
+    draft: "Draft",
+    closed: "Closed",
+    locked: "Locked",
+    archived: "Archived",
+
+    ready: "Ready to save",
+    notReady: "Required data",
+    basicData: "Basic data",
+    dateRange: "Date range",
+    statusReady: "Year status",
+    optionsReady: "Operation options",
+
+    requiredName: "Fiscal year name is required.",
+    requiredCode: "Year code is required.",
+    requiredStartDate: "Start date is required.",
+    requiredEndDate: "End date is required.",
+    invalidDateRange: "End date must be after or equal to start date.",
+    saveSuccess: "Fiscal year created successfully.",
+    saveError: "Unable to create fiscal year.",
+    unsavedConfirm: "You have unsaved changes. Do you want to leave?",
+    clearConfirm: "Do you want to clear the form?",
+    unknown: "Unknown",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-/* ============================================================
-   Locale / API
-============================================================ */
-
-function readLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
-
-    const saved =
-      window.localStorage.getItem("primey-locale") ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
-
-    if (saved === "en") return "en";
-    if (saved === "ar") return "ar";
-
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch {
-    return "ar";
-  }
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
 }
 
-function apiUrl(path: string) {
-  const base =
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    "";
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
 
-  if (!base) return path;
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
+}
 
-  return `${base.replace(/\/$/, "")}${path}`;
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) return envBase.slice(0, -4);
+  return envBase;
+}
+
+function makeApiUrl(path: string) {
+  return `${getApiBaseUrl()}${path}`;
 }
 
 function getCookie(name: string) {
-  try {
-    if (typeof document === "undefined") return "";
-
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-
-    if (parts.length === 2) {
-      return parts.pop()?.split(";").shift() || "";
-    }
-
-    return "";
-  } catch {
-    return "";
-  }
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") {
-      return value as Dict;
-    }
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isAuthResolving(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return Boolean(
-    auth.isLoading ||
-      auth.loading ||
-      auth.isInitializing ||
-      auth.initializing ||
-      auth.pending,
-  );
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
+  if (typeof document === "undefined") return "";
 
   return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
+    document.cookie
+      .split("; ")
+      .find((row) => row.startsWith(`${name}=`))
+      ?.split("=")[1] || ""
   );
 }
 
-function hasSafePermission(
-  authValue: unknown,
-  codes: string[],
-  mode: "view" | "action",
-) {
-  if (isSystemAdmin(authValue)) return true;
+async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const csrfToken = getCookie("csrftoken");
 
-  const permissions = getAuthPermissionCodes(authValue);
+  const response = await fetch(url, {
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    ...options,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...(csrfToken ? { "X-CSRFToken": decodeURIComponent(csrfToken) } : {}),
+      ...(options.headers || {}),
+    },
+  });
 
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
 
-  const roles = getAuthRoles(authValue);
+  let payload: any = null;
 
-  if (roles.length > 0) {
-    if (mode === "view") {
-      return roles.some((role) =>
-        [
-          "system_admin",
-          "superuser",
-          "super_admin",
-          "accountant",
-          "support",
-          "viewer",
-        ].includes(role),
-      );
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
-
-    return roles.some((role) =>
-      ["system_admin", "superuser", "super_admin", "accountant"].includes(role),
-    );
   }
 
-  return true;
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
+  }
+
+  return (payload || {}) as T;
 }
 
-/* ============================================================
-   Dictionary
-============================================================ */
+function extractCreatedId(payload: ApiResponse) {
+  const data = asRecord(payload.data);
+  const item = asRecord(payload.item || payload.fiscal_year || payload.year || payload.result);
 
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    title: isArabic ? "إنشاء سنة مالية" : "Create Fiscal Year",
-    subtitle: isArabic
-      ? "أضف سنة مالية جديدة وحدد تاريخ البداية والنهاية وحالة الإقفال والفترات المحاسبية."
-      : "Add a new fiscal year and define start date, end date, closing status, and accounting periods.",
-
-    back: isArabic ? "السنوات المالية" : "Fiscal Years",
-    save: isArabic ? "حفظ السنة المالية" : "Save Fiscal Year",
-    saving: isArabic ? "جاري الحفظ..." : "Saving...",
-    clear: isArabic ? "مسح النموذج" : "Clear Form",
-
-    mainInfo: isArabic ? "بيانات السنة المالية" : "Fiscal Year Details",
-    mainInfoDesc: isArabic
-      ? "المعلومات الأساسية للسنة المالية."
-      : "Basic fiscal year information.",
-    periodInfo: isArabic ? "الفترة والحالة" : "Period and Status",
-    periodInfoDesc: isArabic
-      ? "حدد بداية ونهاية السنة المالية وحالة الإقفال."
-      : "Set fiscal year start, end, and closing status.",
-    summaryTitle: isArabic ? "ملخص السنة المالية" : "Fiscal Year Summary",
-    summaryDesc: isArabic
-      ? "مراجعة بيانات السنة المالية قبل الحفظ."
-      : "Review fiscal year data before saving.",
-
-    year: isArabic ? "السنة" : "Year",
-    name: isArabic ? "اسم السنة المالية" : "Fiscal Year Name",
-    startDate: isArabic ? "تاريخ البداية" : "Start Date",
-    endDate: isArabic ? "تاريخ النهاية" : "End Date",
-    status: isArabic ? "الحالة" : "Status",
-    mode: isArabic ? "نوع السنة" : "Year Type",
-    notes: isArabic ? "ملاحظات" : "Notes",
-
-    calendarYear: isArabic ? "سنة تقويمية" : "Calendar Year",
-    customYear: isArabic ? "سنة مخصصة" : "Custom Year",
-
-    open: isArabic ? "مفتوحة" : "Open",
-    closed: isArabic ? "مغلقة" : "Closed",
-    archived: isArabic ? "مؤرشفة" : "Archived",
-
-    isCurrent: isArabic ? "تعيين كسنة مالية حالية" : "Set as current fiscal year",
-    createMonthlyPeriods: isArabic
-      ? "إنشاء الفترات الشهرية تلقائيًا"
-      : "Create monthly periods automatically",
-
-    expectedPeriods: isArabic ? "عدد الفترات المتوقع" : "Expected Periods",
-    durationDays: isArabic ? "مدة السنة بالأيام" : "Duration in Days",
-    selectedStatus: isArabic ? "الحالة المحددة" : "Selected Status",
-    selectedMode: isArabic ? "النوع المحدد" : "Selected Type",
-
-    accessDeniedTitle: isArabic ? "غير مصرح بإنشاء سنة مالية" : "Access denied",
-    accessDeniedText: isArabic
-      ? "لا تملك صلاحية إنشاء السنوات المالية. تواصل مع مسؤول النظام إذا كنت تحتاج الوصول."
-      : "You do not have permission to create fiscal years. Contact your system administrator if you need access.",
-
-    validationTitle: isArabic ? "راجع بيانات السنة المالية" : "Review fiscal year data",
-    requiredYear: isArabic ? "السنة مطلوبة." : "Year is required.",
-    requiredName: isArabic ? "اسم السنة المالية مطلوب." : "Fiscal year name is required.",
-    requiredStartDate: isArabic ? "تاريخ البداية مطلوب." : "Start date is required.",
-    requiredEndDate: isArabic ? "تاريخ النهاية مطلوب." : "End date is required.",
-    invalidYear: isArabic ? "السنة يجب أن تكون رقمًا صحيحًا." : "Year must be a valid number.",
-    invalidDateRange: isArabic
-      ? "تاريخ البداية لا يمكن أن يكون بعد تاريخ النهاية."
-      : "Start date cannot be after end date.",
-
-    saveSuccess: isArabic
-      ? "تم إنشاء السنة المالية بنجاح."
-      : "Fiscal year created successfully.",
-    saveError: isArabic
-      ? "تعذر حفظ السنة المالية."
-      : "Unable to save fiscal year.",
-
-    confirmClear: isArabic
-      ? "هل تريد مسح النموذج الحالي؟"
-      : "Clear the current form?",
-    unsavedChanges: isArabic
-      ? "لديك تغييرات غير محفوظة. هل تريد المغادرة؟"
-      : "You have unsaved changes. Do you want to leave?",
-  };
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function toNumber(value: unknown): number {
-  const parsed = Number(value ?? 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatNumber(value: unknown): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(toNumber(value));
-}
-
-function formatDate(value: string, locale: AppLocale): string {
-  if (!value) return "-";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(date);
-}
-
-function getDaysBetween(startDate: string, endDate: string) {
-  if (!startDate || !endDate) return 0;
-
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
-
-  const diff = end.getTime() - start.getTime();
-
-  if (diff < 0) return 0;
-
-  return Math.floor(diff / (1000 * 60 * 60 * 24)) + 1;
-}
-
-function getExpectedPeriods(startDate: string, endDate: string) {
-  if (!startDate || !endDate) return 0;
-
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
-  if (start > end) return 0;
-
-  return (
-    (end.getFullYear() - start.getFullYear()) * 12 +
-    (end.getMonth() - start.getMonth()) +
-    1
+  return normalizeText(
+    payload.id ||
+      payload.pk ||
+      payload.uuid ||
+      data.id ||
+      data.pk ||
+      data.uuid ||
+      item.id ||
+      item.pk ||
+      item.uuid,
   );
 }
 
-function statusLabel(status: FiscalYearStatus, locale: AppLocale) {
-  const t = dictionary(locale);
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
 
-  const labels: Record<FiscalYearStatus, string> = {
-    OPEN: t.open,
-    CLOSED: t.closed,
-    ARCHIVED: t.archived,
-  };
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10);
 
-  return labels[status];
+  return parsed.toISOString().slice(0, 10);
 }
 
-function modeLabel(mode: FiscalYearMode, locale: AppLocale) {
-  const t = dictionary(locale);
-
-  return mode === "CALENDAR" ? t.calendarYear : t.customYear;
+function getYearFromDate(value: string) {
+  if (!value) return "";
+  const year = value.slice(0, 4);
+  return /^\d{4}$/.test(year) ? year : "";
 }
 
-function statusBadge(status: FiscalYearStatus, locale: AppLocale) {
-  const label = statusLabel(status, locale);
+function statusLabel(status: FiscalYearStatus, locale: Locale) {
+  const t = translations[locale];
 
-  if (status === "OPEN") {
-    return (
-      <Badge className="rounded-full border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
-        <UnlockKeyhole className="me-1 h-3.5 w-3.5" />
-        {label}
-      </Badge>
-    );
+  if (status === "open") return t.open;
+  if (status === "draft") return t.draft;
+  if (status === "closed") return t.closed;
+  if (status === "locked") return t.locked;
+
+  return t.archived;
+}
+
+function getStatusClass(status: FiscalYearStatus) {
+  if (status === "open") {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
   }
 
-  if (status === "CLOSED") {
-    return (
-      <Badge className="rounded-full border-slate-200 bg-slate-50 px-3 py-1 text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-        <LockKeyhole className="me-1 h-3.5 w-3.5" />
-        {label}
-      </Badge>
-    );
+  if (status === "locked") {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
   }
 
+  if (status === "closed") {
+    return "border-slate-500/30 bg-slate-50 text-slate-700 hover:bg-slate-50";
+  }
+
+  if (status === "draft") {
+    return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+  }
+
+  return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+}
+
+function ReadinessItem({
+  ready,
+  label,
+}: {
+  ready: boolean;
+  label: string;
+}) {
   return (
-    <Badge variant="secondary" className="rounded-full px-3 py-1">
-      {label}
-    </Badge>
+    <div className="flex items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      {ready ? (
+        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+      ) : (
+        <TriangleAlert className="h-4 w-4 text-amber-600" />
+      )}
+    </div>
   );
 }
 
-/* ============================================================
-   Page
-============================================================ */
+function OptionCard({
+  title,
+  description,
+  checked,
+  onChange,
+  disabled,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-background p-4 transition-colors hover:bg-muted/30">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-1 h-4 w-4 rounded border-muted-foreground"
+      />
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-foreground">{title}</span>
+        <span className="mt-1 block text-sm leading-5 text-muted-foreground">
+          {description}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+function CreateSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-4 p-6">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <Skeleton key={index} className="h-11 w-full" />
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-6">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={index} className="h-12 w-full" />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
 
 export default function CreateAccountingFiscalYearPage() {
-  const auth = useAuth() as unknown;
+  const router = useRouter();
 
-  const [locale, setLocale] = useState<AppLocale>("ar");
-  const [form, setForm] = useState<FormState>(() => makeDefaultForm());
-  const [isSaving, setIsSaving] = useState(false);
-  const [submitError, setSubmitError] = useState("");
-  const [isDirty, setIsDirty] = useState(false);
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [form, setForm] = React.useState<FormState>(initialForm);
+  const [fieldErrors, setFieldErrors] = React.useState<FieldErrors>({});
+  const [ready, setReady] = React.useState(false);
 
-  const t = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-  const authResolving = isAuthResolving(auth);
+  const [saving, setSaving] = React.useState(false);
+  const [submitError, setSubmitError] = React.useState("");
+  const [dirty, setDirty] = React.useState(false);
 
-  const canCreate = hasSafePermission(
-    auth,
-    [
-      "accounting.create",
-      "accounting.fiscal_years.create",
-      "accounting.manage",
-    ],
-    "action",
-  );
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
-  const expectedPeriods = useMemo(
-    () => getExpectedPeriods(form.startDate, form.endDate),
-    [form.startDate, form.endDate],
-  );
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
 
-  const durationDays = useMemo(
-    () => getDaysBetween(form.startDate, form.endDate),
-    [form.startDate, form.endDate],
-  );
-
-  const canSubmit = canCreate && !isSaving;
-
-  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({
-      ...current,
-      [key]: value,
-    }));
-    setIsDirty(true);
-  }
-
-  function handleYearChange(value: string) {
-    const cleanYear = value.replace(/\D/g, "").slice(0, 4);
-    const parsedYear = Number(cleanYear);
-
-    setForm((current) => {
-      if (current.mode === "CALENDAR" && cleanYear.length === 4 && parsedYear > 0) {
-        return {
-          ...current,
-          year: cleanYear,
-          name: `FY ${cleanYear}`,
-          startDate: `${cleanYear}-01-01`,
-          endDate: `${cleanYear}-12-31`,
-        };
-      }
-
-      return {
-        ...current,
-        year: cleanYear,
-        name: cleanYear.length === 4 ? `FY ${cleanYear}` : current.name,
-      };
-    });
-
-    setIsDirty(true);
-  }
-
-  function handleModeChange(value: FiscalYearMode) {
-    setForm((current) => {
-      const year = current.year || String(new Date().getFullYear());
-
-      if (value === "CALENDAR") {
-        return {
-          ...current,
-          mode: value,
-          startDate: `${year}-01-01`,
-          endDate: `${year}-12-31`,
-        };
-      }
-
-      return {
-        ...current,
-        mode: value,
-      };
-    });
-
-    setIsDirty(true);
-  }
-
-  function clearForm() {
-    if (isDirty && !window.confirm(t.confirmClear)) return;
-
-    setForm(makeDefaultForm());
-    setSubmitError("");
-    setIsDirty(false);
-  }
-
-  function validateForm() {
-    const errors: string[] = [];
-
-    if (!form.year.trim()) errors.push(t.requiredYear);
-    if (!Number.isFinite(Number(form.year))) errors.push(t.invalidYear);
-    if (!form.name.trim()) errors.push(t.requiredName);
-    if (!form.startDate) errors.push(t.requiredStartDate);
-    if (!form.endDate) errors.push(t.requiredEndDate);
-
-    if (form.startDate && form.endDate && form.startDate > form.endDate) {
-      errors.push(t.invalidDateRange);
-    }
-
-    return Array.from(new Set(errors));
-  }
-
-  function buildPayload() {
-    return {
-      year: Number(form.year),
-      fiscal_year: Number(form.year),
-      code: form.year.trim(),
-      name: form.name.trim(),
-      title: form.name.trim(),
-      start_date: form.startDate,
-      date_from: form.startDate,
-      end_date: form.endDate,
-      date_to: form.endDate,
-      status: form.status,
-      state: form.status,
-      is_current: form.isCurrent,
-      current: form.isCurrent,
-      is_closed: form.status === "CLOSED",
-      create_monthly_periods: form.createMonthlyPeriods,
-      auto_create_periods: form.createMonthlyPeriods,
-      periods_count: expectedPeriods,
-      notes: form.notes.trim(),
-      description: form.notes.trim(),
-    };
-  }
-
-  async function submitForm() {
-    if (!canCreate) return;
-
-    const errors = validateForm();
-
-    if (errors.length > 0) {
-      setSubmitError(errors.join("\n"));
-      toast.error(t.validationTitle);
-      return;
-    }
-
-    try {
-      setIsSaving(true);
-      setSubmitError("");
-
-      const payload = buildPayload();
-      const csrfToken = getCookie("csrftoken");
-
-      const endpoints = [
-        "/api/accounting/fiscal-years/create/",
-        "/api/accounting/fiscal-years/",
-      ];
-
-      let saved = false;
-      let lastMessage = "";
-
-      for (const endpoint of endpoints) {
-        const response = await fetch(apiUrl(endpoint), {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
-          },
-          body: JSON.stringify(payload),
-        });
-
-        const responsePayload = (await response.json().catch(() => null)) as
-          | ApiEnvelope<unknown>
-          | null;
-
-        if ([400, 404, 405].includes(response.status)) {
-          lastMessage =
-            responsePayload?.message ||
-            responsePayload?.detail ||
-            responsePayload?.error ||
-            `HTTP ${response.status}`;
-
-          if (response.status === 400) break;
-
-          continue;
-        }
-
-        if (
-          !response.ok ||
-          responsePayload?.ok === false ||
-          responsePayload?.success === false
-        ) {
-          throw new Error(
-            responsePayload?.message ||
-              responsePayload?.detail ||
-              responsePayload?.error ||
-              `HTTP ${response.status}`,
-          );
-        }
-
-        saved = true;
-        break;
-      }
-
-      if (!saved) {
-        throw new Error(lastMessage || t.saveError);
-      }
-
-      toast.success(t.saveSuccess);
-      setForm(makeDefaultForm());
-      setIsDirty(false);
-    } catch (error) {
-      console.error("Create fiscal year submit error:", error);
-      const message = error instanceof Error ? error.message : t.saveError;
-
-      setSubmitError(message || t.saveError);
-      toast.error(t.saveError);
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = readLocale();
-
-      applyDocumentLocale(nextLocale);
       setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
     };
 
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
+    applyLocale();
+    setReady(true);
 
-    syncAfterPaint();
-
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
 
     return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
     };
   }, []);
 
-  useEffect(() => {
-    const handler = (event: BeforeUnloadEvent) => {
-      if (!isDirty || isSaving) return;
+  React.useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty || saving) return;
 
       event.preventDefault();
       event.returnValue = "";
     };
 
-    window.addEventListener("beforeunload", handler);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirty, saving]);
 
-    return () => {
-      window.removeEventListener("beforeunload", handler);
+  const readiness = React.useMemo(() => {
+    const basicData = Boolean(form.name.trim()) && Boolean(form.code.trim());
+    const dateRange =
+      Boolean(form.start_date) &&
+      Boolean(form.end_date) &&
+      form.end_date >= form.start_date;
+    const statusReady = Boolean(form.status);
+    const optionsReady = true;
+
+    return {
+      basicData,
+      dateRange,
+      statusReady,
+      optionsReady,
+      ready: basicData && dateRange && statusReady,
     };
-  }, [isDirty, isSaving]);
+  }, [form]);
 
-  if (!authResolving && !canCreate) {
+  function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+
+    setDirty(true);
+    setSubmitError("");
+
+    setFieldErrors((current) => ({
+      ...current,
+      [key]: undefined,
+    }));
+  }
+
+  function fillFromYear(year: string) {
+    if (!year) return;
+
+    const name = locale === "ar" ? `السنة المالية ${year}` : `Fiscal Year ${year}`;
+    const code = `FY-${year}`;
+
+    setForm((current) => ({
+      ...current,
+      name: current.name.trim() ? current.name : name,
+      code: current.code.trim() ? current.code : code,
+      start_date: `${year}-01-01`,
+      end_date: `${year}-12-31`,
+      use_calendar_year: true,
+    }));
+
+    setDirty(true);
+    setFieldErrors({});
+  }
+
+  function handleStartDateChange(value: string) {
+    const year = getYearFromDate(value);
+
+    setForm((current) => {
+      const next: FormState = {
+        ...current,
+        start_date: value,
+      };
+
+      if (current.use_calendar_year && year) {
+        next.name = current.name.trim()
+          ? current.name
+          : locale === "ar"
+            ? `السنة المالية ${year}`
+            : `Fiscal Year ${year}`;
+        next.code = current.code.trim() ? current.code : `FY-${year}`;
+        next.end_date = `${year}-12-31`;
+      }
+
+      return next;
+    });
+
+    setDirty(true);
+    setSubmitError("");
+    setFieldErrors((current) => ({
+      ...current,
+      start_date: undefined,
+      end_date: undefined,
+    }));
+  }
+
+  function validateForm() {
+    const nextErrors: FieldErrors = {};
+
+    if (!form.name.trim()) nextErrors.name = t.requiredName;
+    if (!form.code.trim()) nextErrors.code = t.requiredCode;
+    if (!form.start_date) nextErrors.start_date = t.requiredStartDate;
+    if (!form.end_date) nextErrors.end_date = t.requiredEndDate;
+
+    if (form.start_date && form.end_date && form.end_date < form.start_date) {
+      nextErrors.end_date = t.invalidDateRange;
+    }
+
+    setFieldErrors(nextErrors);
+
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  function buildPayload() {
+    return {
+      name: form.name.trim(),
+      title: form.name.trim(),
+      fiscal_year_name: form.name.trim(),
+      code: form.code.trim(),
+      year_code: form.code.trim(),
+      fiscal_year_code: form.code.trim(),
+      start_date: form.start_date,
+      date_from: form.start_date,
+      from_date: form.start_date,
+      end_date: form.end_date,
+      date_to: form.end_date,
+      to_date: form.end_date,
+      status: form.status,
+      year_status: form.status,
+      is_current: form.is_current,
+      current: form.is_current,
+      is_closed: form.status === "closed" || form.status === "locked",
+      is_locked: form.status === "locked",
+      create_monthly_periods: form.create_monthly_periods,
+      auto_create_periods: form.create_monthly_periods,
+      generate_periods: form.create_monthly_periods,
+      period_frequency: form.create_monthly_periods ? "monthly" : null,
+      notes: form.notes.trim(),
+      description: form.notes.trim(),
+    };
+  }
+
+  async function submitForm(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+
+    if (!validateForm()) return;
+
+    setSaving(true);
+    setSubmitError("");
+
+    const payload = buildPayload();
+
+    const endpoints = [
+      "/api/accounting/fiscal-years/",
+      "/api/accounting/fiscal_years/",
+      "/api/accounting/years/",
+    ];
+
+    let createdId = "";
+    let lastError: unknown = null;
+
+    try {
+      for (const endpoint of endpoints) {
+        try {
+          const responsePayload = await fetchJson<ApiResponse>(makeApiUrl(endpoint), {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+
+          createdId = extractCreatedId(responsePayload);
+          break;
+        } catch (caughtError) {
+          lastError = caughtError;
+        }
+      }
+
+      if (!createdId && lastError) {
+        throw lastError instanceof Error ? lastError : new Error(t.saveError);
+      }
+
+      toast.success(t.saveSuccess);
+      setDirty(false);
+
+      if (createdId) {
+        router.push(`/system/accounting/fiscal-years/${createdId}`);
+      } else {
+        router.push("/system/accounting/fiscal-years");
+      }
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error && caughtError.message
+          ? caughtError.message
+          : t.saveError;
+
+      setSubmitError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function clearForm() {
+    if (dirty && !window.confirm(t.clearConfirm)) return;
+
+    setForm(initialForm);
+    setFieldErrors({});
+    setSubmitError("");
+    setDirty(false);
+  }
+
+  function goBack(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (!dirty || saving) return;
+
+    const confirmed = window.confirm(t.unsavedConfirm);
+
+    if (!confirmed) {
+      event.preventDefault();
+    }
+  }
+
+  const currentYear = String(new Date().getFullYear());
+
+  if (!ready) {
     return (
-      <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-destructive">
-                {t.accessDeniedTitle}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {t.accessDeniedText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="w-full space-y-4" dir={dir}>
+        <CreateSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="w-full space-y-4" dir={isArabic ? "rtl" : "ltr"}>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
             {t.title}
           </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {t.subtitle}
-          </p>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link
-            href="/system/accounting/fiscal-years"
-            onClick={(event) => {
-              if (isDirty && !window.confirm(t.unsavedChanges)) {
-                event.preventDefault();
-              }
-            }}
-          >
-            <Button
-              variant="outline"
-              className="h-10 w-full rounded-xl sm:w-auto"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{t.back}</span>
-            </Button>
-          </Link>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={clearForm}
-            disabled={isSaving}
-          >
-            <RotateCcw className="h-4 w-4" />
-            <span>{t.clear}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild variant="outline" className="h-9 rounded-lg">
+            <Link href="/system/accounting/fiscal-years" onClick={goBack}>
+              <BackIcon className="h-4 w-4" />
+              {t.back}
+            </Link>
           </Button>
 
           <Button
-            type="button"
-            className="h-10 rounded-xl"
-            onClick={submitForm}
-            disabled={!canSubmit}
+            variant="outline"
+            className="h-9 rounded-lg"
+            onClick={() => fillFromYear(currentYear)}
+            disabled={saving}
           >
-            {isSaving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
-            <span>{isSaving ? t.saving : t.save}</span>
+            <RefreshCw className="h-4 w-4" />
+            {t.autoFill}
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-9 rounded-lg"
+            onClick={clearForm}
+            disabled={saving}
+          >
+            <RotateCcw className="h-4 w-4" />
+            {t.clear}
+          </Button>
+
+          <Button
+            className="h-9 rounded-lg bg-black text-white hover:bg-black/90"
+            onClick={() => void submitForm()}
+            disabled={saving}
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? t.saving : t.save}
           </Button>
         </div>
       </div>
 
       {submitError ? (
-        <Card className="rounded-2xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <CardContent className="flex items-start gap-3 p-5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-              <XCircle className="h-5 w-5" />
-            </div>
-
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex items-start gap-3 p-4 text-right">
+            <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
             <div>
-              <p className="font-semibold text-destructive">
-                {t.validationTitle}
-              </p>
-              <p className="mt-1 whitespace-pre-line text-sm text-muted-foreground">
-                {submitError}
-              </p>
+              <p className="font-semibold text-red-900">{t.saveError}</p>
+              <p className="text-sm text-red-700">{submitError}</p>
             </div>
           </CardContent>
         </Card>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <FileText className="h-4 w-4" />
-                {t.mainInfo}
-              </CardTitle>
-              <CardDescription>{t.mainInfoDesc}</CardDescription>
-            </CardHeader>
+      <form onSubmit={submitForm}>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-4">
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>{t.formTitle}</CardTitle>
+                    <CardDescription>{t.formDesc}</CardDescription>
+                  </div>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.year}</label>
-                <Input
-                  value={form.year}
-                  onChange={(event) => handleYearChange(event.target.value)}
-                  disabled={isSaving}
-                  inputMode="numeric"
-                  dir="ltr"
-                  className="h-11 rounded-xl"
-                />
-              </div>
+                  <CardAction>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background">
+                      <CalendarClock className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  </CardAction>
+                </div>
+              </CardHeader>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.name}</label>
-                <Input
-                  value={form.name}
-                  onChange={(event) => updateForm("name", event.target.value)}
-                  disabled={isSaving}
-                  className="h-11 rounded-xl"
-                />
-              </div>
+              <CardContent className="space-y-5 px-6 pb-6">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.name}</label>
+                    <Input
+                      value={form.name}
+                      onChange={(event) => updateField("name", event.target.value)}
+                      placeholder={t.namePlaceholder}
+                      disabled={saving}
+                      className={cn(
+                        "h-10 rounded-lg bg-background",
+                        fieldErrors.name && "border-red-300",
+                      )}
+                    />
+                    {fieldErrors.name ? (
+                      <p className="text-xs text-red-600">{fieldErrors.name}</p>
+                    ) : null}
+                  </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium">{t.notes}</label>
-                <textarea
-                  value={form.notes}
-                  onChange={(event) => updateForm("notes", event.target.value)}
-                  disabled={isSaving}
-                  rows={3}
-                  className="w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </div>
-            </CardContent>
-          </Card>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.code}</label>
+                    <Input
+                      value={form.code}
+                      onChange={(event) =>
+                        updateField("code", event.target.value.toUpperCase())
+                      }
+                      placeholder={t.codePlaceholder}
+                      disabled={saving}
+                      className={cn(
+                        "h-10 rounded-lg bg-background",
+                        fieldErrors.code && "border-red-300",
+                      )}
+                    />
+                    {fieldErrors.code ? (
+                      <p className="text-xs text-red-600">{fieldErrors.code}</p>
+                    ) : null}
+                  </div>
+                </div>
 
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <CalendarClock className="h-4 w-4" />
-                {t.periodInfo}
-              </CardTitle>
-              <CardDescription>{t.periodInfoDesc}</CardDescription>
-            </CardHeader>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">
+                      {t.startDate}
+                    </label>
+                    <Input
+                      type="date"
+                      value={form.start_date}
+                      onChange={(event) => handleStartDateChange(event.target.value)}
+                      disabled={saving}
+                      className={cn(
+                        "h-10 rounded-lg bg-background",
+                        fieldErrors.start_date && "border-red-300",
+                      )}
+                    />
+                    {fieldErrors.start_date ? (
+                      <p className="text-xs text-red-600">{fieldErrors.start_date}</p>
+                    ) : null}
+                  </div>
 
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.mode}</label>
-                <select
-                  value={form.mode}
-                  onChange={(event) =>
-                    handleModeChange(event.target.value as FiscalYearMode)
-                  }
-                  disabled={isSaving}
-                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="CALENDAR">{t.calendarYear}</option>
-                  <option value="CUSTOM">{t.customYear}</option>
-                </select>
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.endDate}</label>
+                    <Input
+                      type="date"
+                      value={form.end_date}
+                      onChange={(event) => updateField("end_date", event.target.value)}
+                      disabled={saving}
+                      className={cn(
+                        "h-10 rounded-lg bg-background",
+                        fieldErrors.end_date && "border-red-300",
+                      )}
+                    />
+                    {fieldErrors.end_date ? (
+                      <p className="text-xs text-red-600">{fieldErrors.end_date}</p>
+                    ) : null}
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.status}</label>
-                <select
-                  value={form.status}
-                  onChange={(event) =>
-                    updateForm("status", event.target.value as FiscalYearStatus)
-                  }
-                  disabled={isSaving}
-                  className="h-11 w-full rounded-xl border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="OPEN">{t.open}</option>
-                  <option value="CLOSED">{t.closed}</option>
-                  <option value="ARCHIVED">{t.archived}</option>
-                </select>
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{t.status}</label>
+                    <Select
+                      value={form.status}
+                      onValueChange={(value) =>
+                        updateField("status", value as FiscalYearStatus)
+                      }
+                      disabled={saving}
+                    >
+                      <SelectTrigger className="h-10 rounded-lg bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="open">{t.open}</SelectItem>
+                        <SelectItem value="draft">{t.draft}</SelectItem>
+                        <SelectItem value="closed">{t.closed}</SelectItem>
+                        <SelectItem value="locked">{t.locked}</SelectItem>
+                        <SelectItem value="archived">{t.archived}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.startDate}</label>
-                <Input
-                  type="date"
-                  value={form.startDate}
-                  onChange={(event) => updateForm("startDate", event.target.value)}
-                  disabled={isSaving || form.mode === "CALENDAR"}
-                  className="h-11 rounded-xl"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t.endDate}</label>
-                <Input
-                  type="date"
-                  value={form.endDate}
-                  onChange={(event) => updateForm("endDate", event.target.value)}
-                  disabled={isSaving || form.mode === "CALENDAR"}
-                  className="h-11 rounded-xl"
-                />
-              </div>
-
-              <div className="space-y-3 md:col-span-2">
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl border bg-background p-3 text-sm">
-                  <Checkbox
-                    checked={form.isCurrent}
-                    onCheckedChange={(checked) =>
-                      updateForm("isCurrent", Boolean(checked))
-                    }
-                    disabled={isSaving}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">{t.notes}</label>
+                  <textarea
+                    value={form.notes}
+                    onChange={(event) => updateField("notes", event.target.value)}
+                    placeholder={t.notesPlaceholder}
+                    disabled={saving}
+                    rows={5}
+                    className="min-h-[128px] w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   />
-                  <span>{t.isCurrent}</span>
-                </label>
+                </div>
+              </CardContent>
+            </Card>
 
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl border bg-background p-3 text-sm">
-                  <Checkbox
-                    checked={form.createMonthlyPeriods}
-                    onCheckedChange={(checked) =>
-                      updateForm("createMonthlyPeriods", Boolean(checked))
-                    }
-                    disabled={isSaving}
-                  />
-                  <span>{t.createMonthlyPeriods}</span>
-                </label>
-              </div>
-            </CardContent>
-          </Card>
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>{t.optionsTitle}</CardTitle>
+                    <CardDescription>{t.optionsDesc}</CardDescription>
+                  </div>
+
+                  <CardAction>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background">
+                      <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  </CardAction>
+                </div>
+              </CardHeader>
+
+              <CardContent className="grid gap-3 px-6 pb-6 md:grid-cols-3">
+                <OptionCard
+                  title={t.useCalendarYear}
+                  description={t.useCalendarYearDesc}
+                  checked={form.use_calendar_year}
+                  disabled={saving}
+                  onChange={(checked) => {
+                    updateField("use_calendar_year", checked);
+                    const year = getYearFromDate(form.start_date) || currentYear;
+                    if (checked) fillFromYear(year);
+                  }}
+                />
+
+                <OptionCard
+                  title={t.makeCurrent}
+                  description={t.makeCurrentDesc}
+                  checked={form.is_current}
+                  disabled={saving}
+                  onChange={(checked) => updateField("is_current", checked)}
+                />
+
+                <OptionCard
+                  title={t.createMonthlyPeriods}
+                  description={t.createMonthlyPeriodsDesc}
+                  checked={form.create_monthly_periods}
+                  disabled={saving}
+                  onChange={(checked) => updateField("create_monthly_periods", checked)}
+                />
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-4">
+            <Card className="rounded-lg border bg-card shadow-none">
+              <CardHeader className="px-6 py-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>{t.summaryTitle}</CardTitle>
+                    <CardDescription>{t.summaryDesc}</CardDescription>
+                  </div>
+
+                  <CardAction>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background">
+                      <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  </CardAction>
+                </div>
+              </CardHeader>
+
+              <CardContent className="space-y-3 px-6 pb-6">
+                <div className="rounded-lg border bg-background p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-foreground">
+                      {readiness.ready ? t.ready : t.notReady}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-xs font-medium",
+                        getStatusClass(form.status),
+                      )}
+                    >
+                      {statusLabel(form.status, locale)}
+                    </Badge>
+                  </div>
+                </div>
+
+                <ReadinessItem ready={readiness.basicData} label={t.basicData} />
+                <ReadinessItem ready={readiness.dateRange} label={t.dateRange} />
+                <ReadinessItem ready={readiness.statusReady} label={t.statusReady} />
+                <ReadinessItem ready={readiness.optionsReady} label={t.optionsReady} />
+
+                <div className="rounded-lg border bg-background p-4 text-sm">
+                  <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    {form.name || t.name}
+                  </div>
+
+                  <div className="space-y-1 text-muted-foreground">
+                    <p>
+                      {t.code}:{" "}
+                      <span className="font-medium text-foreground">
+                        {form.code || "—"}
+                      </span>
+                    </p>
+                    <p>
+                      {t.startDate}:{" "}
+                      <span className="font-medium text-foreground tabular-nums">
+                        {formatDate(form.start_date)}
+                      </span>
+                    </p>
+                    <p>
+                      {t.endDate}:{" "}
+                      <span className="font-medium text-foreground tabular-nums">
+                        {formatDate(form.end_date)}
+                      </span>
+                    </p>
+                    <p>
+                      {t.makeCurrent}:{" "}
+                      <span className="font-medium text-foreground">
+                        {form.is_current ? "✓" : "—"}
+                      </span>
+                    </p>
+                    <p>
+                      {t.createMonthlyPeriods}:{" "}
+                      <span className="font-medium text-foreground">
+                        {form.create_monthly_periods ? "✓" : "—"}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  className="h-10 w-full rounded-lg bg-black text-white hover:bg-black/90"
+                  onClick={() => void submitForm()}
+                  disabled={saving}
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {saving ? t.saving : t.save}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </div>
-
-        <aside className="space-y-4">
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-bold">
-                <CheckCircle2 className="h-4 w-4" />
-                {t.summaryTitle}
-              </CardTitle>
-              <CardDescription>{t.summaryDesc}</CardDescription>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.year}</p>
-                <p className="mt-2 font-semibold" dir="ltr">
-                  {form.year || "-"}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.name}</p>
-                <p className="mt-2 font-semibold">{form.name || "-"}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.selectedMode}
-                  </p>
-                  <p className="mt-2 font-semibold">
-                    {modeLabel(form.mode, locale)}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.selectedStatus}
-                  </p>
-                  <div className="mt-2">{statusBadge(form.status, locale)}</div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.startDate}</p>
-                <p className="mt-2 font-semibold">
-                  {formatDate(form.startDate, locale)}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border bg-background p-4">
-                <p className="text-xs text-muted-foreground">{t.endDate}</p>
-                <p className="mt-2 font-semibold">
-                  {formatDate(form.endDate, locale)}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.expectedPeriods}
-                  </p>
-                  <p className="mt-2 text-lg font-bold">
-                    {formatNumber(expectedPeriods)}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border bg-background p-4">
-                  <p className="text-xs text-muted-foreground">
-                    {t.durationDays}
-                  </p>
-                  <p className="mt-2 text-lg font-bold">
-                    {formatNumber(durationDays)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid gap-2 pt-2">
-                <Button
-                  type="button"
-                  className="h-11 rounded-2xl"
-                  onClick={submitForm}
-                  disabled={!canSubmit}
-                >
-                  {isSaving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  {isSaving ? t.saving : t.save}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 rounded-2xl"
-                  onClick={clearForm}
-                  disabled={isSaving}
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  {t.clear}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <ShieldCheck className="h-4 w-4" />
-                {form.isCurrent ? t.isCurrent : t.selectedStatus}
-              </div>
-
-              <p className="text-sm leading-6 text-muted-foreground">
-                {statusLabel(form.status, locale)}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border bg-card shadow-sm">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Layers3 className="h-4 w-4" />
-                {t.createMonthlyPeriods}
-              </div>
-
-              <p className="text-2xl font-bold">
-                {form.createMonthlyPeriods ? formatNumber(expectedPeriods) : "0"}
-              </p>
-
-              <p className="text-sm leading-6 text-muted-foreground">
-                {form.createMonthlyPeriods ? t.expectedPeriods : t.customYear}
-              </p>
-            </CardContent>
-          </Card>
-        </aside>
-      </div>
+      </form>
     </div>
   );
 }

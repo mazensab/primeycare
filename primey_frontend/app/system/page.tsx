@@ -1,384 +1,472 @@
 "use client";
 
 /* ============================================================
-   📂 app/system/page.tsx
-   🧠 Primey Care | System Dashboard
-
-   ✅ المرحلة 17 + المرحلة 2
-   ✅ نفس النمط المعتمد
-   ✅ w-full space-y-4
-   ✅ بدون main / min-h-screen / max-w
-   ✅ الحفاظ على CRM Dashboard المعتمد
-   ✅ إضافة اختصارات للوحدات بعد تنظيف السايدر
-   ✅ Excel .xls HTML Workbook
-   ✅ Web PDF Print
-   ✅ sonner
-   ✅ صلاحيات آمنة مع fallback لـ system_admin / superuser
-   ✅ بدون localhost hardcoded
-   ✅ لا توجد نصوص تقنية ظاهرة في الواجهة
+   📂 primey_frontend/app/system/page.tsx
+   🧠 Primey Care — System Dashboard
+   ------------------------------------------------------------
+   ✅ Approved Products / Customers / Orders operational pattern
+   ✅ Clickable KPI cards instead of shortcuts
+   ✅ Separate full-width tables:
+      - Latest orders
+      - Latest payments
+      - Latest customers
+   ✅ Each table has independent search + filters
+   ✅ Real API only
+   ✅ Excel .xls + Web print
+   ✅ Skeleton loading
+   ✅ Error / Empty states
+   ✅ sonner toast
+   ✅ RTL/LTR through primey-locale
+   ✅ SAR icon from /currency/sar.svg
+   ✅ No localhost
+   ✅ No fake data
 ============================================================ */
 
+import * as React from "react";
 import Link from "next/link";
 import {
-  type ReactNode,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import {
-  BarChart3,
-  BellRing,
-  Building2,
-  Calculator,
+  ArrowUpDown,
+  Bell,
+  CalendarDays,
   CreditCard,
-  Download,
-  FileText,
-  Home,
-  MessageCircle,
+  FileSpreadsheet,
+  Loader2,
   Package,
   Printer,
   ReceiptText,
-  RefreshCcw,
-  Settings,
+  RefreshCw,
+  RotateCcw,
+  Search,
   ShoppingCart,
   Stethoscope,
+  TriangleAlert,
   UserCog,
   Users,
-  WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
-
-import CustomDateRangePicker from "@/components/custom-date-range-picker";
-import {
-  LeadBySourceCard,
-  SalesPipeline,
-  LeadsCard,
-  TargetCard,
-  TotalCustomersCard,
-  TotalDeals,
-  TotalRevenueCard,
-  RecentTasks,
-} from "@/components/analytics";
-import { useAuth } from "@/components/providers/AuthProvider";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-/* ============================================================
-   Types
-============================================================ */
+type Locale = "ar" | "en";
+type ApiRecord = Record<string, unknown>;
 
-type AppLocale = "ar" | "en";
-type Dict = Record<string, unknown>;
-
-type ShortcutKey =
-  | "customers"
-  | "products"
-  | "orders"
-  | "invoices"
-  | "payments"
-  | "providers"
-  | "centers"
-  | "contracts"
-  | "agents"
-  | "treasury"
-  | "accounting"
-  | "reports"
-  | "notifications"
-  | "whatsapp"
-  | "users"
-  | "settings";
-
-type ShortcutItem = {
-  key: ShortcutKey;
-  href: string;
-  icon: ReactNode;
-  permissionCodes: string[];
-  titleAr: string;
-  titleEn: string;
-  descriptionAr: string;
-  descriptionEn: string;
-  groupAr: string;
-  groupEn: string;
+type ApiResponse = {
+  count?: number;
+  total?: number;
+  total_count?: number;
+  results?: unknown[];
+  items?: unknown[];
+  data?: unknown;
+  summary?: unknown;
+  meta?: unknown;
 };
 
-const PRIMEY_LOCALE_STORAGE_KEY = "primey-locale";
+type DashboardStats = {
+  customers: number;
+  orders: number;
+  invoices: number;
+  payments: number;
+  products: number;
+  providers: number;
+  agents: number;
+  notifications: number;
+  totalInvoicesAmount: number;
+  totalPaymentsAmount: number;
+  pendingOrders: number;
+  unpaidInvoices: number;
+};
 
-/* ============================================================
-   Locale
-============================================================ */
+type OrderRecord = {
+  id: string;
+  order_number: string;
+  customer_name: string;
+  product_name: string;
+  provider_name: string;
+  status: string;
+  payment_status: string;
+  fulfillment_status: string;
+  payment_method: string;
+  total_amount: number;
+  created_at: string | null;
+};
 
-function getStoredLocale(): AppLocale {
-  try {
-    if (typeof window === "undefined") return "ar";
+type PaymentRecord = {
+  id: string;
+  payment_number: string;
+  customer_name: string;
+  invoice_number: string;
+  method: string;
+  status: string;
+  amount: number;
+  paid_at: string | null;
+  created_at: string | null;
+};
 
-    const savedLocale =
-      window.localStorage.getItem(PRIMEY_LOCALE_STORAGE_KEY) ||
-      window.localStorage.getItem("locale") ||
-      window.localStorage.getItem("lang");
+type CustomerRecord = {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  status: string;
+  city: string;
+  total_orders: number;
+  total_paid: number;
+  created_at: string | null;
+};
 
-    if (savedLocale === "en") return "en";
-    if (savedLocale === "ar") return "ar";
+type OrderStatusFilter =
+  | "all"
+  | "pending"
+  | "confirmed"
+  | "processing"
+  | "completed"
+  | "cancelled"
+  | "refunded"
+  | "card_ready"
+  | "assigned_for_delivery"
+  | "out_for_delivery"
+  | "delivered";
 
-    return document.documentElement.lang === "en" ? "en" : "ar";
-  } catch (error) {
-    console.error("Read locale error:", error);
-    return "ar";
+type PaymentStatusFilter =
+  | "all"
+  | "pending"
+  | "paid"
+  | "confirmed"
+  | "failed"
+  | "cancelled"
+  | "refunded";
+
+type CustomerStatusFilter = "all" | "active" | "inactive" | "blocked";
+
+type SortKey = "newest" | "oldest" | "amount_high" | "amount_low" | "name";
+
+const API_ENDPOINTS = {
+  customers: "/api/customers/",
+  orders: "/api/orders/",
+  invoices: "/api/invoices/",
+  payments: "/api/payments/",
+  products: "/api/products/",
+  providers: "/api/providers/",
+  agents: "/api/agents/",
+  notifications: "/api/notifications/inbox/",
+};
+
+const translations = {
+  ar: {
+    title: "لوحة تحكم النظام",
+    subtitle:
+      "نظرة تشغيلية موحدة على Primey Care مع مؤشرات مباشرة وجداول منفصلة لآخر الطلبات والمدفوعات والعملاء.",
+    refresh: "تحديث",
+    export: "تصدير Excel",
+    print: "طباعة",
+    reset: "إعادة ضبط",
+    from: "من",
+    to: "إلى",
+    search: "بحث",
+    all: "الكل",
+    sort: "الترتيب",
+    newest: "الأحدث",
+    oldest: "الأقدم",
+    amountHigh: "الأعلى مبلغًا",
+    amountLow: "الأقل مبلغًا",
+    nameSort: "الاسم",
+    open: "فتح",
+    showing: "عرض",
+    rows: "صفوف",
+    of: "من",
+
+    totalCustomers: "إجمالي العملاء",
+    totalOrders: "إجمالي الطلبات",
+    totalInvoices: "إجمالي الفواتير",
+    totalPayments: "إجمالي المدفوعات",
+    providersCount: "مقدمو الخدمة",
+    productsCount: "المنتجات",
+    agentsCount: "المندوبون",
+    notificationsCount: "الإشعارات",
+    pendingOrders: "طلبات معلقة",
+    unpaidInvoices: "فواتير غير مدفوعة",
+    customers: "العملاء",
+    orders: "الطلبات",
+    invoices: "الفواتير",
+    payments: "المدفوعات",
+    products: "المنتجات",
+    providers: "مقدمو الخدمة",
+    agents: "المندوبون",
+    notifications: "الإشعارات",
+
+    latestOrders: "آخر الطلبات",
+    latestOrdersDesc: "أحدث الطلبات المسجلة في النظام مع حالة الطلب والدفع والتنفيذ.",
+    latestPayments: "آخر المدفوعات",
+    latestPaymentsDesc: "أحدث عمليات الدفع والتحصيل المسجلة.",
+    latestCustomers: "آخر العملاء",
+    latestCustomersDesc: "آخر العملاء المضافين أو المحدثين في النظام.",
+
+    orderSearchPlaceholder: "ابحث برقم الطلب أو العميل أو المنتج أو مقدم الخدمة...",
+    paymentSearchPlaceholder: "ابحث برقم الدفع أو العميل أو الفاتورة أو طريقة الدفع...",
+    customerSearchPlaceholder: "ابحث باسم العميل أو الجوال أو البريد أو المدينة...",
+
+    orderNumber: "رقم الطلب",
+    customer: "العميل",
+    product: "المنتج",
+    provider: "مقدم الخدمة",
+    orderStatus: "حالة الطلب",
+    paymentStatus: "حالة الدفع",
+    fulfillmentStatus: "التنفيذ",
+    paymentMethod: "طريقة الدفع",
+    total: "الإجمالي",
+    createdAt: "التاريخ",
+
+    paymentNumber: "رقم الدفع",
+    invoice: "الفاتورة",
+    method: "الطريقة",
+    amount: "المبلغ",
+    paidAt: "تاريخ الدفع",
+
+    customerName: "اسم العميل",
+    phone: "الجوال",
+    email: "البريد",
+    city: "المدينة",
+    status: "الحالة",
+    customerOrders: "الطلبات",
+    totalPaid: "المدفوع",
+
+    pending: "معلق",
+    confirmed: "مؤكد",
+    processing: "قيد المعالجة",
+    completed: "مكتمل",
+    cancelled: "ملغي",
+    refunded: "مسترد",
+    cardReady: "جاهز للتوصيل",
+    assignedForDelivery: "مسند للتوصيل",
+    outForDelivery: "خارج للتوصيل",
+    delivered: "تم التسليم",
+
+    paid: "مدفوع",
+    failed: "فشل",
+    active: "نشط",
+    inactive: "غير نشط",
+    blocked: "محظور",
+
+    noDataTitle: "لا توجد بيانات",
+    noDataDesc: "ستظهر البيانات هنا عند توفرها.",
+    noResultsTitle: "لا توجد نتائج مطابقة",
+    noResultsDesc: "غيّر البحث أو الفلاتر لعرض نتائج أخرى.",
+    errorTitle: "تعذر تحميل لوحة النظام",
+    errorDesc: "تأكد من تشغيل الباكند ثم أعد المحاولة.",
+    tryAgain: "إعادة المحاولة",
+    exportEmpty: "لا توجد بيانات للتصدير.",
+    printEmpty: "لا توجد بيانات للطباعة.",
+    printTitle: "تقرير لوحة النظام",
+    generatedAt: "تاريخ الطباعة",
+    refreshed: "تم تحديث لوحة النظام.",
+    unknown: "غير محدد",
+    sar: "ر.س",
+  },
+  en: {
+    title: "System Dashboard",
+    subtitle:
+      "A unified operational view of Primey Care with live indicators and separate latest orders, payments, and customers tables.",
+    refresh: "Refresh",
+    export: "Export Excel",
+    print: "Print",
+    reset: "Reset",
+    from: "From",
+    to: "To",
+    search: "Search",
+    all: "All",
+    sort: "Sort",
+    newest: "Newest",
+    oldest: "Oldest",
+    amountHigh: "Highest amount",
+    amountLow: "Lowest amount",
+    nameSort: "Name",
+    open: "Open",
+    showing: "Showing",
+    rows: "Rows",
+    of: "of",
+
+    totalCustomers: "Total customers",
+    totalOrders: "Total orders",
+    totalInvoices: "Total invoices",
+    totalPayments: "Total payments",
+    providersCount: "Providers",
+    productsCount: "Products",
+    agentsCount: "Agents",
+    notificationsCount: "Notifications",
+    pendingOrders: "Pending orders",
+    unpaidInvoices: "Unpaid invoices",
+    customers: "Customers",
+    orders: "Orders",
+    invoices: "Invoices",
+    payments: "Payments",
+    products: "Products",
+    providers: "Providers",
+    agents: "Agents",
+    notifications: "Notifications",
+
+    latestOrders: "Latest orders",
+    latestOrdersDesc: "Latest system orders with order, payment, and fulfillment statuses.",
+    latestPayments: "Latest payments",
+    latestPaymentsDesc: "Latest recorded payment and collection transactions.",
+    latestCustomers: "Latest customers",
+    latestCustomersDesc: "Latest customers added or updated in the system.",
+
+    orderSearchPlaceholder: "Search by order number, customer, product, or provider...",
+    paymentSearchPlaceholder: "Search by payment number, customer, invoice, or method...",
+    customerSearchPlaceholder: "Search by customer name, phone, email, or city...",
+
+    orderNumber: "Order number",
+    customer: "Customer",
+    product: "Product",
+    provider: "Provider",
+    orderStatus: "Order status",
+    paymentStatus: "Payment status",
+    fulfillmentStatus: "Fulfillment",
+    paymentMethod: "Payment method",
+    total: "Total",
+    createdAt: "Date",
+
+    paymentNumber: "Payment number",
+    invoice: "Invoice",
+    method: "Method",
+    amount: "Amount",
+    paidAt: "Paid at",
+
+    customerName: "Customer name",
+    phone: "Phone",
+    email: "Email",
+    city: "City",
+    status: "Status",
+    customerOrders: "Orders",
+    totalPaid: "Paid",
+
+    pending: "Pending",
+    confirmed: "Confirmed",
+    processing: "Processing",
+    completed: "Completed",
+    cancelled: "Cancelled",
+    refunded: "Refunded",
+    cardReady: "Card ready",
+    assignedForDelivery: "Assigned",
+    outForDelivery: "Out for delivery",
+    delivered: "Delivered",
+
+    paid: "Paid",
+    failed: "Failed",
+    active: "Active",
+    inactive: "Inactive",
+    blocked: "Blocked",
+
+    noDataTitle: "No data",
+    noDataDesc: "Data will appear here once available.",
+    noResultsTitle: "No matching results",
+    noResultsDesc: "Change search or filters to show other results.",
+    errorTitle: "Unable to load system dashboard",
+    errorDesc: "Make sure the backend is running, then try again.",
+    tryAgain: "Try again",
+    exportEmpty: "No data to export.",
+    printEmpty: "No data to print.",
+    printTitle: "System dashboard report",
+    generatedAt: "Generated at",
+    refreshed: "System dashboard refreshed.",
+    unknown: "Unknown",
+    sar: "SAR",
+  },
+} as const;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function isRecord(value: unknown): value is ApiRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): ApiRecord {
+  return isRecord(value) ? value : {};
+}
+
+function normalizeText(value: unknown, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const cleaned = String(value).trim();
+  return cleaned || fallback;
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
+
+  return fallback;
 }
 
-function applyDocumentLocale(locale: AppLocale) {
-  try {
-    if (typeof document === "undefined") return;
-
-    document.documentElement.lang = locale;
-    document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-    document.body.dir = locale === "ar" ? "rtl" : "ltr";
-  } catch (error) {
-    console.error("Apply locale error:", error);
-  }
-}
-
-function dictionary(locale: AppLocale) {
-  const isArabic = locale === "ar";
-
-  return {
-    pageTitle: isArabic ? "لوحة تحكم النظام" : "System Dashboard",
-    subtitle: isArabic
-      ? "نظرة تشغيلية موحدة على النظام مع اختصارات للوحدات الرئيسية بعد تنظيف السايدر."
-      : "A unified operational view with shortcuts to the main modules after sidebar cleanup.",
-
-    refresh: isArabic ? "تحديث" : "Refresh",
-    exportExcel: isArabic ? "تصدير Excel" : "Export Excel",
-    print: isArabic ? "طباعة PDF" : "Print PDF",
-
-    refreshed: isArabic ? "تم تحديث اللوحة." : "Dashboard refreshed.",
-    exportSuccess: isArabic ? "تم تجهيز ملف Excel." : "Excel file prepared.",
-    printSuccess: isArabic ? "تم تجهيز نافذة الطباعة." : "Print window prepared.",
-    printError: isArabic ? "تعذر فتح نافذة الطباعة." : "Unable to open print window.",
-
-    shortcutsTitle: isArabic ? "اختصارات الوحدات" : "Module Shortcuts",
-    shortcutsDesc: isArabic
-      ? "الوصول السريع للوحات الوحدات الرئيسية، والصفحات الداخلية أصبحت داخل كل لوحة."
-      : "Quick access to main module dashboards; internal pages now live inside each module.",
-
-    analyticsTitle: isArabic ? "مؤشرات النظام" : "System Analytics",
-    generatedAt: isArabic ? "تاريخ التصدير" : "Generated At",
-    printedAt: isArabic ? "تاريخ الطباعة" : "Printed At",
-    open: isArabic ? "فتح" : "Open",
-
-    operations: isArabic ? "العمليات" : "Operations",
-    network: isArabic ? "شبكة الخدمة" : "Service Network",
-    finance: isArabic ? "المالية" : "Finance",
-    communication: isArabic ? "التواصل" : "Communication",
-    system: isArabic ? "النظام" : "System",
-    reports: isArabic ? "التقارير" : "Reports",
-
-    available: isArabic ? "متاح" : "Available",
-  };
-}
-
-/* ============================================================
-   Auth / Permissions
-============================================================ */
-
-function asDict(value: unknown): Dict {
-  return value && typeof value === "object" ? (value as Dict) : {};
-}
-
-function getNested(source: Dict, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-
-    if (value && typeof value === "object") return value as Dict;
-  }
-
-  return {};
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .flatMap((value) => {
-          if (!value) return [];
-
-          if (typeof value === "string") return [value];
-
-          if (Array.isArray(value)) {
-            return value.flatMap((item) => {
-              if (typeof item === "string") return [item];
-
-              if (item && typeof item === "object") {
-                const obj = item as Dict;
-
-                return [
-                  obj.code,
-                  obj.codename,
-                  obj.permission,
-                  obj.name,
-                  obj.role,
-                ].filter(Boolean) as string[];
-              }
-
-              return [];
-            });
-          }
-
-          if (value && typeof value === "object") {
-            const obj = value as Dict;
-
-            return [
-              obj.code,
-              obj.codename,
-              obj.permission,
-              obj.name,
-              obj.role,
-            ].filter(Boolean) as string[];
-          }
-
-          return [];
-        })
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function getAuthUser(authValue: unknown) {
-  const auth = asDict(authValue);
-
-  return getNested(auth, [
-    "user",
-    "currentUser",
-    "profile",
-    "account",
-    "session",
-    "data",
-  ]);
-}
-
-function getAuthRoles(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  return uniqueStrings([
-    auth.role,
-    auth.roles,
-    auth.user_role,
-    auth.userType,
-    auth.user_type,
-    auth.workspace,
-    auth.workspaces,
-    auth.type,
-    user.role,
-    user.roles,
-    user.user_role,
-    user.userType,
-    user.user_type,
-    user.workspace,
-    user.workspaces,
-    user.type,
-  ]).map((item) => item.toLowerCase());
-}
-
-function getAuthPermissionCodes(authValue: unknown): string[] {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-
-  const authPermissions = asDict(auth.permissions);
-  const userPermissions = asDict(user.permissions);
-  const authProfilePermissions = asDict(auth.profile_permissions);
-  const userProfilePermissions = asDict(user.profile_permissions);
-
-  return uniqueStrings([
-    auth.permission_codes,
-    auth.permissions,
-    auth.codes,
-    auth.profile_permissions,
-    authPermissions.codes,
-    authProfilePermissions.codes,
-    user.permission_codes,
-    user.permissions,
-    user.codes,
-    user.profile_permissions,
-    userPermissions.codes,
-    userProfilePermissions.codes,
-  ]);
-}
-
-function isSystemAdmin(authValue: unknown) {
-  const auth = asDict(authValue);
-  const user = getAuthUser(authValue);
-  const roles = getAuthRoles(authValue);
-
-  return (
-    Boolean(auth.is_superuser) ||
-    Boolean(auth.isSuperuser) ||
-    Boolean(auth.is_system_admin) ||
-    Boolean(auth.isSystemAdmin) ||
-    Boolean(user.is_superuser) ||
-    Boolean(user.isSuperuser) ||
-    Boolean(user.is_system_admin) ||
-    Boolean(user.isSystemAdmin) ||
-    roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "superadmin",
-        "admin",
-        "administrator",
-      ].includes(role),
-    )
-  );
-}
-
-function hasAnyPermission(authValue: unknown, codes: string[]) {
-  if (isSystemAdmin(authValue)) return true;
-
-  const permissions = getAuthPermissionCodes(authValue);
-
-  if (permissions.length > 0) {
-    return codes.some((code) => permissions.includes(code));
-  }
-
-  const roles = getAuthRoles(authValue);
-
-  if (roles.length > 0) {
-    return roles.some((role) =>
-      [
-        "system_admin",
-        "superuser",
-        "super_admin",
-        "accountant",
-        "support",
-        "viewer",
-      ].includes(role),
-    );
-  }
-
-  return true;
-}
-
-/* ============================================================
-   Helpers
-============================================================ */
-
-function formatNumber(value: number): string {
+function formatInteger(value: unknown) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(value);
+  }).format(toNumber(value));
 }
 
-function escapeHtml(value: string | number) {
+function formatMoney(value: unknown) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(toNumber(value));
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).slice(0, 10);
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).replace("T", " ").slice(0, 16);
+  }
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -387,647 +475,1962 @@ function escapeHtml(value: string | number) {
     .replaceAll("'", "&#039;");
 }
 
-function shortcutTitle(item: ShortcutItem, locale: AppLocale) {
-  return locale === "ar" ? item.titleAr : item.titleEn;
+function getInitialLocale(): Locale {
+  if (typeof window === "undefined") return "ar";
+  return window.localStorage.getItem("primey-locale") === "en" ? "en" : "ar";
 }
 
-function shortcutDescription(item: ShortcutItem, locale: AppLocale) {
-  return locale === "ar" ? item.descriptionAr : item.descriptionEn;
+function getApiBaseUrl() {
+  const envBase =
+    typeof process !== "undefined"
+      ? (
+          process.env.NEXT_PUBLIC_API_BASE_URL ||
+          process.env.NEXT_PUBLIC_API_URL ||
+          ""
+        ).replace(/\/+$/, "")
+      : "";
+
+  if (envBase.endsWith("/api")) {
+    return envBase.slice(0, -4);
+  }
+
+  return envBase;
 }
 
-function shortcutGroup(item: ShortcutItem, locale: AppLocale) {
-  return locale === "ar" ? item.groupAr : item.groupEn;
+function makeApiUrl(path: string, params?: URLSearchParams) {
+  const query = params?.toString();
+  return `${getApiBaseUrl()}${path}${query ? `?${query}` : ""}`;
 }
 
-/* ============================================================
-   Shortcuts
-============================================================ */
-
-function getShortcuts(): ShortcutItem[] {
-  return [
-    {
-      key: "customers",
-      href: "/system/customers",
-      icon: <Users className="h-5 w-5" />,
-      permissionCodes: ["customers.view"],
-      titleAr: "العملاء",
-      titleEn: "Customers",
-      descriptionAr: "لوحة العملاء وقائمة العملاء وإنشاء عميل.",
-      descriptionEn: "Customer dashboard, list, and create page.",
-      groupAr: "العمليات",
-      groupEn: "Operations",
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    redirect: "follow",
+    signal,
+    headers: {
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
     },
-    {
-      key: "products",
-      href: "/system/products",
-      icon: <Package className="h-5 w-5" />,
-      permissionCodes: ["products.view"],
-      titleAr: "المنتجات والبرامج",
-      titleEn: "Products & Programs",
-      descriptionAr: "إدارة المنتجات والبرامج والباقات.",
-      descriptionEn: "Manage products, programs, and plans.",
-      groupAr: "العمليات",
-      groupEn: "Operations",
-    },
-    {
-      key: "orders",
-      href: "/system/orders",
-      icon: <ShoppingCart className="h-5 w-5" />,
-      permissionCodes: ["orders.view"],
-      titleAr: "الطلبات",
-      titleEn: "Orders",
-      descriptionAr: "متابعة الطلبات ودورة التنفيذ.",
-      descriptionEn: "Track orders and fulfillment lifecycle.",
-      groupAr: "العمليات",
-      groupEn: "Operations",
-    },
-    {
-      key: "invoices",
-      href: "/system/invoices",
-      icon: <ReceiptText className="h-5 w-5" />,
-      permissionCodes: ["invoices.view"],
-      titleAr: "الفواتير",
-      titleEn: "Invoices",
-      descriptionAr: "لوحة الفواتير والقائمة والإنشاء.",
-      descriptionEn: "Invoices dashboard, list, and create page.",
-      groupAr: "العمليات",
-      groupEn: "Operations",
-    },
-    {
-      key: "payments",
-      href: "/system/payments",
-      icon: <CreditCard className="h-5 w-5" />,
-      permissionCodes: ["payments.view"],
-      titleAr: "المدفوعات",
-      titleEn: "Payments",
-      descriptionAr: "متابعة المدفوعات والتأكيدات.",
-      descriptionEn: "Track payments and confirmations.",
-      groupAr: "العمليات",
-      groupEn: "Operations",
-    },
-    {
-      key: "providers",
-      href: "/system/providers",
-      icon: <Stethoscope className="h-5 w-5" />,
-      permissionCodes: ["providers.view"],
-      titleAr: "مقدمو الخدمة",
-      titleEn: "Providers",
-      descriptionAr: "إدارة مقدمي الخدمة وبياناتهم.",
-      descriptionEn: "Manage providers and their profiles.",
-      groupAr: "شبكة الخدمة",
-      groupEn: "Service Network",
-    },
-    {
-      key: "centers",
-      href: "/system/centers",
-      icon: <Building2 className="h-5 w-5" />,
-      permissionCodes: ["providers.view", "centers.view"],
-      titleAr: "المراكز",
-      titleEn: "Centers",
-      descriptionAr: "إدارة المراكز والفروع التشغيلية.",
-      descriptionEn: "Manage centers and operational branches.",
-      groupAr: "شبكة الخدمة",
-      groupEn: "Service Network",
-    },
-    {
-      key: "contracts",
-      href: "/system/contracts",
-      icon: <FileText className="h-5 w-5" />,
-      permissionCodes: ["contracts.view"],
-      titleAr: "العقود",
-      titleEn: "Contracts",
-      descriptionAr: "إدارة عقود مقدمي الخدمة والخصومات.",
-      descriptionEn: "Manage provider contracts and discounts.",
-      groupAr: "شبكة الخدمة",
-      groupEn: "Service Network",
-    },
-    {
-      key: "agents",
-      href: "/system/agents",
-      icon: <UserCog className="h-5 w-5" />,
-      permissionCodes: ["agents.view"],
-      titleAr: "المندوبون",
-      titleEn: "Agents",
-      descriptionAr: "إدارة المندوبين والعمولات.",
-      descriptionEn: "Manage agents and commissions.",
-      groupAr: "شبكة الخدمة",
-      groupEn: "Service Network",
-    },
-    {
-      key: "treasury",
-      href: "/system/treasury",
-      icon: <WalletCards className="h-5 w-5" />,
-      permissionCodes: ["treasury.view"],
-      titleAr: "الخزينة",
-      titleEn: "Treasury",
-      descriptionAr: "الصناديق والبنوك والحركات المالية.",
-      descriptionEn: "Cashboxes, banks, and treasury transactions.",
-      groupAr: "المالية",
-      groupEn: "Finance",
-    },
-    {
-      key: "accounting",
-      href: "/system/accounting",
-      icon: <Calculator className="h-5 w-5" />,
-      permissionCodes: ["accounting.view"],
-      titleAr: "المحاسبة",
-      titleEn: "Accounting",
-      descriptionAr: "الحسابات والقيود والفترات المالية.",
-      descriptionEn: "Accounts, journal entries, and periods.",
-      groupAr: "المالية",
-      groupEn: "Finance",
-    },
-    {
-      key: "reports",
-      href: "/system/reports",
-      icon: <BarChart3 className="h-5 w-5" />,
-      permissionCodes: ["reports.view"],
-      titleAr: "التقارير",
-      titleEn: "Reports",
-      descriptionAr: "التقارير المركزية لكل الوحدات.",
-      descriptionEn: "Central reports for all modules.",
-      groupAr: "التقارير",
-      groupEn: "Reports",
-    },
-    {
-      key: "notifications",
-      href: "/system/notifications",
-      icon: <BellRing className="h-5 w-5" />,
-      permissionCodes: ["notifications.view", "system.view"],
-      titleAr: "الإشعارات",
-      titleEn: "Notifications",
-      descriptionAr: "الإشعارات والقائمة والإعدادات.",
-      descriptionEn: "Notifications, list, and settings.",
-      groupAr: "التواصل",
-      groupEn: "Communication",
-    },
-    {
-      key: "whatsapp",
-      href: "/system/whatsapp",
-      icon: <MessageCircle className="h-5 w-5" />,
-      permissionCodes: ["whatsapp.view", "system.view"],
-      titleAr: "واتساب",
-      titleEn: "WhatsApp",
-      descriptionAr: "المحادثات والسجلات والقوالب والبث.",
-      descriptionEn: "Inbox, logs, templates, and broadcasts.",
-      groupAr: "التواصل",
-      groupEn: "Communication",
-    },
-    {
-      key: "users",
-      href: "/system/users",
-      icon: <Users className="h-5 w-5" />,
-      permissionCodes: ["users.view"],
-      titleAr: "مستخدمو النظام",
-      titleEn: "System Users",
-      descriptionAr: "إدارة المستخدمين والأدوار والصلاحيات.",
-      descriptionEn: "Manage users, roles, and permissions.",
-      groupAr: "النظام",
-      groupEn: "System",
-    },
-    {
-      key: "settings",
-      href: "/system/settings",
-      icon: <Settings className="h-5 w-5" />,
-      permissionCodes: ["system.settings", "settings.view"],
-      titleAr: "الإعدادات",
-      titleEn: "Settings",
-      descriptionAr: "إعدادات النظام والتكاملات.",
-      descriptionEn: "System settings and integrations.",
-      groupAr: "النظام",
-      groupEn: "System",
-    },
-  ];
-}
-
-/* ============================================================
-   Export / Print
-============================================================ */
-
-function downloadExcel({
-  filename,
-  title,
-  locale,
-  shortcuts,
-}: {
-  filename: string;
-  title: string;
-  locale: AppLocale;
-  shortcuts: ShortcutItem[];
-}) {
-  const isArabic = locale === "ar";
-  const dir = isArabic ? "rtl" : "ltr";
-  const align = isArabic ? "right" : "left";
-  const t = dictionary(locale);
-
-  const rowsHtml = shortcuts
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(shortcutTitle(item, locale))}</td>
-          <td>${escapeHtml(shortcutGroup(item, locale))}</td>
-          <td>${escapeHtml(shortcutDescription(item, locale))}</td>
-          <td>${escapeHtml(item.href)}</td>
-        </tr>`,
-    )
-    .join("");
-
-  const workbook = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel"
-          xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta charset="UTF-8" />
-        <style>
-          body { direction: ${dir}; font-family: Arial, sans-serif; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td {
-            border: 1px solid #d9e2ef;
-            padding: 8px;
-            text-align: ${align};
-            vertical-align: top;
-            mso-number-format: "\\@";
-          }
-          th { background: #d8ecfb; font-weight: 700; }
-          .title { font-size: 20px; font-weight: 700; text-align: center; background: #fff; }
-          .section { font-weight: 700; background: #eef6ff; }
-          .summary-label { font-weight: 700; background: #f8fafc; width: 240px; }
-        </style>
-      </head>
-      <body dir="${dir}">
-        <table>
-          <tr><td class="title" colspan="4">${escapeHtml(title)}</td></tr>
-          <tr><td colspan="4"></td></tr>
-          <tr><td class="section" colspan="4">${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</td></tr>
-          <tr><td class="summary-label">${escapeHtml(t.available)}</td><td colspan="3">${escapeHtml(formatNumber(shortcuts.length))}</td></tr>
-
-          <tr><td colspan="4"></td></tr>
-          <tr>
-            <th>${escapeHtml(t.shortcutsTitle)}</th>
-            <th>${escapeHtml("Group")}</th>
-            <th>${escapeHtml("Description")}</th>
-            <th>${escapeHtml("Page")}</th>
-          </tr>
-          ${rowsHtml}
-        </table>
-      </body>
-    </html>`;
-
-  const blob = new Blob([workbook], {
-    type: "application/vnd.ms-excel;charset=utf-8;",
   });
 
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
 
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
+  let payload: any = null;
 
-  URL.revokeObjectURL(url);
-}
-
-function buildPrintHtml({
-  locale,
-  title,
-  shortcuts,
-}: {
-  locale: AppLocale;
-  title: string;
-  shortcuts: ShortcutItem[];
-}) {
-  const isArabic = locale === "ar";
-  const t = dictionary(locale);
-
-  const rows = shortcuts
-    .map(
-      (item) => `
-        <tr>
-          <td>${escapeHtml(shortcutTitle(item, locale))}</td>
-          <td>${escapeHtml(shortcutGroup(item, locale))}</td>
-          <td>${escapeHtml(shortcutDescription(item, locale))}</td>
-        </tr>`,
-    )
-    .join("");
-
-  return `
-    <!doctype html>
-    <html lang="${locale}" dir="${isArabic ? "rtl" : "ltr"}">
-      <head>
-        <meta charset="utf-8" />
-        <title>${escapeHtml(title)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            padding: 24px;
-            font-family: Arial, Tahoma, sans-serif;
-            color: #111827;
-            background: #fff;
-            direction: ${isArabic ? "rtl" : "ltr"};
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 14px;
-            margin-bottom: 18px;
-          }
-          h1 { margin: 0; font-size: 22px; font-weight: 800; }
-          .meta { margin-top: 8px; color: #6b7280; font-size: 12px; }
-          .badge {
-            border: 1px solid #d1d5db;
-            border-radius: 999px;
-            padding: 5px 12px;
-            font-size: 12px;
-            height: fit-content;
-          }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-          th { background: #f3f4f6; font-weight: 700; }
-          th, td {
-            border: 1px solid #e5e7eb;
-            padding: 8px;
-            text-align: ${isArabic ? "right" : "left"};
-          }
-          @page { size: A4 landscape; margin: 12mm; }
-          @media print { body { padding: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <h1>${escapeHtml(title)}</h1>
-            <div class="meta">${escapeHtml(t.printedAt)}: ${escapeHtml(new Date().toLocaleString("en-US"))}</div>
-          </div>
-          <div class="badge">Primey Care</div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>${escapeHtml(t.shortcutsTitle)}</th>
-              <th>${escapeHtml("Group")}</th>
-              <th>${escapeHtml("Description")}</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-
-        <script>
-          window.addEventListener("load", () => {
-            window.focus();
-            window.print();
-          });
-        </script>
-      </body>
-    </html>
-  `;
-}
-
-/* ============================================================
-   Page
-============================================================ */
-
-export default function SystemDashboardPage() {
-  const auth = useAuth() as unknown;
-
-  const [locale, setLocale] = useState<AppLocale>(() => getStoredLocale());
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  const labels = useMemo(() => dictionary(locale), [locale]);
-  const isArabic = locale === "ar";
-
-  const shortcuts = useMemo(
-    () =>
-      getShortcuts().filter((item) =>
-        hasAnyPermission(auth, item.permissionCodes),
-      ),
-    [auth],
-  );
-
-  const groupedShortcuts = useMemo(() => {
-    const groups = [
-      labels.operations,
-      labels.network,
-      labels.finance,
-      labels.reports,
-      labels.communication,
-      labels.system,
-    ];
-
-    return groups
-      .map((group) => ({
-        group,
-        items: shortcuts.filter((item) => shortcutGroup(item, locale) === group),
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [labels.communication, labels.finance, labels.network, labels.operations, labels.reports, labels.system, locale, shortcuts]);
-
-  function refreshDashboard() {
-    setRefreshKey((current) => current + 1);
-    toast.success(labels.refreshed);
-  }
-
-  function exportExcel() {
-    downloadExcel({
-      filename: `primey-care-system-dashboard-${new Date().toISOString().slice(0, 10)}.xls`,
-      title: labels.pageTitle,
-      locale,
-      shortcuts,
-    });
-
-    toast.success(labels.exportSuccess);
-  }
-
-  function printPage() {
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
-
-    if (!printWindow) {
-      toast.error(labels.printError);
-      return;
+  if (rawText && contentType.includes("application/json")) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
     }
-
-    printWindow.document.open();
-    printWindow.document.write(
-      buildPrintHtml({
-        locale,
-        title: labels.pageTitle,
-        shortcuts,
-      }),
-    );
-    printWindow.document.close();
-
-    toast.success(labels.printSuccess);
   }
 
-  useEffect(() => {
-    const syncLocale = () => {
-      const nextLocale = getStoredLocale();
+  if (!response.ok) {
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
 
-      applyDocumentLocale(nextLocale);
-      setLocale(nextLocale);
-    };
+    throw new Error(message);
+  }
 
-    const syncAfterPaint = () => {
-      syncLocale();
-      window.setTimeout(syncLocale, 0);
-    };
+  return (payload || {}) as T;
+}
 
-    syncAfterPaint();
+function extractArray(payload: ApiResponse) {
+  if (Array.isArray(payload.results)) return payload.results;
+  if (Array.isArray(payload.items)) return payload.items;
 
-    window.addEventListener("primey-locale-changed", syncAfterPaint);
-    window.addEventListener("storage", syncAfterPaint);
+  const data = asRecord(payload.data);
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.rows)) return data.rows;
 
-    return () => {
-      window.removeEventListener("primey-locale-changed", syncAfterPaint);
-      window.removeEventListener("storage", syncAfterPaint);
-    };
-  }, []);
+  return [];
+}
+
+function extractCount(payload: ApiResponse) {
+  const data = asRecord(payload.data);
+  const meta = asRecord(payload.meta);
+  const summary = asRecord(payload.summary);
+
+  return toNumber(
+    payload.count ??
+      payload.total ??
+      payload.total_count ??
+      data.count ??
+      data.total ??
+      data.total_count ??
+      meta.count ??
+      meta.total ??
+      meta.total_items ??
+      summary.total_count ??
+      summary.total,
+    extractArray(payload).length,
+  );
+}
+
+function extractSummary(payload: ApiResponse) {
+  const data = asRecord(payload.data);
+  if (payload.summary) return asRecord(payload.summary);
+  if (data.summary) return asRecord(data.summary);
+  return data;
+}
+
+function normalizeNestedName(value: unknown, keys: string[] = ["name", "full_name", "title"]) {
+  const record = asRecord(value);
+
+  for (const key of keys) {
+    const text = normalizeText(record[key]);
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function normalizeOrder(value: unknown): OrderRecord {
+  const item = asRecord(value);
+  const customer = asRecord(item.customer);
+  const product = asRecord(item.product);
+  const provider = asRecord(item.provider);
+
+  const id = normalizeText(item.id || item.pk || item.uuid);
+
+  return {
+    id,
+    order_number: normalizeText(item.order_number || item.number || item.code || `#${id}`),
+    customer_name:
+      normalizeText(item.customer_name) ||
+      normalizeNestedName(customer, ["name", "full_name", "display_name"]),
+    product_name:
+      normalizeText(item.product_name) ||
+      normalizeNestedName(product, ["name", "title", "name_ar", "name_en"]),
+    provider_name:
+      normalizeText(item.provider_name) ||
+      normalizeNestedName(provider, ["name", "title", "name_ar", "name_en"]),
+    status: normalizeText(item.status || item.order_status || "pending"),
+    payment_status: normalizeText(item.payment_status || "pending"),
+    fulfillment_status: normalizeText(item.fulfillment_status || item.delivery_status),
+    payment_method: normalizeText(item.payment_method || item.method),
+    total_amount: toNumber(
+      item.total_amount ?? item.total ?? item.grand_total ?? item.amount,
+    ),
+    created_at: normalizeText(item.created_at || item.created || item.updated_at) || null,
+  };
+}
+
+function normalizePayment(value: unknown): PaymentRecord {
+  const item = asRecord(value);
+  const customer = asRecord(item.customer);
+  const invoice = asRecord(item.invoice);
+
+  const id = normalizeText(item.id || item.pk || item.uuid);
+
+  return {
+    id,
+    payment_number: normalizeText(
+      item.payment_number || item.receipt_number || item.reference || item.code || `#${id}`,
+    ),
+    customer_name:
+      normalizeText(item.customer_name) ||
+      normalizeNestedName(customer, ["name", "full_name", "display_name"]),
+    invoice_number:
+      normalizeText(item.invoice_number) ||
+      normalizeText(invoice.invoice_number || invoice.number || invoice.code),
+    method: normalizeText(item.method || item.payment_method || item.gateway || item.channel),
+    status: normalizeText(item.status || item.payment_status || "pending"),
+    amount: toNumber(item.amount ?? item.paid_amount ?? item.total_amount ?? item.total),
+    paid_at:
+      normalizeText(item.paid_at || item.payment_date || item.confirmed_at) || null,
+    created_at: normalizeText(item.created_at || item.created || item.updated_at) || null,
+  };
+}
+
+function normalizeCustomer(value: unknown): CustomerRecord {
+  const item = asRecord(value);
+
+  const id = normalizeText(item.id || item.pk || item.uuid);
+
+  return {
+    id,
+    name: normalizeText(item.name || item.full_name || item.display_name || `#${id}`),
+    phone: normalizeText(
+      item.phone ||
+        item.phone_number ||
+        item.mobile ||
+        item.mobile_number ||
+        item.whatsapp_number,
+    ),
+    email: normalizeText(item.email),
+    status: normalizeText(item.status || (item.is_active === false ? "inactive" : "active")),
+    city: normalizeText(item.city || item.city_name),
+    total_orders: toNumber(item.total_orders ?? item.orders_count ?? item.order_count),
+    total_paid: toNumber(item.total_paid ?? item.paid_amount ?? item.total_payments),
+    created_at: normalizeText(item.created_at || item.created || item.updated_at) || null,
+  };
+}
+
+function getOrderStatusLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const status = normalizeText(value).toLowerCase();
+
+  if (status === "confirmed") return t.confirmed;
+  if (status === "processing") return t.processing;
+  if (status === "completed") return t.completed;
+  if (status === "cancelled" || status === "canceled") return t.cancelled;
+  if (status === "refunded") return t.refunded;
+  if (status === "card_ready") return t.cardReady;
+  if (status === "assigned_for_delivery") return t.assignedForDelivery;
+  if (status === "out_for_delivery") return t.outForDelivery;
+  if (status === "delivered") return t.delivered;
+
+  return t.pending;
+}
+
+function getPaymentStatusLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const status = normalizeText(value).toLowerCase();
+
+  if (status === "paid" || status === "confirmed" || status === "success") return t.paid;
+  if (status === "failed") return t.failed;
+  if (status === "cancelled" || status === "canceled") return t.cancelled;
+  if (status === "refunded") return t.refunded;
+
+  return t.pending;
+}
+
+function getCustomerStatusLabel(value: string, locale: Locale) {
+  const t = translations[locale];
+  const status = normalizeText(value).toLowerCase();
+
+  if (status === "inactive") return t.inactive;
+  if (status === "blocked") return t.blocked;
+
+  return t.active;
+}
+
+function getBadgeClass(value: string) {
+  const status = normalizeText(value).toLowerCase();
+
+  if (
+    ["paid", "confirmed", "completed", "active", "delivered", "success"].includes(status)
+  ) {
+    return "border-emerald-500/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-50";
+  }
+
+  if (["failed", "cancelled", "canceled", "blocked", "refunded"].includes(status)) {
+    return "border-red-500/30 bg-red-50 text-red-700 hover:bg-red-50";
+  }
+
+  if (["processing", "out_for_delivery", "assigned_for_delivery", "card_ready"].includes(status)) {
+    return "border-blue-500/30 bg-blue-50 text-blue-700 hover:bg-blue-50";
+  }
+
+  return "border-amber-500/30 bg-amber-50 text-amber-700 hover:bg-amber-50";
+}
+
+function MoneyValue({
+  value,
+  label,
+}: {
+  value: number | null | undefined;
+  label: string;
+}) {
+  if (value === null || value === undefined) {
+    return <span className="text-sm text-muted-foreground">—</span>;
+  }
 
   return (
-    <div className="w-full space-y-4" dir="ltr">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className={isArabic ? "text-right" : "text-left"} dir={isArabic ? "rtl" : "ltr"}>
-          <h1 className="text-xl font-bold tracking-tight lg:text-2xl">
-            {labels.pageTitle}
-          </h1>
-
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted-foreground">
-            {labels.subtitle}
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <CustomDateRangePicker key={refreshKey} />
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={refreshDashboard}
-          >
-            <RefreshCcw className="h-4 w-4" />
-            <span>{labels.refresh}</span>
-          </Button>
-
-          <Button className="h-10 rounded-xl" onClick={exportExcel}>
-            <Download className="h-4 w-4" />
-            <span>{labels.exportExcel}</span>
-          </Button>
-
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl"
-            onClick={printPage}
-          >
-            <Printer className="h-4 w-4" />
-            <span>{labels.print}</span>
-          </Button>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <TargetCard />
-          <TotalCustomersCard />
-          <TotalDeals />
-          <TotalRevenueCard />
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-3">
-          <LeadBySourceCard />
-          <RecentTasks />
-          <SalesPipeline />
-        </div>
-
-        <LeadsCard />
-      </div>
-
-      <Card className="rounded-2xl border bg-card shadow-sm" dir={isArabic ? "rtl" : "ltr"}>
-        <CardHeader>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <CardTitle className="text-base font-bold">
-                {labels.shortcutsTitle}
-              </CardTitle>
-              <CardDescription>{labels.shortcutsDesc}</CardDescription>
-            </div>
-
-            <Badge variant="outline" className="w-fit rounded-full">
-              <Home className="h-3.5 w-3.5" />
-              {formatNumber(shortcuts.length)} {labels.available}
-            </Badge>
-          </div>
-        </CardHeader>
-
-        <CardContent className="space-y-4">
-          {groupedShortcuts.map((group) => (
-            <div key={group.group} className="space-y-3">
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-primary" />
-                <p className="text-sm font-bold">{group.group}</p>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                {group.items.map((item) => (
-                  <ShortcutCard
-                    key={item.key}
-                    href={item.href}
-                    icon={item.icon}
-                    title={shortcutTitle(item, locale)}
-                    description={shortcutDescription(item, locale)}
-                    openLabel={labels.open}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+    <div className="flex items-center justify-start gap-1 text-sm font-semibold tabular-nums">
+      <span>{formatMoney(value)}</span>
+      <img src="/currency/sar.svg" alt={label} className="h-3.5 w-3.5" />
     </div>
   );
 }
 
-/* ============================================================
-   Small Components
-============================================================ */
-
-function ShortcutCard({
-  href,
-  icon,
-  title,
-  description,
-  openLabel,
+function StatusBadge({
+  value,
+  label,
 }: {
-  href: string;
-  icon: ReactNode;
-  title: string;
-  description: string;
-  openLabel: string;
+  value: string;
+  label: string;
 }) {
   return (
-    <Link href={href}>
-      <Card className="h-full rounded-2xl border bg-background/70 shadow-sm transition hover:bg-muted/40">
-        <CardContent className="flex h-full flex-col gap-4 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              {icon}
-            </div>
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-full px-2.5 py-1 text-xs font-medium",
+        getBadgeClass(value),
+      )}
+    >
+      {label}
+    </Badge>
+  );
+}
 
-            <Badge variant="outline" className="rounded-full">
-              {openLabel}
+function KpiCard({
+  title,
+  value,
+  trend,
+  href,
+  icon: Icon,
+}: {
+  title: string;
+  value: React.ReactNode;
+  trend: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+}) {
+  return (
+    <Link href={href} className="block rounded-lg outline-none transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-ring">
+      <Card className="rounded-lg border bg-card shadow-none transition hover:border-foreground/20 hover:shadow-sm">
+        <CardHeader className="relative min-h-[112px] px-6 py-5">
+          <CardDescription className="text-sm font-medium text-muted-foreground">
+            {title}
+          </CardDescription>
+
+          <CardTitle className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+            {value}
+          </CardTitle>
+
+          <CardAction>
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-background">
+              <Icon className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </CardAction>
+
+          <div className="pt-1">
+            <Badge
+              variant="outline"
+              className="rounded-full border-emerald-500/30 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+            >
+              {trend}
             </Badge>
           </div>
+        </CardHeader>
+      </Card>
+    </Link>
+  );
+}
 
-          <div>
-            <p className="font-semibold">{title}</p>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              {description}
-            </p>
+function DashboardSkeleton() {
+  return (
+    <div className="w-full space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-56" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-24" />
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <Card key={index} className="rounded-lg border bg-card shadow-none">
+            <CardHeader className="min-h-[112px] px-6 py-5">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-8 w-32" />
+              <Skeleton className="h-5 w-20" />
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
+
+      {Array.from({ length: 3 }).map((_, index) => (
+        <Card key={index} className="rounded-lg border bg-card shadow-none">
+          <CardContent className="space-y-3 p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-80 w-full" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function EmptyTableState({
+  title,
+  description,
+  onReset,
+  showReset,
+}: {
+  title: string;
+  description: string;
+  onReset: () => void;
+  showReset: boolean;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-lg border bg-muted/40">
+        <Search className="h-6 w-6 text-muted-foreground" />
+      </div>
+
+      <div className="space-y-1">
+        <p className="font-semibold text-foreground">{title}</p>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+
+      {showReset ? (
+        <Button variant="outline" className="h-9 rounded-lg" onClick={onReset}>
+          <RotateCcw className="h-4 w-4" />
+          إعادة ضبط
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+export default function SystemDashboardPage() {
+  const [locale, setLocale] = React.useState<Locale>("ar");
+  const [stats, setStats] = React.useState<DashboardStats>({
+    customers: 0,
+    orders: 0,
+    invoices: 0,
+    payments: 0,
+    products: 0,
+    providers: 0,
+    agents: 0,
+    notifications: 0,
+    totalInvoicesAmount: 0,
+    totalPaymentsAmount: 0,
+    pendingOrders: 0,
+    unpaidInvoices: 0,
+  });
+
+  const [orders, setOrders] = React.useState<OrderRecord[]>([]);
+  const [payments, setPayments] = React.useState<PaymentRecord[]>([]);
+  const [customers, setCustomers] = React.useState<CustomerRecord[]>([]);
+
+  const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  const [ordersSearch, setOrdersSearch] = React.useState("");
+  const [ordersStatus, setOrdersStatus] = React.useState<OrderStatusFilter>("all");
+  const [ordersSort, setOrdersSort] = React.useState<SortKey>("newest");
+  const [ordersDateFrom, setOrdersDateFrom] = React.useState("");
+  const [ordersDateTo, setOrdersDateTo] = React.useState("");
+
+  const [paymentsSearch, setPaymentsSearch] = React.useState("");
+  const [paymentsStatus, setPaymentsStatus] = React.useState<PaymentStatusFilter>("all");
+  const [paymentsSort, setPaymentsSort] = React.useState<SortKey>("newest");
+  const [paymentsDateFrom, setPaymentsDateFrom] = React.useState("");
+  const [paymentsDateTo, setPaymentsDateTo] = React.useState("");
+
+  const [customersSearch, setCustomersSearch] = React.useState("");
+  const [customersStatus, setCustomersStatus] = React.useState<CustomerStatusFilter>("all");
+  const [customersSort, setCustomersSort] = React.useState<SortKey>("newest");
+  const [customersDateFrom, setCustomersDateFrom] = React.useState("");
+  const [customersDateTo, setCustomersDateTo] = React.useState("");
+
+  const t = translations[locale];
+  const dir = locale === "ar" ? "rtl" : "ltr";
+
+  React.useEffect(() => {
+    const applyLocale = () => {
+      const nextLocale = getInitialLocale();
+
+      setLocale(nextLocale);
+      document.documentElement.lang = nextLocale;
+      document.documentElement.dir = nextLocale === "ar" ? "rtl" : "ltr";
+      document.body.dir = nextLocale === "ar" ? "rtl" : "ltr";
+    };
+
+    applyLocale();
+
+    window.addEventListener("storage", applyLocale);
+    window.addEventListener("primey-locale-changed", applyLocale);
+
+    return () => {
+      window.removeEventListener("storage", applyLocale);
+      window.removeEventListener("primey-locale-changed", applyLocale);
+    };
+  }, []);
+
+  const loadDashboard = React.useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      const controller = new AbortController();
+
+      try {
+        if (!silent) setLoading(true);
+
+        setRefreshing(true);
+        setError("");
+
+        const smallParams = new URLSearchParams({
+          page: "1",
+          page_size: "1",
+        });
+
+        const rowsParams = new URLSearchParams({
+          page: "1",
+          page_size: "12",
+          ordering: "-created_at",
+        });
+
+        const [
+          customersCountResponse,
+          ordersResponse,
+          invoicesResponse,
+          paymentsResponse,
+          productsResponse,
+          providersResponse,
+          agentsResponse,
+          notificationsResponse,
+          customersRowsResponse,
+        ] = await Promise.allSettled([
+          fetchJson<ApiResponse>(makeApiUrl(API_ENDPOINTS.customers, smallParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API_ENDPOINTS.orders, rowsParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API_ENDPOINTS.invoices, smallParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API_ENDPOINTS.payments, rowsParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API_ENDPOINTS.products, smallParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API_ENDPOINTS.providers, smallParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API_ENDPOINTS.agents, smallParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API_ENDPOINTS.notifications, smallParams), controller.signal),
+          fetchJson<ApiResponse>(makeApiUrl(API_ENDPOINTS.customers, rowsParams), controller.signal),
+        ]);
+
+        const getPayload = (result: PromiseSettledResult<ApiResponse>) =>
+          result.status === "fulfilled" ? result.value : {};
+
+        const customersCountPayload = getPayload(customersCountResponse);
+        const ordersPayload = getPayload(ordersResponse);
+        const invoicesPayload = getPayload(invoicesResponse);
+        const paymentsPayload = getPayload(paymentsResponse);
+        const productsPayload = getPayload(productsResponse);
+        const providersPayload = getPayload(providersResponse);
+        const agentsPayload = getPayload(agentsResponse);
+        const notificationsPayload = getPayload(notificationsResponse);
+        const customersRowsPayload = getPayload(customersRowsResponse);
+
+        const ordersSummary = extractSummary(ordersPayload);
+        const invoicesSummary = extractSummary(invoicesPayload);
+        const paymentsSummary = extractSummary(paymentsPayload);
+
+        setOrders(extractArray(ordersPayload).map(normalizeOrder));
+        setPayments(extractArray(paymentsPayload).map(normalizePayment));
+        setCustomers(extractArray(customersRowsPayload).map(normalizeCustomer));
+
+        setStats({
+          customers: extractCount(customersCountPayload),
+          orders: extractCount(ordersPayload),
+          invoices: extractCount(invoicesPayload),
+          payments: extractCount(paymentsPayload),
+          products: extractCount(productsPayload),
+          providers: extractCount(providersPayload),
+          agents: extractCount(agentsPayload),
+          notifications: extractCount(notificationsPayload),
+          totalInvoicesAmount: toNumber(
+            invoicesSummary.total_amount ||
+              invoicesSummary.total ||
+              invoicesSummary.grand_total ||
+              invoicesSummary.invoices_total,
+          ),
+          totalPaymentsAmount: toNumber(
+            paymentsSummary.total_amount ||
+              paymentsSummary.total ||
+              paymentsSummary.paid_amount ||
+              paymentsSummary.payments_total,
+          ),
+          pendingOrders: toNumber(
+            ordersSummary.pending_count ||
+              ordersSummary.pending ||
+              ordersSummary.pending_orders,
+          ),
+          unpaidInvoices: toNumber(
+            invoicesSummary.unpaid_count ||
+              invoicesSummary.pending_count ||
+              invoicesSummary.unpaid ||
+              invoicesSummary.due_count,
+          ),
+        });
+
+        if (silent) toast.success(t.refreshed);
+      } catch (caughtError) {
+        const message =
+          caughtError instanceof Error && caughtError.message
+            ? caughtError.message
+            : t.errorDesc;
+
+        setError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+
+      return () => controller.abort();
+    },
+    [t.errorDesc, t.refreshed],
+  );
+
+  React.useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
+  const filteredOrders = React.useMemo(() => {
+    const query = ordersSearch.trim().toLowerCase();
+
+    let rows = orders.filter((order) => {
+      const matchesSearch =
+        !query ||
+        order.order_number.toLowerCase().includes(query) ||
+        order.customer_name.toLowerCase().includes(query) ||
+        order.product_name.toLowerCase().includes(query) ||
+        order.provider_name.toLowerCase().includes(query);
+
+      const status = order.status.toLowerCase();
+      const matchesStatus = ordersStatus === "all" || status === ordersStatus;
+
+      const date = formatDate(order.created_at);
+      const matchesFrom = !ordersDateFrom || (date !== "—" && date >= ordersDateFrom);
+      const matchesTo = !ordersDateTo || (date !== "—" && date <= ordersDateTo);
+
+      return matchesSearch && matchesStatus && matchesFrom && matchesTo;
+    });
+
+    rows = [...rows].sort((a, b) => {
+      if (ordersSort === "oldest") {
+        return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+      }
+
+      if (ordersSort === "amount_high") return b.total_amount - a.total_amount;
+      if (ordersSort === "amount_low") return a.total_amount - b.total_amount;
+      if (ordersSort === "name") return a.customer_name.localeCompare(b.customer_name);
+
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    });
+
+    return rows;
+  }, [orders, ordersDateFrom, ordersDateTo, ordersSearch, ordersSort, ordersStatus]);
+
+  const filteredPayments = React.useMemo(() => {
+    const query = paymentsSearch.trim().toLowerCase();
+
+    let rows = payments.filter((payment) => {
+      const matchesSearch =
+        !query ||
+        payment.payment_number.toLowerCase().includes(query) ||
+        payment.customer_name.toLowerCase().includes(query) ||
+        payment.invoice_number.toLowerCase().includes(query) ||
+        payment.method.toLowerCase().includes(query);
+
+      const status = payment.status.toLowerCase();
+      const matchesStatus = paymentsStatus === "all" || status === paymentsStatus;
+
+      const date = formatDate(payment.paid_at || payment.created_at);
+      const matchesFrom = !paymentsDateFrom || (date !== "—" && date >= paymentsDateFrom);
+      const matchesTo = !paymentsDateTo || (date !== "—" && date <= paymentsDateTo);
+
+      return matchesSearch && matchesStatus && matchesFrom && matchesTo;
+    });
+
+    rows = [...rows].sort((a, b) => {
+      if (paymentsSort === "oldest") {
+        return String(a.paid_at || a.created_at || "").localeCompare(
+          String(b.paid_at || b.created_at || ""),
+        );
+      }
+
+      if (paymentsSort === "amount_high") return b.amount - a.amount;
+      if (paymentsSort === "amount_low") return a.amount - b.amount;
+      if (paymentsSort === "name") return a.customer_name.localeCompare(b.customer_name);
+
+      return String(b.paid_at || b.created_at || "").localeCompare(
+        String(a.paid_at || a.created_at || ""),
+      );
+    });
+
+    return rows;
+  }, [
+    payments,
+    paymentsDateFrom,
+    paymentsDateTo,
+    paymentsSearch,
+    paymentsSort,
+    paymentsStatus,
+  ]);
+
+  const filteredCustomers = React.useMemo(() => {
+    const query = customersSearch.trim().toLowerCase();
+
+    let rows = customers.filter((customer) => {
+      const matchesSearch =
+        !query ||
+        customer.name.toLowerCase().includes(query) ||
+        customer.phone.toLowerCase().includes(query) ||
+        customer.email.toLowerCase().includes(query) ||
+        customer.city.toLowerCase().includes(query);
+
+      const status = customer.status.toLowerCase();
+      const matchesStatus = customersStatus === "all" || status === customersStatus;
+
+      const date = formatDate(customer.created_at);
+      const matchesFrom = !customersDateFrom || (date !== "—" && date >= customersDateFrom);
+      const matchesTo = !customersDateTo || (date !== "—" && date <= customersDateTo);
+
+      return matchesSearch && matchesStatus && matchesFrom && matchesTo;
+    });
+
+    rows = [...rows].sort((a, b) => {
+      if (customersSort === "oldest") {
+        return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+      }
+
+      if (customersSort === "amount_high") return b.total_paid - a.total_paid;
+      if (customersSort === "amount_low") return a.total_paid - b.total_paid;
+      if (customersSort === "name") return a.name.localeCompare(b.name);
+
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    });
+
+    return rows;
+  }, [
+    customers,
+    customersDateFrom,
+    customersDateTo,
+    customersSearch,
+    customersSort,
+    customersStatus,
+  ]);
+
+  const hasOrdersFilters =
+    Boolean(ordersSearch.trim()) ||
+    ordersStatus !== "all" ||
+    Boolean(ordersDateFrom) ||
+    Boolean(ordersDateTo) ||
+    ordersSort !== "newest";
+
+  const hasPaymentsFilters =
+    Boolean(paymentsSearch.trim()) ||
+    paymentsStatus !== "all" ||
+    Boolean(paymentsDateFrom) ||
+    Boolean(paymentsDateTo) ||
+    paymentsSort !== "newest";
+
+  const hasCustomersFilters =
+    Boolean(customersSearch.trim()) ||
+    customersStatus !== "all" ||
+    Boolean(customersDateFrom) ||
+    Boolean(customersDateTo) ||
+    customersSort !== "newest";
+
+  function resetOrdersFilters() {
+    setOrdersSearch("");
+    setOrdersStatus("all");
+    setOrdersDateFrom("");
+    setOrdersDateTo("");
+    setOrdersSort("newest");
+  }
+
+  function resetPaymentsFilters() {
+    setPaymentsSearch("");
+    setPaymentsStatus("all");
+    setPaymentsDateFrom("");
+    setPaymentsDateTo("");
+    setPaymentsSort("newest");
+  }
+
+  function resetCustomersFilters() {
+    setCustomersSearch("");
+    setCustomersStatus("all");
+    setCustomersDateFrom("");
+    setCustomersDateTo("");
+    setCustomersSort("newest");
+  }
+
+  function buildExportRows() {
+    return {
+      orders: filteredOrders.map((order) => ({
+        orderNumber: order.order_number,
+        customer: order.customer_name,
+        product: order.product_name,
+        provider: order.provider_name,
+        status: getOrderStatusLabel(order.status, locale),
+        payment: getPaymentStatusLabel(order.payment_status, locale),
+        amount: formatMoney(order.total_amount),
+        createdAt: formatDateTime(order.created_at),
+      })),
+      payments: filteredPayments.map((payment) => ({
+        paymentNumber: payment.payment_number,
+        customer: payment.customer_name,
+        invoice: payment.invoice_number,
+        method: payment.method,
+        status: getPaymentStatusLabel(payment.status, locale),
+        amount: formatMoney(payment.amount),
+        paidAt: formatDateTime(payment.paid_at || payment.created_at),
+      })),
+      customers: filteredCustomers.map((customer) => ({
+        name: customer.name,
+        phone: customer.phone,
+        email: customer.email,
+        city: customer.city,
+        status: getCustomerStatusLabel(customer.status, locale),
+        orders: customer.total_orders,
+        paid: formatMoney(customer.total_paid),
+        createdAt: formatDateTime(customer.created_at),
+      })),
+    };
+  }
+
+  function exportExcel() {
+    const rows = buildExportRows();
+    const totalRows = rows.orders.length + rows.payments.length + rows.customers.length;
+
+    if (!totalRows) {
+      toast.error(t.exportEmpty);
+      return;
+    }
+
+    const html = `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; direction: ${dir}; }
+            h2 { margin-top: 24px; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 24px; }
+            th, td { border: 1px solid #d9d9d9; padding: 8px; text-align: ${locale === "ar" ? "right" : "left"}; }
+            th { background: #f3f4f6; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(t.printTitle)}</h1>
+          <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+
+          <h2>${escapeHtml(t.latestOrders)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.orderNumber)}</th>
+                <th>${escapeHtml(t.customer)}</th>
+                <th>${escapeHtml(t.product)}</th>
+                <th>${escapeHtml(t.provider)}</th>
+                <th>${escapeHtml(t.orderStatus)}</th>
+                <th>${escapeHtml(t.paymentStatus)}</th>
+                <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.orders
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.orderNumber)}</td>
+                      <td>${escapeHtml(row.customer)}</td>
+                      <td>${escapeHtml(row.product)}</td>
+                      <td>${escapeHtml(row.provider)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.payment)}</td>
+                      <td>${escapeHtml(row.amount)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <h2>${escapeHtml(t.latestPayments)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.paymentNumber)}</th>
+                <th>${escapeHtml(t.customer)}</th>
+                <th>${escapeHtml(t.invoice)}</th>
+                <th>${escapeHtml(t.method)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.amount)}</th>
+                <th>${escapeHtml(t.paidAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.payments
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.paymentNumber)}</td>
+                      <td>${escapeHtml(row.customer)}</td>
+                      <td>${escapeHtml(row.invoice)}</td>
+                      <td>${escapeHtml(row.method)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.amount)}</td>
+                      <td>${escapeHtml(row.paidAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <h2>${escapeHtml(t.latestCustomers)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.customerName)}</th>
+                <th>${escapeHtml(t.phone)}</th>
+                <th>${escapeHtml(t.email)}</th>
+                <th>${escapeHtml(t.city)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.customerOrders)}</th>
+                <th>${escapeHtml(t.totalPaid)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.customers
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.name)}</td>
+                      <td>${escapeHtml(row.phone)}</td>
+                      <td>${escapeHtml(row.email)}</td>
+                      <td>${escapeHtml(row.city)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.orders)}</td>
+                      <td>${escapeHtml(row.paid)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([html], {
+      type: "application/vnd.ms-excel;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `primey-care-system-dashboard-${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+
+    URL.revokeObjectURL(url);
+  }
+
+  function printPage() {
+    const rows = buildExportRows();
+    const totalRows = rows.orders.length + rows.payments.length + rows.customers.length;
+
+    if (!totalRows) {
+      toast.error(t.printEmpty);
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+
+    if (!printWindow) {
+      toast.error(t.printEmpty);
+      return;
+    }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="${locale}" dir="${dir}">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(t.printTitle)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+              margin-bottom: 18px;
+            }
+            h1 { margin: 0; font-size: 22px; }
+            h2 { margin: 24px 0 10px; font-size: 16px; }
+            p { margin: 4px 0 0; color: #6b7280; font-size: 12px; }
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(4, minmax(0, 1fr));
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .box {
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              padding: 10px;
+            }
+            .box span {
+              display: block;
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 4px;
+            }
+            .box strong { font-size: 16px; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+              margin-bottom: 18px;
+            }
+            th, td {
+              border: 1px solid #e5e7eb;
+              padding: 8px;
+              text-align: ${locale === "ar" ? "right" : "left"};
+              vertical-align: top;
+            }
+            th {
+              background: #f9fafb;
+              color: #374151;
+              font-weight: 700;
+            }
+            @media print { body { padding: 16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1>Primey Care - ${escapeHtml(t.printTitle)}</h1>
+              <p>${escapeHtml(t.generatedAt)}: ${escapeHtml(new Date().toISOString().slice(0, 19).replace("T", " "))}</p>
+            </div>
+            <div>
+              <p>${escapeHtml(t.showing)}: ${escapeHtml(totalRows)}</p>
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="box"><span>${escapeHtml(t.customers)}</span><strong>${escapeHtml(stats.customers)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.orders)}</span><strong>${escapeHtml(stats.orders)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.invoices)}</span><strong>${escapeHtml(stats.invoices)}</strong></div>
+            <div class="box"><span>${escapeHtml(t.payments)}</span><strong>${escapeHtml(stats.payments)}</strong></div>
+          </div>
+
+          <h2>${escapeHtml(t.latestOrders)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.orderNumber)}</th>
+                <th>${escapeHtml(t.customer)}</th>
+                <th>${escapeHtml(t.product)}</th>
+                <th>${escapeHtml(t.provider)}</th>
+                <th>${escapeHtml(t.orderStatus)}</th>
+                <th>${escapeHtml(t.paymentStatus)}</th>
+                <th>${escapeHtml(t.total)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.orders
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.orderNumber)}</td>
+                      <td>${escapeHtml(row.customer)}</td>
+                      <td>${escapeHtml(row.product)}</td>
+                      <td>${escapeHtml(row.provider)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.payment)}</td>
+                      <td>${escapeHtml(row.amount)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <h2>${escapeHtml(t.latestPayments)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.paymentNumber)}</th>
+                <th>${escapeHtml(t.customer)}</th>
+                <th>${escapeHtml(t.invoice)}</th>
+                <th>${escapeHtml(t.method)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.amount)}</th>
+                <th>${escapeHtml(t.paidAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.payments
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.paymentNumber)}</td>
+                      <td>${escapeHtml(row.customer)}</td>
+                      <td>${escapeHtml(row.invoice)}</td>
+                      <td>${escapeHtml(row.method)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.amount)}</td>
+                      <td>${escapeHtml(row.paidAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <h2>${escapeHtml(t.latestCustomers)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t.customerName)}</th>
+                <th>${escapeHtml(t.phone)}</th>
+                <th>${escapeHtml(t.email)}</th>
+                <th>${escapeHtml(t.city)}</th>
+                <th>${escapeHtml(t.status)}</th>
+                <th>${escapeHtml(t.customerOrders)}</th>
+                <th>${escapeHtml(t.totalPaid)}</th>
+                <th>${escapeHtml(t.createdAt)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.customers
+                .map(
+                  (row) => `
+                    <tr>
+                      <td>${escapeHtml(row.name)}</td>
+                      <td>${escapeHtml(row.phone)}</td>
+                      <td>${escapeHtml(row.email)}</td>
+                      <td>${escapeHtml(row.city)}</td>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.orders)}</td>
+                      <td>${escapeHtml(row.paid)}</td>
+                      <td>${escapeHtml(row.createdAt)}</td>
+                    </tr>
+                  `,
+                )
+                .join("")}
+            </tbody>
+          </table>
+
+          <script>
+            window.onload = function () {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+  }
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-4" dir={dir}>
+        <DashboardSkeleton />
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-4" dir={dir}>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1 text-right">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground lg:text-3xl">
+            {t.title}
+          </h1>
+          <p className="text-sm text-muted-foreground">{t.subtitle}</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            className="h-9 rounded-lg"
+            onClick={() => void loadDashboard({ silent: true })}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            {t.refresh}
+          </Button>
+
+          <Button variant="outline" className="h-9 rounded-lg" onClick={exportExcel}>
+            <FileSpreadsheet className="h-4 w-4" />
+            {t.export}
+          </Button>
+
+          <Button variant="outline" className="h-9 rounded-lg" onClick={printPage}>
+            <Printer className="h-4 w-4" />
+            {t.print}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          title={t.totalCustomers}
+          value={formatInteger(stats.customers)}
+          trend={t.customers}
+          href="/system/customers"
+          icon={Users}
+        />
+
+        <KpiCard
+          title={t.totalOrders}
+          value={formatInteger(stats.orders)}
+          trend={`${t.pendingOrders}: ${formatInteger(stats.pendingOrders)}`}
+          href="/system/orders"
+          icon={ShoppingCart}
+        />
+
+        <KpiCard
+          title={t.totalInvoices}
+          value={formatInteger(stats.invoices)}
+          trend={`${formatMoney(stats.totalInvoicesAmount)} ${t.sar}`}
+          href="/system/invoices"
+          icon={ReceiptText}
+        />
+
+        <KpiCard
+          title={t.totalPayments}
+          value={formatInteger(stats.payments)}
+          trend={`${formatMoney(stats.totalPaymentsAmount)} ${t.sar}`}
+          href="/system/payments"
+          icon={CreditCard}
+        />
+
+        <KpiCard
+          title={t.providersCount}
+          value={formatInteger(stats.providers)}
+          trend={t.providers}
+          href="/system/providers"
+          icon={Stethoscope}
+        />
+
+        <KpiCard
+          title={t.productsCount}
+          value={formatInteger(stats.products)}
+          trend={t.products}
+          href="/system/products"
+          icon={Package}
+        />
+
+        <KpiCard
+          title={t.agentsCount}
+          value={formatInteger(stats.agents)}
+          trend={t.agents}
+          href="/system/agents"
+          icon={UserCog}
+        />
+
+        <KpiCard
+          title={t.notificationsCount}
+          value={formatInteger(stats.notifications)}
+          trend={t.notifications}
+          href="/system/notifications"
+          icon={Bell}
+        />
+      </div>
+
+      {error ? (
+        <Card className="rounded-lg border border-red-200 bg-red-50 shadow-none">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 text-right">
+              <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+              <div>
+                <p className="font-semibold text-red-900">{t.errorTitle}</p>
+                <p className="text-sm text-red-700">{error || t.errorDesc}</p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              className="h-9 rounded-lg bg-white"
+              onClick={() => void loadDashboard()}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {t.tryAgain}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardHeader className="px-6 py-5">
+          <CardTitle>{t.latestOrders}</CardTitle>
+          <CardDescription>{t.latestOrdersDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-col gap-3">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={ordersSearch}
+                onChange={(event) => setOrdersSearch(event.target.value)}
+                placeholder={t.orderSearchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={ordersStatus}
+                  onValueChange={(value) => setOrdersStatus(value as OrderStatusFilter)}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[170px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.all}</SelectItem>
+                    <SelectItem value="pending">{t.pending}</SelectItem>
+                    <SelectItem value="confirmed">{t.confirmed}</SelectItem>
+                    <SelectItem value="processing">{t.processing}</SelectItem>
+                    <SelectItem value="completed">{t.completed}</SelectItem>
+                    <SelectItem value="cancelled">{t.cancelled}</SelectItem>
+                    <SelectItem value="refunded">{t.refunded}</SelectItem>
+                    <SelectItem value="card_ready">{t.cardReady}</SelectItem>
+                    <SelectItem value="assigned_for_delivery">{t.assignedForDelivery}</SelectItem>
+                    <SelectItem value="out_for_delivery">{t.outForDelivery}</SelectItem>
+                    <SelectItem value="delivered">{t.delivered}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">{t.from}</span>
+                  <Input
+                    type="date"
+                    value={ordersDateFrom}
+                    onChange={(event) => setOrdersDateFrom(event.target.value)}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
+
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <span className="text-xs text-muted-foreground">{t.to}</span>
+                  <Input
+                    type="date"
+                    value={ordersDateTo}
+                    onChange={(event) => setOrdersDateTo(event.target.value)}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={ordersSort}
+                  onValueChange={(value) => setOrdersSort(value as SortKey)}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[155px]">
+                    <ArrowUpDown className="h-4 w-4" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="newest">{t.newest}</SelectItem>
+                    <SelectItem value="oldest">{t.oldest}</SelectItem>
+                    <SelectItem value="amount_high">{t.amountHigh}</SelectItem>
+                    <SelectItem value="amount_low">{t.amountLow}</SelectItem>
+                    <SelectItem value="name">{t.nameSort}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg bg-background"
+                  onClick={resetOrdersFilters}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t.reset}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1180px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    <TableHead className="h-11 w-[160px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.orderNumber}
+                    </TableHead>
+                    <TableHead className="h-11 w-[180px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.customer}
+                    </TableHead>
+                    <TableHead className="h-11 w-[210px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.product}
+                    </TableHead>
+                    <TableHead className="h-11 w-[180px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.provider}
+                    </TableHead>
+                    <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.orderStatus}
+                    </TableHead>
+                    <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.paymentStatus}
+                    </TableHead>
+                    <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.total}
+                    </TableHead>
+                    <TableHead className="h-11 w-[145px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.createdAt}
+                    </TableHead>
+                    <TableHead className="h-11 w-[80px] whitespace-nowrap px-4 text-center text-xs font-semibold text-muted-foreground">
+                      {t.open}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {filteredOrders.length ? (
+                    filteredOrders.map((order) => (
+                      <TableRow key={order.id || order.order_number} className="h-[62px]">
+                        <TableCell className="h-[62px] w-[160px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm font-semibold text-foreground">
+                            {order.order_number}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[180px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm text-foreground">
+                            {order.customer_name || "—"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[210px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm text-muted-foreground">
+                            {order.product_name || "—"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[180px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm text-muted-foreground">
+                            {order.provider_name || "—"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                          <StatusBadge
+                            value={order.status}
+                            label={getOrderStatusLabel(order.status, locale)}
+                          />
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                          <StatusBadge
+                            value={order.payment_status}
+                            label={getPaymentStatusLabel(order.payment_status, locale)}
+                          />
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                          <MoneyValue value={order.total_amount} label={t.sar} />
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[145px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                            {formatDateTime(order.created_at)}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[80px] overflow-hidden px-4 text-center align-middle">
+                          <Button asChild variant="ghost" size="sm" className="h-8 rounded-lg">
+                            <Link href={`/system/orders/${order.id}`}>{t.open}</Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={9} className="h-72">
+                        <EmptyTableState
+                          title={hasOrdersFilters ? t.noResultsTitle : t.noDataTitle}
+                          description={hasOrdersFilters ? t.noResultsDesc : t.noDataDesc}
+                          onReset={resetOrdersFilters}
+                          showReset={hasOrdersFilters}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="text-sm text-muted-foreground">
+            {t.showing}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(filteredOrders.length)}
+            </span>{" "}
+            {t.of}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(orders.length)}
+            </span>{" "}
+            {t.rows}
           </div>
         </CardContent>
       </Card>
-    </Link>
+
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardHeader className="px-6 py-5">
+          <CardTitle>{t.latestPayments}</CardTitle>
+          <CardDescription>{t.latestPaymentsDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-col gap-3">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={paymentsSearch}
+                onChange={(event) => setPaymentsSearch(event.target.value)}
+                placeholder={t.paymentSearchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={paymentsStatus}
+                  onValueChange={(value) => setPaymentsStatus(value as PaymentStatusFilter)}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[150px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.all}</SelectItem>
+                    <SelectItem value="pending">{t.pending}</SelectItem>
+                    <SelectItem value="paid">{t.paid}</SelectItem>
+                    <SelectItem value="confirmed">{t.confirmed}</SelectItem>
+                    <SelectItem value="failed">{t.failed}</SelectItem>
+                    <SelectItem value="cancelled">{t.cancelled}</SelectItem>
+                    <SelectItem value="refunded">{t.refunded}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">{t.from}</span>
+                  <Input
+                    type="date"
+                    value={paymentsDateFrom}
+                    onChange={(event) => setPaymentsDateFrom(event.target.value)}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
+
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <span className="text-xs text-muted-foreground">{t.to}</span>
+                  <Input
+                    type="date"
+                    value={paymentsDateTo}
+                    onChange={(event) => setPaymentsDateTo(event.target.value)}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={paymentsSort}
+                  onValueChange={(value) => setPaymentsSort(value as SortKey)}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[155px]">
+                    <ArrowUpDown className="h-4 w-4" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="newest">{t.newest}</SelectItem>
+                    <SelectItem value="oldest">{t.oldest}</SelectItem>
+                    <SelectItem value="amount_high">{t.amountHigh}</SelectItem>
+                    <SelectItem value="amount_low">{t.amountLow}</SelectItem>
+                    <SelectItem value="name">{t.nameSort}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg bg-background"
+                  onClick={resetPaymentsFilters}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t.reset}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[980px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    <TableHead className="h-11 w-[170px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.paymentNumber}
+                    </TableHead>
+                    <TableHead className="h-11 w-[180px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.customer}
+                    </TableHead>
+                    <TableHead className="h-11 w-[150px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.invoice}
+                    </TableHead>
+                    <TableHead className="h-11 w-[150px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.method}
+                    </TableHead>
+                    <TableHead className="h-11 w-[120px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.status}
+                    </TableHead>
+                    <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.amount}
+                    </TableHead>
+                    <TableHead className="h-11 w-[145px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.paidAt}
+                    </TableHead>
+                    <TableHead className="h-11 w-[80px] whitespace-nowrap px-4 text-center text-xs font-semibold text-muted-foreground">
+                      {t.open}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {filteredPayments.length ? (
+                    filteredPayments.map((payment) => (
+                      <TableRow key={payment.id || payment.payment_number} className="h-[62px]">
+                        <TableCell className="h-[62px] w-[170px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm font-semibold text-foreground">
+                            {payment.payment_number}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[180px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm text-foreground">
+                            {payment.customer_name || "—"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[150px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm text-muted-foreground">
+                            {payment.invoice_number || "—"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[150px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm text-muted-foreground">
+                            {payment.method || "—"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[120px] overflow-hidden px-4 text-right align-middle">
+                          <StatusBadge
+                            value={payment.status}
+                            label={getPaymentStatusLabel(payment.status, locale)}
+                          />
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                          <MoneyValue value={payment.amount} label={t.sar} />
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[145px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                            {formatDateTime(payment.paid_at || payment.created_at)}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[80px] overflow-hidden px-4 text-center align-middle">
+                          <Button asChild variant="ghost" size="sm" className="h-8 rounded-lg">
+                            <Link href={`/system/payments/${payment.id}`}>{t.open}</Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={8} className="h-72">
+                        <EmptyTableState
+                          title={hasPaymentsFilters ? t.noResultsTitle : t.noDataTitle}
+                          description={hasPaymentsFilters ? t.noResultsDesc : t.noDataDesc}
+                          onReset={resetPaymentsFilters}
+                          showReset={hasPaymentsFilters}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="text-sm text-muted-foreground">
+            {t.showing}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(filteredPayments.length)}
+            </span>{" "}
+            {t.of}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(payments.length)}
+            </span>{" "}
+            {t.rows}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="overflow-hidden rounded-lg border bg-card shadow-none">
+        <CardHeader className="px-6 py-5">
+          <CardTitle>{t.latestCustomers}</CardTitle>
+          <CardDescription>{t.latestCustomersDesc}</CardDescription>
+        </CardHeader>
+
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-col gap-3">
+            <div className="relative w-full">
+              <Search
+                className={cn(
+                  "absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground",
+                  locale === "ar" ? "right-3" : "left-3",
+                )}
+              />
+              <Input
+                value={customersSearch}
+                onChange={(event) => setCustomersSearch(event.target.value)}
+                placeholder={t.customerSearchPlaceholder}
+                className={cn(
+                  "h-10 rounded-lg bg-background",
+                  locale === "ar" ? "pr-9" : "pl-9",
+                )}
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={customersStatus}
+                  onValueChange={(value) => setCustomersStatus(value as CustomerStatusFilter)}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[150px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t.all}</SelectItem>
+                    <SelectItem value="active">{t.active}</SelectItem>
+                    <SelectItem value="inactive">{t.inactive}</SelectItem>
+                    <SelectItem value="blocked">{t.blocked}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">{t.from}</span>
+                  <Input
+                    type="date"
+                    value={customersDateFrom}
+                    onChange={(event) => setCustomersDateFrom(event.target.value)}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
+
+                <div className="flex h-9 items-center gap-2 rounded-lg border bg-background px-3">
+                  <span className="text-xs text-muted-foreground">{t.to}</span>
+                  <Input
+                    type="date"
+                    value={customersDateTo}
+                    onChange={(event) => setCustomersDateTo(event.target.value)}
+                    className="h-7 w-[135px] border-0 bg-transparent p-0 text-xs shadow-none focus-visible:ring-0"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={customersSort}
+                  onValueChange={(value) => setCustomersSort(value as SortKey)}
+                >
+                  <SelectTrigger className="h-9 w-full rounded-lg bg-background sm:w-[155px]">
+                    <ArrowUpDown className="h-4 w-4" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="newest">{t.newest}</SelectItem>
+                    <SelectItem value="oldest">{t.oldest}</SelectItem>
+                    <SelectItem value="amount_high">{t.amountHigh}</SelectItem>
+                    <SelectItem value="amount_low">{t.amountLow}</SelectItem>
+                    <SelectItem value="name">{t.nameSort}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg bg-background"
+                  onClick={resetCustomersFilters}
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t.reset}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border bg-background">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1060px] table-fixed">
+                <TableHeader>
+                  <TableRow className="h-11 bg-muted/40 hover:bg-muted/40">
+                    <TableHead className="h-11 w-[220px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.customerName}
+                    </TableHead>
+                    <TableHead className="h-11 w-[155px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.phone}
+                    </TableHead>
+                    <TableHead className="h-11 w-[210px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.email}
+                    </TableHead>
+                    <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.city}
+                    </TableHead>
+                    <TableHead className="h-11 w-[115px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.status}
+                    </TableHead>
+                    <TableHead className="h-11 w-[105px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.customerOrders}
+                    </TableHead>
+                    <TableHead className="h-11 w-[130px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.totalPaid}
+                    </TableHead>
+                    <TableHead className="h-11 w-[145px] whitespace-nowrap px-4 text-right text-xs font-semibold text-muted-foreground">
+                      {t.createdAt}
+                    </TableHead>
+                    <TableHead className="h-11 w-[80px] whitespace-nowrap px-4 text-center text-xs font-semibold text-muted-foreground">
+                      {t.open}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {filteredCustomers.length ? (
+                    filteredCustomers.map((customer) => (
+                      <TableRow key={customer.id || customer.phone} className="h-[62px]">
+                        <TableCell className="h-[62px] w-[220px] overflow-hidden px-4 text-right align-middle">
+                          <div className="min-w-0">
+                            <span className="block truncate text-sm font-semibold text-foreground">
+                              {customer.name || t.unknown}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              #{customer.id || "—"}
+                            </span>
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[155px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm tabular-nums text-muted-foreground" dir="ltr">
+                            {customer.phone || "—"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[210px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm text-muted-foreground">
+                            {customer.email || "—"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm text-muted-foreground">
+                            {customer.city || "—"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[115px] overflow-hidden px-4 text-right align-middle">
+                          <StatusBadge
+                            value={customer.status}
+                            label={getCustomerStatusLabel(customer.status, locale)}
+                          />
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[105px] overflow-hidden px-4 text-right align-middle">
+                          <span className="text-sm font-medium tabular-nums">
+                            {formatInteger(customer.total_orders)}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[130px] overflow-hidden px-4 text-right align-middle">
+                          <MoneyValue value={customer.total_paid} label={t.sar} />
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[145px] overflow-hidden px-4 text-right align-middle">
+                          <span className="block truncate text-sm tabular-nums text-muted-foreground">
+                            {formatDateTime(customer.created_at)}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className="h-[62px] w-[80px] overflow-hidden px-4 text-center align-middle">
+                          <Button asChild variant="ghost" size="sm" className="h-8 rounded-lg">
+                            <Link href={`/system/customers/${customer.id}`}>{t.open}</Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={9} className="h-72">
+                        <EmptyTableState
+                          title={hasCustomersFilters ? t.noResultsTitle : t.noDataTitle}
+                          description={hasCustomersFilters ? t.noResultsDesc : t.noDataDesc}
+                          onReset={resetCustomersFilters}
+                          showReset={hasCustomersFilters}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div className="text-sm text-muted-foreground">
+            {t.showing}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(filteredCustomers.length)}
+            </span>{" "}
+            {t.of}{" "}
+            <span className="font-medium text-foreground tabular-nums">
+              {formatInteger(customers.length)}
+            </span>{" "}
+            {t.rows}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
